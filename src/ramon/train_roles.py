@@ -18,6 +18,7 @@ from .ensemble import (
     balanced_accuracy, regime_features, train_binary_logistic,
 )
 from .history import ensure_history_db, load_bars
+from .news import NEWS_FEATURES
 
 
 @dataclass(frozen=True)
@@ -61,17 +62,17 @@ def load_trade_examples(db: str | Path, symbol: str, chronos_model: str) -> list
     with sqlite3.connect(db) as conn:
         rows = conn.execute("""
             SELECT s.quote_time,t.closed,s.regime_features,s.entry_features,
-                   s.meta_base_features,t.net_r,s.base_decision
+                   s.news_features,s.meta_base_features,t.net_r,s.base_decision
             FROM decision_samples s JOIN trade_outcomes t ON t.sample_key=s.sample_key
             WHERE s.symbol=? AND t.symbol=s.symbol AND s.chronos_model=?
-              AND s.schema_version=2 AND t.direction=s.direction
+              AND s.schema_version=3 AND s.news_features IS NOT NULL AND t.direction=s.direction
               AND s.final_decision=t.direction AND t.opened>=s.quote_time
               AND t.opened<=s.quote_time+90 AND t.closed>=t.opened
             ORDER BY s.quote_time,s.sample_key
         """, (symbol, chronos_model)).fetchall()
     return [Example(int(t), int(end), {"regime": json.loads(r), "entry": json.loads(e),
-                                     "meta_base": json.loads(m)}, int(float(pnl) > 0),
-                    float(pnl), base in {"BUY", "SELL"}) for t, end, r, e, m, pnl, base in rows]
+                                     "news": json.loads(n), "meta_base": json.loads(m)}, int(float(pnl) > 0),
+                    float(pnl), base in {"BUY", "SELL"}) for t, end, r, e, n, m, pnl, base in rows]
 
 
 def temporal_windows(examples: list[Example]) -> tuple[list[Example], list[Example], list[Example]]:
@@ -103,6 +104,8 @@ def meta_features(row: Example, models: dict[str, BinaryLogisticModel]) -> dict[
     features = dict(row.features["meta_base"])
     features["regime_probability"] = models["regime"].predict_proba(row.features["regime"])
     features["entry_probability"] = models["entry"].predict_proba(row.features["entry"])
+    if "news" in models:
+        features["news_probability"] = models["news"].predict_proba(row.features["news"])
     return features
 
 
@@ -191,7 +194,8 @@ def train_bundle(*, db: str | Path, symbol: str, chronos_model: str, out: Path,
         return {**report, "status": "waiting_for_regime_history", "regime_samples": len(regime)}
     try:
         models = {"regime": fit_role(regime, "regime", REGIME_FEATURES),
-                  "entry": fit_role(base, "entry", ENTRY_FEATURES)}
+                  "entry": fit_role(base, "entry", ENTRY_FEATURES),
+                  "news": fit_role(base, "news", NEWS_FEATURES)}
         meta_examples = [Example(row.time, row.label_end, {"meta": meta_features(row, models)}, row.label)
                          for row in meta]
         models["meta"] = fit_role(meta_examples, "meta", META_FEATURES)

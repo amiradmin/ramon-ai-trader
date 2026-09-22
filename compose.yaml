@@ -16,6 +16,11 @@ services:
       CHRONOS_DEVICE: cpu
       RAMON_HISTORY_DB: /data/ramon_history.sqlite3
       RAMON_ENSEMBLE_DIR: /checkpoints/ensemble
+      RAMON_NEWS_ENABLED: ${RAMON_NEWS_ENABLED:-1}
+      RAMON_NEWS_URL: ${RAMON_NEWS_URL:-https://nfs.faireconomy.media/ff_calendar_thisweek.json}
+      RAMON_NEWS_REFRESH_SECONDS: ${RAMON_NEWS_REFRESH_SECONDS:-300}
+      RAMON_NEWS_TIMEOUT_SECONDS: ${RAMON_NEWS_TIMEOUT_SECONDS:-2.0}
+      RAMON_NEWS_MAX_STALE_SECONDS: ${RAMON_NEWS_MAX_STALE_SECONDS:-1800}
       HF_HOME: /home/ramon/.cache/huggingface
     volumes:
       - chronos_cache:/home/ramon/.cache/huggingface

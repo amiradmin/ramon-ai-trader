@@ -94,4 +94,5 @@ def test_ensemble_stays_inactive_until_all_roles_exist(tmp_path: Path) -> None:
     assert payload["decision"] == "WAIT"
     assert payload["base_decision"] == "WAIT"
     assert payload["regime_probability"] == -1.0
-    assert set(features) == {"regime", "entry", "meta_base"}
+    assert payload["news_probability"] == -1.0
+    assert set(features) == {"regime", "entry", "news", "meta_base"}

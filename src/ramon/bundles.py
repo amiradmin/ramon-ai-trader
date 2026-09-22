@@ -10,10 +10,18 @@ from pathlib import Path
 import re
 from uuid import uuid4
 
-from .ensemble import BinaryLogisticModel, ENTRY_FEATURES, META_FEATURES, REGIME_FEATURES
+from .ensemble import (
+    BinaryLogisticModel,
+    ENTRY_FEATURES,
+    LEGACY_META_FEATURES,
+    META_FEATURES,
+    REGIME_FEATURES,
+)
+from .news import NEWS_FEATURES
 
-SCHEMA_VERSION = 2
-FEATURES = {"regime": REGIME_FEATURES, "entry": ENTRY_FEATURES, "meta": META_FEATURES}
+SCHEMA_VERSION = 3
+LEGACY_FEATURES = {"regime": REGIME_FEATURES, "entry": ENTRY_FEATURES, "meta": LEGACY_META_FEATURES}
+FEATURES = {"regime": REGIME_FEATURES, "entry": ENTRY_FEATURES, "news": NEWS_FEATURES, "meta": META_FEATURES}
 
 
 def atomic_json(path: Path, value: dict[str, object]) -> None:
@@ -36,15 +44,17 @@ def load_bundle(root: Path, bundle_id: str, chronos_model: str | None = None) ->
         raise ValueError("invalid bundle ID")
     directory = root / "versions" / bundle_id
     manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
-    if manifest["schema_version"] != SCHEMA_VERSION or manifest["bundle_id"] != bundle_id:
+    schema_version = int(manifest["schema_version"])
+    if schema_version not in {2, SCHEMA_VERSION} or manifest["bundle_id"] != bundle_id:
         raise ValueError("bundle schema/identity mismatch")
     if chronos_model is not None and manifest["chronos_model"] != chronos_model:
         raise ValueError("bundle belongs to a different Chronos checkpoint")
     threshold = float(manifest["trade_threshold"])
     if not 0.5 <= threshold < 1.0:
         raise ValueError("invalid trade threshold")
+    expected_features = FEATURES if schema_version == SCHEMA_VERSION else LEGACY_FEATURES
     models = {}
-    for role, expected in FEATURES.items():
+    for role, expected in expected_features.items():
         path = directory / f"{role}.json"
         if hashlib.sha256(path.read_bytes()).hexdigest() != manifest["sha256"][role]:
             raise ValueError(f"{role} checksum mismatch")

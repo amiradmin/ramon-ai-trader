@@ -13,6 +13,7 @@ from .core import Forecast, Market, Settings, evaluate
 from .ensemble import EnsembleCoordinator, dominant_direction
 from .history import persist_decision_sample, persist_market, persist_trade_outcome
 from .model import ChronosForecaster, model_name
+from .news import DEFAULT_FOREX_FACTORY_JSON, ForexFactoryNewsProvider
 
 
 def persist_market_safely(db: str, market: Market) -> str:
@@ -42,12 +43,20 @@ class CachedForecaster:
 
 
 def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) -> None:
-    """Serve Chronos plus learned regime/entry/meta roles."""
+    """Serve Chronos plus learned regime/entry/news/meta roles."""
     guard = Lock()
     cached_model = CachedForecaster(model)
     history_db = os.getenv("RAMON_HISTORY_DB", "").strip()
     ensemble_dir = os.getenv("RAMON_ENSEMBLE_DIR", "/checkpoints/ensemble").strip()
     ensemble = EnsembleCoordinator(ensemble_dir, model.model_id)
+    news_enabled = os.getenv("RAMON_NEWS_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
+    news_provider = ForexFactoryNewsProvider(
+        enabled=news_enabled,
+        url=os.getenv("RAMON_NEWS_URL", DEFAULT_FOREX_FACTORY_JSON).strip() or DEFAULT_FOREX_FACTORY_JSON,
+        refresh_seconds=int(os.getenv("RAMON_NEWS_REFRESH_SECONDS", "300")),
+        timeout_seconds=float(os.getenv("RAMON_NEWS_TIMEOUT_SECONDS", "2.0")),
+        max_stale_seconds=int(os.getenv("RAMON_NEWS_MAX_STALE_SECONDS", "1800")),
+    )
     last_persisted_bar: dict[str, int] = {}
     history_status: dict[str, object] = {
         "last_error": "",
@@ -70,6 +79,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     "history_last_error": str(history_status["last_error"]),
                     "history_last_persisted_bar": int(history_status["last_persisted_bar"]),
                     **ensemble.status(),
+                    **news_provider.status(),
                 },
             )
 
@@ -110,12 +120,17 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                             last_persisted_bar[key] = newest
                             history_status["last_persisted_bar"] = newest
 
+                news_snapshot = news_provider.snapshot()
                 with guard:
                     result = evaluate(market, cached_model, settings)
-                    ensemble_payload, feature_snapshot = ensemble.assess(market, result)
+                    ensemble_payload, feature_snapshot = ensemble.assess(
+                        market, result, news_snapshot.features
+                    )
 
                 response = result.to_dict()
                 response.update(ensemble_payload)
+                response.update(news_snapshot.payload())
+                response["news_model_ready"] = int(ensemble.news_ready)
                 sample_key = uuid4().hex[:16]
                 response["sample_key"] = sample_key
                 response["sample_saved"] = 0
@@ -132,6 +147,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                             base_decision=result.decision,
                             regime_features=feature_snapshot["regime"],
                             entry_features=feature_snapshot["entry"],
+                            news_features=feature_snapshot["news"],
                             meta_base_features=feature_snapshot["meta_base"],
                             sample_key=sample_key,
                             chronos_model=model.model_id,
