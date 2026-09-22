@@ -7,3 +7,4 @@ runtime/
 .env
 data/
 checkpoints/
+installer/
