@@ -1,0 +1,13 @@
+.git
+.github
+.venv
+.pytest_cache
+__pycache__
+*.pyc
+*.sqlite3
+.env
+runtime
+checkpoints
+data
+tests
+mt5
