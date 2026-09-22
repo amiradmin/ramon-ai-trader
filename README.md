@@ -97,6 +97,22 @@ bash scripts/setup_local.sh --model-only
 bash scripts/setup_local.sh
 ~~~
 
+اگر پیش‌بینی مدل موفق بود ولی اجرای MetaEditor زیر Wine شکست خورد، برای تکرار **فقط کپی و کامپایل اکسپرت** از فرمان زیر استفاده کنید؛ وزن مدل دوباره آزمایش نمی‌شود:
+
+~~~bash
+bash scripts/setup_local.sh --mt5-only
+~~~
+
+خطای «wine32 is missing» همراه با خطای باز شدن metaeditor.exe معمولاً به وابستگی ۳۲ بیتی Wine یا DLLهای آن مربوط است. ابتدا نوع فایل و وضعیت بسته را بررسی کنید:
+
+~~~bash
+file "$HOME/.mt5/drive_c/Program Files/MetaTrader 5/metaeditor.exe"
+dpkg --print-foreign-architectures
+dpkg-query -W wine32:i386 2>/dev/null || true
+~~~
+
+اگر خروجی file برابر PE32 بود، نصب wine32:i386 راه‌حل محتمل است. پیش از نصب، طرح تغییر بسته‌ها را با **apt -s install wine32:i386** بررسی کنید، به‌ویژه اگر Wine یا MT5 موجودتان در حال استفاده است. اگر بسته پیدا نشد، باید مخزن i386 برای نسخهٔ Ubuntu شما فعال باشد. خطای c0000135 می‌تواند از DLL دیگری هم باشد؛ اگر wine32 از قبل نصب بود یا MetaEditor فایل PE32+ بود، خروجی Wine و فایل Ramon.log را بررسی کنید. پس از رفع Wine فرمان --mt5-only کافی است.
+
 اگر پردازشگر گرافیکی CUDA و نصب سازگار PyTorch دارید، RAMON_DEVICE=cuda را برای آزمون اولیه بگذارید؛ حالت پیش‌فرض CPU است. اگر اسکریپت MetaEditor را پیدا نکرد، می‌توان فایل mt5/Ramon.mq5 را دستی به MQL5/Experts/Ramon/ کپی کرد و در MetaEditor با F7 کامپایل کرد.
 
 پس از نصب، سرویس را در یک ترمینال جداگانه اجرا کنید و تا زمانی که Ramon روی نمودار است باز نگه دارید:
