@@ -1,69 +1,193 @@
-# Ramon — independent model-led XAUUSD_l M15 bot
+# Ramon — ربات معاملاتی مبتنی بر Chronos‑2
 
-Ramon is separate from Eskandar. A local Python service loads a **real Chronos-2 checkpoint** and forecasts the next four M15 closes from the last 256 completed closes. The EA sends the last 256 completed OHLC bars, receives a BUY/SELL/WAIT decision, and independently checks spread, quote freshness, account, volume risk, margin, existing positions, and daily trade count before placing any order. The model is not replaced by an EMA or RSI rule when unavailable. The initial checkpoint is `autogluon/chronos-2-small` (28M parameters); it is a pretrained time-series model and has not been adapted to this broker until trained below.
+**Ramon** یک پروژهٔ مستقل برای معاملهٔ طلا در MetaTrader 5 است. هدف آن ساخت رباتی است که با یک مدل واقعی سری زمانی تصمیم بگیرد، نتیجهٔ معاملات واقعی حساب سنتی را اندازه‌گیری کند و در نسخه‌های بعدی از داده‌های خودش یاد بگیرد؛ در عین حال، اندازهٔ ریسک و شرایط اجرای سفارش قابل بررسی و کنترل باشند.
 
-The M15 regime is an input for future research, **not a veto**: this robot never calls Eskandar's regime, pullback, or breakout code. WAIT is a valid model decision, with a visible reason.
+**وضعیت پروژه: نسخهٔ اولیهٔ قابل آزمایش.** سرویس محلی برای فراخوانی API واقعی Chronos‑2 و اکسپرت MT5 برای استفاده از پاسخ آن نوشته شده‌اند. دانلود مدل، پیش‌بینی با وزن واقعی و کامپایل اکسپرت روی دستگاه صاحب حساب، آزمون اتصال واقعی و ارزیابی سودآوری هنوز باید انجام شوند. آموزش خودکار و یادگیری از سود/زیان معاملات هنوز پیاده‌سازی نشده‌اند. هیچ بازده یا سود تضمین‌شده‌ای وجود ندارد.
 
-## Run the real model
+> دامنهٔ فعلی: LiteFinance، نماد دقیق XAUUSD_l، تایم‌فریم M15، حساب واقعی سنتی با تأیید دستی تبدیل واحدهای حساب. Ramon از Eskandar و قوانین شش‌مرحله‌ای آن مستقل است.
 
-Clone this repository on the Ubuntu machine running MT5, with Python 3.11+, `uv`, Wine, working MetaEditor, and enough RAM/disk space for PyTorch and Chronos-2. Run the local installer:
+## هدف نهایی
 
-```bash
+می‌خواهیم Ramon این چرخه را با دادهٔ قابل ردیابی طی کند:
+
+1. آخرین کندل‌های بسته‌شده و هزینهٔ واقعی ورود را از MT5 دریافت کند.
+2. با نسخهٔ مشخصی از مدل، مسیر احتمالی قیمت و عدم‌قطعیت آن را پیش‌بینی کند و BUY، SELL یا WAIT را همراه دلیل تولید کند.
+3. تنها در چارچوب بودجهٔ ریسک، محدودیت حساب و شرایط سالم بازار سفارش بدهد.
+4. برای هر تصمیم، ورودی‌ها، خروجی مدل، سفارش و نتیجهٔ واقعی معامله را ثبت کند؛ از جمله تصمیم‌های WAIT و سیگنال‌هایی که به علت حداقل حجم کارگزار اجرا نشده‌اند.
+5. مدل جدید را با تاریخچهٔ بدون نشت اطلاعات آموزش دهد، روی دوره‌های بعدی و هزینه‌های واقعی بسنجد، و تنها پس از بهتر شدن معیارهای از پیش تعیین‌شده به‌صورت نسخه‌بندی‌شده جایگزین کند.
+6. بتواند در صورت خرابی مدل، تغییر رفتار بازار یا افت عملکرد، ورود جدید را متوقف کند و به نسخهٔ قبلی برگردد.
+
+«هوشمند» در این پروژه یعنی مدل قابل آموزش، پیش‌بینی همراه عدم‌قطعیت و تصمیم قابل ارزیابی. صرفِ تعداد بیشتر معاملات یا حذف WAIT نشان‌دهندهٔ هوشمندی نیست. ربات باید بتواند فرصت‌های خوب را بگیرد و در موقعیت نامناسب علت صبر کردن را نشان دهد.
+
+## امروز چه چیزی کار می‌کند؟
+
+| بخش | وضعیت فعلی |
+| --- | --- |
+| پیش‌بینی | کد بارگذاری checkpoint **autogluon/chronos-2-small** با API پایتون Chronos‑2؛ استفاده از حداکثر ۲۵۶ قیمت بسته‌شدن برای پیش‌بینی چهار کندل آینده و کوانتیل‌های ۱۰٪، ۵۰٪ و ۹۰٪؛ اجرای وزن واقعی روی دستگاه کاربر هنوز تأیید نشده است |
+| تصمیم | BUY/SELL/WAIT از میانهٔ پیش‌بینی کندل چهارم، اسپرد، ATR و پهنای بازهٔ پیش‌بینی؛ حداقل مزیت و قدرت سیگنال فعلاً پارامترهای ثابت‌اند |
+| ارتباط | سرویس HTTP فقط روی 127.0.0.1:8012؛ ارسال آخرین کندل‌های بسته‌شده از EA؛ خطای مدل یا پاسخ نامعتبر به سفارش منجر نمی‌شود |
+| اجرای MT5 | بررسی نماد و حساب، مجوز معامله، تازگی قیمت، اسپرد، پوزیشن‌های موجود، مارجین، سقف دفعات ورود و محاسبهٔ حجم با OrderCalcProfit |
+| ارزیابی | بازپخش آفلاین دادهٔ M15 از پایگاه SQLite با ورود در کندل بعدی، حداکثر چهار کندل نگهداری، اسپرد و فرض محافظه‌کارانه برای برخورد همزمان SL/TP |
+| آموزش | پیاده‌سازی اولیهٔ فرمان دستی LoRA با تقسیم زمانی ۷۰٪ آموزش، ۱۰٪ اعتبارسنجی و ۲۰٪ دادهٔ کنارگذاشته‌شده؛ اجرای آموزش و بازبارگذاری checkpoint روی دستگاه هنوز آزموده نشده است |
+| هنوز در برنامه | ثبت جامع تمام تصمیم‌ها و اجراها، آموزش دوره‌ای خودکار، سنجش عملکرد معاملات واقعی، مقایسهٔ خودکار مدل‌ها، ارتقای کنترل‌شده و بازگشت خودکار |
+
+Chronos‑2 در نسخهٔ فعلی **پیش‌بینی‌کنندهٔ سری زمانی** است، نه عاملی که مستقیماً از پاداش معامله یاد گرفته باشد. فیلتر مزیت خالص، حد سود/ضرر و محدودیت‌های اجرا هنوز کد مشخص دارند. در صورت در دسترس نبودن مدل، استراتژی EMA/RSI جای آن قرار نمی‌گیرد. Ollama در این معماری لازم نیست.
+
+## معماری
+
+~~~mermaid
+flowchart TD
+    A["MT5: Ramon EA روی XAUUSD_l M15"] -->|"کندل بسته‌شده، Bid/Ask"| B["سرویس محلی 127.0.0.1:8012"]
+    B -->|"تا ۲۵۶ قیمت بسته‌شدن"| C["Chronos-2: پیش‌بینی ۴ کندل"]
+    C -->|"بازه و میانهٔ پیش‌بینی"| B
+    B -->|"BUY/SELL/WAIT + دلیل"| A
+    A -->|"کنترل ریسک و ارسال سفارش"| D["حساب سنتی LiteFinance"]
+~~~
+
+اکسپرت هر بار فقط از **کندل کامل‌شده** تصمیم می‌گیرد؛ نمایش وضعیت روی کندل زنده به معنی صدور سفارش نیست. سرویس یک endpoint سلامت به نشانی /health و یک endpoint تصمیم به نشانی /decision دارد. سرویس روی loopback گوش می‌دهد و برای استفاده روی همان ماشینی طراحی شده که MT5 زیر Wine اجرا می‌شود.
+
+## ساختار ریپو
+
+| مسیر | کار |
+| --- | --- |
+| mt5/Ramon.mq5 | اکسپرت مستقل MT5 و کنترل‌های قبل از سفارش |
+| src/ramon/model.py | بارگذاری checkpoint و خواندن خروجی واقعی Chronos‑2 |
+| src/ramon/core.py | اعتبارسنجی داده، ATR، اسپرد و تصمیم BUY/SELL/WAIT |
+| src/ramon/server.py | سرویس محلی HTTP و پاسخ سلامت |
+| src/ramon/preflight.py | آزمایش بارگذاری مدل و یک پیش‌بینی واقعی، بدون سفارش |
+| src/ramon/history.py و replay.py | خواندن تاریخچه و ارزیابی ترتیبی آفلاین |
+| src/ramon/train.py | ساخت checkpoint جدید با LoRA و ثبت تقسیم داده |
+| scripts/setup_local.sh | نصب وابستگی‌ها، آزمایش مدل و کامپایل اکسپرت در Ubuntu/Wine |
+| tests/ | تست تصمیم، پاسخ HTTP، سازگاری آداپتور مدل و ترتیب بازپخش |
+
+## نصب روی Ubuntu و MT5
+
+پیش‌نیازها: Python 3.11 یا بالاتر، uv، Wine، MetaTrader 5 و MetaEditor سالم، دسترسی به اینترنت برای دریافت بسته‌ها و وزن مدل، و RAM/فضای دیسک کافی برای PyTorch. دانلود بستهٔ PyTorch می‌تواند بسیار بزرگ‌تر از فایل وزن مدل باشد. این راهنما فرض می‌کند MT5 روی همان دستگاه Ubuntu اجرا می‌شود.
+
+~~~bash
 git clone https://github.com/amiradmin/ramon-ai-trader.git
 cd ramon-ai-trader
 bash scripts/setup_local.sh
-```
+~~~
 
-The installer syncs the Python dependencies, downloads and **loads the actual model weights**, verifies a four-step forecast, then copies and compiles `mt5/Ramon.mq5` into your MT5 Experts directory. By default it looks in `~/.mt5/drive_c/Program Files/MetaTrader 5`; for another location run `RAMON_MT5_DIR='/path/to/MetaTrader 5' bash scripts/setup_local.sh`. If MT5 stores chart and Expert files separately from its installation, set `RAMON_MT5_DATA_DIR` to the directory found through MT5 **File → Open Data Folder**. It prints an error if Wine, MT5 or MetaEditor is unavailable. A later start loads the weights from cache. To check a CUDA installation, run the installer with `RAMON_DEVICE=cuda` only if your local PyTorch supports CUDA.
+این دستور وابستگی‌ها را نصب می‌کند، مدل را دانلود و بارگذاری می‌کند، یک پیش‌بینی چهارمرحله‌ای واقعی را می‌سنجد، سپس Ramon.mq5 را در Experts کپی و با MetaEditor کامپایل می‌کند. **این دستور معاملهٔ زنده را فعال نمی‌کند.**
 
-Start the real local decision server in a **separate terminal**, and leave that process running while Ramon is on the chart:
+مسیر پیش‌فرض MT5 برابر است با ~/.mt5/drive_c/Program Files/MetaTrader 5. اگر محل نصب متفاوت است، RAMON_MT5_DIR را به پوشهٔ حاوی metaeditor64.exe بدهید. اگر پوشهٔ دادهٔ ترمینال جداست، مسیر آن را از **File → Open Data Folder** در MT5 پیدا کنید و به RAMON_MT5_DATA_DIR بدهید:
 
-```bash
+~~~bash
+RAMON_MT5_DIR="/path/to/MetaTrader 5" \
+RAMON_MT5_DATA_DIR="/path/to/terminal-data" \
+bash scripts/setup_local.sh
+~~~
+
+اگر پردازشگر گرافیکی CUDA و نصب سازگار PyTorch دارید، RAMON_DEVICE=cuda را برای آزمون اولیه بگذارید؛ حالت پیش‌فرض CPU است. اگر اسکریپت MetaEditor را پیدا نکرد، می‌توان فایل mt5/Ramon.mq5 را دستی به MQL5/Experts/Ramon/ کپی کرد و در MetaEditor با F7 کامپایل کرد.
+
+پس از نصب، سرویس را در یک ترمینال جداگانه اجرا کنید و تا زمانی که Ramon روی نمودار است باز نگه دارید:
+
+~~~bash
 cd ramon-ai-trader
 uv run --extra model python -m ramon.server --device cpu
-```
+~~~
 
-Open `http://127.0.0.1:8012/health`: it must report `ready: true` and the expected model. If loading fails, the service does not start and the EA cannot receive a BUY/SELL signal. Ollama is not used because Chronos-2's native forecasting API is a Python/PyTorch model.
+بررسی سرویس:
 
-## Install the separate EA
+~~~bash
+curl http://127.0.0.1:8012/health
+~~~
 
-1. The installer copies and compiles the EA for the default MT5 location. If your terminal uses another data directory, select **File → Open Data Folder** in MT5 and use that directory as `RAMON_MT5_DATA_DIR` before rerunning the installer, or copy `mt5/Ramon.mq5` into its `MQL5/Experts/Ramon/` directory and compile with F7 in MetaEditor. Use a separate XAUUSD_l M15 chart.
-2. MT5 **Tools → Options → Expert Advisors → Allow WebRequest**, add `http://127.0.0.1:8012`. Keep the server on the **same** machine/MT5 Wine host because it listens on loopback only.
-3. Start with `EnableLiveTrading=false`. Confirm the service health endpoint and BUY/SELL/WAIT with the status displayed on the chart and Experts log. No order is sent while disarmed.
-4. For the verified LiteFinance cent account only, set the exact `AllowedAccountLogin`, keep `TradeSymbol=XAUUSD_l`, verify `MoneyUnitsPerUSD=100`, and only then enable trading. Inputs default to planned loss at most $0.06 per trade, four entries per broker day, maximum spread 50 points, one position, and a four-bar maximum hold. If the minimum 0.01 lot exceeds the dollar risk, the order is refused and the reason is displayed.
+باید ready برابر true و نام checkpoint را نشان دهد. بارگذاری checkpoint آموزش‌دیدهٔ محلی با گزینهٔ --model و مسیر پوشهٔ مدل ممکن است؛ مراحل ارزیابی قبل از جایگزینی را در بخش آموزش ببینید.
 
-The EA refuses other gold symbols, timeframes, or an account/login mismatch. It also refuses to open alongside another robot's position on the same symbol. It does not place an order when the model is unreachable, returns malformed data, or responds for an older bar. After an entry the broker holds SL/TP; the EA handles the four-bar time exit when connected.
+### اتصال اکسپرت
 
-## Evaluate on broker history
+1. در MT5 به **Tools → Options → Expert Advisors** بروید؛ Allow WebRequest را فعال و http://127.0.0.1:8012 را به فهرست URLها اضافه کنید.
+2. اکسپرت Ramon را به **نمودار جداگانهٔ XAUUSD_l در M15** وصل کنید. ورودی EnableLiveTrading در شروع **false** باشد.
+3. /health، پنل نمودار و تب Experts را بررسی کنید. باید وضعیت مدل، دلیل BUY/SELL/WAIT و خطای احتمالی ارتباط دیده شود. پنل حالت DISARMED را نشان می‌دهد و در این حالت سفارش نمی‌فرستد.
+4. پیش از هر فعال‌سازی حساب سنتی، AllowedAccountLogin را با شمارهٔ دقیق حساب پر کنید، RequiredServerText را با سرور واقعی تطبیق دهید و مقدار MoneyUnitsPerUSD را با مشخصات همان حساب بررسی کنید. سپس شرایط ریسک را بررسی و فقط برای آن حساب EnableLiveTrading را فعال کنید.
 
-The existing `DeepHistorySync` tool in the separate MetaTrader assistant repository can populate `history_bars` in its SQLite store. Export sufficiently deep history for the **exact** `XAUUSD_l` symbol, and pass the real absolute path of that database:
+WebRequest در Strategy Tester متاتریدر اجرا نمی‌شود؛ بازپخش تاریخی مستقل از تستر انجام می‌شود. اگر سرویس خاموش شود یا پاسخ معتبر برای کندل جاری ندهد، ورود جدید انجام نمی‌شود. حد ضرر و حد سود سفارش‌های باز نزد کارگزار ثبت می‌شوند؛ خروج زمانی چهارکندلی به وصل بودن اکسپرت نیاز دارد.
 
-```bash
+## منطق تصمیم و محدودیت ریسک نسخهٔ اولیه
+
+| پارامتر | مقدار پیش‌فرض / رفتار |
+| --- | --- |
+| افق پیش‌بینی | چهار کندل M15 آینده؛ ورودی حداکثر ۲۵۶ کندل بسته‌شده |
+| حداقل مزیت | بیشینهٔ ۰٫۱۲ × ATR14 و ۱٫۵ × اسپرد؛ نسبت مزیت به پهنای پیش‌بینی دست‌کم ۰٫۲۰ |
+| حد ضرر / هدف | فاصلهٔ اولیه ۱٫۵ × ATR14 و ۳ × ATR14؛ هدف اسمی حدود ۲ برابر فاصلهٔ حد ضرر است |
+| ریسک هر معامله | بودجهٔ **برنامه‌ریزی‌شدهٔ ۰٫۰۶ دلار** با فرض دستی MoneyUnitsPerUSD=100 برای حساب سنتی |
+| اسپرد / دفعات معامله | حداکثر ۵۰ پوینت؛ حداکثر چهار ورود برای این اکسپرت در روزِ سرور کارگزار |
+| حجم و موقعیت | بررسی حداقل حجم با OrderCalcProfit؛ اگر کوچک‌ترین حجم مجاز از بودجه بگذرد، ورود رد می‌شود؛ همزمان یک موقعیت برای Ramon |
+| نگهداری موقعیت | حداکثر چهار کندل M15 تا تلاش برای خروج زمانی؛ SL/TP طبق سفارش نزد کارگزار ثبت می‌شوند |
+| شروع | EnableLiveTrading=false و AllowedAccountLogin=0؛ بدون تنظیم حسابِ دقیق، اجرای زنده مجاز نیست |
+
+۰٫۰۶ دلار **سقف قطعی زیان واقعی نیست**: لغزش، گپ، کمیسیون، تغییر قیمت و رفتار کارگزار می‌توانند زیان را بیشتر کنند. محدودیت چهار ورود در روز، محدودیت زیان تجمعی روزانه نیست. فیلتر مستقل اخبار، قطع‌کنندهٔ افت سرمایهٔ روزانه و ثبت کامل کارمزد هنوز پیاده‌سازی نشده‌اند. بنابراین وضعیت خبری UNKNOWN در نسخهٔ فعلی به معنی سنجش ایمنی خبر نیست.
+
+## ارزیابی با دادهٔ کارگزار
+
+برای دادهٔ تاریخی از جدول history_bars در SQLite ابزار تاریخچهٔ ریپوی جداگانهٔ MetaTrader assistant استفاده می‌شود. نماد باید **دقیقاً XAUUSD_l** و timeframe برابر M15 باشد. مسیر زیر را با فایل واقعی روی کامپیوتر خودتان عوض کنید:
+
+~~~bash
 uv run --extra model python -m ramon.replay \
   --db /absolute/path/to/history.sqlite3 \
   --symbol XAUUSD_l --point 0.01 --fallback-spread 42 --stride 4
-```
+~~~
 
-The replay uses the latest 20% chronologically, enters at the **next** M15 open, holds at most four bars, counts a stop first if both stop and target are crossed within the same candle, and permits only one position at a time. If the store lacks recorded spreads, the explicit fallback is 42 points. This bar-based replay cannot reproduce tick-by-tick fills, margin, latency, or news; validate with broker real-tick data and live cent outcomes before trusting its profitability estimates. MT5 `WebRequest` cannot run in Strategy Tester, which is why offline replay is separate.
+بازپخش روی ۲۰٪ آخر تاریخچه به ترتیب زمانی است؛ در اولین کندل **بعد از سیگنال** وارد می‌شود و در هر زمان فقط یک معامله فرض می‌کند. اگر اسپرد تاریخی ذخیره نشده باشد، fallback-spread ورودی استفاده می‌شود. وقتی حد سود و ضرر داخل یک کندل لمس شوند، زیان ابتدا شمرده می‌شود. خروجی شامل تعداد تصمیم‌ها، خرید، فروش، برد، باخت، خروج زمانی و مجموع R است.
 
-## Adapt Chronos-2 to our data
+این بازپخش، تیک واقعی، لغزش، کمیسیون، محدودیت حجم، مارجین، خبر و قطع ارتباط را به‌طور کامل بازسازی نمی‌کند. برای قضاوت دربارهٔ سودآوری باید آن را با دادهٔ دقیق‌تر کارگزار و نتایج **معاملات واقعی سنتی با ریسک محدود** تکمیل کرد. هدف محصول به تصمیم و اجرای واقعی می‌رسد؛ ارزیابی تاریخی ابزار سنجش و جلوگیری از تغییرهای کورکورانه است.
 
-With at least **4000** completed XAUUSD_l M15 bars, LoRA fine-tuning can stage a new checkpoint:
+## آموزش Chronos‑2
 
-```bash
+برای اجرای دستی LoRA حداقل ۴۰۰۰ کندل بسته‌شدهٔ M15 لازم است. این حداقل فنیِ فرمان آموزش است و **تضمین کافی بودن داده یا بهبود معامله نیست**. آموزش GPU مناسب می‌خواهد؛ برای آزمون اولیه می‌توان --device cpu را به‌کار برد، اما بسیار کندتر خواهد بود.
+
+~~~bash
 uv sync --extra model --extra train
 uv run --extra model --extra train python -m ramon.train \
   --db /absolute/path/to/history.sqlite3 \
   --symbol XAUUSD_l --device cuda \
   --out ./runtime/chronos/checkpoint-001
-```
+~~~
 
-The oldest 70% trains, the next 10% validates, and the newest 20% remains untouched. A manifest records split boundaries. The service **does not automatically switch** to a newly trained checkpoint: compare the untouched holdout with the original model using the same replay configuration and then start the service with `--model /absolute/path/to/checkpoint-001/model` only if the newer model improves risk-adjusted outcomes. A historical improvement does not guarantee future profit.
+طبق پیاده‌سازی، داده به ترتیب زمان تقسیم می‌شود: ۷۰٪ آموزش، ۱۰٪ اعتبارسنجی و ۲۰٪ تازه‌تر برای سنجش جداگانه کنار می‌ماند. checkpoint و manifest برای مسیر نسخه‌دار در نظر گرفته شده‌اند؛ اجرای واقعی آموزش و بازبارگذاری checkpoint هنوز باید تأیید شوند. سرویس زنده خودکار مدلش را عوض نمی‌کند. پس از تأیید ساخته‌شدن و بارگذاری checkpoint، برای مقایسهٔ دو مدل باید دوره، اسپرد و تنظیمات بازپخش یکسان باشند:
 
-## Development
+~~~bash
+uv run --extra model python -m ramon.replay \
+  --db /absolute/path/to/history.sqlite3 --model autogluon/chronos-2-small
 
-```bash
+uv run --extra model python -m ramon.replay \
+  --db /absolute/path/to/history.sqlite3 \
+  --model /absolute/path/to/checkpoint-001/model
+~~~
+
+اگر مدل جدید با معیارهای از پیش مشخص‌شده بهتر بود، می‌توان سرویس را با --model و مسیر checkpoint جدید **دوباره راه‌اندازی** کرد. امروزه معیار تصمیم‌گیری برای ارتقای خودکار، پایش پس از انتشار و بازگشت خودکار در کد وجود ندارند. بهبود روی گذشته دلیل کافی برای اعتماد به سود آینده نیست.
+
+## مسیر توسعه
+
+| مرحله | خروجی مورد انتظار | وضعیت |
+| --- | --- | --- |
+| ۱. اتصال واقعی روی دستگاه | نصب وزن مدل، پیش‌بینی واقعی، کامپایل MT5، /health و تصمیم روی نمودار DISARMED | کد و اسکریپت آماده؛ آزمون روی دستگاه کاربر باقی است |
+| ۲. ثبت نتایج | ثبت هر کندل، نسخهٔ مدل، کوانتیل‌ها، هزینهٔ ورود، WAIT و دلیل آن، سفارش و نتیجهٔ بسته‌شدن؛ پیوند هر معامله به سیگنال اصلی | برنامه |
+| ۳. خط پایهٔ قابل سنجش | دادهٔ کامل XAUUSD_l، هزینه و لغزش نزدیک به واقعیت، دوره‌های زمانی جدا و اندازه‌گیری سود خالص، افت سرمایه و کیفیت پیش‌بینی | بازپخش اولیه آماده؛ ارزیابی کامل برنامه |
+| ۴. آزمایش واقعی سنتی | معاملهٔ محدود با گزارش روزانهٔ سود/زیان پس از هزینه، دلایل رد سفارش و کیفیت اتصال؛ بدون فرض سودآوری از روی بک‌تست | برنامه، پس از موفقیت مرحلهٔ ۱ |
+| ۵. آموزش از دادهٔ خودمان | LoRA دوره‌ای روی تاریخچه، مقایسهٔ checkpoint جدید با قبلی روی دادهٔ خارج از آموزش و ثبت نسخه‌ها | کد آموزش دستی نوشته شده؛ آزمون کامل، زمان‌بندی و انتخاب خودکار برنامه |
+| ۶. یادگیری از نتیجهٔ معامله | ساخت برچسب و پاداش از اجرا، هزینه، خروج و موقعیت‌های WAIT؛ سنجش کالیبراسیون و سیاست تصمیم در کنار پیش‌بینی قیمت | پژوهش و پیاده‌سازی آینده |
+| ۷. بهره‌برداری پایدار | محدودیت زیان روزانه، پایش سلامت و تأخیر مدل، توقف ورود هنگام خطا، گزارش، بازگشت نسخه و استقرار قابل تکرار | برنامه |
+
+پیش‌شرط ارتقای مدل در آینده باید قبل از دیدن نتیجهٔ دورهٔ آزمون تعریف شود: کیفیت پیش‌بینی، سود خالص پس از هزینه، افت سرمایه، تعداد نمونهٔ کافی و پایداری در چند دوره. اگر مدل جدید بدتر شد، نسخهٔ فعال عوض نشود. آموزش با نتایج واقعی به معنی تغییر وزن مدل بعد از هر معامله نیست؛ دادهٔ کم و رفتار متغیر بازار می‌توانند مدل را به نویز عادت دهند.
+
+## توسعه و صحت‌سنجی
+
+~~~bash
+uv sync --extra dev
 uv run --extra dev pytest
-```
+python -m compileall -q src tests
+bash -n scripts/setup_local.sh
+~~~
 
-All decision tests inject a fixed forecaster: they check protocol, spread costs, no-trade failures, and replay ordering without downloading weights. An end-to-end model load and MetaEditor compile must also be run on the user's MT5 machine before any armed session.
+تست‌ها تصمیم BUY/SELL/WAIT، هزینهٔ اسپرد، رد دادهٔ خراب، استخراج کوانتیل مدل، ارتباط HTTP و ترتیب ورود در بازپخش را پوشش می‌دهند. آنها وزن واقعی را دانلود نمی‌کنند و کامپایل MQL5 را جایگزین نمی‌کنند. فرمان preflight، MetaEditor و بررسی نمودار برای آزمون کامل روی دستگاه خودتان لازم‌اند.
+
+## منابع
+
+- [پروژهٔ رسمی Chronos و نمونهٔ استفاده از Chronos‑2](https://github.com/amazon-science/chronos-forecasting)
+- [مدل Chronos‑2 کوچک در Hugging Face](https://huggingface.co/autogluon/chronos-2-small)
+- [مستندات MetaEditor برای کامپایل خط فرمان](https://www.metatrader5.com/en/metaeditor/help/beginning/integration_ide)
+- [مستندات MT5 برای WebRequest](https://www.mql5.com/en/docs/network/webrequest)
