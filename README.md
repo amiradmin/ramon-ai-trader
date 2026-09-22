@@ -213,7 +213,7 @@ curl http://127.0.0.1:8012/health
 
 ### خروجی تشخیصی Ramon با یک دستور
 
-Ramon v0.15 در هر به‌روزرسانی پنل، فایل `Ramon_Diagnostic.txt` را در پوشهٔ مشترک MT5 (`FILE_COMMON`) می‌نویسد. این فایل شامل آخرین تصمیم مدل، دلیل BUY/SELL/WAIT، زمان کندل سیگنال، low/median/high پیش‌بینی، ATR، edge، spread، فاصلهٔ SL/TP، وضعیت account lock، مجوزهای معامله، پوزیشن مدیریت‌شده، تعداد معاملات روز و وضعیت فعلی اجرا است. شمارهٔ login حساب در این خروجی چاپ نمی‌شود.
+Ramon v0.16 در هر به‌روزرسانی پنل، فایل `Ramon_Diagnostic.txt` را در پوشهٔ مشترک MT5 (`FILE_COMMON`) می‌نویسد. این فایل شامل آخرین تصمیم مدل، دلیل BUY/SELL/WAIT، زمان کندل سیگنال، low/median/high پیش‌بینی، ATR، edge، spread، فاصلهٔ SL/TP، وضعیت account lock، مجوزهای معامله، پوزیشن مدیریت‌شده، تعداد معاملات روز و وضعیت فعلی اجرا است. شمارهٔ login حساب در این خروجی چاپ نمی‌شود.
 
 پس از اینکه Ramon روی نمودار `XAUUSD_l / M15` اجرا شد، برای گرفتن وضعیت کامل مدل و MT5 فقط این فرمان را اجرا کنید:
 
@@ -314,9 +314,9 @@ bash -n scripts/setup_local.sh
 
 ### داشبورد روی چارت و دکمهٔ Copy Diagnostic
 
-از v0.15، Ramon به‌جای متن سادهٔ Comment یک داشبورد روی خود چارت می‌سازد. داشبورد وضعیت ARMED/DISARMED، account lock و مجوزها، تصمیم و دلیل مدل، forecast low/median/high، BuyEdge/SellEdge، حداقل edge، uncertainty، signal strength، ATR، فاصلهٔ SL/TP، تعداد معاملات روز و بودجهٔ ریسک را نشان می‌دهد. شرط‌های EDGE و STRENGTH به‌صورت PASS/FAIL نمایش داده می‌شوند.
+از v0.16، Ramon به‌جای متن سادهٔ Comment یک داشبورد روی خود چارت می‌سازد. داشبورد وضعیت ARMED/DISARMED، account lock و مجوزها، تصمیم و دلیل مدل، forecast low/median/high، BuyEdge/SellEdge، حداقل edge، uncertainty، signal strength، ATR، فاصلهٔ SL/TP، تعداد معاملات روز و بودجهٔ ریسک را نشان می‌دهد. شرط‌های EDGE و STRENGTH به‌صورت PASS/FAIL نمایش داده می‌شوند.
 
-از v0.15، پاسخ مدل قیمت دقیق `signal_bid/signal_ask` لحظهٔ تصمیم را هم برمی‌گرداند. پنل و diagnostic علاوه بر ارز حساب، بودجهٔ ریسک در واحد حساب، حجم پیشنهادی و زیان محاسبه‌شده تا SL با `OrderCalcProfit` را نشان می‌دهند. برای جلوگیری از فعال‌سازی تصادفی با تبدیل واحد اشتباه، `ConfirmMoneyUnitsPerUSD=false` پیش‌فرض است و Ramon در حالت Live تا زمانی که کاربر آن را آگاهانه `true` نکند initialize نمی‌شود. `ExpectedAccountCurrency` نیز در صورت پرشدن باید دقیقاً با `ACCOUNT_CURRENCY` برابر باشد.
+از v0.15، پاسخ مدل قیمت دقیق `signal_bid/signal_ask` لحظهٔ تصمیم را هم برمی‌گرداند. پنل و diagnostic علاوه بر ارز حساب، بودجهٔ ریسک در واحد حساب، حجم پیشنهادی و زیان محاسبه‌شده تا SL با `OrderCalcProfit` را نشان می‌دهند. برای جلوگیری از فعال‌سازی تصادفی با تبدیل واحد اشتباه، `ConfirmMoneyUnitsPerUSD=false` پیش‌فرض است. از v0.16 اگر Live روشن باشد ولی این تأیید یا کنترل ارز حساب پاس نشود، اکسپرت از چارت حذف نمی‌شود؛ روی چارت می‌ماند و وضعیت `BLOCKED` نشان می‌دهد و هیچ سفارش جدیدی ارسال نمی‌کند. `ExpectedAccountCurrency` نیز در صورت پرشدن باید دقیقاً با `ACCOUNT_CURRENCY` برابر باشد.
 
 Ramon همچنین دو فایل پایدار در `FILE_COMMON` می‌سازد: `Ramon_Signals.csv` برای تمام WAIT/BUY/SELLهای پردازش‌شده و `Ramon_Trades.csv` برای dealهای واقعی ورود/خروج با حجم، قیمت، سود، کمیسیون و swap. این فایل‌ها پایهٔ دادهٔ نسخه‌های بعدی برای ارزیابی و آموزش هستند.
 

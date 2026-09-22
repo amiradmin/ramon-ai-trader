@@ -1,5 +1,5 @@
 #property strict
-#property version "0.15"
+#property version "0.16"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -98,6 +98,47 @@ bool AccountLockHealthy()
    return true;
 }
 
+bool CurrencyCheckHealthy()
+{
+   if(StringLen(ExpectedAccountCurrency)==0)
+      return true;
+   return AccountInfoString(ACCOUNT_CURRENCY)==ExpectedAccountCurrency;
+}
+
+bool LiveExecutionReady(string &reason)
+{
+   reason="";
+   if(!EnableLiveTrading)
+   {
+      reason="Live trading disabled";
+      return false;
+   }
+   if(!ConfirmMoneyUnitsPerUSD)
+   {
+      reason="BLOCKED: confirm MoneyUnitsPerUSD";
+      return false;
+   }
+   if(!CurrencyCheckHealthy())
+   {
+      reason="BLOCKED: account currency mismatch";
+      return false;
+   }
+   if(!AccountLockHealthy())
+   {
+      reason="BLOCKED: account/server lock mismatch";
+      return false;
+   }
+   return true;
+}
+
+string LiveStateText()
+{
+   if(!EnableLiveTrading)
+      return "DISARMED";
+   string reason="";
+   return (LiveExecutionReady(reason) ? "ARMED" : "BLOCKED");
+}
+
 bool ManagedPosition(ulong &ticket,datetime &opened)
 {
    ticket=0;
@@ -164,7 +205,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.15\n"
+      +"EA version: 0.16\n"
       +"Captured: "+TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS)+"\n"
       +"Symbol: "+_Symbol+"  Timeframe: M15\n"
       +"Bid: "+(tick_ok ? DoubleToString(tick.bid,_Digits) : "NA")
@@ -197,7 +238,7 @@ string BuildDiagnosticText()
       +"StopDistance: "+DoubleToString(LastStopDistance,_Digits)
       +"  TargetDistance: "+DoubleToString(LastTargetDistance,_Digits)+"\n\n"
       +"=== ACCOUNT / EXECUTION ===\n"
-      +"Live: "+(EnableLiveTrading ? "ARMED" : "DISARMED")
+      +"Live: "+LiveStateText()
       +"  AccountLock: "+(AccountLockHealthy() ? "OK" : "FAIL")
       +"  Server: "+AccountInfoString(ACCOUNT_SERVER)+"\n"
       +"AccountCurrency: "+AccountInfoString(ACCOUNT_CURRENCY)
@@ -320,13 +361,15 @@ void DrawDashboard()
    string dominant=(LastBuyEdge>=LastSellEdge ? "BUY" : "SELL");
    color state_color=(LastModelDecision=="BUY" ? clrLime :
       (LastModelDecision=="SELL" ? clrTomato : clrGold));
-   color live_color=(EnableLiveTrading && lock_ok && permissions ? clrLime : clrOrange);
+   string live_reason="";
+   bool live_ready=LiveExecutionReady(live_reason);
+   color live_color=(live_ready && permissions ? clrLime : clrOrange);
 
    UiRect("PANEL",12,24,500,392,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.15",28,36,clrWhite,12);
+   UiLabel("TITLE","RAMON AI TRADER  v0.16",28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2",28,56,C'148,163,184',9);
 
-   UiLabel("LIVE","LIVE: "+(EnableLiveTrading ? "ARMED" : "DISARMED")
+   UiLabel("LIVE","LIVE: "+LiveStateText()
       +"   LOCK: "+(lock_ok ? "OK" : "FAIL")
       +"   PERMS: "+(permissions ? "OK" : "FAIL"),28,82,live_color,10);
 
@@ -368,8 +411,9 @@ void DrawDashboard()
       (ConfirmMoneyUnitsPerUSD ? clrLime : clrOrange),9);
 
    UiLabel("MONEY_CONFIRM","MoneyUnits/USD: "+DoubleToString(MoneyUnitsPerUSD,2)
-      +"   Confirmed: "+BoolText(ConfirmMoneyUnitsPerUSD),28,332,
-      (ConfirmMoneyUnitsPerUSD ? clrLime : clrOrange),9);
+      +"   Confirmed: "+BoolText(ConfirmMoneyUnitsPerUSD)
+      +(EnableLiveTrading && !live_ready ? "   "+live_reason : ""),28,332,
+      (live_ready || !EnableLiveTrading ? clrLime : clrOrange),9);
 
    UiButton("COPY","COPY DIAGNOSTIC",28,356,176,30);
    UiLabel("COPY_STATUS",LastCopyStatus,218,364,C'148,163,184',8);
@@ -791,8 +835,9 @@ void OnTimer()
 
    if(decision=="WAIT" || !EnableLiveTrading)
    { ShowStatus(); return; }
-   if(!AccountLockHealthy())
-   { StatusLine="Account/server lock mismatch"; ShowStatus(); return; }
+   string live_block_reason="";
+   if(!LiveExecutionReady(live_block_reason))
+   { StatusLine=live_block_reason; ShowStatus(); return; }
    if(!(bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED)
       || !(bool)MQLInfoInteger(MQL_TRADE_ALLOWED)
       || !(bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED))
@@ -889,12 +934,12 @@ int OnInit()
    }
    if(StringLen(ExpectedAccountCurrency)>0
       && AccountInfoString(ACCOUNT_CURRENCY)!=ExpectedAccountCurrency)
-   { Print("Account currency mismatch: actual=",AccountInfoString(ACCOUNT_CURRENCY),
-      " expected=",ExpectedAccountCurrency); return INIT_FAILED; }
+      Print("Ramon live BLOCKED: account currency mismatch: actual=",
+         AccountInfoString(ACCOUNT_CURRENCY)," expected=",ExpectedAccountCurrency);
    if(EnableLiveTrading && !ConfirmMoneyUnitsPerUSD)
-   { Print("ConfirmMoneyUnitsPerUSD must be true before live trading"); return INIT_FAILED; }
+      Print("Ramon live BLOCKED: ConfirmMoneyUnitsPerUSD is false");
    if(EnableLiveTrading && !AccountLockHealthy())
-   { Print("Account/server lock required before arming"); return INIT_FAILED; }
+      Print("Ramon live BLOCKED: account/server lock mismatch");
    Trade.SetExpertMagicNumber(MagicNumber);
    Trade.SetDeviationInPoints(MaxDeviationPoints);
    Trade.SetTypeFillingBySymbol(_Symbol);

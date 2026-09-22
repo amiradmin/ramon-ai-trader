@@ -9,7 +9,7 @@ EA = Path(__file__).resolve().parents[1] / "mt5" / "Ramon.mq5"
 def test_model_url_allows_host_and_compose_service_only() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "0.15"' in source
+    assert '#property version "0.16"' in source
     assert 'url=="http://127.0.0.1:8012/decision"' in source
     assert 'url=="http://model:8012/decision"' in source
     assert "!IsAllowedModelUrl(ModelUrl)" in source
@@ -19,7 +19,7 @@ def test_model_url_allows_host_and_compose_service_only() -> None:
 def test_live_account_session_lock() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "0.15"' in source
+    assert '#property version "0.16"' in source
     assert "input bool AutoLockCurrentAccount = true" in source
     assert "input bool EnableLiveTrading = false" in source
     assert "LockedAccountLogin=current_login" in source
@@ -46,7 +46,7 @@ def test_diagnostic_export_contains_operational_state() -> None:
 def test_chart_dashboard_and_copy_button() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert 'RAMON AI TRADER  v0.15' in source
+    assert 'RAMON AI TRADER  v0.16' in source
     assert 'UiButton("COPY","COPY DIAGNOSTIC"' in source
     assert "void OnChartEvent(" in source
     assert "CopyDiagnosticToClipboard()" in source
@@ -74,4 +74,20 @@ def test_risk_verification_and_csv_learning_logs() -> None:
     assert "void AppendSignalCsv()" in source
     assert "void AppendTradeCsv(const ulong deal)" in source
     assert "void OnTradeTransaction(" in source
-    assert 'Print("ConfirmMoneyUnitsPerUSD must be true before live trading")' in source
+    assert 'reason="BLOCKED: confirm MoneyUnitsPerUSD"' in source
+    assert 'reason="BLOCKED: account currency mismatch"' in source
+    assert "string LiveStateText()" in source
+    assert 'Print("Ramon live BLOCKED: ConfirmMoneyUnitsPerUSD is false")' in source
+    assert 'ConfirmMoneyUnitsPerUSD must be true before live trading' not in source
+
+
+def test_live_block_does_not_detach_ea() -> None:
+    source = EA.read_text(encoding="utf-8")
+
+    assert '#property version "0.16"' in source
+    assert "bool LiveExecutionReady(string &reason)" in source
+    assert 'return (LiveExecutionReady(reason) ? "ARMED" : "BLOCKED")' in source
+    assert 'if(!LiveExecutionReady(live_block_reason))' in source
+    assert 'StatusLine=live_block_reason' in source
+    assert 'Print("Ramon live BLOCKED: ConfirmMoneyUnitsPerUSD is false")' in source
+    assert 'Print("Ramon live BLOCKED: account/server lock mismatch")' in source
