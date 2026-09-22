@@ -100,6 +100,8 @@ class Decision:
     decision: str
     reason: str
     signal_bar_time: int
+    signal_bid: float
+    signal_ask: float
     spread_points: int
     atr: float
     edge: float
@@ -181,6 +183,8 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
         decision=side,
         reason=reason,
         signal_bar_time=market.bars[-1].time,
+        signal_bid=market.bid,
+        signal_ask=market.ask,
         spread_points=spread_points,
         atr=atr,
         edge=edge,

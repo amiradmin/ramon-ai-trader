@@ -59,6 +59,8 @@ class DecisionTests(unittest.TestCase):
         result = evaluate(self.market, self.model)
         self.assertEqual(result.decision, "BUY")
         self.assertAlmostEqual(result.edge, 2.6)
+        self.assertAlmostEqual(result.signal_bid, 100.0)
+        self.assertAlmostEqual(result.signal_ask, 100.4)
         self.assertAlmostEqual(result.buy_edge, 2.6)
         self.assertAlmostEqual(result.sell_edge, -3.4)
         self.assertAlmostEqual(result.minimum_edge, 0.6)
@@ -139,6 +141,8 @@ class DecisionTests(unittest.TestCase):
         with urlopen(Request(url + "/decision", data=payload, headers={"Content-Type": "application/json"}), timeout=5) as response:
             body = json.load(response)
             self.assertEqual(body["decision"], "BUY")
+            self.assertEqual(body["signal_bid"], 100.0)
+            self.assertEqual(body["signal_ask"], 100.4)
             self.assertIn("buy_edge", body)
             self.assertIn("signal_strength", body)
             self.assertEqual(body["minimum_strength"], 0.20)

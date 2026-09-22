@@ -1,5 +1,5 @@
 #property strict
-#property version "0.14"
+#property version "0.15"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -26,7 +26,9 @@ input bool AutoLockCurrentAccount = true; // Bind this EA session to the account
 input long AllowedAccountLogin = 0; // Used only when AutoLockCurrentAccount=false.
 input bool EnableLiveTrading = false;
 input string ModelUrl = "http://127.0.0.1:8012/decision";
-input double MoneyUnitsPerUSD = 100.0; // LiteFinance cent account, verified manually.
+input double MoneyUnitsPerUSD = 100.0; // Manual conversion from account deposit units to USD; verify before live.
+input bool ConfirmMoneyUnitsPerUSD = false; // Must be true before live trading can arm.
+input string ExpectedAccountCurrency = ""; // Optional exact ACCOUNT_CURRENCY check when non-empty.
 input double RiskPerTradeUSD = 0.06;
 input int MaxSpreadPoints = 50;
 input int MaxTradesPerDay = 4;
@@ -38,6 +40,9 @@ input bool WriteDiagnosticFile = true;
 input string DiagnosticFileName = "Ramon_Diagnostic.txt";
 input bool ShowDashboard = true;
 input bool EnableClipboardButton = true;
+input bool WriteCsvLogs = true;
+input string SignalCsvFileName = "Ramon_Signals.csv";
+input string TradeCsvFileName = "Ramon_Trades.csv";
 
 CTrade Trade;
 datetime LastProcessedBar = 0;
@@ -45,6 +50,8 @@ string StatusLine = "Starting";
 string LastModelDecision = "NONE";
 string LastModelReason = "NONE";
 datetime LastSignalBarTime = 0;
+double LastSignalBid = 0.0;
+double LastSignalAsk = 0.0;
 double LastForecastLow = 0.0;
 double LastForecast = 0.0;
 double LastForecastHigh = 0.0;
@@ -56,6 +63,11 @@ double LastMinimumEdge = 0.0;
 double LastUncertainty = 0.0;
 double LastSignalStrength = 0.0;
 double LastMinimumStrength = 0.20;
+string LastSizingSide = "NONE";
+double LastPlannedVolume = 0.0;
+double LastEstimatedStopLossUnits = 0.0;
+double LastMinimumLotStopLossUnits = 0.0;
+double LastRiskBudgetUnits = 0.0;
 double LastStopDistance = 0.0;
 double LastTargetDistance = 0.0;
 int LastModelSpreadPoints = 0;
@@ -152,7 +164,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.14\n"
+      +"EA version: 0.15\n"
       +"Captured: "+TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS)+"\n"
       +"Symbol: "+_Symbol+"  Timeframe: M15\n"
       +"Bid: "+(tick_ok ? DoubleToString(tick.bid,_Digits) : "NA")
@@ -165,6 +177,8 @@ string BuildDiagnosticText()
       +"Decision: "+LastModelDecision+"  Reason: "+LastModelReason+"\n"
       +"Signal bar: "+(LastSignalBarTime>0 ? TimeToString(LastSignalBarTime,TIME_DATE|TIME_MINUTES) : "NONE")
       +"  Last closed: "+(closed>0 ? TimeToString(closed,TIME_DATE|TIME_MINUTES) : "NONE")+"\n"
+      +"SignalBid: "+DoubleToString(LastSignalBid,_Digits)
+      +"  SignalAsk: "+DoubleToString(LastSignalAsk,_Digits)+"\n"
       +"Forecast low/median/high: "
       +DoubleToString(LastForecastLow,_Digits)+" / "
       +DoubleToString(LastForecast,_Digits)+" / "
@@ -186,6 +200,9 @@ string BuildDiagnosticText()
       +"Live: "+(EnableLiveTrading ? "ARMED" : "DISARMED")
       +"  AccountLock: "+(AccountLockHealthy() ? "OK" : "FAIL")
       +"  Server: "+AccountInfoString(ACCOUNT_SERVER)+"\n"
+      +"AccountCurrency: "+AccountInfoString(ACCOUNT_CURRENCY)
+      +"  ExpectedCurrency: "+(StringLen(ExpectedAccountCurrency)>0 ? ExpectedAccountCurrency : "NOT_SET")
+      +"  MoneyUnitsConfirmed: "+BoolText(ConfirmMoneyUnitsPerUSD)+"\n"
       +"Balance: "+DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),2)
       +"  Equity: "+DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY),2)
       +"  FreeMargin: "+DoubleToString(AccountInfoDouble(ACCOUNT_MARGIN_FREE),2)+"\n"
@@ -197,7 +214,13 @@ string BuildDiagnosticText()
       +"Trades today: "+IntegerToString(today)+"/"+IntegerToString(MaxTradesPerDay)+"\n"
       +"RiskPerTradeUSD: "+DoubleToString(RiskPerTradeUSD,2)
       +"  MoneyUnitsPerUSD: "+DoubleToString(MoneyUnitsPerUSD,2)
-      +"  MaxSpreadPoints: "+IntegerToString(MaxSpreadPoints)+"\n";
+      +"  RiskBudgetAccountUnits: "+DoubleToString(LastRiskBudgetUnits,2)+"\n"
+      +"SizingSide: "+LastSizingSide
+      +"  PlannedVolume: "+DoubleToString(LastPlannedVolume,2)
+      +"  EstimatedSLAccountUnits: "+DoubleToString(LastEstimatedStopLossUnits,2)
+      +"  MinLotSLAccountUnits: "+DoubleToString(LastMinimumLotStopLossUnits,2)+"\n"
+      +"MaxSpreadPoints: "+IntegerToString(MaxSpreadPoints)
+      +"  CSV: "+(WriteCsvLogs ? "ON" : "OFF")+"\n";
 
    return text;
 }
@@ -299,8 +322,8 @@ void DrawDashboard()
       (LastModelDecision=="SELL" ? clrTomato : clrGold));
    color live_color=(EnableLiveTrading && lock_ok && permissions ? clrLime : clrOrange);
 
-   UiRect("PANEL",12,24,448,324,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.14",28,36,clrWhite,12);
+   UiRect("PANEL",12,24,500,392,C'15,23,42',C'71,85,105');
+   UiLabel("TITLE","RAMON AI TRADER  v0.15",28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2",28,56,C'148,163,184',9);
 
    UiLabel("LIVE","LIVE: "+(EnableLiveTrading ? "ARMED" : "DISARMED")
@@ -310,34 +333,46 @@ void DrawDashboard()
    UiLabel("DECISION","DECISION: "+LastModelDecision+"   "+LastModelReason,28,108,state_color,11);
    UiLabel("SIGNAL","Signal: "+(LastSignalBarTime>0 ? TimeToString(LastSignalBarTime,TIME_DATE|TIME_MINUTES) : "NONE")
       +"   Spread: "+IntegerToString(spread_points)+"/"+IntegerToString(MaxSpreadPoints),28,132,clrWhite,9);
+   UiLabel("SIGNAL_PRICE","Signal Bid/Ask: "+DoubleToString(LastSignalBid,_Digits)
+      +" / "+DoubleToString(LastSignalAsk,_Digits),28,154,C'203,213,225',9);
 
    UiLabel("FORECAST","Forecast L/M/H: "
       +DoubleToString(LastForecastLow,_Digits)+" / "
       +DoubleToString(LastForecast,_Digits)+" / "
-      +DoubleToString(LastForecastHigh,_Digits),28,154,C'191,219,254',9);
+      +DoubleToString(LastForecastHigh,_Digits),28,176,C'191,219,254',9);
 
    UiLabel("EDGE","Dominant: "+dominant
       +"   BuyEdge: "+DoubleToString(LastBuyEdge,2)
-      +"   SellEdge: "+DoubleToString(LastSellEdge,2),28,178,clrWhite,9);
+      +"   SellEdge: "+DoubleToString(LastSellEdge,2),28,200,clrWhite,9);
    UiLabel("EDGE_PASS","EDGE "+PassFail(edge_pass)
-      +"   "+DoubleToString(dominant_edge,2)+" >= "+DoubleToString(LastMinimumEdge,2),28,200,
+      +"   "+DoubleToString(dominant_edge,2)+" >= "+DoubleToString(LastMinimumEdge,2),28,222,
       (edge_pass ? clrLime : clrTomato),9);
 
    UiLabel("STRENGTH","STRENGTH "+PassFail(strength_pass)
       +"   "+DoubleToString(LastSignalStrength,3)+" >= "+DoubleToString(LastMinimumStrength,3)
-      +"   Unc: "+DoubleToString(LastUncertainty,2),28,222,
+      +"   Unc: "+DoubleToString(LastUncertainty,2),28,244,
       (strength_pass ? clrLime : clrTomato),9);
 
    UiLabel("RISK","ATR: "+DoubleToString(LastAtr,2)
       +"   SL dist: "+DoubleToString(LastStopDistance,2)
-      +"   TP dist: "+DoubleToString(LastTargetDistance,2),28,244,C'203,213,225',9);
+      +"   TP dist: "+DoubleToString(LastTargetDistance,2),28,266,C'203,213,225',9);
 
-   UiLabel("ACCOUNT","Balance: "+DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),2)
-      +"   Trades: "+IntegerToString(today)+"/"+IntegerToString(MaxTradesPerDay)
-      +"   Risk: $"+DoubleToString(RiskPerTradeUSD,2),28,266,C'203,213,225',9);
+   UiLabel("ACCOUNT","Currency: "+AccountInfoString(ACCOUNT_CURRENCY)
+      +"   Balance: "+DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),2)
+      +"   Trades: "+IntegerToString(today)+"/"+IntegerToString(MaxTradesPerDay),28,288,C'203,213,225',9);
 
-   UiButton("COPY","COPY DIAGNOSTIC",28,294,176,30);
-   UiLabel("COPY_STATUS",LastCopyStatus,218,302,C'148,163,184',8);
+   UiLabel("SIZING","Sizing: "+LastSizingSide
+      +"   Vol: "+DoubleToString(LastPlannedVolume,2)
+      +"   SL units: "+DoubleToString(LastEstimatedStopLossUnits,2)
+      +" / budget "+DoubleToString(LastRiskBudgetUnits,2),28,310,
+      (ConfirmMoneyUnitsPerUSD ? clrLime : clrOrange),9);
+
+   UiLabel("MONEY_CONFIRM","MoneyUnits/USD: "+DoubleToString(MoneyUnitsPerUSD,2)
+      +"   Confirmed: "+BoolText(ConfirmMoneyUnitsPerUSD),28,332,
+      (ConfirmMoneyUnitsPerUSD ? clrLime : clrOrange),9);
+
+   UiButton("COPY","COPY DIAGNOSTIC",28,356,176,30);
+   UiLabel("COPY_STATUS",LastCopyStatus,218,364,C'148,163,184',8);
    ChartRedraw();
 }
 
@@ -534,6 +569,142 @@ double SelectVolume(ENUM_ORDER_TYPE direction,double entry,double stop)
    return (-money<=budget+0.00001 ? volume : 0.0);
 }
 
+void UpdateSizingPreview()
+{
+   LastRiskBudgetUnits=RiskPerTradeUSD*MoneyUnitsPerUSD;
+   LastSizingSide=(LastModelDecision=="BUY" || LastModelDecision=="SELL"
+      ? LastModelDecision
+      : (LastBuyEdge>=LastSellEdge ? "BUY" : "SELL"));
+   LastPlannedVolume=0.0;
+   LastEstimatedStopLossUnits=0.0;
+   LastMinimumLotStopLossUnits=0.0;
+
+   if(LastSignalBid<=0.0 || LastSignalAsk<=LastSignalBid || LastStopDistance<=0.0)
+      return;
+
+   ENUM_ORDER_TYPE side=(LastSizingSide=="BUY" ? ORDER_TYPE_BUY : ORDER_TYPE_SELL);
+   double entry=(side==ORDER_TYPE_BUY ? LastSignalAsk : LastSignalBid);
+   double point=SymbolInfoDouble(_Symbol,SYMBOL_POINT);
+   double min_stop=(double)SymbolInfoInteger(_Symbol,SYMBOL_TRADE_STOPS_LEVEL)*point;
+   double distance=MathMax(LastStopDistance,min_stop+2*point);
+   double stop=NormalizeDouble(entry+(side==ORDER_TYPE_BUY ? -distance : distance),_Digits);
+   double minimum=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN);
+   double money=0.0;
+
+   if(minimum>0.0 && OrderCalcProfit(side,_Symbol,minimum,entry,stop,money) && money<0.0)
+      LastMinimumLotStopLossUnits=-money;
+
+   double volume=SelectVolume(side,entry,stop);
+   LastPlannedVolume=volume;
+   if(volume>0.0 && OrderCalcProfit(side,_Symbol,volume,entry,stop,money) && money<0.0)
+      LastEstimatedStopLossUnits=-money;
+}
+
+void AppendSignalCsv()
+{
+   if(!WriteCsvLogs || StringLen(SignalCsvFileName)==0)
+      return;
+   int handle=FileOpen(
+      SignalCsvFileName,
+      FILE_READ|FILE_WRITE|FILE_CSV|FILE_ANSI|FILE_COMMON,
+      ','
+   );
+   if(handle==INVALID_HANDLE)
+   {
+      Print("Ramon signal CSV open failed err=",GetLastError());
+      return;
+   }
+   bool empty=(FileSize(handle)==0);
+   FileSeek(handle,0,SEEK_END);
+   if(empty)
+   {
+      FileWrite(handle,
+         "captured","signal_bar_time","symbol","decision","reason",
+         "signal_bid","signal_ask","spread_points",
+         "forecast_low","forecast_median","forecast_high","atr",
+         "buy_edge","sell_edge","minimum_edge","uncertainty",
+         "signal_strength","minimum_strength","stop_distance","target_distance",
+         "live_armed","account_lock","account_currency","balance_units",
+         "risk_usd","money_units_per_usd","risk_budget_units",
+         "sizing_side","planned_volume","estimated_sl_units","min_lot_sl_units");
+   }
+   FileWrite(handle,
+      TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS),
+      TimeToString(LastSignalBarTime,TIME_DATE|TIME_MINUTES),
+      _Symbol,LastModelDecision,LastModelReason,
+      DoubleToString(LastSignalBid,_Digits),DoubleToString(LastSignalAsk,_Digits),
+      IntegerToString(LastModelSpreadPoints),
+      DoubleToString(LastForecastLow,_Digits),DoubleToString(LastForecast,_Digits),
+      DoubleToString(LastForecastHigh,_Digits),DoubleToString(LastAtr,4),
+      DoubleToString(LastBuyEdge,_Digits),DoubleToString(LastSellEdge,_Digits),
+      DoubleToString(LastMinimumEdge,_Digits),DoubleToString(LastUncertainty,_Digits),
+      DoubleToString(LastSignalStrength,6),DoubleToString(LastMinimumStrength,6),
+      DoubleToString(LastStopDistance,_Digits),DoubleToString(LastTargetDistance,_Digits),
+      BoolText(EnableLiveTrading),BoolText(AccountLockHealthy()),
+      AccountInfoString(ACCOUNT_CURRENCY),
+      DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),2),
+      DoubleToString(RiskPerTradeUSD,4),DoubleToString(MoneyUnitsPerUSD,4),
+      DoubleToString(LastRiskBudgetUnits,4),LastSizingSide,
+      DoubleToString(LastPlannedVolume,4),DoubleToString(LastEstimatedStopLossUnits,4),
+      DoubleToString(LastMinimumLotStopLossUnits,4));
+   FileFlush(handle);
+   FileClose(handle);
+}
+
+void AppendTradeCsv(const ulong deal)
+{
+   if(!WriteCsvLogs || StringLen(TradeCsvFileName)==0 || deal==0 || !HistoryDealSelect(deal))
+      return;
+   if(HistoryDealGetString(deal,DEAL_SYMBOL)!=_Symbol)
+      return;
+   if((ulong)HistoryDealGetInteger(deal,DEAL_MAGIC)!=MagicNumber)
+      return;
+
+   int handle=FileOpen(
+      TradeCsvFileName,
+      FILE_READ|FILE_WRITE|FILE_CSV|FILE_ANSI|FILE_COMMON,
+      ','
+   );
+   if(handle==INVALID_HANDLE)
+   {
+      Print("Ramon trade CSV open failed err=",GetLastError());
+      return;
+   }
+   bool empty=(FileSize(handle)==0);
+   FileSeek(handle,0,SEEK_END);
+   if(empty)
+   {
+      FileWrite(handle,
+         "captured","signal_bar_time","deal","position_id","entry","type",
+         "volume","price","profit_units","commission_units","swap_units",
+         "account_currency","comment");
+   }
+
+   long entry=HistoryDealGetInteger(deal,DEAL_ENTRY);
+   long type=HistoryDealGetInteger(deal,DEAL_TYPE);
+   string entry_text=(entry==DEAL_ENTRY_IN ? "IN" :
+      (entry==DEAL_ENTRY_OUT ? "OUT" :
+      (entry==DEAL_ENTRY_INOUT ? "INOUT" : "OUT_BY")));
+   string type_text=(type==DEAL_TYPE_BUY ? "BUY" :
+      (type==DEAL_TYPE_SELL ? "SELL" : IntegerToString(type)));
+
+   FileWrite(handle,
+      TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS),
+      (LastSignalBarTime>0 ? TimeToString(LastSignalBarTime,TIME_DATE|TIME_MINUTES) : "NONE"),
+      IntegerToString((long)deal),
+      IntegerToString(HistoryDealGetInteger(deal,DEAL_POSITION_ID)),
+      entry_text,type_text,
+      DoubleToString(HistoryDealGetDouble(deal,DEAL_VOLUME),4),
+      DoubleToString(HistoryDealGetDouble(deal,DEAL_PRICE),_Digits),
+      DoubleToString(HistoryDealGetDouble(deal,DEAL_PROFIT),4),
+      DoubleToString(HistoryDealGetDouble(deal,DEAL_COMMISSION),4),
+      DoubleToString(HistoryDealGetDouble(deal,DEAL_SWAP),4),
+      AccountInfoString(ACCOUNT_CURRENCY),
+      HistoryDealGetString(deal,DEAL_COMMENT));
+   FileFlush(handle);
+   FileClose(handle);
+}
+
 void ManageOpenPosition()
 {
    ulong ticket;
@@ -567,12 +738,14 @@ void OnTimer()
    if(!BuildRequest(payload,bar_time) || !QueryModel(payload,reply))
    { ShowStatus(); return; }
    string decision="",reason="";
-   double signal_time=0.0,median=0.0,atr=0.0,stop_distance=0.0,target_distance=0.0;
+   double signal_time=0.0,signal_bid=0.0,signal_ask=0.0,median=0.0,atr=0.0,stop_distance=0.0,target_distance=0.0;
    double forecast_low=0.0,forecast_high=0.0,edge=0.0,model_spread=0.0;
    double buy_edge=0.0,sell_edge=0.0,minimum_edge=0.0,uncertainty=0.0,signal_strength=0.0,minimum_strength=0.0;
    if(!JsonText(reply,"decision",decision)
       || !JsonText(reply,"reason",reason)
       || !JsonNumber(reply,"signal_bar_time",signal_time)
+      || !JsonNumber(reply,"signal_bid",signal_bid)
+      || !JsonNumber(reply,"signal_ask",signal_ask)
       || !JsonNumber(reply,"forecast_low",forecast_low)
       || !JsonNumber(reply,"forecast_median",median)
       || !JsonNumber(reply,"forecast_high",forecast_high)
@@ -594,6 +767,8 @@ void OnTimer()
    LastModelDecision=decision;
    LastModelReason=reason;
    LastSignalBarTime=bar_time;
+   LastSignalBid=signal_bid;
+   LastSignalAsk=signal_ask;
    LastForecastLow=forecast_low;
    LastForecast=median;
    LastForecastHigh=forecast_high;
@@ -609,6 +784,8 @@ void OnTimer()
    LastStopDistance=stop_distance;
    LastTargetDistance=target_distance;
    StatusLine=reason;
+   UpdateSizingPreview();
+   AppendSignalCsv();
    Print("Ramon ",TimeToString(bar_time)," ",decision," ",reason,
       " median=",DoubleToString(median,_Digits));
 
@@ -662,6 +839,16 @@ void OnTimer()
 }
 
 
+void OnTradeTransaction(
+   const MqlTradeTransaction &trans,
+   const MqlTradeRequest &request,
+   const MqlTradeResult &result
+)
+{
+   if(trans.type==TRADE_TRANSACTION_DEAL_ADD && trans.deal>0)
+      AppendTradeCsv(trans.deal);
+}
+
 void OnChartEvent(const int id,const long &lparam,const double &dparam,const string &sparam)
 {
    if(id!=CHARTEVENT_OBJECT_CLICK || sparam!=UiPrefix+"COPY")
@@ -679,6 +866,7 @@ int OnInit()
    if(MoneyUnitsPerUSD<=0.0 || RiskPerTradeUSD<=0.0 || RiskPerTradeUSD>0.50
       || MaxSpreadPoints<=0 || MaxTradesPerDay<1 || MaximumHoldBars<1
       || (WriteDiagnosticFile && StringLen(DiagnosticFileName)==0)
+      || (WriteCsvLogs && (StringLen(SignalCsvFileName)==0 || StringLen(TradeCsvFileName)==0))
       || !IsAllowedModelUrl(ModelUrl))
    { Print("Invalid risk or local server settings"); return INIT_FAILED; }
    long current_login=AccountInfoInteger(ACCOUNT_LOGIN);
@@ -699,6 +887,12 @@ int OnInit()
       LockedAccountLogin=AllowedAccountLogin;
       LockedAccountServer=current_server;
    }
+   if(StringLen(ExpectedAccountCurrency)>0
+      && AccountInfoString(ACCOUNT_CURRENCY)!=ExpectedAccountCurrency)
+   { Print("Account currency mismatch: actual=",AccountInfoString(ACCOUNT_CURRENCY),
+      " expected=",ExpectedAccountCurrency); return INIT_FAILED; }
+   if(EnableLiveTrading && !ConfirmMoneyUnitsPerUSD)
+   { Print("ConfirmMoneyUnitsPerUSD must be true before live trading"); return INIT_FAILED; }
    if(EnableLiveTrading && !AccountLockHealthy())
    { Print("Account/server lock required before arming"); return INIT_FAILED; }
    Trade.SetExpertMagicNumber(MagicNumber);
