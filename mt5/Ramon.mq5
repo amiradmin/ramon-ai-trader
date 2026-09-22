@@ -1,5 +1,5 @@
 #property strict
-#property version "0.24"
+#property version "0.25"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -297,7 +297,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.24\n"
+      +"EA version: 0.25\n"
       +"Captured: "+TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS)+"\n"
       +"Symbol: "+_Symbol+"  Timeframe: M15\n"
       +"Bid: "+(tick_ok ? DoubleToString(tick.bid,_Digits) : "NA")
@@ -491,8 +491,27 @@ void DrawDashboard()
    color live_color=(live_ready && permissions ? clrLime : clrOrange);
    color risk_gate_color=(RiskGateBlocked() ? clrTomato : clrLime);
 
-   UiRect("PANEL",12,24,520,524,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.24",28,36,clrWhite,12);
+   ulong managed_ticket=0;
+   datetime managed_opened=0;
+   bool has_managed_position=ManagedPosition(managed_ticket,managed_opened);
+   double live_profit_units=0.0;
+   double live_profit_usd=0.0;
+   if(has_managed_position && PositionSelectByTicket(managed_ticket))
+   {
+      live_profit_units=PositionGetDouble(POSITION_PROFIT);
+      live_profit_usd=AccountUnitsToUSD(live_profit_units);
+   }
+   color pnl_color=(!has_managed_position ? C'148,163,184' :
+      (live_profit_units>0.00001 ? clrLime :
+      (live_profit_units<-0.00001 ? clrTomato : clrWhite)));
+   string pnl_units=(live_profit_units>0.00001 ? "+" : "")
+      +DoubleToString(live_profit_units,2);
+   string pnl_usd=(live_profit_usd>0.00001 ? "+$" :
+      (live_profit_usd<-0.00001 ? "-$" : "$"))
+      +DoubleToString(MathAbs(live_profit_usd),2);
+
+   UiRect("PANEL",12,24,520,548,C'15,23,42',C'71,85,105');
+   UiLabel("TITLE","RAMON AI TRADER  v0.25",28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
 
@@ -553,26 +572,32 @@ void DrawDashboard()
    UiLabel("BALANCE_USD","Balance: "+DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),2)+" units"
       +"   ~= $"+DoubleToString(AccountUnitsToUSD(AccountInfoDouble(ACCOUNT_BALANCE)),2),28,376,C'203,213,225',9);
 
+   UiLabel("LIVE_PNL",
+      has_managed_position
+         ? "LIVE P/L: "+pnl_units+" units   ~= "+pnl_usd
+         : "LIVE P/L: --   (no Ramon position)",
+      28,398,pnl_color,10);
+
    UiLabel("SIZING","Sizing: "+LastSizingSide
       +"   Vol: "+DoubleToString(LastPlannedVolume,2)
       +"   Preferred: $"+DoubleToString(RiskPerTradeUSD,2)
-      +"   Cap: $"+DoubleToString(MaxExecutableRiskUSD,2),28,398,
+      +"   Cap: $"+DoubleToString(MaxExecutableRiskUSD,2),28,420,
       (ConfirmMoneyUnitsPerUSD ? clrLime : clrOrange),9);
 
    UiLabel("MIN_RISK","Min executable risk: $"
       +DoubleToString(AccountUnitsToUSD(LastMinimumLotStopLossUnits),4)
-      +" ("+DoubleToString(LastMinimumLotStopLossUnits,2)+" units)",28,420,
+      +" ("+DoubleToString(LastMinimumLotStopLossUnits,2)+" units)",28,442,
       risk_gate_color,9);
 
-   UiLabel("RISK_GATE",RiskGateText(),28,442,risk_gate_color,10);
+   UiLabel("RISK_GATE",RiskGateText(),28,464,risk_gate_color,10);
 
    UiLabel("MONEY_CONFIRM","MoneyUnits/USD: "+DoubleToString(MoneyUnitsPerUSD,2)
       +"   Confirmed: "+BoolText(ConfirmMoneyUnitsPerUSD)
-      +(EnableLiveTrading && !live_ready ? "   "+live_reason : ""),28,466,
+      +(EnableLiveTrading && !live_ready ? "   "+live_reason : ""),28,488,
       (live_ready || !EnableLiveTrading ? clrLime : clrOrange),9);
 
-   UiButton("COPY","COPY DIAGNOSTIC",28,490,176,30);
-   UiLabel("COPY_STATUS",LastCopyStatus,218,498,C'148,163,184',8);
+   UiButton("COPY","COPY DIAGNOSTIC",28,514,176,30);
+   UiLabel("COPY_STATUS",LastCopyStatus,218,522,C'148,163,184',8);
    ChartRedraw();
 }
 
