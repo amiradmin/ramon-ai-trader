@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Mapping, Sequence
 
 from .core import Bar, Decision, Market, atr14
+from .news import NEWS_FEATURES, neutral_news_features
 
 
 REGIME_FEATURES = (
@@ -39,7 +40,8 @@ META_BASE_FEATURES = (
     "ai_trend_consistency",
 )
 
-META_FEATURES = META_BASE_FEATURES + ("regime_probability", "entry_probability")
+LEGACY_META_FEATURES = META_BASE_FEATURES + ("regime_probability", "entry_probability")
+META_FEATURES = LEGACY_META_FEATURES + ("news_probability",)
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,11 +248,11 @@ def dominant_direction(decision: Decision) -> str:
 
 
 class EnsembleCoordinator:
-    """Three lightweight learned roles around Chronos: regime, entry and meta decision."""
+    """Learned regime, entry, news and meta roles around Chronos."""
 
     def __init__(self, root: str | Path, chronos_model: str | None = None) -> None:
         self.root = Path(root)
-        self.regime = self.entry = self.meta = None
+        self.regime = self.entry = self.news = self.meta = None
         self.bundle_id = ""
         self.symbol = ""
         self.error = ""
@@ -260,35 +262,50 @@ class EnsembleCoordinator:
 
             try:
                 manifest, models = load_active_bundle(self.root, chronos_model)
-                self.regime, self.entry, self.meta = (models[name] for name in ("regime", "entry", "meta"))
+                self.regime = models.get("regime")
+                self.entry = models.get("entry")
+                self.news = models.get("news")
+                self.meta = models.get("meta")
                 self.bundle_id = str(manifest["bundle_id"])
                 self.symbol = str(manifest["symbol"])
                 self.threshold = float(manifest["trade_threshold"])
             except (OSError, ValueError, KeyError, TypeError) as exc:
-                self.regime = self.entry = self.meta = None
+                self.regime = self.entry = self.news = self.meta = None
                 self.error = f"invalid_role_bundle: {exc}"
 
     @property
     def ready(self) -> bool:
         return self.regime is not None and self.entry is not None and self.meta is not None
 
+    @property
+    def news_ready(self) -> bool:
+        return self.news is not None
+
     def status(self) -> dict[str, object]:
         return {
             "ensemble_ready": self.ready,
             "regime_model_ready": self.regime is not None,
             "entry_model_ready": self.entry is not None,
+            "news_model_ready": self.news is not None,
             "meta_model_ready": self.meta is not None,
             "ensemble_bundle": self.bundle_id,
             "ensemble_error": self.error,
-            "ensemble_mode": "meta" if self.ready else ("blocked" if self.error else "bootstrap_chronos"),
+            "ensemble_mode": ("meta_news" if self.ready and self.news_ready else "meta_legacy") if self.ready else ("blocked" if self.error else "bootstrap_chronos"),
         }
 
-    def assess(self, market: Market, decision: Decision) -> tuple[dict[str, object], dict[str, dict[str, float]]]:
+    def assess(
+        self,
+        market: Market,
+        decision: Decision,
+        news_features: Mapping[str, float] | None = None,
+    ) -> tuple[dict[str, object], dict[str, dict[str, float]]]:
         r_features = regime_features(market.bars)
         e_features = entry_features(market, decision)
+        n_features = dict(news_features or neutral_news_features())
         m_base = meta_base_features(market, decision)
         regime_probability = self.regime.predict_proba(r_features) if self.regime else -1.0
         entry_probability = self.entry.predict_proba(e_features) if self.entry else -1.0
+        news_probability = self.news.predict_proba(n_features) if self.news else -1.0
 
         meta_probability = -1.0
         final_decision = decision.decision
@@ -302,6 +319,8 @@ class EnsembleCoordinator:
             meta_features = dict(m_base)
             meta_features["regime_probability"] = regime_probability
             meta_features["entry_probability"] = entry_probability
+            if self.news is not None:
+                meta_features["news_probability"] = news_probability
             meta_probability = self.meta.predict_proba(meta_features)
             ensemble_active = 1
             direction = dominant_direction(decision)
@@ -325,6 +344,7 @@ class EnsembleCoordinator:
             "ensemble_active": ensemble_active,
             "regime_probability": regime_probability,
             "entry_probability": entry_probability,
+            "news_probability": news_probability,
             "meta_probability": meta_probability,
             "edge": max(decision.buy_edge, decision.sell_edge) if final_decision in {"BUY", "SELL"} else 0.0,
             "ensemble_bundle": self.bundle_id,
@@ -332,6 +352,7 @@ class EnsembleCoordinator:
         feature_snapshot = {
             "regime": r_features,
             "entry": e_features,
+            "news": n_features,
             "meta_base": m_base,
         }
         return payload, feature_snapshot
