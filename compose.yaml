@@ -1,0 +1,46 @@
+services:
+  model:
+    build:
+      context: .
+      args:
+        RAMON_UID: ${RAMON_UID:-1000}
+        RAMON_GID: ${RAMON_GID:-1000}
+    image: ramon-ai-trader:local
+    init: true
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8012:8012"
+    environment:
+      CHRONOS_MODEL: ${CHRONOS_MODEL:-autogluon/chronos-2-small}
+      CHRONOS_DEVICE: cpu
+      HF_HOME: /home/ramon/.cache/huggingface
+    volumes:
+      - chronos_cache:/home/ramon/.cache/huggingface
+      - ./checkpoints:/checkpoints:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8012/health', timeout=3).close()"]
+      interval: 30s
+      timeout: 5s
+      start_period: 180s
+      retries: 3
+
+  tools:
+    profiles: ["tools"]
+    build:
+      context: .
+      args:
+        RAMON_UID: ${RAMON_UID:-1000}
+        RAMON_GID: ${RAMON_GID:-1000}
+    image: ramon-ai-trader:local
+    init: true
+    environment:
+      HF_HOME: /home/ramon/.cache/huggingface
+    volumes:
+      - chronos_cache:/home/ramon/.cache/huggingface
+      - ./data:/data:ro
+      - ./checkpoints:/checkpoints
+    entrypoint: ["python"]
+    command: ["-m", "ramon.preflight", "--device", "cpu"]
+
+volumes:
+  chronos_cache:
