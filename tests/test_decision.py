@@ -89,6 +89,44 @@ class DecisionTests(unittest.TestCase):
         self.assertGreaterEqual(max(strength_wait.buy_edge, strength_wait.sell_edge), strength_wait.minimum_edge)
         self.assertLess(strength_wait.signal_strength, strength_wait.minimum_strength)
 
+    def test_intrabar_reversal_can_confirm_low_strength_model_direction(self) -> None:
+        micro = (
+            Bar(1_800_100_000, 99.90, 100.00, 99.82, 99.90),
+            Bar(1_800_100_060, 99.90, 99.96, 99.78, 99.84),
+            Bar(1_800_100_120, 99.84, 99.98, 99.80, 99.95),
+            Bar(1_800_100_180, 99.95, 100.03, 99.93, 100.00),
+        )
+        market = Market("XAUUSD_l", "M15", 100.0, 100.4, 0.01, bars(), micro)
+        self.model.value = Forecast(95.0, 101.1, 107.0)
+
+        result = evaluate(market, self.model)
+
+        self.assertEqual(result.decision, "BUY")
+        self.assertEqual(result.reason, "intrabar_reversal_up")
+        self.assertEqual(result.intrabar_confirmed, 1)
+        self.assertEqual(result.intrabar_direction, "BUY")
+        self.assertGreaterEqual(result.buy_edge, result.minimum_edge)
+        self.assertLess(result.signal_strength, result.minimum_strength)
+        self.assertGreaterEqual(result.signal_strength, result.intrabar_min_strength)
+        self.assertGreaterEqual(result.intrabar_move_atr, result.intrabar_min_move_atr)
+        self.assertGreaterEqual(result.intrabar_rebound_atr, result.intrabar_min_rebound_atr)
+
+    def test_intrabar_does_not_bypass_model_edge(self) -> None:
+        micro = (
+            Bar(1_800_100_000, 99.80, 99.90, 99.70, 99.80),
+            Bar(1_800_100_060, 99.80, 99.92, 99.72, 99.84),
+            Bar(1_800_100_120, 99.84, 100.00, 99.80, 99.95),
+            Bar(1_800_100_180, 99.95, 100.05, 99.93, 100.00),
+        )
+        market = Market("XAUUSD_l", "M15", 100.0, 100.4, 0.01, bars(), micro)
+        self.model.value = Forecast(98.0, 100.5, 105.0)
+
+        result = evaluate(market, self.model)
+
+        self.assertEqual(result.decision, "WAIT")
+        self.assertEqual(result.reason, "insufficient_model_edge")
+        self.assertEqual(result.intrabar_confirmed, 0)
+
     def test_spread_failure_does_not_run_model(self) -> None:
         market = Market("XAUUSD_l", "M15", 100.0, 101.0, 0.01, bars())
         result = evaluate(market, self.model)

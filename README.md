@@ -362,3 +362,12 @@ Ramon همچنین دو فایل پایدار در `FILE_COMMON` می‌سازد
 ### خطای ذخیرهٔ تاریخچه و دسترسی پوشهٔ data
 
 ذخیرهٔ تاریخچه برای یادگیری از v0.19 به بعد best-effort است و خرابی یا permission آن دیگر پاسخ `/decision` را به HTTP 503 تبدیل نمی‌کند. وضعیت `/health` فیلدهای `history_enabled`، `history_last_error` و `history_last_persisted_bar` را نشان می‌دهد. روی bind mount محلی، پوشه‌های `data/` و `checkpoints/` باید برای UID/GID کانتینر Ramon قابل‌نوشتن باشند.
+
+
+### Intrabar reversal confirmation
+
+از v0.20 اکسپرت علاوه بر snapshot سی‌ثانیه‌ای، چهار کندل M1 اخیر شامل کندل درحال‌تشکیل را در `micro_bars` به سرویس تصمیم می‌فرستد. این داده وارد ورودی اصلی Chronos نمی‌شود؛ Chronos همچنان فقط با close کندل‌های بسته‌شده M15 forecast می‌سازد.
+
+وقتی forecast جهت غالب BUY یا SELL دارد و **Edge اصلی حتماً PASS** است، Ramon می‌تواند strength کمتر از آستانهٔ اصلی 0.20 را فقط با تأیید حرکت کوتاه‌مدت بپذیرد. گیت پیش‌فرض intrabar شامل strength حداقل 0.05، حرکت 3–4 دقیقه‌ای حداقل 0.06×ATR، برگشت از extreme کوتاه‌مدت حداقل 0.08×ATR و چرخش آخرین قیمت در همان جهت است. در این حالت reason برابر `intrabar_reversal_up` یا `intrabar_reversal_down` می‌شود.
+
+این مسیر **هیچ‌کدام از کنترل‌های اجرای سفارش را دور نمی‌زند**: محدودیت spread، account lock، تعداد معاملات، minimum lot، margin و RiskGate بعد از تصمیم همچنان اعمال می‌شوند. بنابراین تأیید intrabar می‌تواند WAIT مدل را به BUY/SELL تبدیل کند، اما اگر حداقل لات از بودجهٔ ریسک بزرگ‌تر باشد سفارش همچنان باز نمی‌شود.

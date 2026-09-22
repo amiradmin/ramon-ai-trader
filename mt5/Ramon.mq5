@@ -1,5 +1,5 @@
 #property strict
-#property version "0.19"
+#property version "0.20"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -66,6 +66,13 @@ double LastMinimumEdge = 0.0;
 double LastUncertainty = 0.0;
 double LastSignalStrength = 0.0;
 double LastMinimumStrength = 0.20;
+bool LastIntrabarConfirmed = false;
+string LastIntrabarDirection = "NONE";
+double LastIntrabarMoveAtr = 0.0;
+double LastIntrabarReboundAtr = 0.0;
+double LastIntrabarMinStrength = 0.05;
+double LastIntrabarMinMoveAtr = 0.06;
+double LastIntrabarMinReboundAtr = 0.08;
 string LastSizingSide = "NONE";
 double LastPlannedVolume = 0.0;
 double LastEstimatedStopLossUnits = 0.0;
@@ -238,7 +245,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.19\n"
+      +"EA version: 0.20\n"
       +"Captured: "+TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS)+"\n"
       +"Symbol: "+_Symbol+"  Timeframe: M15\n"
       +"Bid: "+(tick_ok ? DoubleToString(tick.bid,_Digits) : "NA")
@@ -271,6 +278,11 @@ string BuildDiagnosticText()
       +"  MinimumStrength: "+DoubleToString(LastMinimumStrength,3)+"\n"
       +"EdgeCondition: "+((MathMax(LastBuyEdge,LastSellEdge)>=LastMinimumEdge && LastMinimumEdge>0.0) ? "PASS" : "FAIL")
       +"  StrengthCondition: "+((LastSignalStrength>=LastMinimumStrength && LastMinimumStrength>0.0) ? "PASS" : "FAIL")+"\n"
+      +"IntrabarConfirm: "+(LastIntrabarConfirmed ? "PASS" : "FAIL")
+      +"  Direction: "+LastIntrabarDirection
+      +"  MoveATR: "+DoubleToString(LastIntrabarMoveAtr,3)+"/"+DoubleToString(LastIntrabarMinMoveAtr,3)
+      +"  ReboundATR: "+DoubleToString(LastIntrabarReboundAtr,3)+"/"+DoubleToString(LastIntrabarMinReboundAtr,3)
+      +"  StrengthFloor: "+DoubleToString(LastIntrabarMinStrength,3)+"\n"
       +"StopDistance: "+DoubleToString(LastStopDistance,_Digits)
       +"  TargetDistance: "+DoubleToString(LastTargetDistance,_Digits)+"\n\n"
       +"=== ACCOUNT / EXECUTION ===\n"
@@ -408,8 +420,8 @@ void DrawDashboard()
    bool live_ready=LiveExecutionReady(live_reason);
    color live_color=(live_ready && permissions ? clrLime : clrOrange);
 
-   UiRect("PANEL",12,24,520,458,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.19",28,36,clrWhite,12);
+   UiRect("PANEL",12,24,520,480,C'15,23,42',C'71,85,105');
+   UiLabel("TITLE","RAMON AI TRADER  v0.20",28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
 
@@ -440,38 +452,44 @@ void DrawDashboard()
       +"   Unc: "+DoubleToString(LastUncertainty,2),28,244,
       (strength_pass ? clrLime : clrTomato),9);
 
+   UiLabel("MICRO","INTRABAR "+PassFail(LastIntrabarConfirmed)
+      +" "+LastIntrabarDirection
+      +"   move "+DoubleToString(LastIntrabarMoveAtr,3)+"/"+DoubleToString(LastIntrabarMinMoveAtr,3)
+      +"   rebound "+DoubleToString(LastIntrabarReboundAtr,3)+"/"+DoubleToString(LastIntrabarMinReboundAtr,3),28,266,
+      (LastIntrabarConfirmed ? clrLime : C'203,213,225'),9);
+
    UiLabel("RISK","ATR: "+DoubleToString(LastAtr,2)
       +"   SL dist: "+DoubleToString(LastStopDistance,2)
-      +"   TP dist: "+DoubleToString(LastTargetDistance,2),28,266,C'203,213,225',9);
+      +"   TP dist: "+DoubleToString(LastTargetDistance,2),28,288,C'203,213,225',9);
 
    UiLabel("ACCOUNT","Account: "+AccountTypeText()+" (configured)"
       +"   Currency: "+AccountInfoString(ACCOUNT_CURRENCY)
-      +"   Trades: "+IntegerToString(today)+"/"+IntegerToString(MaxTradesPerDay),28,288,C'203,213,225',9);
+      +"   Trades: "+IntegerToString(today)+"/"+IntegerToString(MaxTradesPerDay),28,310,C'203,213,225',9);
 
    UiLabel("BALANCE_USD","Balance: "+DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),2)+" units"
-      +"   ~= $"+DoubleToString(AccountUnitsToUSD(AccountInfoDouble(ACCOUNT_BALANCE)),2),28,310,C'203,213,225',9);
+      +"   ~= $"+DoubleToString(AccountUnitsToUSD(AccountInfoDouble(ACCOUNT_BALANCE)),2),28,332,C'203,213,225',9);
 
    UiLabel("SIZING","Sizing: "+LastSizingSide
       +"   Vol: "+DoubleToString(LastPlannedVolume,2)
       +"   Budget: $"+DoubleToString(RiskPerTradeUSD,2)
-      +" ("+DoubleToString(LastRiskBudgetUnits,2)+" units)",28,332,
+      +" ("+DoubleToString(LastRiskBudgetUnits,2)+" units)",28,354,
       (ConfirmMoneyUnitsPerUSD ? clrLime : clrOrange),9);
 
    UiLabel("MIN_RISK","Min executable risk: $"
       +DoubleToString(AccountUnitsToUSD(LastMinimumLotStopLossUnits),4)
-      +" ("+DoubleToString(LastMinimumLotStopLossUnits,2)+" units)",28,354,
+      +" ("+DoubleToString(LastMinimumLotStopLossUnits,2)+" units)",28,376,
       (MinimumLotExceedsRiskBudget() ? clrTomato : clrLime),9);
 
-   UiLabel("RISK_GATE",RiskGateText(),28,376,
+   UiLabel("RISK_GATE",RiskGateText(),28,398,
       (MinimumLotExceedsRiskBudget() ? clrTomato : clrLime),10);
 
    UiLabel("MONEY_CONFIRM","MoneyUnits/USD: "+DoubleToString(MoneyUnitsPerUSD,2)
       +"   Confirmed: "+BoolText(ConfirmMoneyUnitsPerUSD)
-      +(EnableLiveTrading && !live_ready ? "   "+live_reason : ""),28,400,
+      +(EnableLiveTrading && !live_ready ? "   "+live_reason : ""),28,422,
       (live_ready || !EnableLiveTrading ? clrLime : clrOrange),9);
 
-   UiButton("COPY","COPY DIAGNOSTIC",28,424,176,30);
-   UiLabel("COPY_STATUS",LastCopyStatus,218,432,C'148,163,184',8);
+   UiButton("COPY","COPY DIAGNOSTIC",28,446,176,30);
+   UiLabel("COPY_STATUS",LastCopyStatus,218,454,C'148,163,184',8);
    ChartRedraw();
 }
 
@@ -602,6 +620,22 @@ bool BuildRequest(string &payload,datetime &bar_time)
          +",\"low\":"+DoubleToString(bars[i].low,_Digits)
          +",\"close\":"+DoubleToString(bars[i].close,_Digits)+"}";
    }
+   payload+="],\"micro_bars\":[";
+   MqlRates micro[];
+   ArraySetAsSeries(micro,true);
+   int micro_copied=CopyRates(_Symbol,PERIOD_M1,0,4,micro);
+   if(micro_copied>=3)
+   {
+      for(int j=micro_copied-1;j>=0;j--)
+      {
+         if(j<micro_copied-1) payload+=",";
+         payload+="{\"time\":"+IntegerToString((long)micro[j].time)
+            +",\"open\":"+DoubleToString(micro[j].open,_Digits)
+            +",\"high\":"+DoubleToString(micro[j].high,_Digits)
+            +",\"low\":"+DoubleToString(micro[j].low,_Digits)
+            +",\"close\":"+DoubleToString(micro[j].close,_Digits)+"}";
+      }
+   }
    payload+="]}";
    return true;
 }
@@ -722,7 +756,10 @@ void AppendSignalCsv()
          "signal_bid","signal_ask","spread_points",
          "forecast_low","forecast_median","forecast_high","atr",
          "buy_edge","sell_edge","minimum_edge","uncertainty",
-         "signal_strength","minimum_strength","stop_distance","target_distance",
+         "signal_strength","minimum_strength",
+         "intrabar_confirmed","intrabar_direction","intrabar_move_atr","intrabar_rebound_atr",
+         "intrabar_min_strength","intrabar_min_move_atr","intrabar_min_rebound_atr",
+         "stop_distance","target_distance",
          "live_armed","account_lock","account_type","account_currency",
          "balance_units","balance_usd_approx",
          "risk_usd","money_units_per_usd","risk_budget_units",
@@ -740,6 +777,10 @@ void AppendSignalCsv()
       DoubleToString(LastBuyEdge,_Digits),DoubleToString(LastSellEdge,_Digits),
       DoubleToString(LastMinimumEdge,_Digits),DoubleToString(LastUncertainty,_Digits),
       DoubleToString(LastSignalStrength,6),DoubleToString(LastMinimumStrength,6),
+      BoolText(LastIntrabarConfirmed),LastIntrabarDirection,
+      DoubleToString(LastIntrabarMoveAtr,6),DoubleToString(LastIntrabarReboundAtr,6),
+      DoubleToString(LastIntrabarMinStrength,6),DoubleToString(LastIntrabarMinMoveAtr,6),
+      DoubleToString(LastIntrabarMinReboundAtr,6),
       DoubleToString(LastStopDistance,_Digits),DoubleToString(LastTargetDistance,_Digits),
       BoolText(EnableLiveTrading),BoolText(AccountLockHealthy()),
       AccountTypeText(),AccountInfoString(ACCOUNT_CURRENCY),
@@ -848,10 +889,12 @@ void OnTimer()
    datetime bar_time=0;
    if(!BuildRequest(payload,bar_time) || !QueryModel(payload,reply))
    { ShowStatus(); return; }
-   string decision="",reason="";
+   string decision="",reason="",intrabar_direction="";
    double signal_time=0.0,signal_bid=0.0,signal_ask=0.0,median=0.0,atr=0.0,stop_distance=0.0,target_distance=0.0;
    double forecast_low=0.0,forecast_high=0.0,edge=0.0,model_spread=0.0;
    double buy_edge=0.0,sell_edge=0.0,minimum_edge=0.0,uncertainty=0.0,signal_strength=0.0,minimum_strength=0.0;
+   double intrabar_confirmed=0.0,intrabar_move_atr=0.0,intrabar_rebound_atr=0.0;
+   double intrabar_min_strength=0.0,intrabar_min_move_atr=0.0,intrabar_min_rebound_atr=0.0;
    if(!JsonText(reply,"decision",decision)
       || !JsonText(reply,"reason",reason)
       || !JsonNumber(reply,"signal_bar_time",signal_time)
@@ -868,6 +911,13 @@ void OnTimer()
       || !JsonNumber(reply,"uncertainty",uncertainty)
       || !JsonNumber(reply,"signal_strength",signal_strength)
       || !JsonNumber(reply,"minimum_strength",minimum_strength)
+      || !JsonNumber(reply,"intrabar_confirmed",intrabar_confirmed)
+      || !JsonText(reply,"intrabar_direction",intrabar_direction)
+      || !JsonNumber(reply,"intrabar_move_atr",intrabar_move_atr)
+      || !JsonNumber(reply,"intrabar_rebound_atr",intrabar_rebound_atr)
+      || !JsonNumber(reply,"intrabar_min_strength",intrabar_min_strength)
+      || !JsonNumber(reply,"intrabar_min_move_atr",intrabar_min_move_atr)
+      || !JsonNumber(reply,"intrabar_min_rebound_atr",intrabar_min_rebound_atr)
       || !JsonNumber(reply,"spread_points",model_spread)
       || !JsonNumber(reply,"stop_distance",stop_distance)
       || !JsonNumber(reply,"target_distance",target_distance)
@@ -890,6 +940,13 @@ void OnTimer()
    LastUncertainty=uncertainty;
    LastSignalStrength=signal_strength;
    LastMinimumStrength=minimum_strength;
+   LastIntrabarConfirmed=(intrabar_confirmed>=0.5);
+   LastIntrabarDirection=intrabar_direction;
+   LastIntrabarMoveAtr=intrabar_move_atr;
+   LastIntrabarReboundAtr=intrabar_rebound_atr;
+   LastIntrabarMinStrength=intrabar_min_strength;
+   LastIntrabarMinMoveAtr=intrabar_min_move_atr;
+   LastIntrabarMinReboundAtr=intrabar_min_rebound_atr;
    LastModelSpreadPoints=(int)model_spread;
    LastStopDistance=stop_distance;
    LastTargetDistance=target_distance;
