@@ -12,10 +12,13 @@ services:
       - "127.0.0.1:8012:8012"
     environment:
       CHRONOS_MODEL: ${CHRONOS_MODEL:-autogluon/chronos-2-small}
+      CHRONOS_MODEL_FILE: /checkpoints/active_model.txt
       CHRONOS_DEVICE: cpu
+      RAMON_HISTORY_DB: /data/ramon_history.sqlite3
       HF_HOME: /home/ramon/.cache/huggingface
     volumes:
       - chronos_cache:/home/ramon/.cache/huggingface
+      - ./data:/data
       - ./checkpoints:/checkpoints:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8012/health', timeout=3).close()"]
@@ -37,7 +40,7 @@ services:
       HF_HOME: /home/ramon/.cache/huggingface
     volumes:
       - chronos_cache:/home/ramon/.cache/huggingface
-      - ./data:/data:ro
+      - ./data:/data
       - ./checkpoints:/checkpoints
     entrypoint: ["python"]
     command: ["-m", "ramon.preflight", "--device", "cpu"]

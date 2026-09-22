@@ -3,10 +3,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Lock
 
 from .core import Forecast, Market, Settings, evaluate
+from .history import persist_market
 from .model import ChronosForecaster, model_name
 
 
@@ -31,6 +33,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
     """Serve live quote snapshots while caching identical completed-M15 forecasts."""
     guard = Lock()
     cached_model = CachedForecaster(model)
+    history_db = os.getenv("RAMON_HISTORY_DB", "").strip()
+    last_persisted_bar: dict[str, int] = {}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -59,6 +63,12 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 if not isinstance(payload, dict):
                     raise ValueError("request must be a JSON object")
                 market = Market.from_dict(payload)
+                if history_db:
+                    key = f"{market.symbol}:{market.timeframe}"
+                    newest = market.bars[-1].time
+                    if last_persisted_bar.get(key) != newest:
+                        persist_market(history_db, market)
+                        last_persisted_bar[key] = newest
                 with guard:
                     result = evaluate(market, cached_model, settings)
                 self.reply(200, result.to_dict())
@@ -88,7 +98,15 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8012)
     parser.add_argument("--host", default="127.0.0.1", choices=("127.0.0.1", "0.0.0.0"))
     args = parser.parse_args()
-    checkpoint = model_name(args.model)
+    requested_model = args.model
+    model_file = os.getenv("CHRONOS_MODEL_FILE", "").strip()
+    if model_file:
+        path = Path(model_file)
+        if path.is_file():
+            candidate = path.read_text(encoding="utf-8").strip()
+            if candidate:
+                requested_model = candidate
+    checkpoint = model_name(requested_model)
     model = ChronosForecaster(checkpoint, args.device)
     serve(args.host, args.port, model, Settings())
 

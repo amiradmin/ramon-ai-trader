@@ -20,6 +20,7 @@ class ReplayResult:
     losses: int
     timed_out: int
     net_r: float
+    max_drawdown_r: float
 
 
 def replay(
@@ -40,6 +41,8 @@ def replay(
     i = start_at
     decisions = buys = sells = wins = losses = timed_out = 0
     net_r = 0.0
+    peak_r = 0.0
+    max_drawdown_r = 0.0
     while i + settings.horizon < len(bars):
         if (i - start_at) % stride:
             i += 1
@@ -98,8 +101,13 @@ def replay(
                 else entry - exit_ask
             )
             net_r += delta / result.stop_distance
+        peak_r = max(peak_r, net_r)
+        max_drawdown_r = max(max_drawdown_r, peak_r - net_r)
         i = closed_at + 1  # no overlapping positions
-    return ReplayResult(len(bars), decisions, buys, sells, wins, losses, timed_out, round(net_r, 4))
+    return ReplayResult(
+        len(bars), decisions, buys, sells, wins, losses, timed_out,
+        round(net_r, 4), round(max_drawdown_r, 4)
+    )
 
 
 def main() -> None:
