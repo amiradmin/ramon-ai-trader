@@ -1,0 +1,334 @@
+#property strict
+#property version "0.10"
+#property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
+
+#include <Trade/Trade.mqh>
+
+input string TradeSymbol = "XAUUSD_l";
+input string RequiredServerText = "LiteFinance";
+input long AllowedAccountLogin = 0; // Explicitly fill before live execution.
+input bool EnableLiveTrading = false;
+input string ModelUrl = "http://127.0.0.1:8012/decision";
+input double MoneyUnitsPerUSD = 100.0; // LiteFinance cent account, verified manually.
+input double RiskPerTradeUSD = 0.06;
+input int MaxSpreadPoints = 50;
+input int MaxTradesPerDay = 4;
+input int MaximumHoldBars = 4;
+input int RequestTimeoutMs = 4000;
+input int MaxDeviationPoints = 30;
+input ulong MagicNumber = 26092212;
+
+CTrade Trade;
+datetime LastProcessedBar = 0;
+string StatusLine = "Starting";
+string LastModelDecision = "NONE";
+double LastForecast = 0.0;
+double LastAtr = 0.0;
+
+bool ManagedPosition(ulong &ticket,datetime &opened)
+{
+   ticket=0;
+   opened=0;
+   for(int i=PositionsTotal()-1;i>=0;i--)
+   {
+      ulong candidate=PositionGetTicket(i);
+      if(candidate==0 || !PositionSelectByTicket(candidate))
+         continue;
+      if(PositionGetString(POSITION_SYMBOL)!=_Symbol)
+         continue;
+      if((ulong)PositionGetInteger(POSITION_MAGIC)!=MagicNumber)
+         continue;
+      ticket=candidate;
+      opened=(datetime)PositionGetInteger(POSITION_TIME);
+      return true;
+   }
+   return false;
+}
+
+bool OtherPositionOnSymbol()
+{
+   for(int i=PositionsTotal()-1;i>=0;i--)
+   {
+      ulong candidate=PositionGetTicket(i);
+      if(candidate==0 || !PositionSelectByTicket(candidate))
+         continue;
+      if(PositionGetString(POSITION_SYMBOL)==_Symbol
+         && (ulong)PositionGetInteger(POSITION_MAGIC)!=MagicNumber)
+         return true;
+   }
+   return false;
+}
+
+void ShowStatus()
+{
+   Comment(
+      "Ramon v0.10 | ",_Symbol," M15\n",
+      "Model: ",LastModelDecision," | ",StatusLine,"\n",
+      "Last closed: ",TimeToString(LastProcessedBar,TIME_DATE|TIME_MINUTES),
+      " | median: ",DoubleToString(LastForecast,_Digits),
+      " | ATR: ",DoubleToString(LastAtr,2),"\n",
+      "Live: ",(EnableLiveTrading ? "ARMED" : "DISARMED"),
+      " | loss limit $",DoubleToString(RiskPerTradeUSD,2),
+      " | spread max ",IntegerToString(MaxSpreadPoints)
+   );
+}
+
+bool JsonText(const string json,const string key,string &value)
+{
+   string marker="\""+key+"\":\"";
+   int start=StringFind(json,marker);
+   if(start<0) return false;
+   start+=StringLen(marker);
+   int finish=StringFind(json,"\"",start);
+   if(finish<0) return false;
+   value=StringSubstr(json,start,finish-start);
+   return true;
+}
+
+bool JsonNumber(const string json,const string key,double &value)
+{
+   string marker="\""+key+"\":";
+   int start=StringFind(json,marker);
+   if(start<0) return false;
+   start+=StringLen(marker);
+   int finish=start;
+   while(finish<StringLen(json))
+   {
+      ushort c=StringGetCharacter(json,finish);
+      if((c>=48 && c<=57) || c==45 || c==46 || c==43 || c==69 || c==101)
+         finish++;
+      else
+         break;
+   }
+   if(finish<=start) return false;
+   value=StringToDouble(StringSubstr(json,start,finish-start));
+   return MathIsValidNumber(value);
+}
+
+bool BuildRequest(string &payload,datetime &bar_time)
+{
+   MqlRates bars[];
+   ArraySetAsSeries(bars,true);
+   int copied=CopyRates(_Symbol,PERIOD_M15,1,256,bars);
+   if(copied<128) { StatusLine="Need 128 completed bars"; return false; }
+   bar_time=bars[0].time;
+   MqlTick tick;
+   if(!SymbolInfoTick(_Symbol,tick) || tick.bid<=0.0 || tick.ask<=tick.bid)
+   { StatusLine="Bad tick"; return false; }
+   if(TimeCurrent()-tick.time>30)
+   { StatusLine="Stale tick"; return false; }
+   if((int)SymbolInfoInteger(_Symbol,SYMBOL_SPREAD)>MaxSpreadPoints)
+   { StatusLine="Spread too high"; return false; }
+   datetime current=iTime(_Symbol,PERIOD_M15,0);
+   if(current<=bar_time || current-bar_time>1800)
+   { StatusLine="Stale completed bar"; return false; }
+
+   payload="{\"symbol\":\""+_Symbol+"\",\"timeframe\":\"M15\",\"bid\":"
+      +DoubleToString(tick.bid,_Digits)+",\"ask\":"
+      +DoubleToString(tick.ask,_Digits)+",\"point\":"
+      +DoubleToString(SymbolInfoDouble(_Symbol,SYMBOL_POINT),_Digits)+",\"bars\":[";
+   for(int i=copied-1;i>=0;i--)
+   {
+      if(i<copied-1) payload+=",";
+      payload+="{\"time\":"+IntegerToString((long)bars[i].time)
+         +",\"open\":"+DoubleToString(bars[i].open,_Digits)
+         +",\"high\":"+DoubleToString(bars[i].high,_Digits)
+         +",\"low\":"+DoubleToString(bars[i].low,_Digits)
+         +",\"close\":"+DoubleToString(bars[i].close,_Digits)+"}";
+   }
+   payload+="]}";
+   return true;
+}
+
+bool QueryModel(const string payload,string &reply)
+{
+   char request[],response[];
+   StringToCharArray(payload,request,0,WHOLE_ARRAY,CP_UTF8);
+   ArrayResize(request,ArraySize(request)-1); // Remove terminal NUL from JSON body.
+   string headers="Content-Type: application/json\r\n";
+   string response_headers="";
+   ResetLastError();
+   int code=WebRequest("POST",ModelUrl,headers,RequestTimeoutMs,request,response,response_headers);
+   if(code!=200)
+   {
+      StatusLine="Model HTTP "+IntegerToString(code)+" err "+IntegerToString(GetLastError());
+      return false;
+   }
+   reply=CharArrayToString(response,0,ArraySize(response),CP_UTF8);
+   return true;
+}
+
+int TradesToday()
+{
+   datetime now=TimeCurrent();
+   datetime start=StringToTime(TimeToString(now,TIME_DATE));
+   if(!HistorySelect(start,now)) return -1;
+   int count=0;
+   for(int i=0;i<HistoryDealsTotal();i++)
+   {
+      ulong deal=HistoryDealGetTicket(i);
+      if(deal==0) continue;
+      if(HistoryDealGetString(deal,DEAL_SYMBOL)!=_Symbol) continue;
+      if((ulong)HistoryDealGetInteger(deal,DEAL_MAGIC)!=MagicNumber) continue;
+      if(HistoryDealGetInteger(deal,DEAL_ENTRY)==DEAL_ENTRY_IN) count++;
+   }
+   return count;
+}
+
+double SelectVolume(ENUM_ORDER_TYPE direction,double entry,double stop)
+{
+   double minimum=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN);
+   double maximum=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MAX);
+   double step=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_STEP);
+   if(minimum<=0.0 || step<=0.0 || maximum<minimum || MoneyUnitsPerUSD<=0.0)
+      return 0.0;
+   double money=0.0;
+   if(!OrderCalcProfit(direction,_Symbol,minimum,entry,stop,money) || money>=0.0)
+      return 0.0;
+   double budget=RiskPerTradeUSD*MoneyUnitsPerUSD;
+   if(budget<=0.0 || -money>budget+0.00001)
+      return 0.0; // Broker minimum lot does not fit USD risk.
+   double steps=MathFloor((budget/(-money)*minimum-minimum)/step+0.00000001);
+   double volume=MathMin(maximum,minimum+steps*step);
+   volume=NormalizeDouble(volume,8);
+   if(!OrderCalcProfit(direction,_Symbol,volume,entry,stop,money))
+      return 0.0;
+   while(-money>budget+0.00001 && volume>minimum)
+   {
+      volume=NormalizeDouble(volume-step,8);
+      if(!OrderCalcProfit(direction,_Symbol,volume,entry,stop,money))
+         return 0.0;
+   }
+   return (-money<=budget+0.00001 ? volume : 0.0);
+}
+
+void ManageOpenPosition()
+{
+   ulong ticket;
+   datetime opened;
+   if(!ManagedPosition(ticket,opened)) return;
+   int age=iBarShift(_Symbol,PERIOD_M15,opened,false);
+   if(age<MaximumHoldBars) { StatusLine="Managed position OPEN"; return; }
+   if(Trade.PositionClose(ticket,MaxDeviationPoints))
+      StatusLine="TIME EXIT "+IntegerToString(age)+" bars";
+   else
+      StatusLine="TIME EXIT FAILED "+IntegerToString((int)Trade.ResultRetcode());
+}
+
+void OnTimer()
+{
+   ShowStatus();
+   if(!(bool)TerminalInfoInteger(TERMINAL_CONNECTED))
+   { StatusLine="Terminal disconnected"; ShowStatus(); return; }
+   ulong ticket;
+   datetime opened;
+   if(ManagedPosition(ticket,opened))
+   { ManageOpenPosition(); ShowStatus(); return; }
+   if(OtherPositionOnSymbol())
+   { StatusLine="Another robot has a position on this symbol"; ShowStatus(); return; }
+   datetime closed=iTime(_Symbol,PERIOD_M15,1);
+   if(closed<=0 || closed==LastProcessedBar)
+      return;
+
+   string payload,reply;
+   datetime bar_time=0;
+   if(!BuildRequest(payload,bar_time) || !QueryModel(payload,reply))
+   { ShowStatus(); return; }
+   string decision="",reason="";
+   double signal_time=0.0,median=0.0,atr=0.0,stop_distance=0.0,target_distance=0.0;
+   if(!JsonText(reply,"decision",decision)
+      || !JsonText(reply,"reason",reason)
+      || !JsonNumber(reply,"signal_bar_time",signal_time)
+      || !JsonNumber(reply,"forecast_median",median)
+      || !JsonNumber(reply,"atr",atr)
+      || !JsonNumber(reply,"stop_distance",stop_distance)
+      || !JsonNumber(reply,"target_distance",target_distance)
+      || (datetime)signal_time!=bar_time
+      || (decision!="BUY" && decision!="SELL" && decision!="WAIT"))
+   { StatusLine="Invalid/stale model response"; ShowStatus(); return; }
+   LastProcessedBar=bar_time; // At most one entry attempt per closed candle.
+   LastModelDecision=decision;
+   LastForecast=median;
+   LastAtr=atr;
+   StatusLine=reason;
+   Print("Ramon ",TimeToString(bar_time)," ",decision," ",reason,
+      " median=",DoubleToString(median,_Digits));
+
+   if(decision=="WAIT" || !EnableLiveTrading)
+   { ShowStatus(); return; }
+   if(AllowedAccountLogin<=0 || AccountInfoInteger(ACCOUNT_LOGIN)!=AllowedAccountLogin)
+   { StatusLine="Account login mismatch"; ShowStatus(); return; }
+   if(StringFind(AccountInfoString(ACCOUNT_SERVER),RequiredServerText)<0)
+   { StatusLine="Broker server mismatch"; ShowStatus(); return; }
+   if(!(bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED)
+      || !(bool)MQLInfoInteger(MQL_TRADE_ALLOWED)
+      || !(bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED))
+   { StatusLine="Trade permission denied"; ShowStatus(); return; }
+   if(SymbolInfoInteger(_Symbol,SYMBOL_TRADE_MODE)!=SYMBOL_TRADE_MODE_FULL)
+   { StatusLine="Symbol trading disabled"; ShowStatus(); return; }
+   int today=TradesToday();
+   if(today<0 || today>=MaxTradesPerDay)
+   { StatusLine="Daily trade limit/history unavailable"; ShowStatus(); return; }
+   MqlTick tick;
+   if(!SymbolInfoTick(_Symbol,tick) || TimeCurrent()-tick.time>30
+      || (int)SymbolInfoInteger(_Symbol,SYMBOL_SPREAD)>MaxSpreadPoints)
+   { StatusLine="Quote changed/stale"; ShowStatus(); return; }
+   if(stop_distance<=0.0 || target_distance<=0.0 || atr<=0.0)
+   { StatusLine="Invalid stop/target"; ShowStatus(); return; }
+   ENUM_ORDER_TYPE side=(decision=="BUY" ? ORDER_TYPE_BUY : ORDER_TYPE_SELL);
+   double entry=(decision=="BUY" ? tick.ask : tick.bid);
+   double point=SymbolInfoDouble(_Symbol,SYMBOL_POINT);
+   double min_stop=(double)SymbolInfoInteger(_Symbol,SYMBOL_TRADE_STOPS_LEVEL)*point;
+   stop_distance=MathMax(stop_distance,min_stop+2*point);
+   target_distance=MathMax(target_distance,min_stop+2*point);
+   double stop=NormalizeDouble(entry+(decision=="BUY" ? -stop_distance : stop_distance),_Digits);
+   double target=NormalizeDouble(entry+(decision=="BUY" ? target_distance : -target_distance),_Digits);
+   double volume=SelectVolume(side,entry,stop);
+   if(volume<=0.0)
+   { StatusLine="Minimum lot exceeds risk budget"; ShowStatus(); return; }
+   double margin=0.0;
+   if(!OrderCalcMargin(side,_Symbol,volume,entry,margin)
+      || margin>AccountInfoDouble(ACCOUNT_MARGIN_FREE)*0.8)
+   { StatusLine="Insufficient margin"; ShowStatus(); return; }
+   // The broker owns SL/TP immediately. No position is opened when the model is unavailable.
+   bool submitted=(
+      decision=="BUY"
+      ? Trade.Buy(volume,_Symbol,0.0,stop,target,"Ramon")
+      : Trade.Sell(volume,_Symbol,0.0,stop,target,"Ramon")
+   );
+   uint retcode=Trade.ResultRetcode();
+   if(!submitted || (retcode!=TRADE_RETCODE_DONE && retcode!=TRADE_RETCODE_PLACED))
+      StatusLine="Order rejected "+IntegerToString((int)retcode);
+   else
+      StatusLine="Order sent "+decision+" "+DoubleToString(volume,2);
+   Print("Ramon execution: ",StatusLine);
+   ShowStatus();
+}
+
+int OnInit()
+{
+   if(_Symbol!=TradeSymbol || _Period!=PERIOD_M15 || StringFind(_Symbol,"XAUUSD")!=0)
+   { Print("Attach only to ",TradeSymbol," M15"); return INIT_FAILED; }
+   if(MoneyUnitsPerUSD<=0.0 || RiskPerTradeUSD<=0.0 || RiskPerTradeUSD>0.50
+      || MaxSpreadPoints<=0 || MaxTradesPerDay<1 || MaximumHoldBars<1
+      || StringFind(ModelUrl,"http://127.0.0.1:")!=0)
+   { Print("Invalid risk or local server settings"); return INIT_FAILED; }
+   if(EnableLiveTrading && (
+      AllowedAccountLogin<=0
+      || AccountInfoInteger(ACCOUNT_LOGIN)!=AllowedAccountLogin
+      || StringFind(AccountInfoString(ACCOUNT_SERVER),RequiredServerText)<0
+   ))
+   { Print("Explicit account/server match required before arming"); return INIT_FAILED; }
+   Trade.SetExpertMagicNumber(MagicNumber);
+   Trade.SetDeviationInPoints(MaxDeviationPoints);
+   Trade.SetTypeFillingBySymbol(_Symbol);
+   EventSetTimer(5);
+   ShowStatus();
+   return INIT_SUCCEEDED;
+}
+
+void OnDeinit(const int reason)
+{
+   EventKillTimer();
+   Comment("");
+}
