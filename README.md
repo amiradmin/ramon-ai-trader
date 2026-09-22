@@ -387,3 +387,20 @@ Ramon از مسیر Chronos دو ویژگی قابل‌مشاهده می‌سا�
 از v0.22 بودجهٔ ترجیحی ریسک همچنان `RiskPerTradeUSD=0.06` است، اما برای حساب‌های سنتی که حداقل لات کارگزار خودش بیش از ۶ سنت ریسک دارد، Ramon می‌تواند **فقط minimum lot** را با `AllowMinLotRiskOverride=true` اجرا کند. سقف سخت پیش‌فرض `MaxExecutableRiskUSD=0.20` است.
 
 اگر زیان محاسبه‌شدهٔ minimum lot تا SL بین 0.06 و 0.20 دلار باشد، حجم فقط همان minimum lot انتخاب می‌شود؛ سقف 0.20 برای بزرگ‌کردن حجم استفاده نمی‌شود. اگر minimum lot بیش از 0.20 دلار ریسک داشته باشد، معامله همچنان block می‌شود. این مقادیر برآورد برنامه‌ریزی‌شده با `OrderCalcProfit` هستند و لغزش، gap و هزینه‌های اجرا می‌توانند زیان واقعی را بیشتر کنند.
+
+
+### Stable baseline v0.22
+
+قبل از شروع معماری چندمدلی، وضعیت کامل Ramon تا v0.22 روی شاخهٔ `stable/v0.22` ثابت شده است. این شاخه شامل Chronos-2، snapshot سی‌ثانیه‌ای، intrabar confirmation، AI-led trend continuation، یادگیری روزانه و minimum-lot risk override است و نقطهٔ rollback قبل از ensemble محسوب می‌شود.
+
+### Multi-model role architecture
+
+از v0.23 Ramon برای جداکردن مسئولیت‌های AI سه role model سبک کنار Chronos تعریف می‌کند:
+
+- `Regime model`: احتمال trend-vs-range را از ویژگی‌های نرمال‌شدهٔ خود تاریخچهٔ M15 یاد می‌گیرد.
+- `Entry model`: کیفیت زمان ورود را از snapshotهای واقعی و نتیجهٔ قیمت حدود ۱۵ دقیقه بعد یاد می‌گیرد.
+- `Meta model`: خروجی Chronos، regime و entry را ترکیب می‌کند و احتمال trade-vs-wait را می‌آموزد.
+
+جهت BUY/SELL همچنان از Chronos/edge غالب می‌آید؛ role modelها جهت مستقل با EMA/RSI/MACD نمی‌سازند. وقتی هر سه artifact آماده نباشند، `ensemble_ready=0` و رفتار زنده همان Chronos فعلی باقی می‌ماند. وقتی هر سه مدل با validation زمانی ارتقا پیدا کنند، meta model می‌تواند با confidence بالا WAIT را به معامله در جهت Chronos تبدیل کند یا با confidence پایین سیگنال پایه را veto کند.
+
+هر snapshot زنده در جدول `decision_samples` ذخیره می‌شود. job روزانه علاوه بر challenger مربوط به Chronos، `ramon.train_roles` را اجرا می‌کند. مدل‌های role فقط وقتی balanced accuracy روی validation زمانی حداقل 0.52 باشد ذخیره می‌شوند. هیچ dependency سنگین ML جدیدی اضافه نشده؛ logistic models داخل خود پروژه آموزش و در JSON versioned می‌شوند.

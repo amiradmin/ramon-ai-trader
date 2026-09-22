@@ -1,5 +1,5 @@
 #property strict
-#property version "0.22"
+#property version "0.23"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -54,6 +54,13 @@ datetime LastEntrySignalBar = 0;
 string StatusLine = "Starting";
 string LastModelDecision = "NONE";
 string LastModelReason = "NONE";
+string LastBaseDecision = "NONE";
+string LastBaseReason = "NONE";
+bool LastEnsembleReady = false;
+bool LastEnsembleActive = false;
+double LastRegimeProbability = -1.0;
+double LastEntryProbability = -1.0;
+double LastMetaProbability = -1.0;
 datetime LastSignalBarTime = 0;
 double LastSignalBid = 0.0;
 double LastSignalAsk = 0.0;
@@ -67,7 +74,7 @@ double LastSellEdge = 0.0;
 double LastMinimumEdge = 0.0;
 double LastUncertainty = 0.0;
 double LastSignalStrength = 0.0;
-double LastMinimumStrength = 0.22;
+double LastMinimumStrength = 0.23;
 bool LastIntrabarConfirmed = false;
 string LastIntrabarDirection = "NONE";
 double LastIntrabarMoveAtr = 0.0;
@@ -284,7 +291,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.22\n"
+      +"EA version: 0.23\n"
       +"Captured: "+TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS)+"\n"
       +"Symbol: "+_Symbol+"  Timeframe: M15\n"
       +"Bid: "+(tick_ok ? DoubleToString(tick.bid,_Digits) : "NA")
@@ -298,6 +305,12 @@ string BuildDiagnosticText()
       +"  Last request: "+(LastDecisionRequestTime>0
          ? TimeToString(LastDecisionRequestTime,TIME_DATE|TIME_SECONDS) : "NONE")+"\n"
       +"Decision: "+LastModelDecision+"  Reason: "+LastModelReason+"\n"
+      +"BaseDecision: "+LastBaseDecision+"  BaseReason: "+LastBaseReason+"\n"
+      +"RoleModels: "+(LastEnsembleReady ? "READY" : "LEARNING")
+      +"  Active: "+BoolText(LastEnsembleActive)
+      +"  RegimeP: "+DoubleToString(LastRegimeProbability,3)
+      +"  EntryP: "+DoubleToString(LastEntryProbability,3)
+      +"  MetaP: "+DoubleToString(LastMetaProbability,3)+"\n"
       +"Signal bar: "+(LastSignalBarTime>0 ? TimeToString(LastSignalBarTime,TIME_DATE|TIME_MINUTES) : "NONE")
       +"  Last closed: "+(closed>0 ? TimeToString(closed,TIME_DATE|TIME_MINUTES) : "NONE")+"\n"
       +"SignalBid: "+DoubleToString(LastSignalBid,_Digits)
@@ -470,8 +483,8 @@ void DrawDashboard()
    color live_color=(live_ready && permissions ? clrLime : clrOrange);
    color risk_gate_color=(RiskGateBlocked() ? clrTomato : clrLime);
 
-   UiRect("PANEL",12,24,520,502,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.22",28,36,clrWhite,12);
+   UiRect("PANEL",12,24,520,524,C'15,23,42',C'71,85,105');
+   UiLabel("TITLE","RAMON AI TRADER  v0.23",28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
 
@@ -515,37 +528,43 @@ void DrawDashboard()
       +"   consistency "+DoubleToString(LastAiTrendConsistency,2),28,288,
       (LastAiTrendConfirmed ? clrLime : C'203,213,225'),9);
 
+   UiLabel("ROLE_MODELS","ROLE MODELS "+(LastEnsembleReady ? "READY" : "LEARNING")
+      +"   regime "+DoubleToString(LastRegimeProbability,2)
+      +"   entry "+DoubleToString(LastEntryProbability,2)
+      +"   meta "+DoubleToString(LastMetaProbability,2),28,310,
+      (LastEnsembleReady ? clrLime : C'203,213,225'),9);
+
    UiLabel("RISK","ATR: "+DoubleToString(LastAtr,2)
       +"   SL dist: "+DoubleToString(LastStopDistance,2)
-      +"   TP dist: "+DoubleToString(LastTargetDistance,2),28,310,C'203,213,225',9);
+      +"   TP dist: "+DoubleToString(LastTargetDistance,2),28,332,C'203,213,225',9);
 
    UiLabel("ACCOUNT","Account: "+AccountTypeText()+" (configured)"
       +"   Currency: "+AccountInfoString(ACCOUNT_CURRENCY)
-      +"   Trades: "+IntegerToString(today)+"/"+IntegerToString(MaxTradesPerDay),28,332,C'203,213,225',9);
+      +"   Trades: "+IntegerToString(today)+"/"+IntegerToString(MaxTradesPerDay),28,354,C'203,213,225',9);
 
    UiLabel("BALANCE_USD","Balance: "+DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),2)+" units"
-      +"   ~= $"+DoubleToString(AccountUnitsToUSD(AccountInfoDouble(ACCOUNT_BALANCE)),2),28,354,C'203,213,225',9);
+      +"   ~= $"+DoubleToString(AccountUnitsToUSD(AccountInfoDouble(ACCOUNT_BALANCE)),2),28,376,C'203,213,225',9);
 
    UiLabel("SIZING","Sizing: "+LastSizingSide
       +"   Vol: "+DoubleToString(LastPlannedVolume,2)
       +"   Preferred: $"+DoubleToString(RiskPerTradeUSD,2)
-      +"   Cap: $"+DoubleToString(MaxExecutableRiskUSD,2),28,376,
+      +"   Cap: $"+DoubleToString(MaxExecutableRiskUSD,2),28,398,
       (ConfirmMoneyUnitsPerUSD ? clrLime : clrOrange),9);
 
    UiLabel("MIN_RISK","Min executable risk: $"
       +DoubleToString(AccountUnitsToUSD(LastMinimumLotStopLossUnits),4)
-      +" ("+DoubleToString(LastMinimumLotStopLossUnits,2)+" units)",28,398,
+      +" ("+DoubleToString(LastMinimumLotStopLossUnits,2)+" units)",28,420,
       risk_gate_color,9);
 
-   UiLabel("RISK_GATE",RiskGateText(),28,420,risk_gate_color,10);
+   UiLabel("RISK_GATE",RiskGateText(),28,442,risk_gate_color,10);
 
    UiLabel("MONEY_CONFIRM","MoneyUnits/USD: "+DoubleToString(MoneyUnitsPerUSD,2)
       +"   Confirmed: "+BoolText(ConfirmMoneyUnitsPerUSD)
-      +(EnableLiveTrading && !live_ready ? "   "+live_reason : ""),28,444,
+      +(EnableLiveTrading && !live_ready ? "   "+live_reason : ""),28,466,
       (live_ready || !EnableLiveTrading ? clrLime : clrOrange),9);
 
-   UiButton("COPY","COPY DIAGNOSTIC",28,468,176,30);
-   UiLabel("COPY_STATUS",LastCopyStatus,218,476,C'148,163,184',8);
+   UiButton("COPY","COPY DIAGNOSTIC",28,490,176,30);
+   UiLabel("COPY_STATUS",LastCopyStatus,218,498,C'148,163,184',8);
    ChartRedraw();
 }
 
@@ -826,6 +845,8 @@ void AppendSignalCsv()
    {
       FileWrite(handle,
          "captured","signal_bar_time","symbol","decision","reason",
+         "base_decision","base_reason","ensemble_ready","ensemble_active",
+         "regime_probability","entry_probability","meta_probability",
          "signal_bid","signal_ask","spread_points",
          "forecast_low","forecast_median","forecast_high","atr",
          "buy_edge","sell_edge","minimum_edge","uncertainty",
@@ -847,6 +868,9 @@ void AppendSignalCsv()
       TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS),
       TimeToString(LastSignalBarTime,TIME_DATE|TIME_MINUTES),
       _Symbol,LastModelDecision,LastModelReason,
+      LastBaseDecision,LastBaseReason,BoolText(LastEnsembleReady),BoolText(LastEnsembleActive),
+      DoubleToString(LastRegimeProbability,6),DoubleToString(LastEntryProbability,6),
+      DoubleToString(LastMetaProbability,6),
       DoubleToString(LastSignalBid,_Digits),DoubleToString(LastSignalAsk,_Digits),
       IntegerToString(LastModelSpreadPoints),
       DoubleToString(LastForecastLow,_Digits),DoubleToString(LastForecast,_Digits),
@@ -972,7 +996,9 @@ void OnTimer()
    datetime bar_time=0;
    if(!BuildRequest(payload,bar_time) || !QueryModel(payload,reply))
    { ShowStatus(); return; }
-   string decision="",reason="",intrabar_direction="";
+   string decision="",reason="",base_decision="",base_reason="",intrabar_direction="";
+   double ensemble_ready=0.0,ensemble_active=0.0;
+   double regime_probability=-1.0,entry_probability=-1.0,meta_probability=-1.0;
    double signal_time=0.0,signal_bid=0.0,signal_ask=0.0,median=0.0,atr=0.0,stop_distance=0.0,target_distance=0.0;
    double forecast_low=0.0,forecast_high=0.0,edge=0.0,model_spread=0.0;
    double buy_edge=0.0,sell_edge=0.0,minimum_edge=0.0,uncertainty=0.0,signal_strength=0.0,minimum_strength=0.0;
@@ -983,6 +1009,13 @@ void OnTimer()
    double trend_min_path_atr=0.0,trend_min_consistency=0.0,trend_min_edge_fraction=0.0,trend_min_micro_move_atr=0.0;
    if(!JsonText(reply,"decision",decision)
       || !JsonText(reply,"reason",reason)
+      || !JsonText(reply,"base_decision",base_decision)
+      || !JsonText(reply,"base_reason",base_reason)
+      || !JsonNumber(reply,"ensemble_ready",ensemble_ready)
+      || !JsonNumber(reply,"ensemble_active",ensemble_active)
+      || !JsonNumber(reply,"regime_probability",regime_probability)
+      || !JsonNumber(reply,"entry_probability",entry_probability)
+      || !JsonNumber(reply,"meta_probability",meta_probability)
       || !JsonNumber(reply,"signal_bar_time",signal_time)
       || !JsonNumber(reply,"signal_bid",signal_bid)
       || !JsonNumber(reply,"signal_ask",signal_ask)
@@ -1021,6 +1054,13 @@ void OnTimer()
    { StatusLine="Invalid/stale model response"; ShowStatus(); return; }
    LastModelDecision=decision;
    LastModelReason=reason;
+   LastBaseDecision=base_decision;
+   LastBaseReason=base_reason;
+   LastEnsembleReady=(ensemble_ready>=0.5);
+   LastEnsembleActive=(ensemble_active>=0.5);
+   LastRegimeProbability=regime_probability;
+   LastEntryProbability=entry_probability;
+   LastMetaProbability=meta_probability;
    LastSignalBarTime=bar_time;
    LastSignalBid=signal_bid;
    LastSignalAsk=signal_ask;

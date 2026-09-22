@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import argparse
+from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import os
 from pathlib import Path
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Lock
+import time
 
 from .core import Forecast, Market, Settings, evaluate
-from .history import persist_market
+from .ensemble import EnsembleCoordinator, dominant_direction
+from .history import persist_decision_sample, persist_market
 from .model import ChronosForecaster, model_name
 
 
@@ -39,10 +41,12 @@ class CachedForecaster:
 
 
 def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) -> None:
-    """Serve live quote snapshots while caching identical completed-M15 forecasts."""
+    """Serve Chronos plus learned regime/entry/meta roles."""
     guard = Lock()
     cached_model = CachedForecaster(model)
     history_db = os.getenv("RAMON_HISTORY_DB", "").strip()
+    ensemble_dir = os.getenv("RAMON_ENSEMBLE_DIR", "/checkpoints/ensemble").strip()
+    ensemble = EnsembleCoordinator(ensemble_dir)
     last_persisted_bar: dict[str, int] = {}
     history_status: dict[str, object] = {
         "last_error": "",
@@ -64,6 +68,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     "history_enabled": bool(history_db),
                     "history_last_error": str(history_status["last_error"]),
                     "history_last_persisted_bar": int(history_status["last_persisted_bar"]),
+                    **ensemble.status(),
                 },
             )
 
@@ -79,6 +84,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 if not isinstance(payload, dict):
                     raise ValueError("request must be a JSON object")
                 market = Market.from_dict(payload)
+
                 if history_db:
                     key = f"{market.symbol}:{market.timeframe}"
                     newest = market.bars[-1].time
@@ -93,13 +99,39 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         else:
                             last_persisted_bar[key] = newest
                             history_status["last_persisted_bar"] = newest
+
                 with guard:
                     result = evaluate(market, cached_model, settings)
-                self.reply(200, result.to_dict())
+                    ensemble_payload, feature_snapshot = ensemble.assess(market, result)
+
+                response = result.to_dict()
+                response.update(ensemble_payload)
+
+                if history_db:
+                    try:
+                        persist_decision_sample(
+                            history_db,
+                            captured=int(time.time()),
+                            market=market,
+                            signal_bar_time=result.signal_bar_time,
+                            atr=result.atr,
+                            direction=dominant_direction(result),
+                            base_decision=result.decision,
+                            regime_features=feature_snapshot["regime"],
+                            entry_features=feature_snapshot["entry"],
+                            meta_base_features=feature_snapshot["meta_base"],
+                        )
+                    except Exception as exc:
+                        print(
+                            f"Ramon decision-sample persistence warning: {type(exc).__name__}: {exc}",
+                            flush=True,
+                        )
+
+                self.reply(200, response)
             except (ValueError, TypeError, json.JSONDecodeError) as exc:
                 self.reply(400, {"error": str(exc)})
-            except Exception:
-                # Never synthesize BUY/SELL if the model fails or times out.
+            except Exception as exc:
+                print(f"Ramon decision failure: {type(exc).__name__}: {exc}", flush=True)
                 self.reply(503, {"error": "model_unavailable"})
 
         def reply(self, status: int, data: dict[str, object]) -> None:
@@ -122,6 +154,7 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8012)
     parser.add_argument("--host", default="127.0.0.1", choices=("127.0.0.1", "0.0.0.0"))
     args = parser.parse_args()
+
     requested_model = args.model
     model_file = os.getenv("CHRONOS_MODEL_FILE", "").strip()
     if model_file:
@@ -130,6 +163,7 @@ def main() -> None:
             candidate = path.read_text(encoding="utf-8").strip()
             if candidate:
                 requested_model = candidate
+
     checkpoint = model_name(requested_model)
     model = ChronosForecaster(checkpoint, args.device)
     serve(args.host, args.port, model, Settings())

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -20,16 +21,39 @@ CREATE TABLE IF NOT EXISTS history_bars (
 )
 """
 
+DECISION_SAMPLE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS decision_samples (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    captured INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    signal_bar_time INTEGER NOT NULL,
+    mid REAL NOT NULL,
+    spread REAL NOT NULL,
+    atr REAL NOT NULL,
+    direction TEXT NOT NULL,
+    base_decision TEXT NOT NULL,
+    regime_features TEXT NOT NULL,
+    entry_features TEXT NOT NULL,
+    meta_base_features TEXT NOT NULL,
+    UNIQUE(captured, symbol)
+)
+"""
+
 
 def ensure_history_db(db: str | Path) -> Path:
-    """Create Ramon's broker-history store when needed."""
+    """Create Ramon's market-history and learning-sample store when needed."""
     path = Path(db).expanduser().resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(path) as conn:
         conn.execute(HISTORY_SCHEMA)
+        conn.execute(DECISION_SAMPLE_SCHEMA)
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_history_symbol_tf_time "
             "ON history_bars(symbol,timeframe,time)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_decision_samples_symbol_time "
+            "ON decision_samples(symbol,captured)"
         )
     return path
 
@@ -71,6 +95,59 @@ def persist_market(db: str | Path, market: Market) -> int:
             rows,
         )
     return len(rows)
+
+
+def persist_decision_sample(
+    db: str | Path,
+    *,
+    captured: int,
+    market: Market,
+    signal_bar_time: int,
+    atr: float,
+    direction: str,
+    base_decision: str,
+    regime_features: dict[str, float],
+    entry_features: dict[str, float],
+    meta_base_features: dict[str, float],
+) -> None:
+    """Persist one live inference sample for later role-model training."""
+    path = ensure_history_db(db)
+    mid = (market.bid + market.ask) / 2.0
+    spread = market.ask - market.bid
+    with sqlite3.connect(path, timeout=10) as conn:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO decision_samples
+                (captured,symbol,signal_bar_time,mid,spread,atr,direction,
+                 base_decision,regime_features,entry_features,meta_base_features)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                int(captured),
+                market.symbol,
+                int(signal_bar_time),
+                float(mid),
+                float(spread),
+                float(atr),
+                str(direction),
+                str(base_decision),
+                json.dumps(regime_features, separators=(",", ":")),
+                json.dumps(entry_features, separators=(",", ":")),
+                json.dumps(meta_base_features, separators=(",", ":")),
+            ),
+        )
+
+
+def decision_sample_count(db: str | Path, symbol: str = "XAUUSD_l") -> int:
+    path = Path(db)
+    if not path.is_file():
+        return 0
+    with sqlite3.connect(path) as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM decision_samples WHERE symbol=?",
+            (symbol,),
+        ).fetchone()
+    return int(row[0] if row else 0)
 
 
 def history_count(db: str | Path, symbol: str = "XAUUSD_l") -> int:

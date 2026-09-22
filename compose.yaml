@@ -15,6 +15,7 @@ services:
       CHRONOS_MODEL_FILE: /checkpoints/active_model.txt
       CHRONOS_DEVICE: cpu
       RAMON_HISTORY_DB: /data/ramon_history.sqlite3
+      RAMON_ENSEMBLE_DIR: /checkpoints/ensemble
       HF_HOME: /home/ramon/.cache/huggingface
     volumes:
       - chronos_cache:/home/ramon/.cache/huggingface
