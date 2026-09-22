@@ -1,5 +1,5 @@
 #property strict
-#property version "0.12"
+#property version "0.13"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -18,13 +18,23 @@ input int MaximumHoldBars = 4;
 input int RequestTimeoutMs = 4000;
 input int MaxDeviationPoints = 30;
 input ulong MagicNumber = 26092212;
+input bool WriteDiagnosticFile = true;
+input string DiagnosticFileName = "Ramon_Diagnostic.txt";
 
 CTrade Trade;
 datetime LastProcessedBar = 0;
 string StatusLine = "Starting";
 string LastModelDecision = "NONE";
+string LastModelReason = "NONE";
+datetime LastSignalBarTime = 0;
+double LastForecastLow = 0.0;
 double LastForecast = 0.0;
+double LastForecastHigh = 0.0;
 double LastAtr = 0.0;
+double LastEdge = 0.0;
+double LastStopDistance = 0.0;
+double LastTargetDistance = 0.0;
+int LastModelSpreadPoints = 0;
 long LockedAccountLogin = 0;
 string LockedAccountServer = "";
 
@@ -84,10 +94,101 @@ bool OtherPositionOnSymbol()
    return false;
 }
 
+string BoolText(const bool value)
+{
+   return (value ? "YES" : "NO");
+}
+
+string BuildDiagnosticText()
+{
+   MqlTick tick;
+   bool tick_ok=SymbolInfoTick(_Symbol,tick) && tick.bid>0.0 && tick.ask>tick.bid;
+   int spread_points=(int)SymbolInfoInteger(_Symbol,SYMBOL_SPREAD);
+   datetime closed=iTime(_Symbol,PERIOD_M15,1);
+   int today=TradesToday();
+
+   ulong ticket=0;
+   datetime opened=0;
+   bool managed=ManagedPosition(ticket,opened);
+   string position_line="NONE";
+   if(managed && PositionSelectByTicket(ticket))
+   {
+      long type=PositionGetInteger(POSITION_TYPE);
+      string side=(type==POSITION_TYPE_BUY ? "BUY" : "SELL");
+      position_line=side
+         +" #"+IntegerToString((long)ticket)
+         +" vol="+DoubleToString(PositionGetDouble(POSITION_VOLUME),2)
+         +" open="+DoubleToString(PositionGetDouble(POSITION_PRICE_OPEN),_Digits)
+         +" sl="+DoubleToString(PositionGetDouble(POSITION_SL),_Digits)
+         +" tp="+DoubleToString(PositionGetDouble(POSITION_TP),_Digits)
+         +" profit="+DoubleToString(PositionGetDouble(POSITION_PROFIT),2);
+   }
+
+   string text=
+      "=== RAMON DIAGNOSTIC ===\n"
+      +"EA version: 0.13\n"
+      +"Captured: "+TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS)+"\n"
+      +"Symbol: "+_Symbol+"  Timeframe: M15\n"
+      +"Bid: "+(tick_ok ? DoubleToString(tick.bid,_Digits) : "NA")
+      +"  Ask: "+(tick_ok ? DoubleToString(tick.ask,_Digits) : "NA")
+      +"  Spread(points): "+IntegerToString(spread_points)+"\n"
+      +"Market: "+(SymbolInfoInteger(_Symbol,SYMBOL_TRADE_MODE)==SYMBOL_TRADE_MODE_FULL ? "OPEN/FULL" : "RESTRICTED")
+      +"  TerminalConnected: "+BoolText((bool)TerminalInfoInteger(TERMINAL_CONNECTED))+"\n\n"
+      +"=== MODEL / SIGNAL ===\n"
+      +"ModelUrl: "+ModelUrl+"\n"
+      +"Decision: "+LastModelDecision+"  Reason: "+LastModelReason+"\n"
+      +"Signal bar: "+(LastSignalBarTime>0 ? TimeToString(LastSignalBarTime,TIME_DATE|TIME_MINUTES) : "NONE")
+      +"  Last closed: "+(closed>0 ? TimeToString(closed,TIME_DATE|TIME_MINUTES) : "NONE")+"\n"
+      +"Forecast low/median/high: "
+      +DoubleToString(LastForecastLow,_Digits)+" / "
+      +DoubleToString(LastForecast,_Digits)+" / "
+      +DoubleToString(LastForecastHigh,_Digits)+"\n"
+      +"ATR: "+DoubleToString(LastAtr,2)
+      +"  Edge: "+DoubleToString(LastEdge,_Digits)
+      +"  ModelSpread(points): "+IntegerToString(LastModelSpreadPoints)+"\n"
+      +"StopDistance: "+DoubleToString(LastStopDistance,_Digits)
+      +"  TargetDistance: "+DoubleToString(LastTargetDistance,_Digits)+"\n\n"
+      +"=== ACCOUNT / EXECUTION ===\n"
+      +"Live: "+(EnableLiveTrading ? "ARMED" : "DISARMED")
+      +"  AccountLock: "+(AccountLockHealthy() ? "OK" : "FAIL")
+      +"  Server: "+AccountInfoString(ACCOUNT_SERVER)+"\n"
+      +"Balance: "+DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),2)
+      +"  Equity: "+DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY),2)
+      +"  FreeMargin: "+DoubleToString(AccountInfoDouble(ACCOUNT_MARGIN_FREE),2)+"\n"
+      +"Trade permissions: terminal="+BoolText((bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED))
+      +" ea="+BoolText((bool)MQLInfoInteger(MQL_TRADE_ALLOWED))
+      +" account="+BoolText((bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED))+"\n"
+      +"Status: "+StatusLine+"\n"
+      +"Managed position: "+position_line+"\n"
+      +"Trades today: "+IntegerToString(today)+"/"+IntegerToString(MaxTradesPerDay)+"\n"
+      +"RiskPerTradeUSD: "+DoubleToString(RiskPerTradeUSD,2)
+      +"  MoneyUnitsPerUSD: "+DoubleToString(MoneyUnitsPerUSD,2)
+      +"  MaxSpreadPoints: "+IntegerToString(MaxSpreadPoints)+"\n";
+
+   return text;
+}
+
+void WriteDiagnostic()
+{
+   if(!WriteDiagnosticFile || StringLen(DiagnosticFileName)==0)
+      return;
+   int handle=FileOpen(
+      DiagnosticFileName,
+      FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON
+   );
+   if(handle==INVALID_HANDLE)
+   {
+      Print("Ramon diagnostic write failed err=",GetLastError());
+      return;
+   }
+   FileWriteString(handle,BuildDiagnosticText());
+   FileClose(handle);
+}
+
 void ShowStatus()
 {
    Comment(
-      "Ramon v0.12 | ",_Symbol," M15\n",
+      "Ramon v0.13 | ",_Symbol," M15\n",
       "Model: ",LastModelDecision," | ",StatusLine,"\n",
       "Last closed: ",TimeToString(LastProcessedBar,TIME_DATE|TIME_MINUTES),
       " | median: ",DoubleToString(LastForecast,_Digits),
@@ -97,6 +198,7 @@ void ShowStatus()
       " | loss limit $",DoubleToString(RiskPerTradeUSD,2),
       " | spread max ",IntegerToString(MaxSpreadPoints)
    );
+   WriteDiagnostic();
 }
 
 bool JsonText(const string json,const string key,string &value)
@@ -262,11 +364,16 @@ void OnTimer()
    { ShowStatus(); return; }
    string decision="",reason="";
    double signal_time=0.0,median=0.0,atr=0.0,stop_distance=0.0,target_distance=0.0;
+   double forecast_low=0.0,forecast_high=0.0,edge=0.0,model_spread=0.0;
    if(!JsonText(reply,"decision",decision)
       || !JsonText(reply,"reason",reason)
       || !JsonNumber(reply,"signal_bar_time",signal_time)
+      || !JsonNumber(reply,"forecast_low",forecast_low)
       || !JsonNumber(reply,"forecast_median",median)
+      || !JsonNumber(reply,"forecast_high",forecast_high)
       || !JsonNumber(reply,"atr",atr)
+      || !JsonNumber(reply,"edge",edge)
+      || !JsonNumber(reply,"spread_points",model_spread)
       || !JsonNumber(reply,"stop_distance",stop_distance)
       || !JsonNumber(reply,"target_distance",target_distance)
       || (datetime)signal_time!=bar_time
@@ -274,8 +381,16 @@ void OnTimer()
    { StatusLine="Invalid/stale model response"; ShowStatus(); return; }
    LastProcessedBar=bar_time; // At most one entry attempt per closed candle.
    LastModelDecision=decision;
+   LastModelReason=reason;
+   LastSignalBarTime=bar_time;
+   LastForecastLow=forecast_low;
    LastForecast=median;
+   LastForecastHigh=forecast_high;
    LastAtr=atr;
+   LastEdge=edge;
+   LastModelSpreadPoints=(int)model_spread;
+   LastStopDistance=stop_distance;
+   LastTargetDistance=target_distance;
    StatusLine=reason;
    Print("Ramon ",TimeToString(bar_time)," ",decision," ",reason,
       " median=",DoubleToString(median,_Digits));
@@ -335,6 +450,7 @@ int OnInit()
    { Print("Attach only to ",TradeSymbol," M15"); return INIT_FAILED; }
    if(MoneyUnitsPerUSD<=0.0 || RiskPerTradeUSD<=0.0 || RiskPerTradeUSD>0.50
       || MaxSpreadPoints<=0 || MaxTradesPerDay<1 || MaximumHoldBars<1
+      || (WriteDiagnosticFile && StringLen(DiagnosticFileName)==0)
       || !IsAllowedModelUrl(ModelUrl))
    { Print("Invalid risk or local server settings"); return INIT_FAILED; }
    long current_login=AccountInfoInteger(ACCOUNT_LOGIN);
