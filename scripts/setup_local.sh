@@ -6,8 +6,8 @@ project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$project_dir"
 
 mode="${1:-full}"
-if [[ $# -gt 1 || "$mode" != "full" && "$mode" != "--diagnose" && "$mode" != "--model-only" ]]; then
-  printf '%s\n' 'Usage: bash scripts/setup_local.sh [--diagnose|--model-only]' >&2
+if [[ $# -gt 1 || "$mode" != "full" && "$mode" != "--diagnose" && "$mode" != "--model-only" && "$mode" != "--mt5-only" ]]; then
+  printf '%s\n' 'Usage: bash scripts/setup_local.sh [--diagnose|--model-only|--mt5-only]' >&2
   exit 2
 fi
 
@@ -102,12 +102,12 @@ if [[ "$mode" == "--diagnose" ]]; then
   exit $?
 fi
 
-if ! command -v uv >/dev/null 2>&1; then
+if [[ "$mode" != "--mt5-only" ]] && ! command -v uv >/dev/null 2>&1; then
   printf '%s\n' 'uv is required: https://docs.astral.sh/uv/getting-started/installation/' >&2
   exit 1
 fi
 
-if [[ "$mode" == full ]]; then
+if [[ "$mode" == full || "$mode" == "--mt5-only" ]]; then
   resolve_mt5
   if command -v wine >/dev/null 2>&1; then
     wine_command=wine
@@ -123,10 +123,12 @@ if [[ "$mode" == full ]]; then
   fi
 fi
 
-printf '%s\n' 'Installing Python model dependencies (PyTorch may be a large download)...'
-uv sync --extra model --extra dev
-printf '%s\n' 'Downloading/loading Chronos-2 and running a real four-step forecast...'
-uv run --extra model python -m ramon.preflight --device "${RAMON_DEVICE:-cpu}"
+if [[ "$mode" != "--mt5-only" ]]; then
+  printf '%s\n' 'Installing Python model dependencies (PyTorch may be a large download)...'
+  uv sync --extra model --extra dev
+  printf '%s\n' 'Downloading/loading Chronos-2 and running a real four-step forecast...'
+  uv run --extra model python -m ramon.preflight --device "${RAMON_DEVICE:-cpu}"
+fi
 
 if [[ "$mode" == "--model-only" ]]; then
   printf '%s\n' 'Real-model preflight passed. MT5 Expert was not installed; run --diagnose and then the full setup.'
@@ -143,7 +145,10 @@ cp "$project_dir/mt5/Ramon.mq5" "$target"
 win_target="$(WINEPREFIX="$wine_prefix" winepath -w "$target")"
 printf 'Compiling %s\n' "$target"
 if ! WINEPREFIX="$wine_prefix" "$wine_command" "$metaeditor" "/compile:$win_target" /log; then
-  printf '%s\n' 'MetaEditor failed; read Ramon.log in the installed EA directory.' >&2
+  printf 'MetaEditor failed: %s\n' "$metaeditor" >&2
+  if command -v file >/dev/null 2>&1; then file "$metaeditor" >&2; fi
+  printf '%s\n' 'If Wine reported missing wine32 and the file is PE32, inspect the i386 Wine package before installing it.' >&2
+  printf '%s\n' 'Also read Ramon.log in the installed EA directory, if it exists.' >&2
   exit 1
 fi
 if [[ ! -s "$target_dir/Ramon.ex5" || "$target" -nt "$target_dir/Ramon.ex5" ]]; then
