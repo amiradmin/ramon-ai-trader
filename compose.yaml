@@ -16,6 +16,7 @@ services:
       CHRONOS_DEVICE: cpu
       RAMON_HISTORY_DB: /data/ramon_history.sqlite3
       RAMON_ENSEMBLE_DIR: /checkpoints/ensemble
+      RAMON_RISK_MODEL_DIR: /checkpoints/risk
       RAMON_NEWS_ENABLED: ${RAMON_NEWS_ENABLED:-1}
       RAMON_NEWS_URL: ${RAMON_NEWS_URL:-https://nfs.faireconomy.media/ff_calendar_thisweek.json}
       RAMON_NEWS_REFRESH_SECONDS: ${RAMON_NEWS_REFRESH_SECONDS:-300}
