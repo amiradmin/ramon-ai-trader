@@ -1,12 +1,13 @@
 #property strict
-#property version "0.11"
+#property version "0.12"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
 
 input string TradeSymbol = "XAUUSD_l";
 input string RequiredServerText = "LiteFinance";
-input long AllowedAccountLogin = 0; // Explicitly fill before live execution.
+input bool AutoLockCurrentAccount = true; // Bind this EA session to the account active at OnInit.
+input long AllowedAccountLogin = 0; // Used only when AutoLockCurrentAccount=false.
 input bool EnableLiveTrading = false;
 input string ModelUrl = "http://127.0.0.1:8012/decision";
 input double MoneyUnitsPerUSD = 100.0; // LiteFinance cent account, verified manually.
@@ -24,6 +25,8 @@ string StatusLine = "Starting";
 string LastModelDecision = "NONE";
 double LastForecast = 0.0;
 double LastAtr = 0.0;
+long LockedAccountLogin = 0;
+string LockedAccountServer = "";
 
 bool IsAllowedModelUrl(const string url)
 {
@@ -31,6 +34,20 @@ bool IsAllowedModelUrl(const string url)
       url=="http://127.0.0.1:8012/decision"
       || url=="http://model:8012/decision"
    );
+}
+
+bool AccountLockHealthy()
+{
+   if(LockedAccountLogin<=0)
+      return false;
+   if(AccountInfoInteger(ACCOUNT_LOGIN)!=LockedAccountLogin)
+      return false;
+   string current_server=AccountInfoString(ACCOUNT_SERVER);
+   if(current_server!=LockedAccountServer)
+      return false;
+   if(StringLen(RequiredServerText)>0 && StringFind(current_server,RequiredServerText)<0)
+      return false;
+   return true;
 }
 
 bool ManagedPosition(ulong &ticket,datetime &opened)
@@ -70,12 +87,13 @@ bool OtherPositionOnSymbol()
 void ShowStatus()
 {
    Comment(
-      "Ramon v0.11 | ",_Symbol," M15\n",
+      "Ramon v0.12 | ",_Symbol," M15\n",
       "Model: ",LastModelDecision," | ",StatusLine,"\n",
       "Last closed: ",TimeToString(LastProcessedBar,TIME_DATE|TIME_MINUTES),
       " | median: ",DoubleToString(LastForecast,_Digits),
       " | ATR: ",DoubleToString(LastAtr,2),"\n",
       "Live: ",(EnableLiveTrading ? "ARMED" : "DISARMED"),
+      " | account lock ",(AccountLockHealthy() ? "OK" : "FAIL"),
       " | loss limit $",DoubleToString(RiskPerTradeUSD,2),
       " | spread max ",IntegerToString(MaxSpreadPoints)
    );
@@ -264,10 +282,8 @@ void OnTimer()
 
    if(decision=="WAIT" || !EnableLiveTrading)
    { ShowStatus(); return; }
-   if(AllowedAccountLogin<=0 || AccountInfoInteger(ACCOUNT_LOGIN)!=AllowedAccountLogin)
-   { StatusLine="Account login mismatch"; ShowStatus(); return; }
-   if(StringFind(AccountInfoString(ACCOUNT_SERVER),RequiredServerText)<0)
-   { StatusLine="Broker server mismatch"; ShowStatus(); return; }
+   if(!AccountLockHealthy())
+   { StatusLine="Account/server lock mismatch"; ShowStatus(); return; }
    if(!(bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED)
       || !(bool)MQLInfoInteger(MQL_TRADE_ALLOWED)
       || !(bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED))
@@ -321,12 +337,26 @@ int OnInit()
       || MaxSpreadPoints<=0 || MaxTradesPerDay<1 || MaximumHoldBars<1
       || !IsAllowedModelUrl(ModelUrl))
    { Print("Invalid risk or local server settings"); return INIT_FAILED; }
-   if(EnableLiveTrading && (
-      AllowedAccountLogin<=0
-      || AccountInfoInteger(ACCOUNT_LOGIN)!=AllowedAccountLogin
-      || StringFind(AccountInfoString(ACCOUNT_SERVER),RequiredServerText)<0
-   ))
-   { Print("Explicit account/server match required before arming"); return INIT_FAILED; }
+   long current_login=AccountInfoInteger(ACCOUNT_LOGIN);
+   string current_server=AccountInfoString(ACCOUNT_SERVER);
+   if(current_login<=0 || StringLen(current_server)==0)
+   { Print("Account identity unavailable"); return INIT_FAILED; }
+   if(StringLen(RequiredServerText)>0 && StringFind(current_server,RequiredServerText)<0)
+   { Print("Broker server mismatch"); return INIT_FAILED; }
+   if(AutoLockCurrentAccount)
+   {
+      LockedAccountLogin=current_login;
+      LockedAccountServer=current_server;
+   }
+   else
+   {
+      if(AllowedAccountLogin<=0 || current_login!=AllowedAccountLogin)
+      { Print("Explicit account login mismatch"); return INIT_FAILED; }
+      LockedAccountLogin=AllowedAccountLogin;
+      LockedAccountServer=current_server;
+   }
+   if(EnableLiveTrading && !AccountLockHealthy())
+   { Print("Account/server lock required before arming"); return INIT_FAILED; }
    Trade.SetExpertMagicNumber(MagicNumber);
    Trade.SetDeviationInPoints(MaxDeviationPoints);
    Trade.SetTypeFillingBySymbol(_Symbol);
