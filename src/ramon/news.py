@@ -104,7 +104,7 @@ def parse_forex_factory_events(payload: bytes | str) -> tuple[NewsEvent, ...]:
     for item in raw:
         if not isinstance(item, dict):
             continue
-        title = str(item.get("title", "")).strip()
+        title = str(item.get("title", "")).strip().replace('"', "'").replace("\\", "/")
         country = str(item.get("country", "")).strip()
         impact = str(item.get("impact", "")).strip().title()
         date_text = str(item.get("date", "")).strip()
