@@ -72,11 +72,28 @@ bash scripts/setup_local.sh
 
 این دستور وابستگی‌ها را نصب می‌کند، مدل را دانلود و بارگذاری می‌کند، یک پیش‌بینی چهارمرحله‌ای واقعی را می‌سنجد، سپس Ramon.mq5 را در Experts کپی و با MetaEditor کامپایل می‌کند. **این دستور معاملهٔ زنده را فعال نمی‌کند.**
 
-مسیر پیش‌فرض MT5 برابر است با ~/.mt5/drive_c/Program Files/MetaTrader 5. اگر محل نصب متفاوت است، RAMON_MT5_DIR را به پوشهٔ حاوی metaeditor64.exe بدهید. اگر پوشهٔ دادهٔ ترمینال جداست، مسیر آن را از **File → Open Data Folder** در MT5 پیدا کنید و به RAMON_MT5_DATA_DIR بدهید:
+اسکریپت مسیر MetaEditor و پوشهٔ Experts را در پیشوندهای رایج Wine مانند ~/.mt5 و ~/.wine جست‌وجو می‌کند. برای نمایش نتیجهٔ جست‌وجو **بدون نصب و کپی فایل** از حالت تشخیص استفاده کنید. اگر ریپو از قبل روی دستگاهتان است، ابتدا تغییرات را بگیرید:
 
 ~~~bash
+git pull --ff-only
+bash scripts/setup_local.sh --diagnose
+~~~
+
+اگر MetaEditor پیدا نشد، با دستور زیر محل نصبش را ببینید. اگر چند پوشهٔ داده پیدا شد، مسیر ترمینال درست را از **File → Open Data Folder** در MT5 بردارید. RAMON_MT5_DIR باید به پوشهٔ حاوی metaeditor64.exe اشاره کند و RAMON_MT5_DATA_DIR باید پوشه‌ای باشد که MQL5/Experts در آن وجود دارد:
+
+~~~bash
+find "$HOME/.mt5" "$HOME/.wine" -type f \
+  \( -iname 'metaeditor64.exe' -o -iname 'metaeditor.exe' \) -print 2>/dev/null
+
 RAMON_MT5_DIR="/path/to/MetaTrader 5" \
 RAMON_MT5_DATA_DIR="/path/to/terminal-data" \
+bash scripts/setup_local.sh
+~~~
+
+برای نصب و آزمون **فقط مدل** در زمانی که مسیر MT5 مشخص نیست، از حالت جداگانه استفاده کنید؛ پس از یافتن مسیر MT5، نصب کامل را دوباره اجرا کنید:
+
+~~~bash
+bash scripts/setup_local.sh --model-only
 bash scripts/setup_local.sh
 ~~~
 
