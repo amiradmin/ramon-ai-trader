@@ -9,7 +9,7 @@ EA = Path(__file__).resolve().parents[1] / "mt5" / "Ramon.mq5"
 def test_model_url_allows_host_and_compose_service_only() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "0.16"' in source
+    assert '#property version "0.17"' in source
     assert 'url=="http://127.0.0.1:8012/decision"' in source
     assert 'url=="http://model:8012/decision"' in source
     assert "!IsAllowedModelUrl(ModelUrl)" in source
@@ -19,7 +19,7 @@ def test_model_url_allows_host_and_compose_service_only() -> None:
 def test_live_account_session_lock() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "0.16"' in source
+    assert '#property version "0.17"' in source
     assert "input bool AutoLockCurrentAccount = true" in source
     assert "input bool EnableLiveTrading = false" in source
     assert "LockedAccountLogin=current_login" in source
@@ -46,7 +46,7 @@ def test_diagnostic_export_contains_operational_state() -> None:
 def test_chart_dashboard_and_copy_button() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert 'RAMON AI TRADER  v0.16' in source
+    assert 'RAMON AI TRADER  v0.17' in source
     assert 'UiButton("COPY","COPY DIAGNOSTIC"' in source
     assert "void OnChartEvent(" in source
     assert "CopyDiagnosticToClipboard()" in source
@@ -84,10 +84,27 @@ def test_risk_verification_and_csv_learning_logs() -> None:
 def test_live_block_does_not_detach_ea() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "0.16"' in source
+    assert '#property version "0.17"' in source
     assert "bool LiveExecutionReady(string &reason)" in source
     assert 'return (LiveExecutionReady(reason) ? "ARMED" : "BLOCKED")' in source
     assert 'if(!LiveExecutionReady(live_block_reason))' in source
     assert 'StatusLine=live_block_reason' in source
     assert 'Print("Ramon live BLOCKED: ConfirmMoneyUnitsPerUSD is false")' in source
     assert 'Print("Ramon live BLOCKED: account/server lock mismatch")' in source
+
+
+def test_cent_account_dashboard_converts_units_to_usd() -> None:
+    source = EA.read_text(encoding="utf-8")
+
+    assert '#property version "0.17"' in source
+    assert "input bool AccountIsCent = true" in source
+    assert "string AccountTypeText()" in source
+    assert "double AccountUnitsToUSD(const double units)" in source
+    assert "bool MinimumLotExceedsRiskBudget()" in source
+    assert '"AccountType: "+AccountTypeText()+" (configured)"' in source
+    assert '"BalanceUSDApprox: "+DoubleToString(AccountUnitsToUSD(AccountInfoDouble(ACCOUNT_BALANCE)),2)' in source
+    assert '"MinExecutableRiskUSD: "+DoubleToString(AccountUnitsToUSD(LastMinimumLotStopLossUnits),4)' in source
+    assert '"TRADE BLOCKED: min lot > risk budget"' in source
+    assert '"Min executable risk: $"' in source
+    assert '"balance_usd_approx"' in source
+    assert '"min_executable_risk_usd"' in source
