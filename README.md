@@ -371,3 +371,12 @@ Ramon همچنین دو فایل پایدار در `FILE_COMMON` می‌سازد
 وقتی forecast جهت غالب BUY یا SELL دارد و **Edge اصلی حتماً PASS** است، Ramon می‌تواند strength کمتر از آستانهٔ اصلی 0.20 را فقط با تأیید حرکت کوتاه‌مدت بپذیرد. گیت پیش‌فرض intrabar شامل strength حداقل 0.05، حرکت 3–4 دقیقه‌ای حداقل 0.06×ATR، برگشت از extreme کوتاه‌مدت حداقل 0.08×ATR و چرخش آخرین قیمت در همان جهت است. در این حالت reason برابر `intrabar_reversal_up` یا `intrabar_reversal_down` می‌شود.
 
 این مسیر **هیچ‌کدام از کنترل‌های اجرای سفارش را دور نمی‌زند**: محدودیت spread، account lock، تعداد معاملات، minimum lot، margin و RiskGate بعد از تصمیم همچنان اعمال می‌شوند. بنابراین تأیید intrabar می‌تواند WAIT مدل را به BUY/SELL تبدیل کند، اما اگر حداقل لات از بودجهٔ ریسک بزرگ‌تر باشد سفارش همچنان باز نمی‌شود.
+
+
+### AI-first trend continuation
+
+از v0.21 مسیر Trend Continuation عمداً با EMA/RSI/MACD یا مجموعه‌ای از شرط‌های تکنیکال دست‌ساز ساخته نشده است. Chronos اکنون علاوه بر low/median/high انتهای افق، **مسیر median هر چهار گام آینده** را به Ramon می‌دهد. جهت Trend Continuation فقط از همین مسیر مدل استخراج می‌شود.
+
+Ramon از مسیر Chronos دو ویژگی قابل‌مشاهده می‌سازد: `AITrend MoveATR` برای اندازهٔ حرکت پیش‌بینی‌شده نسبت به ATR و `AITrend Consistency` برای اینکه چند گام متوالی مسیر مدل در یک جهت هستند. اگر مدل یک مسیر منسجم BUY/SELL پیش‌بینی کند، قیمت هنوز حداقل بخشی از edge لازم را داشته باشد و M1 بعد از pullback دوباره در همان جهت حرکت کند، reason می‌تواند `ai_trend_continuation_up` یا `ai_trend_continuation_down` شود.
+
+اصل معماری Ramon این است: **جهت و alpha از مدل AI؛ timing کوتاه‌مدت و کنترل‌های ریسک از کد قطعی.** کد قطعی اجازه ندارد بدون جهت Chronos یک Trend Continuation بسازد. محدودیت‌های spread، account lock، minimum lot، margin و RiskGate مستقل از alpha باقی می‌مانند. این جداسازی عمداً مانع تبدیل Ramon به یک ربات rule-based شبیه مجموعه‌ای از شرط‌های ثابت می‌شود.

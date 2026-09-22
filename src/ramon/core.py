@@ -111,6 +111,10 @@ class Settings:
     intrabar_min_strength: float = 0.05
     intrabar_min_move_atr: float = 0.06
     intrabar_min_rebound_atr: float = 0.08
+    trend_min_path_atr: float = 0.15
+    trend_min_consistency: float = 0.75
+    trend_min_edge_fraction: float = 0.25
+    trend_min_micro_move_atr: float = 0.03
     stop_atr: float = 1.5
     target_atr: float = 3.0
 
@@ -120,6 +124,7 @@ class Forecast:
     low: float
     median: float
     high: float
+    median_path: tuple[float, ...] = ()
 
 
 class Forecaster(Protocol):
@@ -149,6 +154,15 @@ class Decision:
     intrabar_min_strength: float
     intrabar_min_move_atr: float
     intrabar_min_rebound_atr: float
+    ai_trend_confirmed: int
+    ai_trend_direction: str
+    ai_trend_score: float
+    ai_trend_move_atr: float
+    ai_trend_consistency: float
+    trend_min_path_atr: float
+    trend_min_consistency: float
+    trend_min_edge_fraction: float
+    trend_min_micro_move_atr: float
     forecast_low: float
     forecast_median: float
     forecast_high: float
@@ -203,6 +217,34 @@ def _intrabar_metrics(
     return move_atr, rebound_atr, turn
 
 
+def _model_trend_metrics(
+    *,
+    last_close: float,
+    forecast: Forecast,
+    atr: float,
+) -> tuple[str, float, float, float]:
+    """Interpret Chronos' full median trajectory; no hand-built indicator sets."""
+    path = forecast.median_path
+    if len(path) < 2 or atr <= 0:
+        return "NONE", 0.0, 0.0, 0.0
+
+    trajectory = (last_close, *path)
+    deltas = tuple(b - a for a, b in zip(trajectory, trajectory[1:]))
+    net = path[-1] - last_close
+    if net == 0:
+        return "NONE", 0.0, 0.0, 0.0
+
+    direction = "BUY" if net > 0 else "SELL"
+    aligned = sum(
+        delta > 0 if direction == "BUY" else delta < 0
+        for delta in deltas
+    )
+    consistency = aligned / len(deltas)
+    move_atr = abs(net) / atr
+    score = move_atr * consistency
+    return direction, move_atr, consistency, score
+
+
 def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settings()) -> Decision:
     """Make a model-led BUY/SELL/WAIT decision; safety checks stay outside the model."""
     market.validate()
@@ -212,8 +254,12 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
         0 <= settings.intrabar_min_strength <= settings.minimum_strength
         and settings.intrabar_min_move_atr >= 0
         and settings.intrabar_min_rebound_atr >= 0
+        and settings.trend_min_path_atr >= 0
+        and 0 <= settings.trend_min_consistency <= 1
+        and 0 <= settings.trend_min_edge_fraction <= 1
+        and settings.trend_min_micro_move_atr >= 0
     ):
-        raise ValueError("invalid intrabar settings")
+        raise ValueError("invalid intrabar/trend settings")
 
     atr = atr14(market.bars)
     spread = market.ask - market.bid
@@ -231,6 +277,11 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
     intrabar_direction = "NONE"
     intrabar_move_atr = 0.0
     intrabar_rebound_atr = 0.0
+    ai_trend_confirmed = 0
+    ai_trend_direction = "NONE"
+    ai_trend_score = 0.0
+    ai_trend_move_atr = 0.0
+    ai_trend_consistency = 0.0
 
     if atr <= market.point or spread_points > settings.max_spread_points:
         reason = "spread_or_atr"
@@ -243,6 +294,11 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
             or not forecast.low <= forecast.median <= forecast.high
         ):
             raise ValueError("invalid model forecast")
+        if forecast.median_path:
+            if len(forecast.median_path) != settings.horizon:
+                raise ValueError("invalid model forecast path length")
+            if not all(isfinite(v) and v > 0 for v in forecast.median_path):
+                raise ValueError("invalid model forecast path")
 
         # Bars and micro-bars are broker Bid prices: BUY pays Ask; SELL later pays Ask.
         buy_edge = forecast.median - market.ask
@@ -261,6 +317,17 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
             atr=atr,
             direction=intrabar_direction,
         )
+        (
+            ai_trend_direction,
+            ai_trend_move_atr,
+            ai_trend_consistency,
+            ai_trend_score,
+        ) = _model_trend_metrics(
+            last_close=market.bars[-1].close,
+            forecast=forecast,
+            atr=atr,
+        )
+
         if (
             dominant_edge >= minimum
             and dominant_strength >= settings.intrabar_min_strength
@@ -270,6 +337,18 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
         ):
             intrabar_confirmed = 1
 
+        trend_edge_floor = minimum * settings.trend_min_edge_fraction
+        if (
+            ai_trend_direction == intrabar_direction
+            and ai_trend_direction != "NONE"
+            and ai_trend_move_atr >= settings.trend_min_path_atr
+            and ai_trend_consistency >= settings.trend_min_consistency
+            and dominant_edge >= trend_edge_floor
+            and intrabar_move_atr >= settings.trend_min_micro_move_atr
+            and micro_turn
+        ):
+            ai_trend_confirmed = 1
+
         if dominant_buy and buy_edge >= minimum and buy_strength >= settings.minimum_strength:
             side, edge, reason = "BUY", buy_edge, "forecast_up"
         elif not dominant_buy and sell_edge >= minimum and sell_strength >= settings.minimum_strength:
@@ -278,6 +357,10 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
             side, edge, reason = "BUY", buy_edge, "intrabar_reversal_up"
         elif not dominant_buy and intrabar_confirmed:
             side, edge, reason = "SELL", sell_edge, "intrabar_reversal_down"
+        elif ai_trend_confirmed and ai_trend_direction == "BUY":
+            side, edge, reason = "BUY", buy_edge, "ai_trend_continuation_up"
+        elif ai_trend_confirmed and ai_trend_direction == "SELL":
+            side, edge, reason = "SELL", sell_edge, "ai_trend_continuation_down"
         else:
             if dominant_edge < minimum:
                 reason = "insufficient_model_edge"
@@ -308,6 +391,15 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
         intrabar_min_strength=settings.intrabar_min_strength,
         intrabar_min_move_atr=settings.intrabar_min_move_atr,
         intrabar_min_rebound_atr=settings.intrabar_min_rebound_atr,
+        ai_trend_confirmed=ai_trend_confirmed,
+        ai_trend_direction=ai_trend_direction,
+        ai_trend_score=ai_trend_score,
+        ai_trend_move_atr=ai_trend_move_atr,
+        ai_trend_consistency=ai_trend_consistency,
+        trend_min_path_atr=settings.trend_min_path_atr,
+        trend_min_consistency=settings.trend_min_consistency,
+        trend_min_edge_fraction=settings.trend_min_edge_fraction,
+        trend_min_micro_move_atr=settings.trend_min_micro_move_atr,
         forecast_low=forecast.low,
         forecast_median=forecast.median,
         forecast_high=forecast.high,

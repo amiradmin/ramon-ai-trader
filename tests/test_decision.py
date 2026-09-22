@@ -33,13 +33,20 @@ class FixedModel:
         return self.value
 
 
-class FakeTensor:
-    def __getitem__(self, indices: object) -> FakeTensor:
-        assert indices == (0, -1, slice(None))
-        return self
+class FakePathTensor:
+    def tolist(self) -> list[list[float]]:
+        return [
+            [98.0, 100.5, 103.0],
+            [98.5, 101.5, 104.0],
+            [99.0, 102.5, 104.5],
+            [99.0, 103.0, 105.0],
+        ]
 
-    def tolist(self) -> list[float]:
-        return [99.0, 103.0, 105.0]
+
+class FakeTensor:
+    def __getitem__(self, index: object) -> FakePathTensor:
+        assert index == 0
+        return FakePathTensor()
 
 
 class FakePipeline:
@@ -127,6 +134,51 @@ class DecisionTests(unittest.TestCase):
         self.assertEqual(result.reason, "insufficient_model_edge")
         self.assertEqual(result.intrabar_confirmed, 0)
 
+    def test_ai_trend_continuation_uses_chronos_path_not_indicators(self) -> None:
+        micro = (
+            Bar(1_800_100_000, 100.30, 100.35, 100.25, 100.30),
+            Bar(1_800_100_060, 100.30, 100.42, 100.28, 100.38),
+            Bar(1_800_100_120, 100.38, 100.40, 100.18, 100.22),
+            Bar(1_800_100_180, 100.22, 100.24, 99.98, 100.00),
+        )
+        market = Market("XAUUSD_l", "M15", 100.0, 100.4, 0.01, bars(), micro)
+        self.model.value = Forecast(
+            94.0,
+            99.3,
+            106.0,
+            (99.8, 99.6, 99.4, 99.3),
+        )
+
+        result = evaluate(market, self.model)
+
+        self.assertEqual(result.ai_trend_direction, "SELL")
+        self.assertEqual(result.ai_trend_confirmed, 1)
+        self.assertEqual(result.decision, "SELL")
+        self.assertEqual(result.reason, "ai_trend_continuation_down")
+        self.assertLess(result.sell_edge, result.minimum_edge)
+        self.assertGreaterEqual(
+            result.sell_edge,
+            result.minimum_edge * result.trend_min_edge_fraction,
+        )
+        self.assertGreaterEqual(result.ai_trend_move_atr, result.trend_min_path_atr)
+        self.assertGreaterEqual(result.ai_trend_consistency, result.trend_min_consistency)
+
+    def test_ai_trend_continuation_requires_chronos_path(self) -> None:
+        micro = (
+            Bar(1_800_100_000, 100.30, 100.35, 100.25, 100.30),
+            Bar(1_800_100_060, 100.30, 100.42, 100.28, 100.38),
+            Bar(1_800_100_120, 100.38, 100.40, 100.18, 100.22),
+            Bar(1_800_100_180, 100.22, 100.24, 99.98, 100.00),
+        )
+        market = Market("XAUUSD_l", "M15", 100.0, 100.4, 0.01, bars(), micro)
+        self.model.value = Forecast(94.0, 99.3, 106.0)
+
+        result = evaluate(market, self.model)
+
+        self.assertEqual(result.ai_trend_direction, "NONE")
+        self.assertEqual(result.ai_trend_confirmed, 0)
+        self.assertEqual(result.decision, "WAIT")
+
     def test_spread_failure_does_not_run_model(self) -> None:
         market = Market("XAUUSD_l", "M15", 100.0, 101.0, 0.01, bars())
         result = evaluate(market, self.model)
@@ -146,7 +198,10 @@ class DecisionTests(unittest.TestCase):
         adapter = ChronosForecaster.__new__(ChronosForecaster)
         adapter._np = FakeNumpy()
         adapter.pipeline = FakePipeline()
-        self.assertEqual(adapter.forecast([100.0] * 128, 4), Forecast(99.0, 103.0, 105.0))
+        self.assertEqual(
+            adapter.forecast([100.0] * 128, 4),
+            Forecast(99.0, 103.0, 105.0, (100.5, 101.5, 102.5, 103.0)),
+        )
 
     def test_bad_history_and_bad_forecast_fail_closed(self) -> None:
         payload = {

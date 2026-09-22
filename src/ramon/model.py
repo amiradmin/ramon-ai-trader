@@ -22,8 +22,14 @@ class ChronosForecaster:
         quantiles, _ = self.pipeline.predict_quantiles(
             [values], prediction_length=horizon, quantile_levels=[0.1, 0.5, 0.9]
         )
-        low, median, high = quantiles[0][0, -1, :].tolist()
-        return Forecast(float(low), float(median), float(high))
+        rows = quantiles[0][0].tolist()
+        if not isinstance(rows, list) or len(rows) != horizon:
+            raise ValueError("invalid Chronos horizon output")
+        if any(not isinstance(row, list) or len(row) < 3 for row in rows):
+            raise ValueError("invalid Chronos quantile output")
+        low, median, high = rows[-1][:3]
+        median_path = tuple(float(row[1]) for row in rows)
+        return Forecast(float(low), float(median), float(high), median_path)
 
 
 def model_name(value: str) -> str:
