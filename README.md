@@ -111,7 +111,18 @@ dpkg --print-foreign-architectures
 dpkg-query -W wine32:i386 2>/dev/null || true
 ~~~
 
-اگر خروجی file برابر PE32 بود، نصب wine32:i386 راه‌حل محتمل است. پیش از نصب، طرح تغییر بسته‌ها را با **apt -s install wine32:i386** بررسی کنید، به‌ویژه اگر Wine یا MT5 موجودتان در حال استفاده است. اگر بسته پیدا نشد، باید مخزن i386 برای نسخهٔ Ubuntu شما فعال باشد. خطای c0000135 می‌تواند از DLL دیگری هم باشد؛ اگر wine32 از قبل نصب بود یا MetaEditor فایل PE32+ بود، خروجی Wine و فایل Ramon.log را بررسی کنید. پس از رفع Wine فرمان --mt5-only کافی است.
+اگر خروجی file برابر PE32 بود، wine32:i386 ممکن است لازم باشد؛ **تا وقتی نسخه‌های مخزن‌های APT یکسان نیستند آن را نصب نکنید**. برای نمونه، انتخاب libgcc-s1:amd64 نسخهٔ questing و libgcc-s1:i386 نسخهٔ noble باعث شکست حل وابستگی می‌شود و با نصب اجباری یا پایین‌آوردن نسخهٔ کتابخانه‌های اصلی نباید حل شود. پیش از هر نصب، نسخهٔ سیستم، منبع بسته‌ها و فایل مخزن‌ها را بخوانید:
+
+~~~bash
+. /etc/os-release; printf 'OS=%s CODENAME=%s\n' "$PRETTY_NAME" "$VERSION_CODENAME"
+apt-cache policy libgcc-s1:amd64 libgcc-s1:i386 wine32:i386
+grep -RniE 'noble|questing|cloudflareclient|Architectures:' \
+  /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null
+~~~
+
+APT باید نسخه‌های سازگار از **همان نسخهٔ Ubuntu** را برای amd64 و i386 ببیند. خطای «pkg.cloudflareclient.com questing Release» مشکل دیگری است: آن مخزن نسخهٔ questing را منتشر نمی‌کند؛ ابتدا فایل مخزن مربوطه را شناسایی کنید و برای رفع خطای APT فقط همان مخزن ناسازگار را اصلاح یا غیرفعال کنید. این کار مشکل مخزن‌های مخلوط Ubuntu را به‌تنهایی برطرف نمی‌کند. پس از اصلاح منابع، تغییرات پیشنهادی **apt -s install wine32:i386** را بررسی کنید؛ اگر حذف Wine یا تنزل کتابخانه‌های اصلی پیشنهاد شد، نصب را انجام ندهید. خطای c0000135 می‌تواند از DLL دیگری هم باشد؛ اگر wine32 از قبل نصب بود یا MetaEditor فایل PE32+ بود، خروجی Wine و فایل Ramon.log را بررسی کنید. پس از رفع Wine فرمان --mt5-only کافی است.
+
+راه جایگزین بدون تغییر بسته‌های Ubuntu: اگر MetaEditor از داخل MT5 باز می‌شود، فایل کپی‌شدهٔ MQL5/Experts/Ramon/Ramon.mq5 را در آن باز کنید و F7 بزنید. تنها پس از کامپایل موفق و نمایش صفر خطا، اکسپرت را به نمودار وصل کنید؛ EnableLiveTrading همچنان false بماند.
 
 اگر پردازشگر گرافیکی CUDA و نصب سازگار PyTorch دارید، RAMON_DEVICE=cuda را برای آزمون اولیه بگذارید؛ حالت پیش‌فرض CPU است. اگر اسکریپت MetaEditor را پیدا نکرد، می‌توان فایل mt5/Ramon.mq5 را دستی به MQL5/Experts/Ramon/ کپی کرد و در MetaEditor با F7 کامپایل کرد.
 
