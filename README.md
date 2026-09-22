@@ -357,3 +357,8 @@ Ramon همچنین دو فایل پایدار در `FILE_COMMON` می‌سازد
 دکمهٔ **COPY DIAGNOSTIC** ابتدا فایل تشخیصی را refresh می‌کند و سپس همان متن را در Clipboard ویندوز/Wine کپی می‌کند. دسترسی Clipboard از WinAPI استفاده می‌کند؛ بنابراین برای خودِ کپی باید در Properties اکسپرت، بخش Dependencies/Common گزینهٔ **Allow DLL imports** فعال باشد. اگر DLL import غیرفعال باشد، معامله و فایل diagnostic همچنان کار می‌کنند و فقط کپی Clipboard انجام نمی‌شود. این دکمه هیچ سفارشی ارسال نمی‌کند.
 
 
+
+
+### خطای ذخیرهٔ تاریخچه و دسترسی پوشهٔ data
+
+ذخیرهٔ تاریخچه برای یادگیری از v0.19 به بعد best-effort است و خرابی یا permission آن دیگر پاسخ `/decision` را به HTTP 503 تبدیل نمی‌کند. وضعیت `/health` فیلدهای `history_enabled`، `history_last_error` و `history_last_persisted_bar` را نشان می‌دهد. روی bind mount محلی، پوشه‌های `data/` و `checkpoints/` باید برای UID/GID کانتینر Ramon قابل‌نوشتن باشند.

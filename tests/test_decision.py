@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 
 from ramon.core import Bar, Forecast, Market, Settings, evaluate
 from ramon.replay import replay
-from ramon.server import CachedForecaster, serve
+from ramon.server import CachedForecaster, persist_market_safely, serve
 from ramon.model import ChronosForecaster
 
 
@@ -128,6 +128,14 @@ class DecisionTests(unittest.TestCase):
         result = replay(history, [40] * 262, self.model, start=256, settings=Settings(horizon=4))
         self.assertEqual((result.buys, result.wins, result.losses), (1, 0, 1))
         self.assertEqual(result.net_r, -1.0)
+
+    def test_history_persistence_failure_does_not_fail_decision_path(self) -> None:
+        from unittest.mock import patch
+
+        with patch("ramon.server.persist_market", side_effect=PermissionError("read-only")):
+            error = persist_market_safely("/data/ramon_history.sqlite3", self.market)
+        self.assertIn("PermissionError", error)
+        self.assertIn("read-only", error)
 
     def test_cached_forecaster_reuses_same_completed_m15_context(self) -> None:
         base = FixedModel(Forecast(99.0, 103.0, 105.0))

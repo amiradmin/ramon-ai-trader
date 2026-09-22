@@ -12,6 +12,15 @@ from .history import persist_market
 from .model import ChronosForecaster, model_name
 
 
+def persist_market_safely(db: str, market: Market) -> str:
+    """Best-effort learning telemetry; never make a trading decision fail."""
+    try:
+        persist_market(db, market)
+    except Exception as exc:
+        return f"{type(exc).__name__}: {exc}"
+    return ""
+
+
 class CachedForecaster:
     """Reuse the Chronos forecast while the completed M15 context is unchanged."""
 
@@ -35,6 +44,10 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
     cached_model = CachedForecaster(model)
     history_db = os.getenv("RAMON_HISTORY_DB", "").strip()
     last_persisted_bar: dict[str, int] = {}
+    history_status: dict[str, object] = {
+        "last_error": "",
+        "last_persisted_bar": 0,
+    }
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -48,6 +61,9 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     "model": model.model_id,
                     "forecast_context": "completed_m15_cached",
                     "live_quote_decisions": True,
+                    "history_enabled": bool(history_db),
+                    "history_last_error": str(history_status["last_error"]),
+                    "history_last_persisted_bar": int(history_status["last_persisted_bar"]),
                 },
             )
 
@@ -67,8 +83,16 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     key = f"{market.symbol}:{market.timeframe}"
                     newest = market.bars[-1].time
                     if last_persisted_bar.get(key) != newest:
-                        persist_market(history_db, market)
-                        last_persisted_bar[key] = newest
+                        history_error = persist_market_safely(history_db, market)
+                        history_status["last_error"] = history_error
+                        if history_error:
+                            print(
+                                f"Ramon history persistence warning: {history_error}",
+                                flush=True,
+                            )
+                        else:
+                            last_persisted_bar[key] = newest
+                            history_status["last_persisted_bar"] = newest
                 with guard:
                     result = evaluate(market, cached_model, settings)
                 self.reply(200, result.to_dict())
