@@ -13,6 +13,7 @@ from ramon.ensemble import (
     BinaryLogisticModel, EnsembleCoordinator, ENTRY_FEATURES, META_FEATURES,
     META_BASE_FEATURES, REGIME_FEATURES,
 )
+from ramon.news import NEWS_FEATURES
 from ramon.history import ensure_history_db, persist_trade_outcome
 from ramon.train_roles import (
     Example, load_trade_examples, promotion_gate, temporal_windows, train_bundle,
@@ -30,7 +31,8 @@ def constant_model(names: tuple[str, ...], probability: float) -> BinaryLogistic
 
 def bundle(root: Path, probability: float = 0.5, **metadata) -> str:
     models = {role: constant_model(names, probability) for role, names in
-              (("regime", REGIME_FEATURES), ("entry", ENTRY_FEATURES), ("meta", META_FEATURES))}
+              (("regime", REGIME_FEATURES), ("entry", ENTRY_FEATURES),
+               ("news", NEWS_FEATURES), ("meta", META_FEATURES))}
     return stage_bundle(root, models, {"chronos_model": "test/model", "symbol": "XAUUSD_l",
                                       "trade_threshold": 0.65, "promotion_gate_passed": True, **metadata})
 
@@ -114,23 +116,25 @@ def test_promotion_rejects_regression_even_when_accuracy_is_high():
     assert "probability_quality_worse_than_incumbent" in reasons
 
 
-def seed_trade(db: Path, index: int, *, chronos_model="test/model", schema=2) -> Example:
+def seed_trade(db: Path, index: int, *, chronos_model="test/model", schema=3) -> Example:
     time = 1_800_000_000 + index * 7200
     positive = index % 2
     x = 2.0 if positive else 0.2
     key = f"{index:016x}"
     features = {"regime": {name: x for name in REGIME_FEATURES},
                 "entry": {name: x for name in ENTRY_FEATURES},
+                "news": {name: x for name in NEWS_FEATURES},
                 "meta_base": {name: x for name in META_BASE_FEATURES}}
     with sqlite3.connect(db) as conn:
         conn.execute("""INSERT INTO decision_samples
             (captured,symbol,signal_bar_time,mid,spread,atr,direction,base_decision,
-             regime_features,entry_features,meta_base_features,sample_key,chronos_model,
+             regime_features,entry_features,news_features,meta_base_features,sample_key,chronos_model,
              schema_version,quote_time,final_decision)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
              (time, "XAUUSD_l", time-900, 100, .1, 1, "BUY", "BUY",
               json.dumps(features["regime"]), json.dumps(features["entry"]),
-              json.dumps(features["meta_base"]), key, chronos_model, schema, time, "BUY"))
+              json.dumps(features["news"]), json.dumps(features["meta_base"]),
+              key, chronos_model, schema, time, "BUY"))
     payload = {"sample_key": key, "trade_key": f"real-account:{index}", "symbol": "XAUUSD_l",
                "direction": "BUY", "opened": time + 1, "closed": time + 900,
                "net_units": 10 if positive else -10, "initial_risk_units": 10,
@@ -181,6 +185,7 @@ def test_full_training_promotes_frozen_roles_then_requires_fresh_holdout(tmp_pat
     assert manifest["regime_label_end"] < manifest["meta_start"]
     assert manifest["training_label_end"] < manifest["holdout_start"]
     assert models["entry"].metadata["last_label_end"] < manifest["meta_start"]
+    assert models["news"].metadata["last_label_end"] < manifest["meta_start"]
     assert models["meta"].metadata["last_label_end"] < manifest["holdout_start"]
     assert report["candidate"]["net_r"] > report["chronos_baseline"]["net_r"]
     again = train_bundle(db=db, symbol="XAUUSD_l", chronos_model="test/model", out=root,
