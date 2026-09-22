@@ -24,7 +24,7 @@ def test_live_account_session_lock() -> None:
     assert "input bool EnableLiveTrading = false" in source
     assert "LockedAccountLogin=current_login" in source
     assert "bool AccountLockHealthy()" in source
-    assert 'StatusLine="Account/server lock mismatch"' in source
+    assert 'reason="BLOCKED: account/server lock mismatch"' in source
     assert "RiskPerTradeUSD = 0.06" in source
 
 
@@ -102,8 +102,8 @@ def test_cent_account_dashboard_converts_units_to_usd() -> None:
     assert "double AccountUnitsToUSD(const double units)" in source
     assert "bool MinimumLotExceedsRiskBudget()" in source
     assert '"AccountType: "+AccountTypeText()+" (configured)"' in source
-    assert '"BalanceUSDApprox: "+DoubleToString(AccountUnitsToUSD(AccountInfoDouble(ACCOUNT_BALANCE)),2)' in source
-    assert '"MinExecutableRiskUSD: "+DoubleToString(AccountUnitsToUSD(LastMinimumLotStopLossUnits),4)' in source
+    assert '"  BalanceUSDApprox: "+DoubleToString(AccountUnitsToUSD(AccountInfoDouble(ACCOUNT_BALANCE)),2)' in source
+    assert '"  MinExecutableRiskUSD: "+DoubleToString(AccountUnitsToUSD(LastMinimumLotStopLossUnits),4)' in source
     assert '"TRADE BLOCKED: min lot > risk budget"' in source
     assert '"Min executable risk: $"' in source
     assert '"balance_usd_approx"' in source
