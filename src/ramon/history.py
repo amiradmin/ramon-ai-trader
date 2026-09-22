@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from math import isfinite
+import re
 from pathlib import Path
 
 from .core import Bar, Market
@@ -47,6 +49,21 @@ def ensure_history_db(db: str | Path) -> Path:
     with sqlite3.connect(path) as conn:
         conn.execute(HISTORY_SCHEMA)
         conn.execute(DECISION_SAMPLE_SCHEMA)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(decision_samples)")}
+        for name, definition in {
+            "sample_key": "TEXT", "chronos_model": "TEXT", "schema_version": "INTEGER DEFAULT 1",
+            "quote_time": "INTEGER", "stop_distance": "REAL", "target_distance": "REAL",
+            "final_decision": "TEXT", "bundle_id": "TEXT",
+        }.items():
+            if name not in columns:
+                conn.execute(f"ALTER TABLE decision_samples ADD COLUMN {name} {definition}")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_sample_key ON decision_samples(sample_key)")
+        conn.execute("""CREATE TABLE IF NOT EXISTS trade_outcomes (
+            trade_key TEXT PRIMARY KEY, sample_key TEXT NOT NULL UNIQUE, symbol TEXT NOT NULL,
+            direction TEXT NOT NULL, opened INTEGER NOT NULL, closed INTEGER NOT NULL,
+            net_units REAL NOT NULL, initial_risk_units REAL NOT NULL,
+            net_r REAL NOT NULL, exit_reason TEXT NOT NULL, received INTEGER NOT NULL
+        )""")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_history_symbol_tf_time "
             "ON history_bars(symbol,timeframe,time)"
@@ -109,18 +126,26 @@ def persist_decision_sample(
     regime_features: dict[str, float],
     entry_features: dict[str, float],
     meta_base_features: dict[str, float],
-) -> None:
+    sample_key: str | None = None,
+    chronos_model: str | None = None,
+    quote_time: int | None = None,
+    stop_distance: float | None = None,
+    target_distance: float | None = None,
+    final_decision: str | None = None,
+    bundle_id: str = "",
+) -> bool:
     """Persist one live inference sample for later role-model training."""
     path = ensure_history_db(db)
     mid = (market.bid + market.ask) / 2.0
     spread = market.ask - market.bid
     with sqlite3.connect(path, timeout=10) as conn:
-        conn.execute(
+        cursor = conn.execute(
             """
             INSERT OR IGNORE INTO decision_samples
                 (captured,symbol,signal_bar_time,mid,spread,atr,direction,
-                 base_decision,regime_features,entry_features,meta_base_features)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                 base_decision,regime_features,entry_features,meta_base_features,
+                 sample_key,chronos_model,schema_version,quote_time,stop_distance,target_distance,final_decision,bundle_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 int(captured),
@@ -134,8 +159,11 @@ def persist_decision_sample(
                 json.dumps(regime_features, separators=(",", ":")),
                 json.dumps(entry_features, separators=(",", ":")),
                 json.dumps(meta_base_features, separators=(",", ":")),
+                sample_key, chronos_model, 2 if sample_key and quote_time else 1, quote_time,
+                stop_distance, target_distance, final_decision, bundle_id,
             ),
         )
+        return cursor.rowcount == 1
 
 
 def decision_sample_count(db: str | Path, symbol: str = "XAUUSD_l") -> int:
@@ -178,3 +206,36 @@ def load_bars(db: str | Path, symbol: str = "XAUUSD_l") -> tuple[tuple[Bar, ...]
     if not bars:
         raise ValueError(f"no {symbol}/M15 history in {db}")
     return bars, spreads
+
+
+def persist_trade_outcome(db: str | Path, payload: dict[str, object], received: int) -> None:
+    """Idempotently reconcile a fully closed MT5 position, including all deal costs.
+
+    The sample join is checked again when training; out-of-order delivery is allowed.
+    Raw account-unit profit and risk use the same denomination, so R is cent-safe.
+    """
+    sample_key = str(payload["sample_key"])
+    if not re.fullmatch(r"[a-f0-9]{16}", sample_key):
+        raise ValueError("invalid sample key")
+    trade_key, symbol, direction = (str(payload[k]) for k in ("trade_key", "symbol", "direction"))
+    opened, closed = int(payload["opened"]), int(payload["closed"])
+    net, risk = float(payload["net_units"]), float(payload["initial_risk_units"])
+    if (not trade_key or len(trade_key) > 256 or not symbol.startswith("XAUUSD")
+            or direction not in {"BUY", "SELL"} or not 0 < opened <= closed
+            or not isfinite(net) or not isfinite(risk) or risk <= 0 or not isfinite(net / risk)):
+        raise ValueError("invalid closed trade outcome")
+    path = ensure_history_db(db)
+    with sqlite3.connect(path, timeout=10) as conn:
+        conn.execute("""INSERT INTO trade_outcomes
+            (trade_key,sample_key,symbol,direction,opened,closed,net_units,initial_risk_units,
+             net_r,exit_reason,received) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(trade_key) DO UPDATE SET
+                net_units=excluded.net_units, initial_risk_units=excluded.initial_risk_units,
+                net_r=excluded.net_r, closed=excluded.closed, exit_reason=excluded.exit_reason,
+                received=excluded.received
+            WHERE trade_outcomes.sample_key=excluded.sample_key
+              AND trade_outcomes.symbol=excluded.symbol
+              AND trade_outcomes.direction=excluded.direction
+              AND trade_outcomes.opened=excluded.opened""",
+            (trade_key, sample_key, symbol, direction, opened, closed, net, risk,
+             net / risk, str(payload.get("exit_reason", "UNKNOWN")), int(received)))

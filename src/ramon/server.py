@@ -7,10 +7,11 @@ import os
 from pathlib import Path
 from threading import Lock
 import time
+from uuid import uuid4
 
 from .core import Forecast, Market, Settings, evaluate
 from .ensemble import EnsembleCoordinator, dominant_direction
-from .history import persist_decision_sample, persist_market
+from .history import persist_decision_sample, persist_market, persist_trade_outcome
 from .model import ChronosForecaster, model_name
 
 
@@ -46,7 +47,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
     cached_model = CachedForecaster(model)
     history_db = os.getenv("RAMON_HISTORY_DB", "").strip()
     ensemble_dir = os.getenv("RAMON_ENSEMBLE_DIR", "/checkpoints/ensemble").strip()
-    ensemble = EnsembleCoordinator(ensemble_dir)
+    ensemble = EnsembleCoordinator(ensemble_dir, model.model_id)
     last_persisted_bar: dict[str, int] = {}
     history_status: dict[str, object] = {
         "last_error": "",
@@ -73,7 +74,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
             )
 
         def do_POST(self) -> None:
-            if self.path != "/decision":
+            if self.path not in {"/decision", "/trades"}:
                 self.send_error(404)
                 return
             try:
@@ -83,7 +84,16 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 payload = json.loads(self.rfile.read(length))
                 if not isinstance(payload, dict):
                     raise ValueError("request must be a JSON object")
+                if self.path == "/trades":
+                    if not history_db:
+                        raise ValueError("history persistence is disabled")
+                    persist_trade_outcome(history_db, payload, int(time.time()))
+                    self.reply(200, {"saved": True})
+                    return
                 market = Market.from_dict(payload)
+                quote_time = int(payload["quote_time"]) if "quote_time" in payload else None
+                if quote_time is not None and not market.bars[-1].time + 900 <= quote_time <= market.bars[-1].time + 1830:
+                    raise ValueError("quote time is inconsistent with completed M15 bars")
 
                 if history_db:
                     key = f"{market.symbol}:{market.timeframe}"
@@ -106,10 +116,13 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
 
                 response = result.to_dict()
                 response.update(ensemble_payload)
+                sample_key = uuid4().hex[:16]
+                response["sample_key"] = sample_key
+                response["sample_saved"] = 0
 
                 if history_db:
                     try:
-                        persist_decision_sample(
+                        saved = persist_decision_sample(
                             history_db,
                             captured=int(time.time()),
                             market=market,
@@ -120,7 +133,15 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                             regime_features=feature_snapshot["regime"],
                             entry_features=feature_snapshot["entry"],
                             meta_base_features=feature_snapshot["meta_base"],
+                            sample_key=sample_key,
+                            chronos_model=model.model_id,
+                            quote_time=quote_time,
+                            stop_distance=result.stop_distance,
+                            target_distance=result.target_distance,
+                            final_decision=str(response["decision"]),
+                            bundle_id=ensemble.bundle_id,
                         )
+                        response["sample_saved"] = int(saved)
                     except Exception as exc:
                         print(
                             f"Ramon decision-sample persistence warning: {type(exc).__name__}: {exc}",
@@ -128,7 +149,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         )
 
                 self.reply(200, response)
-            except (ValueError, TypeError, json.JSONDecodeError) as exc:
+            except (ValueError, TypeError, KeyError, OverflowError, json.JSONDecodeError) as exc:
                 self.reply(400, {"error": str(exc)})
             except Exception as exc:
                 print(f"Ramon decision failure: {type(exc).__name__}: {exc}", flush=True)

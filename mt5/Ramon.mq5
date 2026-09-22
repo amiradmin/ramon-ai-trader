@@ -1,5 +1,5 @@
 #property strict
-#property version "0.23"
+#property version "0.24"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -54,6 +54,12 @@ datetime LastEntrySignalBar = 0;
 string StatusLine = "Starting";
 string LastModelDecision = "NONE";
 string LastModelReason = "NONE";
+string LastSampleKey = "";
+bool LastSampleSaved = false;
+string LastBundleId = "";
+string TradeLearningStatus = "COLLECTING REAL TRADES";
+datetime LastTradeSync = 0;
+ulong SyncedTradeIds[];
 string LastBaseDecision = "NONE";
 string LastBaseReason = "NONE";
 bool LastEnsembleReady = false;
@@ -74,7 +80,7 @@ double LastSellEdge = 0.0;
 double LastMinimumEdge = 0.0;
 double LastUncertainty = 0.0;
 double LastSignalStrength = 0.0;
-double LastMinimumStrength = 0.23;
+double LastMinimumStrength = 0.20;
 bool LastIntrabarConfirmed = false;
 string LastIntrabarDirection = "NONE";
 double LastIntrabarMoveAtr = 0.0;
@@ -291,7 +297,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.23\n"
+      +"EA version: 0.24\n"
       +"Captured: "+TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS)+"\n"
       +"Symbol: "+_Symbol+"  Timeframe: M15\n"
       +"Bid: "+(tick_ok ? DoubleToString(tick.bid,_Digits) : "NA")
@@ -305,6 +311,8 @@ string BuildDiagnosticText()
       +"  Last request: "+(LastDecisionRequestTime>0
          ? TimeToString(LastDecisionRequestTime,TIME_DATE|TIME_SECONDS) : "NONE")+"\n"
       +"Decision: "+LastModelDecision+"  Reason: "+LastModelReason+"\n"
+      +"DecisionID: "+LastSampleKey+"  Saved: "+BoolText(LastSampleSaved)+"  Bundle: "+LastBundleId+"\n"
+      +"TradeLearning: "+TradeLearningStatus+"\n"
       +"BaseDecision: "+LastBaseDecision+"  BaseReason: "+LastBaseReason+"\n"
       +"RoleModels: "+(LastEnsembleReady ? "READY" : "LEARNING")
       +"  Active: "+BoolText(LastEnsembleActive)
@@ -484,7 +492,7 @@ void DrawDashboard()
    color risk_gate_color=(RiskGateBlocked() ? clrTomato : clrLime);
 
    UiRect("PANEL",12,24,520,524,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.23",28,36,clrWhite,12);
+   UiLabel("TITLE","RAMON AI TRADER  v0.24",28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
 
@@ -676,8 +684,6 @@ bool BuildRequest(string &payload,datetime &bar_time)
    { StatusLine="Bad tick"; return false; }
    if(TimeCurrent()-tick.time>30)
    { StatusLine="Stale tick"; return false; }
-   if((int)SymbolInfoInteger(_Symbol,SYMBOL_SPREAD)>MaxSpreadPoints)
-   { StatusLine="Spread too high"; return false; }
    datetime current=iTime(_Symbol,PERIOD_M15,0);
    if(current<=bar_time || current-bar_time>1800)
    { StatusLine="Stale completed bar"; return false; }
@@ -711,7 +717,7 @@ bool BuildRequest(string &payload,datetime &bar_time)
             +",\"close\":"+DoubleToString(micro[j].close,_Digits)+"}";
       }
    }
-   payload+="]}";
+   payload+="],\"quote_time\":"+IntegerToString((long)tick.time)+"}";
    return true;
 }
 
@@ -958,6 +964,151 @@ void AppendTradeCsv(const ulong deal)
    FileClose(handle);
 }
 
+bool ValidSampleKey(const string key)
+{
+   if(StringLen(key)!=16) return false;
+   for(int i=0;i<16;i++)
+   {
+      ushort c=StringGetCharacter(key,i);
+      if(!((c>=48 && c<=57) || (c>=97 && c<=102))) return false;
+   }
+   return true;
+}
+
+string JsonEscape(string value)
+{
+   StringReplace(value,"\\","\\\\");
+   StringReplace(value,"\"","\\\"");
+   StringReplace(value,"\r","\\r");
+   StringReplace(value,"\n","\\n");
+   StringReplace(value,"\t","\\t");
+   return value;
+}
+
+bool PositionIdOpen(const ulong identifier)
+{
+   for(int i=PositionsTotal()-1;i>=0;i--)
+   {
+      if(PositionGetTicket(i)==0) continue;
+      if((ulong)PositionGetInteger(POSITION_IDENTIFIER)==identifier) return true;
+   }
+   return false;
+}
+
+bool ClosedTradePayload(const ulong identifier,string &payload)
+{
+   if(PositionIdOpen(identifier) || !HistorySelectByPosition(identifier)) return false;
+   string sample="",direction="",exit_reason="";
+   datetime opened=0,closed=0;
+   double in_volume=0.0,out_volume=0.0,net=0.0,risk=0.0;
+   // Do not call HistoryDealSelect here: it resets the selected position history.
+   for(int i=0;i<HistoryDealsTotal();i++)
+   {
+      ulong deal=HistoryDealGetTicket(i);
+      if(deal==0) return false;
+      if(HistoryDealGetString(deal,DEAL_SYMBOL)!=_Symbol) continue;
+      net+=HistoryDealGetDouble(deal,DEAL_PROFIT)
+         +HistoryDealGetDouble(deal,DEAL_COMMISSION)
+         +HistoryDealGetDouble(deal,DEAL_SWAP)
+         +HistoryDealGetDouble(deal,DEAL_FEE);
+      long type=HistoryDealGetInteger(deal,DEAL_TYPE);
+      if(type!=DEAL_TYPE_BUY && type!=DEAL_TYPE_SELL) continue;
+      long entry=HistoryDealGetInteger(deal,DEAL_ENTRY);
+      datetime at=(datetime)HistoryDealGetInteger(deal,DEAL_TIME);
+      double volume=HistoryDealGetDouble(deal,DEAL_VOLUME);
+      if(entry==DEAL_ENTRY_IN)
+      {
+         if((ulong)HistoryDealGetInteger(deal,DEAL_MAGIC)!=MagicNumber) return false;
+         string comment=HistoryDealGetString(deal,DEAL_COMMENT);
+         if(StringFind(comment,"Ramon:")!=0) return false;
+         string key=StringSubstr(comment,6,16);
+         string side=(type==DEAL_TYPE_BUY ? "BUY" : "SELL");
+         if(!ValidSampleKey(key) || (sample!="" && sample!=key)
+            || (direction!="" && direction!=side)) return false;
+         sample=key;
+         direction=side;
+         if(opened==0 || at<opened) opened=at;
+         in_volume+=volume;
+         ulong order=(ulong)HistoryDealGetInteger(deal,DEAL_ORDER);
+         double stop=HistoryOrderGetDouble(order,ORDER_SL);
+         double fill=HistoryDealGetDouble(deal,DEAL_PRICE);
+         double loss=0.0;
+         ENUM_ORDER_TYPE order_side=(type==DEAL_TYPE_BUY ? ORDER_TYPE_BUY : ORDER_TYPE_SELL);
+         if(stop<=0.0 || !OrderCalcProfit(order_side,_Symbol,volume,fill,stop,loss) || loss>=0.0)
+            return false;
+         risk+=MathAbs(loss);
+      }
+      else if(entry==DEAL_ENTRY_OUT || entry==DEAL_ENTRY_OUT_BY)
+      {
+         out_volume+=volume;
+         if(at>=closed)
+         {
+            closed=at;
+            exit_reason=EnumToString((ENUM_DEAL_REASON)HistoryDealGetInteger(deal,DEAL_REASON));
+         }
+      }
+      else return false; // Reversals/netting multiple decisions have ambiguous attribution.
+   }
+   if(sample=="" || risk<=0.0 || closed<opened || in_volume<=0.0
+      || MathAbs(in_volume-out_volume)>0.000001) return false;
+   string trade_key=AccountInfoString(ACCOUNT_SERVER)+":"
+      +IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN))+":"+IntegerToString((long)identifier);
+   payload="{\"trade_key\":\""+JsonEscape(trade_key)+"\",\"sample_key\":\""+sample
+      +"\",\"symbol\":\""+_Symbol+"\",\"direction\":\""+direction
+      +"\",\"opened\":"+IntegerToString((long)opened)+",\"closed\":"+IntegerToString((long)closed)
+      +",\"net_units\":"+DoubleToString(net,8)+",\"initial_risk_units\":"+DoubleToString(risk,8)
+      +",\"exit_reason\":\""+exit_reason+"\"}";
+   return true;
+}
+
+void SyncClosedTrades()
+{
+   if(!AccountLockHealthy() || AccountInfoInteger(ACCOUNT_TRADE_MODE)!=ACCOUNT_TRADE_MODE_REAL)
+      return;
+   datetime now=TimeCurrent();
+   if(LastTradeSync>0 && now-LastTradeSync<30) return;
+   LastTradeSync=now;
+   // Recover unsent outcomes after service/terminal restarts from broker history.
+   if(!HistorySelect(now-30*86400,now)) return;
+   ulong identifiers[];
+   for(int i=0;i<HistoryDealsTotal();i++)
+   {
+      ulong deal=HistoryDealGetTicket(i);
+      if(deal==0 || HistoryDealGetString(deal,DEAL_SYMBOL)!=_Symbol
+         || (ulong)HistoryDealGetInteger(deal,DEAL_MAGIC)!=MagicNumber
+         || HistoryDealGetInteger(deal,DEAL_ENTRY)!=DEAL_ENTRY_IN) continue;
+      ulong identifier=(ulong)HistoryDealGetInteger(deal,DEAL_POSITION_ID);
+      bool seen=false;
+      for(int j=0;j<ArraySize(identifiers);j++) if(identifiers[j]==identifier) seen=true;
+      for(int j=0;j<ArraySize(SyncedTradeIds);j++) if(SyncedTradeIds[j]==identifier) seen=true;
+      if(seen) continue;
+      int count=ArraySize(identifiers);
+      ArrayResize(identifiers,count+1);
+      identifiers[count]=identifier;
+   }
+   for(int i=0;i<ArraySize(identifiers);i++)
+   {
+      string payload="";
+      if(!ClosedTradePayload(identifiers[i],payload)) continue;
+      char request[],response[];
+      StringToCharArray(payload,request,0,WHOLE_ARRAY,CP_UTF8);
+      ArrayResize(request,ArraySize(request)-1);
+      string headers="";
+      string url=StringSubstr(ModelUrl,0,StringLen(ModelUrl)-StringLen("/decision"))+"/trades";
+      int code=WebRequest("POST",url,"Content-Type: application/json\r\n",
+         1000,request,response,headers);
+      if(code==200)
+      {
+         int count=ArraySize(SyncedTradeIds);
+         ArrayResize(SyncedTradeIds,count+1);
+         SyncedTradeIds[count]=identifiers[i];
+         TradeLearningStatus="SYNCED "+IntegerToString((long)identifiers[i]);
+      }
+      else TradeLearningStatus="RETRY HTTP "+IntegerToString(code);
+      return; // At most one bounded telemetry request per timer cycle.
+   }
+}
+
 void ManageOpenPosition()
 {
    ulong ticket;
@@ -978,10 +1129,9 @@ void OnTimer()
    { StatusLine="Terminal disconnected"; ShowStatus(); return; }
    ulong ticket;
    datetime opened;
-   if(ManagedPosition(ticket,opened))
-   { ManageOpenPosition(); ShowStatus(); return; }
-   if(OtherPositionOnSymbol())
-   { StatusLine="Another robot has a position on this symbol"; ShowStatus(); return; }
+   bool has_managed=ManagedPosition(ticket,opened);
+   if(has_managed) ManageOpenPosition(); // Exits always run before network telemetry.
+   SyncClosedTrades();
    datetime closed=iTime(_Symbol,PERIOD_M15,1);
    if(closed<=0)
       return;
@@ -998,6 +1148,8 @@ void OnTimer()
    { ShowStatus(); return; }
    string decision="",reason="",base_decision="",base_reason="",intrabar_direction="";
    double ensemble_ready=0.0,ensemble_active=0.0;
+   string sample_key="",bundle_id="";
+   double sample_saved=0.0;
    double regime_probability=-1.0,entry_probability=-1.0,meta_probability=-1.0;
    double signal_time=0.0,signal_bid=0.0,signal_ask=0.0,median=0.0,atr=0.0,stop_distance=0.0,target_distance=0.0;
    double forecast_low=0.0,forecast_high=0.0,edge=0.0,model_spread=0.0;
@@ -1009,6 +1161,10 @@ void OnTimer()
    double trend_min_path_atr=0.0,trend_min_consistency=0.0,trend_min_edge_fraction=0.0,trend_min_micro_move_atr=0.0;
    if(!JsonText(reply,"decision",decision)
       || !JsonText(reply,"reason",reason)
+      || !JsonText(reply,"sample_key",sample_key)
+      || !JsonNumber(reply,"sample_saved",sample_saved)
+      || !JsonText(reply,"ensemble_bundle",bundle_id)
+      || !ValidSampleKey(sample_key)
       || !JsonText(reply,"base_decision",base_decision)
       || !JsonText(reply,"base_reason",base_reason)
       || !JsonNumber(reply,"ensemble_ready",ensemble_ready)
@@ -1052,6 +1208,9 @@ void OnTimer()
       || (datetime)signal_time!=bar_time
       || (decision!="BUY" && decision!="SELL" && decision!="WAIT"))
    { StatusLine="Invalid/stale model response"; ShowStatus(); return; }
+   LastSampleKey=sample_key;
+   LastSampleSaved=(sample_saved>=0.5);
+   LastBundleId=bundle_id;
    LastModelDecision=decision;
    LastModelReason=reason;
    LastBaseDecision=base_decision;
@@ -1100,6 +1259,13 @@ void OnTimer()
    Print("Ramon ",TimeToString(bar_time)," ",decision," ",reason,
       " median=",DoubleToString(median,_Digits));
 
+   // Learning snapshots continue while positions exist; execution remains single-position.
+   if(ManagedPosition(ticket,opened))
+   { StatusLine=(LastSampleSaved ? "Managed position OPEN; learning snapshot saved" : "Managed position OPEN; snapshot storage failed"); ShowStatus(); return; }
+   if(OtherPositionOnSymbol())
+   { StatusLine="Another robot has a position on this symbol"; ShowStatus(); return; }
+   if(decision!="BUY" && decision!="SELL" && decision!="WAIT")
+   { StatusLine="Unknown model decision"; ShowStatus(); return; }
    if(decision=="WAIT" || !EnableLiveTrading)
    { ShowStatus(); return; }
    if(LastEntrySignalBar==bar_time)
@@ -1140,8 +1306,8 @@ void OnTimer()
    // The broker owns SL/TP immediately. No position is opened when the model is unavailable.
    bool submitted=(
       decision=="BUY"
-      ? Trade.Buy(volume,_Symbol,0.0,stop,target,"Ramon")
-      : Trade.Sell(volume,_Symbol,0.0,stop,target,"Ramon")
+      ? Trade.Buy(volume,_Symbol,0.0,stop,target,"Ramon:"+LastSampleKey)
+      : Trade.Sell(volume,_Symbol,0.0,stop,target,"Ramon:"+LastSampleKey)
    );
    uint retcode=Trade.ResultRetcode();
    if(!submitted || (retcode!=TRADE_RETCODE_DONE && retcode!=TRADE_RETCODE_PLACED))

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import json
 from math import exp, isfinite
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
+from typing import Mapping, Sequence
 
 from .core import Bar, Decision, Market, atr14
 
@@ -37,7 +37,6 @@ META_BASE_FEATURES = (
     "uncertainty_atr",
     "ai_trend_score",
     "ai_trend_consistency",
-    "base_trade",
 )
 
 META_FEATURES = META_BASE_FEATURES + ("regime_probability", "entry_probability")
@@ -55,7 +54,7 @@ class BinaryLogisticModel:
     @classmethod
     def load(cls, path: str | Path) -> BinaryLogisticModel:
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
-        return cls(
+        model = cls(
             feature_names=tuple(str(v) for v in raw["feature_names"]),
             means=tuple(float(v) for v in raw["means"]),
             scales=tuple(float(v) for v in raw["scales"]),
@@ -63,6 +62,16 @@ class BinaryLogisticModel:
             bias=float(raw["bias"]),
             metadata=dict(raw.get("metadata", {})),
         )
+        count = len(model.feature_names)
+        if not count or len(set(model.feature_names)) != count:
+            raise ValueError("invalid feature names")
+        if any(len(v) != count for v in (model.means, model.scales, model.weights)):
+            raise ValueError("model vector length mismatch")
+        if not all(isfinite(v) for v in (*model.means, *model.scales, *model.weights, model.bias)):
+            raise ValueError("non-finite model parameters")
+        if any(v <= 0 for v in model.scales):
+            raise ValueError("invalid model scales")
+        return model
 
     def save(self, path: str | Path) -> None:
         target = Path(path)
@@ -90,6 +99,8 @@ class BinaryLogisticModel:
                 raise ValueError(f"non-finite model feature {name}")
             values.append((value - mean) / scale)
         z = self.bias + sum(w * x for w, x in zip(self.weights, values))
+        if not isfinite(z):
+            raise ValueError("non-finite model score")
         if z >= 0:
             return 1.0 / (1.0 + exp(-min(z, 60.0)))
         ez = exp(max(z, -60.0))
@@ -116,6 +127,8 @@ def train_binary_logistic(
         raise ValueError("binary training requires both classes")
     names = tuple(feature_names)
     columns = [[float(row[name]) for row in rows] for name in names]
+    if not names or any(not isfinite(value) for column in columns for value in column):
+        raise ValueError("invalid training features")
     means = tuple(_mean(column) for column in columns)
     scales = tuple(
         max((_mean([(value - mean) ** 2 for value in column])) ** 0.5, 1e-9)
@@ -223,26 +236,37 @@ def meta_base_features(market: Market, decision: Decision) -> dict[str, float]:
         "uncertainty_atr": decision.uncertainty / atr,
         "ai_trend_score": decision.ai_trend_score,
         "ai_trend_consistency": decision.ai_trend_consistency,
-        "base_trade": 1.0 if decision.decision in {"BUY", "SELL"} else 0.0,
     }
 
 
 def dominant_direction(decision: Decision) -> str:
+    if max(decision.buy_edge, decision.sell_edge) <= 0:
+        return "NONE"
     return "BUY" if decision.buy_edge >= decision.sell_edge else "SELL"
 
 
 class EnsembleCoordinator:
     """Three lightweight learned roles around Chronos: regime, entry and meta decision."""
 
-    def __init__(self, root: str | Path) -> None:
+    def __init__(self, root: str | Path, chronos_model: str | None = None) -> None:
         self.root = Path(root)
-        self.regime = self._load_optional("regime.json")
-        self.entry = self._load_optional("entry.json")
-        self.meta = self._load_optional("meta.json")
+        self.regime = self.entry = self.meta = None
+        self.bundle_id = ""
+        self.symbol = ""
+        self.error = ""
+        self.threshold = 0.65
+        if (self.root / "active.json").exists():
+            from .bundles import load_active_bundle
 
-    def _load_optional(self, name: str) -> BinaryLogisticModel | None:
-        path = self.root / name
-        return BinaryLogisticModel.load(path) if path.is_file() else None
+            try:
+                manifest, models = load_active_bundle(self.root, chronos_model)
+                self.regime, self.entry, self.meta = (models[name] for name in ("regime", "entry", "meta"))
+                self.bundle_id = str(manifest["bundle_id"])
+                self.symbol = str(manifest["symbol"])
+                self.threshold = float(manifest["trade_threshold"])
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                self.regime = self.entry = self.meta = None
+                self.error = f"invalid_role_bundle: {exc}"
 
     @property
     def ready(self) -> bool:
@@ -254,6 +278,9 @@ class EnsembleCoordinator:
             "regime_model_ready": self.regime is not None,
             "entry_model_ready": self.entry is not None,
             "meta_model_ready": self.meta is not None,
+            "ensemble_bundle": self.bundle_id,
+            "ensemble_error": self.error,
+            "ensemble_mode": "meta" if self.ready else ("blocked" if self.error else "bootstrap_chronos"),
         }
 
     def assess(self, market: Market, decision: Decision) -> tuple[dict[str, object], dict[str, dict[str, float]]]:
@@ -268,6 +295,9 @@ class EnsembleCoordinator:
         final_reason = decision.reason
         ensemble_active = 0
 
+        if self.error:
+            final_decision, final_reason = "WAIT", "invalid_role_bundle"
+
         if self.ready:
             meta_features = dict(m_base)
             meta_features["regime_probability"] = regime_probability
@@ -277,12 +307,12 @@ class EnsembleCoordinator:
             direction = dominant_direction(decision)
             dominant_edge = max(decision.buy_edge, decision.sell_edge)
 
-            if meta_probability >= 0.65 and dominant_edge > 0:
+            if meta_probability >= self.threshold and dominant_edge > 0 and market.symbol == self.symbol:
                 final_decision = direction
                 final_reason = (
                     "ensemble_meta_up" if direction == "BUY" else "ensemble_meta_down"
                 )
-            elif meta_probability <= 0.35:
+            else:
                 final_decision = "WAIT"
                 final_reason = "ensemble_meta_veto"
 
@@ -296,6 +326,8 @@ class EnsembleCoordinator:
             "regime_probability": regime_probability,
             "entry_probability": entry_probability,
             "meta_probability": meta_probability,
+            "edge": max(decision.buy_edge, decision.sell_edge) if final_decision in {"BUY", "SELL"} else 0.0,
+            "ensemble_bundle": self.bundle_id,
         }
         feature_snapshot = {
             "regime": r_features,
