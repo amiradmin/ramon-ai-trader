@@ -11,7 +11,7 @@ from .model import ChronosForecaster, model_name
 
 
 def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) -> None:
-    """Serve requests on loopback; inference is serialized for one local EA."""
+    """Serve one EA at a time; containers can opt into an internal network bind."""
     guard = Lock()
 
     class Handler(BaseHTTPRequestHandler):
@@ -50,8 +50,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
             self.end_headers()
             self.wfile.write(body)
 
-    if host not in {"127.0.0.1", "localhost"}:
-        raise ValueError("only loopback binding is supported")
+    if host not in {"127.0.0.1", "localhost", "0.0.0.0"}:
+        raise ValueError("unsupported bind address")
     HTTPServer((host, port), Handler).serve_forever()
 
 
@@ -60,10 +60,11 @@ def main() -> None:
     parser.add_argument("--model", default=os.getenv("CHRONOS_MODEL", "autogluon/chronos-2-small"))
     parser.add_argument("--device", default=os.getenv("CHRONOS_DEVICE", "cpu"))
     parser.add_argument("--port", type=int, default=8012)
+    parser.add_argument("--host", default="127.0.0.1", choices=("127.0.0.1", "0.0.0.0"))
     args = parser.parse_args()
     checkpoint = model_name(args.model)
     model = ChronosForecaster(checkpoint, args.device)
-    serve("127.0.0.1", args.port, model, Settings())
+    serve(args.host, args.port, model, Settings())
 
 
 if __name__ == "__main__":
