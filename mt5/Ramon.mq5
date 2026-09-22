@@ -1,5 +1,5 @@
 #property strict
-#property version "0.27"
+#property version "0.28"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -32,7 +32,11 @@ input bool ConfirmMoneyUnitsPerUSD = false; // Must be true before live trading 
 input string ExpectedAccountCurrency = ""; // Optional exact ACCOUNT_CURRENCY check when non-empty.
 input double RiskPerTradeUSD = 0.06; // Preferred sizing budget.
 input bool AllowMinLotRiskOverride = true; // Permit broker minimum lot above preferred budget.
-input double MaxExecutableRiskUSD = 0.20; // Hard planned-risk cap for minimum-lot override.
+input double MaxExecutableRiskUSD = 0.20; // Absolute hard cap; dynamic sizing never exceeds it.
+input bool EnableDynamicRisk = true; // Use the learned Risk Model multiplier when promoted.
+input double MaxDynamicRiskMultiplier = 2.0; // Risk Model may never exceed this multiplier.
+input double MaxDailyLossPercent = 3.0; // Stop new entries after this Ramon-only realized daily drawdown.
+input bool RequireNonNegativeDayForRiskOn = true; // Do not lever above 1x while today's Ramon P/L is negative.
 input int MaxSpreadPoints = 50;
 input int MaxTradesPerDay = 20;
 input int MaximumHoldBars = 4;
@@ -68,6 +72,10 @@ double LastRegimeProbability = -1.0;
 double LastEntryProbability = -1.0;
 double LastNewsProbability = -1.0;
 double LastMetaProbability = -1.0;
+bool LastRiskModelReady = false;
+double LastRiskProbability = -1.0;
+double LastRiskMultiplier = 1.0;
+string LastRiskMode = "LEARNING";
 bool LastNewsSourceReady = false;
 bool LastNewsModelReady = false;
 double LastNewsSourceAgeSeconds = -1.0;
@@ -235,6 +243,56 @@ double AccountUnitsToUSD(const double units)
    return units/MoneyUnitsPerUSD;
 }
 
+double DailyNetAccountUnits()
+{
+   datetime now=TimeCurrent();
+   datetime start=StringToTime(TimeToString(now,TIME_DATE));
+   if(!HistorySelect(start,now))
+      return 0.0;
+   double total=0.0;
+   for(int i=0;i<HistoryDealsTotal();i++)
+   {
+      ulong deal=HistoryDealGetTicket(i);
+      if(deal==0) continue;
+      if(HistoryDealGetString(deal,DEAL_SYMBOL)!=_Symbol) continue;
+      if((ulong)HistoryDealGetInteger(deal,DEAL_MAGIC)!=MagicNumber) continue;
+      total+=HistoryDealGetDouble(deal,DEAL_PROFIT)
+         +HistoryDealGetDouble(deal,DEAL_COMMISSION)
+         +HistoryDealGetDouble(deal,DEAL_SWAP)
+         +HistoryDealGetDouble(deal,DEAL_FEE);
+   }
+   return total;
+}
+
+double DailyNetPercent()
+{
+   double daily=DailyNetAccountUnits();
+   double start_balance=AccountInfoDouble(ACCOUNT_BALANCE)-daily;
+   if(start_balance<=0.0)
+      return 0.0;
+   return 100.0*daily/start_balance;
+}
+
+double EffectiveRiskMultiplier()
+{
+   if(!EnableDynamicRisk || !LastRiskModelReady)
+      return 1.0;
+   double multiplier=MathMax(0.50,MathMin(MaxDynamicRiskMultiplier,LastRiskMultiplier));
+   if(RequireNonNegativeDayForRiskOn && DailyNetAccountUnits()<0.0 && multiplier>1.0)
+      multiplier=1.0;
+   return multiplier;
+}
+
+double EffectiveRiskBudgetUSD()
+{
+   return MathMin(MaxExecutableRiskUSD,RiskPerTradeUSD*EffectiveRiskMultiplier());
+}
+
+bool DailyLossStopTriggered()
+{
+   return MaxDailyLossPercent>0.0 && DailyNetPercent()<=-MaxDailyLossPercent;
+}
+
 bool MinimumLotExceedsRiskBudget()
 {
    return (
@@ -254,7 +312,7 @@ bool MinimumLotOverrideEligible()
    return (
       AllowMinLotRiskOverride
       && MoneyUnitsPerUSD>0.0
-      && MaxExecutableRiskUSD>=RiskPerTradeUSD
+      && MaxExecutableRiskUSD>=EffectiveRiskBudgetUSD()
       && LastMinimumLotStopLossUnits>LastRiskBudgetUnits+0.00001
       && LastMinimumLotStopLossUnits<=MaxExecutableRiskUnits()+0.00001
    );
@@ -307,7 +365,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.27\n"
+      +"EA version: 0.28\n"
       +"Captured: "+TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS)+"\n"
       +"Symbol: "+_Symbol+"  Timeframe: M15\n"
       +"Bid: "+(tick_ok ? DoubleToString(tick.bid,_Digits) : "NA")
@@ -336,6 +394,12 @@ string BuildDiagnosticText()
       +"  AgeSec: "+DoubleToString(LastNewsSourceAgeSeconds,0)
       +"  Event: "+LastNewsEventCountry+" "+LastNewsEventImpact+" "+LastNewsEventTitle
       +"  DeltaMin: "+DoubleToString(LastNewsEventDeltaMinutes,1)+"\n"
+      +"RiskModel: "+(LastRiskModelReady ? "READY" : "LEARNING")
+      +"  P: "+DoubleToString(LastRiskProbability,3)
+      +"  Mult: "+DoubleToString(EffectiveRiskMultiplier(),2)+"x"
+      +"  Mode: "+LastRiskMode
+      +"  EffectiveRiskUSD: "+DoubleToString(EffectiveRiskBudgetUSD(),4)
+      +"  DailyPnL: "+DoubleToString(DailyNetPercent(),2)+"%\n"
       +"Signal bar: "+(LastSignalBarTime>0 ? TimeToString(LastSignalBarTime,TIME_DATE|TIME_MINUTES) : "NONE")
       +"  Last closed: "+(closed>0 ? TimeToString(closed,TIME_DATE|TIME_MINUTES) : "NONE")+"\n"
       +"SignalBid: "+DoubleToString(LastSignalBid,_Digits)
@@ -528,7 +592,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.27",28,36,clrWhite,12);
+   UiLabel("TITLE","RAMON AI TRADER  v0.28",28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
 
@@ -611,7 +675,8 @@ void DrawDashboard()
 
    UiLabel("SIZING","Sizing: "+LastSizingSide
       +"   Vol: "+DoubleToString(LastPlannedVolume,2)
-      +"   Preferred: $"+DoubleToString(RiskPerTradeUSD,2)
+      +"   Risk: $"+DoubleToString(EffectiveRiskBudgetUSD(),2)
+      +" ("+DoubleToString(EffectiveRiskMultiplier(),2)+"x)"
       +"   Cap: $"+DoubleToString(MaxExecutableRiskUSD,2),28,442,
       (ConfirmMoneyUnitsPerUSD ? clrLime : clrOrange),9);
 
@@ -822,7 +887,7 @@ double SelectVolume(ENUM_ORDER_TYPE direction,double entry,double stop)
    double money=0.0;
    if(!OrderCalcProfit(direction,_Symbol,minimum,entry,stop,money) || money>=0.0)
       return 0.0;
-   double budget=RiskPerTradeUSD*MoneyUnitsPerUSD;
+   double budget=EffectiveRiskBudgetUSD()*MoneyUnitsPerUSD;
    double hard_cap=MaxExecutableRiskUSD*MoneyUnitsPerUSD;
    if(budget<=0.0 || hard_cap<=0.0)
       return 0.0;
@@ -850,7 +915,7 @@ double SelectVolume(ENUM_ORDER_TYPE direction,double entry,double stop)
 
 void UpdateSizingPreview()
 {
-   LastRiskBudgetUnits=RiskPerTradeUSD*MoneyUnitsPerUSD;
+   LastRiskBudgetUnits=EffectiveRiskBudgetUSD()*MoneyUnitsPerUSD;
    LastSizingSide=(LastModelDecision=="BUY" || LastModelDecision=="SELL"
       ? LastModelDecision
       : (LastBuyEdge>=LastSellEdge ? "BUY" : "SELL"));
@@ -909,6 +974,7 @@ void AppendSignalCsv()
          "captured","signal_bar_time","symbol","decision","reason",
          "base_decision","base_reason","ensemble_ready","ensemble_active",
          "regime_probability","entry_probability","meta_probability",
+         "risk_model_ready","risk_probability","risk_multiplier","risk_mode",
          "signal_bid","signal_ask","spread_points",
          "forecast_low","forecast_median","forecast_high","atr",
          "buy_edge","sell_edge","minimum_edge","uncertainty",
@@ -933,6 +999,8 @@ void AppendSignalCsv()
       LastBaseDecision,LastBaseReason,BoolText(LastEnsembleReady),BoolText(LastEnsembleActive),
       DoubleToString(LastRegimeProbability,6),DoubleToString(LastEntryProbability,6),
       DoubleToString(LastMetaProbability,6),
+      BoolText(LastRiskModelReady),DoubleToString(LastRiskProbability,6),
+      DoubleToString(EffectiveRiskMultiplier(),4),LastRiskMode,
       DoubleToString(LastSignalBid,_Digits),DoubleToString(LastSignalAsk,_Digits),
       IntegerToString(LastModelSpreadPoints),
       DoubleToString(LastForecastLow,_Digits),DoubleToString(LastForecast,_Digits),
@@ -1207,6 +1275,8 @@ void OnTimer()
    string sample_key="",bundle_id="";
    double sample_saved=0.0;
    double regime_probability=-1.0,entry_probability=-1.0,news_probability=-1.0,meta_probability=-1.0;
+   double risk_model_ready=0.0,risk_probability=-1.0,risk_multiplier=1.0;
+   string risk_mode="";
    double news_source_ready=0.0,news_model_ready=0.0,news_source_age_seconds=-1.0;
    double news_event_time=0.0,news_event_delta_minutes=0.0;
    string news_source="",news_event_title="",news_event_country="",news_event_impact="";
@@ -1232,6 +1302,10 @@ void OnTimer()
       || !JsonNumber(reply,"entry_probability",entry_probability)
       || !JsonNumber(reply,"news_probability",news_probability)
       || !JsonNumber(reply,"meta_probability",meta_probability)
+      || !JsonNumber(reply,"risk_model_ready",risk_model_ready)
+      || !JsonNumber(reply,"risk_probability",risk_probability)
+      || !JsonNumber(reply,"risk_multiplier",risk_multiplier)
+      || !JsonText(reply,"risk_mode",risk_mode)
       || !JsonText(reply,"news_source",news_source)
       || !JsonNumber(reply,"news_source_ready",news_source_ready)
       || !JsonNumber(reply,"news_model_ready",news_model_ready)
@@ -1290,6 +1364,10 @@ void OnTimer()
    LastEntryProbability=entry_probability;
    LastNewsProbability=news_probability;
    LastMetaProbability=meta_probability;
+   LastRiskModelReady=(risk_model_ready>=0.5);
+   LastRiskProbability=risk_probability;
+   LastRiskMultiplier=risk_multiplier;
+   LastRiskMode=risk_mode;
    LastNewsSource=news_source;
    LastNewsSourceReady=(news_source_ready>=0.5);
    LastNewsModelReady=(news_model_ready>=0.5);
@@ -1361,6 +1439,8 @@ void OnTimer()
    int today=TradesToday();
    if(today<0 || today>=MaxTradesPerDay)
    { StatusLine="Daily trade limit/history unavailable"; ShowStatus(); return; }
+   if(DailyLossStopTriggered())
+   { StatusLine="DAILY LOSS STOP"; ShowStatus(); return; }
    MqlTick tick;
    if(!SymbolInfoTick(_Symbol,tick) || TimeCurrent()-tick.time>30
       || (int)SymbolInfoInteger(_Symbol,SYMBOL_SPREAD)>MaxSpreadPoints)
@@ -1428,6 +1508,8 @@ int OnInit()
    if(MoneyUnitsPerUSD<=0.0 || RiskPerTradeUSD<=0.0 || RiskPerTradeUSD>0.50
       || MaxExecutableRiskUSD<=0.0 || MaxExecutableRiskUSD>0.50
       || MaxExecutableRiskUSD<RiskPerTradeUSD
+      || MaxDynamicRiskMultiplier<1.0 || MaxDynamicRiskMultiplier>3.0
+      || MaxDailyLossPercent<=0.0 || MaxDailyLossPercent>10.0
       || MaxSpreadPoints<=0 || MaxTradesPerDay<1 || MaximumHoldBars<1
       || SnapshotIntervalSeconds<10
       || (WriteDiagnosticFile && StringLen(DiagnosticFileName)==0)
