@@ -1,5 +1,5 @@
 #property strict
-#property version "0.25"
+#property version "0.26"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -66,7 +66,17 @@ bool LastEnsembleReady = false;
 bool LastEnsembleActive = false;
 double LastRegimeProbability = -1.0;
 double LastEntryProbability = -1.0;
+double LastNewsProbability = -1.0;
 double LastMetaProbability = -1.0;
+bool LastNewsSourceReady = false;
+bool LastNewsModelReady = false;
+double LastNewsSourceAgeSeconds = -1.0;
+string LastNewsSource = "NONE";
+string LastNewsEventTitle = "NONE";
+string LastNewsEventCountry = "NONE";
+string LastNewsEventImpact = "NONE";
+datetime LastNewsEventTime = 0;
+double LastNewsEventDeltaMinutes = 0.0;
 datetime LastSignalBarTime = 0;
 double LastSignalBid = 0.0;
 double LastSignalAsk = 0.0;
@@ -297,7 +307,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.25\n"
+      +"EA version: 0.26\n"
       +"Captured: "+TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS)+"\n"
       +"Symbol: "+_Symbol+"  Timeframe: M15\n"
       +"Bid: "+(tick_ok ? DoubleToString(tick.bid,_Digits) : "NA")
@@ -318,7 +328,14 @@ string BuildDiagnosticText()
       +"  Active: "+BoolText(LastEnsembleActive)
       +"  RegimeP: "+DoubleToString(LastRegimeProbability,3)
       +"  EntryP: "+DoubleToString(LastEntryProbability,3)
+      +"  NewsP: "+DoubleToString(LastNewsProbability,3)
       +"  MetaP: "+DoubleToString(LastMetaProbability,3)+"\n"
+      +"News: "+LastNewsSource
+      +"  SourceReady: "+BoolText(LastNewsSourceReady)
+      +"  ModelReady: "+BoolText(LastNewsModelReady)
+      +"  AgeSec: "+DoubleToString(LastNewsSourceAgeSeconds,0)
+      +"  Event: "+LastNewsEventCountry+" "+LastNewsEventImpact+" "+LastNewsEventTitle
+      +"  DeltaMin: "+DoubleToString(LastNewsEventDeltaMinutes,1)+"\n"
       +"Signal bar: "+(LastSignalBarTime>0 ? TimeToString(LastSignalBarTime,TIME_DATE|TIME_MINUTES) : "NONE")
       +"  Last closed: "+(closed>0 ? TimeToString(closed,TIME_DATE|TIME_MINUTES) : "NONE")+"\n"
       +"SignalBid: "+DoubleToString(LastSignalBid,_Digits)
@@ -510,8 +527,8 @@ void DrawDashboard()
       (live_profit_usd<-0.00001 ? "-$" : "$"))
       +DoubleToString(MathAbs(live_profit_usd),2);
 
-   UiRect("PANEL",12,24,520,548,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.25",28,36,clrWhite,12);
+   UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
+   UiLabel("TITLE","RAMON AI TRADER  v0.26",28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
 
@@ -558,46 +575,60 @@ void DrawDashboard()
    UiLabel("ROLE_MODELS","ROLE MODELS "+(LastEnsembleReady ? "READY" : "LEARNING")
       +"   regime "+DoubleToString(LastRegimeProbability,2)
       +"   entry "+DoubleToString(LastEntryProbability,2)
+      +"   news "+DoubleToString(LastNewsProbability,2)
       +"   meta "+DoubleToString(LastMetaProbability,2),28,310,
       (LastEnsembleReady ? clrLime : C'203,213,225'),9);
 
+   string news_title=(StringLen(LastNewsEventTitle)>28 ? StringSubstr(LastNewsEventTitle,0,28)+"..." : LastNewsEventTitle);
+   string news_delta=(LastNewsEventTime>0
+      ? (LastNewsEventDeltaMinutes>=0.0 ? " in " : " ")
+         +DoubleToString(MathAbs(LastNewsEventDeltaMinutes),0)+"m"
+      : "");
+   color news_color=(!LastNewsSourceReady ? clrOrange :
+      (LastNewsModelReady ? clrLime : C'203,213,225'));
+   UiLabel("NEWS","NEWS "+LastNewsSource
+      +" "+(LastNewsSourceReady ? "READY" : "OFFLINE")
+      +" | model "+(LastNewsModelReady ? "READY" : "LEARNING")
+      +" | "+LastNewsEventImpact+" "+LastNewsEventCountry+" "+news_title+news_delta,
+      28,332,news_color,9);
+
    UiLabel("RISK","ATR: "+DoubleToString(LastAtr,2)
       +"   SL dist: "+DoubleToString(LastStopDistance,2)
-      +"   TP dist: "+DoubleToString(LastTargetDistance,2),28,332,C'203,213,225',9);
+      +"   TP dist: "+DoubleToString(LastTargetDistance,2),28,354,C'203,213,225',9);
 
    UiLabel("ACCOUNT","Account: "+AccountTypeText()+" (configured)"
       +"   Currency: "+AccountInfoString(ACCOUNT_CURRENCY)
-      +"   Trades: "+IntegerToString(today)+"/"+IntegerToString(MaxTradesPerDay),28,354,C'203,213,225',9);
+      +"   Trades: "+IntegerToString(today)+"/"+IntegerToString(MaxTradesPerDay),28,376,C'203,213,225',9);
 
    UiLabel("BALANCE_USD","Balance: "+DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),2)+" units"
-      +"   ~= $"+DoubleToString(AccountUnitsToUSD(AccountInfoDouble(ACCOUNT_BALANCE)),2),28,376,C'203,213,225',9);
+      +"   ~= $"+DoubleToString(AccountUnitsToUSD(AccountInfoDouble(ACCOUNT_BALANCE)),2),28,398,C'203,213,225',9);
 
    UiLabel("LIVE_PNL",
       has_managed_position
          ? "LIVE P/L: "+pnl_units+" units   ~= "+pnl_usd
          : "LIVE P/L: --   (no Ramon position)",
-      28,398,pnl_color,10);
+      28,420,pnl_color,10);
 
    UiLabel("SIZING","Sizing: "+LastSizingSide
       +"   Vol: "+DoubleToString(LastPlannedVolume,2)
       +"   Preferred: $"+DoubleToString(RiskPerTradeUSD,2)
-      +"   Cap: $"+DoubleToString(MaxExecutableRiskUSD,2),28,420,
+      +"   Cap: $"+DoubleToString(MaxExecutableRiskUSD,2),28,442,
       (ConfirmMoneyUnitsPerUSD ? clrLime : clrOrange),9);
 
    UiLabel("MIN_RISK","Min executable risk: $"
       +DoubleToString(AccountUnitsToUSD(LastMinimumLotStopLossUnits),4)
-      +" ("+DoubleToString(LastMinimumLotStopLossUnits,2)+" units)",28,442,
+      +" ("+DoubleToString(LastMinimumLotStopLossUnits,2)+" units)",28,464,
       risk_gate_color,9);
 
-   UiLabel("RISK_GATE",RiskGateText(),28,464,risk_gate_color,10);
+   UiLabel("RISK_GATE",RiskGateText(),28,486,risk_gate_color,10);
 
    UiLabel("MONEY_CONFIRM","MoneyUnits/USD: "+DoubleToString(MoneyUnitsPerUSD,2)
       +"   Confirmed: "+BoolText(ConfirmMoneyUnitsPerUSD)
-      +(EnableLiveTrading && !live_ready ? "   "+live_reason : ""),28,488,
+      +(EnableLiveTrading && !live_ready ? "   "+live_reason : ""),28,510,
       (live_ready || !EnableLiveTrading ? clrLime : clrOrange),9);
 
-   UiButton("COPY","COPY DIAGNOSTIC",28,514,176,30);
-   UiLabel("COPY_STATUS",LastCopyStatus,218,522,C'148,163,184',8);
+   UiButton("COPY","COPY DIAGNOSTIC",28,536,176,30);
+   UiLabel("COPY_STATUS",LastCopyStatus,218,544,C'148,163,184',8);
    ChartRedraw();
 }
 
@@ -1175,7 +1206,10 @@ void OnTimer()
    double ensemble_ready=0.0,ensemble_active=0.0;
    string sample_key="",bundle_id="";
    double sample_saved=0.0;
-   double regime_probability=-1.0,entry_probability=-1.0,meta_probability=-1.0;
+   double regime_probability=-1.0,entry_probability=-1.0,news_probability=-1.0,meta_probability=-1.0;
+   double news_source_ready=0.0,news_model_ready=0.0,news_source_age_seconds=-1.0;
+   double news_event_time=0.0,news_event_delta_minutes=0.0;
+   string news_source="",news_event_title="",news_event_country="",news_event_impact="";
    double signal_time=0.0,signal_bid=0.0,signal_ask=0.0,median=0.0,atr=0.0,stop_distance=0.0,target_distance=0.0;
    double forecast_low=0.0,forecast_high=0.0,edge=0.0,model_spread=0.0;
    double buy_edge=0.0,sell_edge=0.0,minimum_edge=0.0,uncertainty=0.0,signal_strength=0.0,minimum_strength=0.0;
@@ -1196,7 +1230,17 @@ void OnTimer()
       || !JsonNumber(reply,"ensemble_active",ensemble_active)
       || !JsonNumber(reply,"regime_probability",regime_probability)
       || !JsonNumber(reply,"entry_probability",entry_probability)
+      || !JsonNumber(reply,"news_probability",news_probability)
       || !JsonNumber(reply,"meta_probability",meta_probability)
+      || !JsonText(reply,"news_source",news_source)
+      || !JsonNumber(reply,"news_source_ready",news_source_ready)
+      || !JsonNumber(reply,"news_model_ready",news_model_ready)
+      || !JsonNumber(reply,"news_source_age_seconds",news_source_age_seconds)
+      || !JsonText(reply,"news_event_title",news_event_title)
+      || !JsonText(reply,"news_event_country",news_event_country)
+      || !JsonText(reply,"news_event_impact",news_event_impact)
+      || !JsonNumber(reply,"news_event_time",news_event_time)
+      || !JsonNumber(reply,"news_event_delta_minutes",news_event_delta_minutes)
       || !JsonNumber(reply,"signal_bar_time",signal_time)
       || !JsonNumber(reply,"signal_bid",signal_bid)
       || !JsonNumber(reply,"signal_ask",signal_ask)
@@ -1244,7 +1288,17 @@ void OnTimer()
    LastEnsembleActive=(ensemble_active>=0.5);
    LastRegimeProbability=regime_probability;
    LastEntryProbability=entry_probability;
+   LastNewsProbability=news_probability;
    LastMetaProbability=meta_probability;
+   LastNewsSource=news_source;
+   LastNewsSourceReady=(news_source_ready>=0.5);
+   LastNewsModelReady=(news_model_ready>=0.5);
+   LastNewsSourceAgeSeconds=news_source_age_seconds;
+   LastNewsEventTitle=news_event_title;
+   LastNewsEventCountry=news_event_country;
+   LastNewsEventImpact=news_event_impact;
+   LastNewsEventTime=(datetime)news_event_time;
+   LastNewsEventDeltaMinutes=news_event_delta_minutes;
    LastSignalBarTime=bar_time;
    LastSignalBid=signal_bid;
    LastSignalAsk=signal_ask;
