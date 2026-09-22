@@ -76,6 +76,19 @@ class DecisionTests(unittest.TestCase):
         self.model.value = Forecast(98.0, 100.0, 102.0)
         self.assertEqual(evaluate(self.market, self.model).decision, "WAIT")
 
+    def test_wait_reason_distinguishes_edge_from_strength(self) -> None:
+        self.model.value = Forecast(99.0, 100.5, 102.0)
+        edge_wait = evaluate(self.market, self.model)
+        self.assertEqual(edge_wait.decision, "WAIT")
+        self.assertEqual(edge_wait.reason, "insufficient_model_edge")
+
+        self.model.value = Forecast(99.0, 101.2, 105.0)
+        strength_wait = evaluate(self.market, self.model)
+        self.assertEqual(strength_wait.decision, "WAIT")
+        self.assertEqual(strength_wait.reason, "insufficient_model_strength")
+        self.assertGreaterEqual(max(strength_wait.buy_edge, strength_wait.sell_edge), strength_wait.minimum_edge)
+        self.assertLess(strength_wait.signal_strength, strength_wait.minimum_strength)
+
     def test_spread_failure_does_not_run_model(self) -> None:
         market = Market("XAUUSD_l", "M15", 100.0, 101.0, 0.01, bars())
         result = evaluate(market, self.model)

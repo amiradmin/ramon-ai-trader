@@ -1,5 +1,5 @@
 #property strict
-#property version "0.17"
+#property version "0.18"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -200,6 +200,15 @@ bool MinimumLotExceedsRiskBudget()
    );
 }
 
+string RiskGateText()
+{
+   if(!MinimumLotExceedsRiskBudget())
+      return "PASS/NO_MIN_LOT_BLOCK";
+   if(LastModelDecision=="WAIT")
+      return "WOULD BLOCK IF SIGNAL: min lot > risk budget";
+   return "TRADE BLOCKED: min lot > risk budget";
+}
+
 string BuildDiagnosticText()
 {
    MqlTick tick;
@@ -227,7 +236,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.17\n"
+      +"EA version: 0.18\n"
       +"Captured: "+TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS)+"\n"
       +"Symbol: "+_Symbol+"  Timeframe: M15\n"
       +"Bid: "+(tick_ok ? DoubleToString(tick.bid,_Digits) : "NA")
@@ -288,9 +297,7 @@ string BuildDiagnosticText()
       +"  EstimatedSLUSD: "+DoubleToString(AccountUnitsToUSD(LastEstimatedStopLossUnits),4)+"\n"
       +"MinLotSLAccountUnits: "+DoubleToString(LastMinimumLotStopLossUnits,2)
       +"  MinExecutableRiskUSD: "+DoubleToString(AccountUnitsToUSD(LastMinimumLotStopLossUnits),4)+"\n"
-      +"RiskGate: "+(MinimumLotExceedsRiskBudget()
-         ? "TRADE BLOCKED: min lot > risk budget"
-         : "PASS/NO_MIN_LOT_BLOCK")+"\n"
+      +"RiskGate: "+RiskGateText()+"\n"
       +"MaxSpreadPoints: "+IntegerToString(MaxSpreadPoints)
       +"  CSV: "+(WriteCsvLogs ? "ON" : "OFF")+"\n";
 
@@ -397,7 +404,7 @@ void DrawDashboard()
    color live_color=(live_ready && permissions ? clrLime : clrOrange);
 
    UiRect("PANEL",12,24,520,458,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.17",28,36,clrWhite,12);
+   UiLabel("TITLE","RAMON AI TRADER  v0.18",28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2",28,56,C'148,163,184',9);
 
    UiLabel("LIVE","LIVE: "+LiveStateText()
@@ -449,9 +456,7 @@ void DrawDashboard()
       +" ("+DoubleToString(LastMinimumLotStopLossUnits,2)+" units)",28,354,
       (MinimumLotExceedsRiskBudget() ? clrTomato : clrLime),9);
 
-   UiLabel("RISK_GATE",MinimumLotExceedsRiskBudget()
-      ? "TRADE BLOCKED: min lot > risk budget"
-      : "RISK GATE: PASS / no min-lot block",28,376,
+   UiLabel("RISK_GATE",RiskGateText(),28,376,
       (MinimumLotExceedsRiskBudget() ? clrTomato : clrLime),10);
 
    UiLabel("MONEY_CONFIRM","MoneyUnits/USD: "+DoubleToString(MoneyUnitsPerUSD,2)

@@ -177,7 +177,13 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
         elif sell_edge > buy_edge and sell_edge >= minimum and sell_strength >= settings.minimum_strength:
             side, edge, reason = "SELL", sell_edge, "forecast_down"
         else:
-            reason = "insufficient_model_edge"
+            dominant_edge = max(buy_edge, sell_edge)
+            if dominant_edge < minimum:
+                reason = "insufficient_model_edge"
+            elif signal_strength < settings.minimum_strength:
+                reason = "insufficient_model_strength"
+            else:
+                reason = "insufficient_model_edge"
 
     return Decision(
         decision=side,
