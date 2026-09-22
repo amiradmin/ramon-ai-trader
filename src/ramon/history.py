@@ -53,7 +53,7 @@ def ensure_history_db(db: str | Path) -> Path:
         for name, definition in {
             "sample_key": "TEXT", "chronos_model": "TEXT", "schema_version": "INTEGER DEFAULT 1",
             "quote_time": "INTEGER", "stop_distance": "REAL", "target_distance": "REAL",
-            "final_decision": "TEXT", "bundle_id": "TEXT",
+            "final_decision": "TEXT", "bundle_id": "TEXT", "news_features": "TEXT",
         }.items():
             if name not in columns:
                 conn.execute(f"ALTER TABLE decision_samples ADD COLUMN {name} {definition}")
@@ -126,6 +126,7 @@ def persist_decision_sample(
     regime_features: dict[str, float],
     entry_features: dict[str, float],
     meta_base_features: dict[str, float],
+    news_features: dict[str, float] | None = None,
     sample_key: str | None = None,
     chronos_model: str | None = None,
     quote_time: int | None = None,
@@ -143,9 +144,9 @@ def persist_decision_sample(
             """
             INSERT OR IGNORE INTO decision_samples
                 (captured,symbol,signal_bar_time,mid,spread,atr,direction,
-                 base_decision,regime_features,entry_features,meta_base_features,
+                 base_decision,regime_features,entry_features,meta_base_features,news_features,
                  sample_key,chronos_model,schema_version,quote_time,stop_distance,target_distance,final_decision,bundle_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 int(captured),
@@ -159,7 +160,8 @@ def persist_decision_sample(
                 json.dumps(regime_features, separators=(",", ":")),
                 json.dumps(entry_features, separators=(",", ":")),
                 json.dumps(meta_base_features, separators=(",", ":")),
-                sample_key, chronos_model, 2 if sample_key and quote_time else 1, quote_time,
+                json.dumps(news_features, separators=(",", ":")) if news_features is not None else None,
+                sample_key, chronos_model, 3 if sample_key and quote_time and news_features is not None else (2 if sample_key and quote_time else 1), quote_time,
                 stop_distance, target_distance, final_decision, bundle_id,
             ),
         )
