@@ -1,5 +1,5 @@
 #property strict
-#property version "0.21"
+#property version "0.22"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -30,7 +30,9 @@ input double MoneyUnitsPerUSD = 100.0; // CENT account: 100 account units = 1 US
 input bool AccountIsCent = true; // Configured account mode; MT5 ACCOUNT_CURRENCY alone cannot identify CENT.
 input bool ConfirmMoneyUnitsPerUSD = false; // Must be true before live trading can arm.
 input string ExpectedAccountCurrency = ""; // Optional exact ACCOUNT_CURRENCY check when non-empty.
-input double RiskPerTradeUSD = 0.06;
+input double RiskPerTradeUSD = 0.06; // Preferred sizing budget.
+input bool AllowMinLotRiskOverride = true; // Permit broker minimum lot above preferred budget.
+input double MaxExecutableRiskUSD = 0.20; // Hard planned-risk cap for minimum-lot override.
 input int MaxSpreadPoints = 50;
 input int MaxTradesPerDay = 4;
 input int MaximumHoldBars = 4;
@@ -65,7 +67,7 @@ double LastSellEdge = 0.0;
 double LastMinimumEdge = 0.0;
 double LastUncertainty = 0.0;
 double LastSignalStrength = 0.0;
-double LastMinimumStrength = 0.21;
+double LastMinimumStrength = 0.22;
 bool LastIntrabarConfirmed = false;
 string LastIntrabarDirection = "NONE";
 double LastIntrabarMoveAtr = 0.0;
@@ -87,6 +89,7 @@ double LastPlannedVolume = 0.0;
 double LastEstimatedStopLossUnits = 0.0;
 double LastMinimumLotStopLossUnits = 0.0;
 double LastRiskBudgetUnits = 0.0;
+bool LastMinLotOverrideUsed = false;
 double LastStopDistance = 0.0;
 double LastTargetDistance = 0.0;
 int LastModelSpreadPoints = 0;
@@ -218,13 +221,40 @@ bool MinimumLotExceedsRiskBudget()
    );
 }
 
+double MaxExecutableRiskUnits()
+{
+   return MaxExecutableRiskUSD*MoneyUnitsPerUSD;
+}
+
+bool MinimumLotOverrideEligible()
+{
+   return (
+      AllowMinLotRiskOverride
+      && MoneyUnitsPerUSD>0.0
+      && MaxExecutableRiskUSD>=RiskPerTradeUSD
+      && LastMinimumLotStopLossUnits>LastRiskBudgetUnits+0.00001
+      && LastMinimumLotStopLossUnits<=MaxExecutableRiskUnits()+0.00001
+   );
+}
+
+bool RiskGateBlocked()
+{
+   return MinimumLotExceedsRiskBudget() && !MinimumLotOverrideEligible();
+}
+
 string RiskGateText()
 {
    if(!MinimumLotExceedsRiskBudget())
-      return "PASS/NO_MIN_LOT_BLOCK";
+      return "PASS: preferred risk budget";
+   if(MinimumLotOverrideEligible())
+   {
+      if(LastModelDecision=="WAIT")
+         return "WOULD ALLOW MIN LOT: override <= $"+DoubleToString(MaxExecutableRiskUSD,2);
+      return "PASS: MIN LOT OVERRIDE <= $"+DoubleToString(MaxExecutableRiskUSD,2);
+   }
    if(LastModelDecision=="WAIT")
-      return "WOULD BLOCK IF SIGNAL: min lot > risk budget";
-   return "TRADE BLOCKED: min lot > risk budget";
+      return "WOULD BLOCK IF SIGNAL: min lot > hard cap";
+   return "TRADE BLOCKED: min lot > hard cap";
 }
 
 string BuildDiagnosticText()
@@ -254,7 +284,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.21\n"
+      +"EA version: 0.22\n"
       +"Captured: "+TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS)+"\n"
       +"Symbol: "+_Symbol+"  Timeframe: M15\n"
       +"Bid: "+(tick_ok ? DoubleToString(tick.bid,_Digits) : "NA")
@@ -324,6 +354,9 @@ string BuildDiagnosticText()
       +"RiskPerTradeUSD: "+DoubleToString(RiskPerTradeUSD,2)
       +"  RiskBudgetAccountUnits: "+DoubleToString(LastRiskBudgetUnits,2)
       +"  RiskBudgetUSD: "+DoubleToString(AccountUnitsToUSD(LastRiskBudgetUnits),4)+"\n"
+      +"MinLotOverride: "+(AllowMinLotRiskOverride ? "ON" : "OFF")
+      +"  MaxExecutableRiskUSD: "+DoubleToString(MaxExecutableRiskUSD,2)
+      +"  OverrideUsed: "+BoolText(LastMinLotOverrideUsed)+"\n"
       +"SizingSide: "+LastSizingSide
       +"  PlannedVolume: "+DoubleToString(LastPlannedVolume,2)+"\n"
       +"EstimatedSLAccountUnits: "+DoubleToString(LastEstimatedStopLossUnits,2)
@@ -435,9 +468,10 @@ void DrawDashboard()
    string live_reason="";
    bool live_ready=LiveExecutionReady(live_reason);
    color live_color=(live_ready && permissions ? clrLime : clrOrange);
+   color risk_gate_color=(RiskGateBlocked() ? clrTomato : clrLime);
 
    UiRect("PANEL",12,24,520,502,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.21",28,36,clrWhite,12);
+   UiLabel("TITLE","RAMON AI TRADER  v0.22",28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
 
@@ -483,28 +517,27 @@ void DrawDashboard()
 
    UiLabel("RISK","ATR: "+DoubleToString(LastAtr,2)
       +"   SL dist: "+DoubleToString(LastStopDistance,2)
-      +"   TP dist: "+DoubleToString(LastTargetDistance,2),28,420,C'203,213,225',9);
+      +"   TP dist: "+DoubleToString(LastTargetDistance,2),28,310,C'203,213,225',9);
 
    UiLabel("ACCOUNT","Account: "+AccountTypeText()+" (configured)"
       +"   Currency: "+AccountInfoString(ACCOUNT_CURRENCY)
-      +"   Trades: "+IntegerToString(today)+"/"+IntegerToString(MaxTradesPerDay),28,420,C'203,213,225',9);
+      +"   Trades: "+IntegerToString(today)+"/"+IntegerToString(MaxTradesPerDay),28,332,C'203,213,225',9);
 
    UiLabel("BALANCE_USD","Balance: "+DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),2)+" units"
-      +"   ~= $"+DoubleToString(AccountUnitsToUSD(AccountInfoDouble(ACCOUNT_BALANCE)),2),28,420,C'203,213,225',9);
+      +"   ~= $"+DoubleToString(AccountUnitsToUSD(AccountInfoDouble(ACCOUNT_BALANCE)),2),28,354,C'203,213,225',9);
 
    UiLabel("SIZING","Sizing: "+LastSizingSide
       +"   Vol: "+DoubleToString(LastPlannedVolume,2)
-      +"   Budget: $"+DoubleToString(RiskPerTradeUSD,2)
-      +" ("+DoubleToString(LastRiskBudgetUnits,2)+" units)",28,420,
+      +"   Preferred: $"+DoubleToString(RiskPerTradeUSD,2)
+      +"   Cap: $"+DoubleToString(MaxExecutableRiskUSD,2),28,376,
       (ConfirmMoneyUnitsPerUSD ? clrLime : clrOrange),9);
 
    UiLabel("MIN_RISK","Min executable risk: $"
       +DoubleToString(AccountUnitsToUSD(LastMinimumLotStopLossUnits),4)
-      +" ("+DoubleToString(LastMinimumLotStopLossUnits,2)+" units)",28,420,
-      (MinimumLotExceedsRiskBudget() ? clrTomato : clrLime),9);
+      +" ("+DoubleToString(LastMinimumLotStopLossUnits,2)+" units)",28,398,
+      risk_gate_color,9);
 
-   UiLabel("RISK_GATE",RiskGateText(),28,420,
-      (MinimumLotExceedsRiskBudget() ? clrTomato : clrLime),10);
+   UiLabel("RISK_GATE",RiskGateText(),28,420,risk_gate_color,10);
 
    UiLabel("MONEY_CONFIRM","MoneyUnits/USD: "+DoubleToString(MoneyUnitsPerUSD,2)
       +"   Confirmed: "+BoolText(ConfirmMoneyUnitsPerUSD)
@@ -512,7 +545,7 @@ void DrawDashboard()
       (live_ready || !EnableLiveTrading ? clrLime : clrOrange),9);
 
    UiButton("COPY","COPY DIAGNOSTIC",28,468,176,30);
-   UiLabel("COPY_STATUS",LastCopyStatus,218,454,C'148,163,184',8);
+   UiLabel("COPY_STATUS",LastCopyStatus,218,476,C'148,163,184',8);
    ChartRedraw();
 }
 
@@ -709,8 +742,17 @@ double SelectVolume(ENUM_ORDER_TYPE direction,double entry,double stop)
    if(!OrderCalcProfit(direction,_Symbol,minimum,entry,stop,money) || money>=0.0)
       return 0.0;
    double budget=RiskPerTradeUSD*MoneyUnitsPerUSD;
-   if(budget<=0.0 || -money>budget+0.00001)
-      return 0.0; // Broker minimum lot does not fit USD risk.
+   double hard_cap=MaxExecutableRiskUSD*MoneyUnitsPerUSD;
+   if(budget<=0.0 || hard_cap<=0.0)
+      return 0.0;
+   if(-money>budget+0.00001)
+   {
+      if(!AllowMinLotRiskOverride || MaxExecutableRiskUSD<RiskPerTradeUSD
+         || -money>hard_cap+0.00001)
+         return 0.0;
+      // Override is deliberately minimum-lot only; never scale volume using the larger cap.
+      return minimum;
+   }
    double steps=MathFloor((budget/(-money)*minimum-minimum)/step+0.00000001);
    double volume=MathMin(maximum,minimum+steps*step);
    volume=NormalizeDouble(volume,8);
@@ -734,6 +776,7 @@ void UpdateSizingPreview()
    LastPlannedVolume=0.0;
    LastEstimatedStopLossUnits=0.0;
    LastMinimumLotStopLossUnits=0.0;
+   LastMinLotOverrideUsed=false;
 
    if(LastSignalBid<=0.0 || LastSignalAsk<=LastSignalBid || LastStopDistance<=0.0)
       return;
@@ -753,7 +796,14 @@ void UpdateSizingPreview()
    double volume=SelectVolume(side,entry,stop);
    LastPlannedVolume=volume;
    if(volume>0.0 && OrderCalcProfit(side,_Symbol,volume,entry,stop,money) && money<0.0)
+   {
       LastEstimatedStopLossUnits=-money;
+      LastMinLotOverrideUsed=(
+         MinimumLotExceedsRiskBudget()
+         && volume<=minimum+0.00000001
+         && MinimumLotOverrideEligible()
+      );
+   }
 }
 
 void AppendSignalCsv()
@@ -789,6 +839,7 @@ void AppendSignalCsv()
          "live_armed","account_lock","account_type","account_currency",
          "balance_units","balance_usd_approx",
          "risk_usd","money_units_per_usd","risk_budget_units",
+         "allow_min_lot_override","max_executable_risk_usd","min_lot_override_used",
          "sizing_side","planned_volume","estimated_sl_units","estimated_sl_usd",
          "min_lot_sl_units","min_executable_risk_usd","min_lot_blocked");
    }
@@ -817,7 +868,9 @@ void AppendSignalCsv()
       DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),2),
       DoubleToString(AccountUnitsToUSD(AccountInfoDouble(ACCOUNT_BALANCE)),4),
       DoubleToString(RiskPerTradeUSD,4),DoubleToString(MoneyUnitsPerUSD,4),
-      DoubleToString(LastRiskBudgetUnits,4),LastSizingSide,
+      DoubleToString(LastRiskBudgetUnits,4),
+      BoolText(AllowMinLotRiskOverride),DoubleToString(MaxExecutableRiskUSD,4),
+      BoolText(LastMinLotOverrideUsed),LastSizingSide,
       DoubleToString(LastPlannedVolume,4),DoubleToString(LastEstimatedStopLossUnits,4),
       DoubleToString(AccountUnitsToUSD(LastEstimatedStopLossUnits),4),
       DoubleToString(LastMinimumLotStopLossUnits,4),
@@ -1039,7 +1092,7 @@ void OnTimer()
    double target=NormalizeDouble(entry+(decision=="BUY" ? target_distance : -target_distance),_Digits);
    double volume=SelectVolume(side,entry,stop);
    if(volume<=0.0)
-   { StatusLine="TRADE BLOCKED: min lot > risk budget"; ShowStatus(); return; }
+   { StatusLine="TRADE BLOCKED: min lot > hard risk cap"; ShowStatus(); return; }
    double margin=0.0;
    if(!OrderCalcMargin(side,_Symbol,volume,entry,margin)
       || margin>AccountInfoDouble(ACCOUNT_MARGIN_FREE)*0.8)
@@ -1088,6 +1141,8 @@ int OnInit()
    if(_Symbol!=TradeSymbol || _Period!=PERIOD_M15 || StringFind(_Symbol,"XAUUSD")!=0)
    { Print("Attach only to ",TradeSymbol," M15"); return INIT_FAILED; }
    if(MoneyUnitsPerUSD<=0.0 || RiskPerTradeUSD<=0.0 || RiskPerTradeUSD>0.50
+      || MaxExecutableRiskUSD<=0.0 || MaxExecutableRiskUSD>0.50
+      || MaxExecutableRiskUSD<RiskPerTradeUSD
       || MaxSpreadPoints<=0 || MaxTradesPerDay<1 || MaximumHoldBars<1
       || SnapshotIntervalSeconds<10
       || (WriteDiagnosticFile && StringLen(DiagnosticFileName)==0)

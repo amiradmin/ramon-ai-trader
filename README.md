@@ -380,3 +380,10 @@ Ramon همچنین دو فایل پایدار در `FILE_COMMON` می‌سازد
 Ramon از مسیر Chronos دو ویژگی قابل‌مشاهده می‌سازد: `AITrend MoveATR` برای اندازهٔ حرکت پیش‌بینی‌شده نسبت به ATR و `AITrend Consistency` برای اینکه چند گام متوالی مسیر مدل در یک جهت هستند. اگر مدل یک مسیر منسجم BUY/SELL پیش‌بینی کند، قیمت هنوز حداقل بخشی از edge لازم را داشته باشد و M1 بعد از pullback دوباره در همان جهت حرکت کند، reason می‌تواند `ai_trend_continuation_up` یا `ai_trend_continuation_down` شود.
 
 اصل معماری Ramon این است: **جهت و alpha از مدل AI؛ timing کوتاه‌مدت و کنترل‌های ریسک از کد قطعی.** کد قطعی اجازه ندارد بدون جهت Chronos یک Trend Continuation بسازد. محدودیت‌های spread، account lock، minimum lot، margin و RiskGate مستقل از alpha باقی می‌مانند. این جداسازی عمداً مانع تبدیل Ramon به یک ربات rule-based شبیه مجموعه‌ای از شرط‌های ثابت می‌شود.
+
+
+### Minimum-lot risk override
+
+از v0.22 بودجهٔ ترجیحی ریسک همچنان `RiskPerTradeUSD=0.06` است، اما برای حساب‌های سنتی که حداقل لات کارگزار خودش بیش از ۶ سنت ریسک دارد، Ramon می‌تواند **فقط minimum lot** را با `AllowMinLotRiskOverride=true` اجرا کند. سقف سخت پیش‌فرض `MaxExecutableRiskUSD=0.20` است.
+
+اگر زیان محاسبه‌شدهٔ minimum lot تا SL بین 0.06 و 0.20 دلار باشد، حجم فقط همان minimum lot انتخاب می‌شود؛ سقف 0.20 برای بزرگ‌کردن حجم استفاده نمی‌شود. اگر minimum lot بیش از 0.20 دلار ریسک داشته باشد، معامله همچنان block می‌شود. این مقادیر برآورد برنامه‌ریزی‌شده با `OrderCalcProfit` هستند و لغزش، gap و هزینه‌های اجرا می‌توانند زیان واقعی را بیشتر کنند.
