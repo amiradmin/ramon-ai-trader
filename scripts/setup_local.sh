@@ -22,8 +22,8 @@ for root in "${RAMON_WINEPREFIX:-}" "$HOME/.mt5" "$HOME/.wine"; do
 done
 
 resolve_mt5() {
-  local candidate root
-  local -a editors=() data_dirs=()
+  local candidate root candidate_dir existing seen
+  local -a editors=() editor_dirs=() data_dirs=()
   if [[ -n "${RAMON_MT5_DIR:-}" ]]; then
     mt5_dir="$RAMON_MT5_DIR"
     if [[ -f "$mt5_dir/metaeditor64.exe" ]]; then
@@ -36,18 +36,30 @@ resolve_mt5() {
     fi
   else
     for root in "${wine_roots[@]}"; do
-      while IFS= read -r -d '' candidate; do editors+=("$candidate"); done \
+      while IFS= read -r -d '' candidate; do
+        editors+=("$candidate")
+        candidate_dir="$(dirname "$candidate")"
+        seen=false
+        for existing in "${editor_dirs[@]}"; do
+          if [[ "$existing" == "$candidate_dir" ]]; then seen=true; break; fi
+        done
+        if [[ "$seen" == false ]]; then editor_dirs+=("$candidate_dir"); fi
+      done \
         < <(find "$root/drive_c" -maxdepth 9 -type f \
           \( -iname 'metaeditor64.exe' -o -iname 'metaeditor.exe' \) -print0 2>/dev/null)
     done
-    if [[ ${#editors[@]} -ne 1 ]]; then
-      printf 'Found %s MetaEditor candidate(s) in the usual Wine prefixes:\n' "${#editors[@]}" >&2
+    if [[ ${#editor_dirs[@]} -ne 1 ]]; then
+      printf 'Found %s MetaEditor installation(s) in the usual Wine prefixes:\n' "${#editor_dirs[@]}" >&2
       if [[ ${#editors[@]} -gt 0 ]]; then printf '  %s\n' "${editors[@]}" >&2; fi
       printf '%s\n' 'Set RAMON_MT5_DIR to the installation directory containing metaeditor64.exe.' >&2
       return 1
     fi
-    metaeditor="${editors[0]}"
-    mt5_dir="$(dirname "$metaeditor")"
+    mt5_dir="${editor_dirs[0]}"
+    if [[ -f "$mt5_dir/metaeditor64.exe" ]]; then
+      metaeditor="$mt5_dir/metaeditor64.exe"
+    else
+      metaeditor="$mt5_dir/metaeditor.exe"
+    fi
   fi
 
   if [[ -n "${RAMON_MT5_DATA_DIR:-}" ]]; then
