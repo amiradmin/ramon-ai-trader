@@ -19,6 +19,7 @@ class SetupDiscoveryTests(unittest.TestCase):
             install = home / ".mt5" / "drive_c" / "Program Files" / "MetaTrader 5"
             install.mkdir(parents=True)
             (install / "metaeditor64.exe").touch()
+            (install / "metaeditor.exe").touch()
             data = home / ".mt5" / "drive_c" / "users" / "amir" / "AppData" / "Roaming" / "MetaQuotes" / "Terminal" / "alpha"
             (data / "MQL5" / "Experts").mkdir(parents=True)
             env = os.environ.copy()
