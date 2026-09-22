@@ -6,20 +6,46 @@ import os
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Lock
 
-from .core import Market, Settings, evaluate
+from .core import Forecast, Market, Settings, evaluate
 from .model import ChronosForecaster, model_name
 
 
+class CachedForecaster:
+    """Reuse the Chronos forecast while the completed M15 context is unchanged."""
+
+    def __init__(self, model: ChronosForecaster) -> None:
+        self.model = model
+        self.model_id = model.model_id
+        self._key: tuple[int, tuple[float, ...]] | None = None
+        self._forecast: Forecast | None = None
+
+    def forecast(self, closes: list[float], horizon: int) -> Forecast:
+        key = (horizon, tuple(float(value) for value in closes))
+        if self._key != key or self._forecast is None:
+            self._forecast = self.model.forecast(closes, horizon)
+            self._key = key
+        return self._forecast
+
+
 def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) -> None:
-    """Serve one EA at a time; containers can opt into an internal network bind."""
+    """Serve live quote snapshots while caching identical completed-M15 forecasts."""
     guard = Lock()
+    cached_model = CachedForecaster(model)
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             if self.path != "/health":
                 self.send_error(404)
                 return
-            self.reply(200, {"ready": True, "model": model.model_id})
+            self.reply(
+                200,
+                {
+                    "ready": True,
+                    "model": model.model_id,
+                    "forecast_context": "completed_m15_cached",
+                    "live_quote_decisions": True,
+                },
+            )
 
         def do_POST(self) -> None:
             if self.path != "/decision":
@@ -34,7 +60,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     raise ValueError("request must be a JSON object")
                 market = Market.from_dict(payload)
                 with guard:
-                    result = evaluate(market, model, settings)
+                    result = evaluate(market, cached_model, settings)
                 self.reply(200, result.to_dict())
             except (ValueError, TypeError, json.JSONDecodeError) as exc:
                 self.reply(400, {"error": str(exc)})

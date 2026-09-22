@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 
 from ramon.core import Bar, Forecast, Market, Settings, evaluate
 from ramon.replay import replay
-from ramon.server import serve
+from ramon.server import CachedForecaster, serve
 from ramon.model import ChronosForecaster
 
 
@@ -128,6 +128,21 @@ class DecisionTests(unittest.TestCase):
         result = replay(history, [40] * 262, self.model, start=256, settings=Settings(horizon=4))
         self.assertEqual((result.buys, result.wins, result.losses), (1, 0, 1))
         self.assertEqual(result.net_r, -1.0)
+
+    def test_cached_forecaster_reuses_same_completed_m15_context(self) -> None:
+        base = FixedModel(Forecast(99.0, 103.0, 105.0))
+        cached = CachedForecaster(base)
+        closes = [100.0] * 256
+
+        first = cached.forecast(closes, 4)
+        second = cached.forecast(list(closes), 4)
+        self.assertEqual(first, second)
+        self.assertEqual(base.calls, 1)
+
+        changed = list(closes)
+        changed[-1] = 100.1
+        cached.forecast(changed, 4)
+        self.assertEqual(base.calls, 2)
 
     def test_http_round_trip_and_model_failure(self) -> None:
         with socket.socket() as temporary:

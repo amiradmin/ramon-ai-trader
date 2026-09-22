@@ -9,7 +9,7 @@ EA = Path(__file__).resolve().parents[1] / "mt5" / "Ramon.mq5"
 def test_model_url_allows_host_and_compose_service_only() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "0.18"' in source
+    assert '#property version "0.19"' in source
     assert 'url=="http://127.0.0.1:8012/decision"' in source
     assert 'url=="http://model:8012/decision"' in source
     assert "!IsAllowedModelUrl(ModelUrl)" in source
@@ -19,7 +19,7 @@ def test_model_url_allows_host_and_compose_service_only() -> None:
 def test_live_account_session_lock() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "0.18"' in source
+    assert '#property version "0.19"' in source
     assert "input bool AutoLockCurrentAccount = true" in source
     assert "input bool EnableLiveTrading = false" in source
     assert "LockedAccountLogin=current_login" in source
@@ -46,7 +46,7 @@ def test_diagnostic_export_contains_operational_state() -> None:
 def test_chart_dashboard_and_copy_button() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert 'RAMON AI TRADER  v0.18' in source
+    assert 'RAMON AI TRADER  v0.19' in source
     assert 'UiButton("COPY","COPY DIAGNOSTIC"' in source
     assert "void OnChartEvent(" in source
     assert "CopyDiagnosticToClipboard()" in source
@@ -84,7 +84,7 @@ def test_risk_verification_and_csv_learning_logs() -> None:
 def test_live_block_does_not_detach_ea() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "0.18"' in source
+    assert '#property version "0.19"' in source
     assert "bool LiveExecutionReady(string &reason)" in source
     assert 'return (LiveExecutionReady(reason) ? "ARMED" : "BLOCKED")' in source
     assert 'if(!LiveExecutionReady(live_block_reason))' in source
@@ -96,7 +96,7 @@ def test_live_block_does_not_detach_ea() -> None:
 def test_cent_account_dashboard_converts_units_to_usd() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "0.18"' in source
+    assert '#property version "0.19"' in source
     assert "input bool AccountIsCent = true" in source
     assert "string AccountTypeText()" in source
     assert "double AccountUnitsToUSD(const double units)" in source
@@ -113,8 +113,23 @@ def test_cent_account_dashboard_converts_units_to_usd() -> None:
 def test_wait_display_distinguishes_strength_and_future_risk_block() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "0.18"' in source
+    assert '#property version "0.19"' in source
     assert "string RiskGateText()" in source
     assert '"WOULD BLOCK IF SIGNAL: min lot > risk budget"' in source
     assert '+"RiskGate: "+RiskGateText()+"\\n"' in source
     assert 'UiLabel("RISK_GATE",RiskGateText()' in source
+
+
+def test_live_snapshots_re_evaluate_inside_same_m15_bar() -> None:
+    source = EA.read_text(encoding="utf-8")
+
+    assert '#property version "0.19"' in source
+    assert "input int SnapshotIntervalSeconds = 30" in source
+    assert "datetime LastDecisionRequestTime = 0" in source
+    assert "datetime LastEntrySignalBar = 0" in source
+    assert "now-LastDecisionRequestTime<SnapshotIntervalSeconds" in source
+    assert "closed==LastProcessedBar" not in source
+    assert "LastProcessedBar=bar_time" not in source
+    assert 'StatusLine="Entry already used for this M15 signal bar"' in source
+    assert "LastEntrySignalBar=bar_time" in source
+    assert "SnapshotIntervalSeconds<10" in source

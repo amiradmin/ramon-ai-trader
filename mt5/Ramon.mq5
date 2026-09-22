@@ -1,5 +1,5 @@
 #property strict
-#property version "0.18"
+#property version "0.19"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -35,6 +35,7 @@ input int MaxSpreadPoints = 50;
 input int MaxTradesPerDay = 4;
 input int MaximumHoldBars = 4;
 input int RequestTimeoutMs = 4000;
+input int SnapshotIntervalSeconds = 30; // Re-evaluate fresh Bid/Ask inside the same M15 bar.
 input int MaxDeviationPoints = 30;
 input ulong MagicNumber = 26092212;
 input bool WriteDiagnosticFile = true;
@@ -46,7 +47,8 @@ input string SignalCsvFileName = "Ramon_Signals.csv";
 input string TradeCsvFileName = "Ramon_Trades.csv";
 
 CTrade Trade;
-datetime LastProcessedBar = 0;
+datetime LastDecisionRequestTime = 0;
+datetime LastEntrySignalBar = 0;
 string StatusLine = "Starting";
 string LastModelDecision = "NONE";
 string LastModelReason = "NONE";
@@ -236,7 +238,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.18\n"
+      +"EA version: 0.19\n"
       +"Captured: "+TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS)+"\n"
       +"Symbol: "+_Symbol+"  Timeframe: M15\n"
       +"Bid: "+(tick_ok ? DoubleToString(tick.bid,_Digits) : "NA")
@@ -246,6 +248,9 @@ string BuildDiagnosticText()
       +"  TerminalConnected: "+BoolText((bool)TerminalInfoInteger(TERMINAL_CONNECTED))+"\n\n"
       +"=== MODEL / SIGNAL ===\n"
       +"ModelUrl: "+ModelUrl+"\n"
+      +"Snapshot cadence: "+IntegerToString(SnapshotIntervalSeconds)+"s"
+      +"  Last request: "+(LastDecisionRequestTime>0
+         ? TimeToString(LastDecisionRequestTime,TIME_DATE|TIME_SECONDS) : "NONE")+"\n"
       +"Decision: "+LastModelDecision+"  Reason: "+LastModelReason+"\n"
       +"Signal bar: "+(LastSignalBarTime>0 ? TimeToString(LastSignalBarTime,TIME_DATE|TIME_MINUTES) : "NONE")
       +"  Last closed: "+(closed>0 ? TimeToString(closed,TIME_DATE|TIME_MINUTES) : "NONE")+"\n"
@@ -404,8 +409,9 @@ void DrawDashboard()
    color live_color=(live_ready && permissions ? clrLime : clrOrange);
 
    UiRect("PANEL",12,24,520,458,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.18",28,36,clrWhite,12);
-   UiLabel("SUB",_Symbol+"  M15  |  Chronos-2",28,56,C'148,163,184',9);
+   UiLabel("TITLE","RAMON AI TRADER  v0.19",28,36,clrWhite,12);
+   UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
+      +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
 
    UiLabel("LIVE","LIVE: "+LiveStateText()
       +"   LOCK: "+(lock_ok ? "OK" : "FAIL")
@@ -829,8 +835,14 @@ void OnTimer()
    if(OtherPositionOnSymbol())
    { StatusLine="Another robot has a position on this symbol"; ShowStatus(); return; }
    datetime closed=iTime(_Symbol,PERIOD_M15,1);
-   if(closed<=0 || closed==LastProcessedBar)
+   if(closed<=0)
       return;
+
+   datetime now=TimeCurrent();
+   if(LastDecisionRequestTime>0
+      && now-LastDecisionRequestTime<SnapshotIntervalSeconds)
+      return;
+   LastDecisionRequestTime=now;
 
    string payload,reply;
    datetime bar_time=0;
@@ -862,7 +874,6 @@ void OnTimer()
       || (datetime)signal_time!=bar_time
       || (decision!="BUY" && decision!="SELL" && decision!="WAIT"))
    { StatusLine="Invalid/stale model response"; ShowStatus(); return; }
-   LastProcessedBar=bar_time; // At most one entry attempt per closed candle.
    LastModelDecision=decision;
    LastModelReason=reason;
    LastSignalBarTime=bar_time;
@@ -890,6 +901,8 @@ void OnTimer()
 
    if(decision=="WAIT" || !EnableLiveTrading)
    { ShowStatus(); return; }
+   if(LastEntrySignalBar==bar_time)
+   { StatusLine="Entry already used for this M15 signal bar"; ShowStatus(); return; }
    string live_block_reason="";
    if(!LiveExecutionReady(live_block_reason))
    { StatusLine=live_block_reason; ShowStatus(); return; }
@@ -933,7 +946,10 @@ void OnTimer()
    if(!submitted || (retcode!=TRADE_RETCODE_DONE && retcode!=TRADE_RETCODE_PLACED))
       StatusLine="Order rejected "+IntegerToString((int)retcode);
    else
+   {
+      LastEntrySignalBar=bar_time;
       StatusLine="Order sent "+decision+" "+DoubleToString(volume,2);
+   }
    Print("Ramon execution: ",StatusLine);
    ShowStatus();
 }
@@ -965,6 +981,7 @@ int OnInit()
    { Print("Attach only to ",TradeSymbol," M15"); return INIT_FAILED; }
    if(MoneyUnitsPerUSD<=0.0 || RiskPerTradeUSD<=0.0 || RiskPerTradeUSD>0.50
       || MaxSpreadPoints<=0 || MaxTradesPerDay<1 || MaximumHoldBars<1
+      || SnapshotIntervalSeconds<10
       || (WriteDiagnosticFile && StringLen(DiagnosticFileName)==0)
       || (WriteCsvLogs && (StringLen(SignalCsvFileName)==0 || StringLen(TradeCsvFileName)==0))
       || !IsAllowedModelUrl(ModelUrl))

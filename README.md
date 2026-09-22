@@ -312,6 +312,10 @@ bash -n scripts/setup_local.sh
 - [مستندات MetaEditor برای کامپایل خط فرمان](https://www.metatrader5.com/en/metaeditor/help/beginning/integration_ide)
 - [مستندات MT5 برای WebRequest](https://www.mql5.com/en/docs/network/webrequest)
 
+### Snapshot زنده داخل کندل M15
+
+از v0.19، Ramon به‌طور پیش‌فرض هر ۳۰ ثانیه (`SnapshotIntervalSeconds=30`) یک snapshot تازه از Bid/Ask می‌فرستد و تصمیم BUY/SELL/WAIT را دوباره محاسبه می‌کند؛ بنابراین برای دیدن فرصت جدید لازم نیست تا بسته‌شدن کندل بعدی ۱۵ دقیقه صبر کند. تاریخچهٔ Chronos همچنان فقط از کندل‌های کامل M15 تشکیل می‌شود. سرویس forecast یک context یکسان M15 را cache می‌کند، پس در فاصلهٔ بین دو کندل بسته‌شده inference سنگین Chronos تکرار نمی‌شود؛ فقط تصمیم با قیمت زندهٔ جدید به‌روزرسانی می‌شود. حداقل cadence قابل تنظیم ۱۰ ثانیه است. برای جلوگیری از ورود تکراری، در هر signal bar بسته‌شدهٔ M15 حداکثر یک سفارش موفق ارسال می‌شود.
+
 ### داشبورد روی چارت و دکمهٔ Copy Diagnostic
 
 از v0.17، Ramon به‌جای متن سادهٔ Comment یک داشبورد روی خود چارت می‌سازد. داشبورد وضعیت ARMED/DISARMED، account lock و مجوزها، تصمیم و دلیل مدل، forecast low/median/high، BuyEdge/SellEdge، حداقل edge، uncertainty، signal strength، ATR، فاصلهٔ SL/TP، تعداد معاملات روز و بودجهٔ ریسک را نشان می‌دهد. شرط‌های EDGE و STRENGTH به‌صورت PASS/FAIL نمایش داده می‌شوند.
