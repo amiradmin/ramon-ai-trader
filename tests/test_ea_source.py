@@ -9,7 +9,7 @@ EA = Path(__file__).resolve().parents[1] / "mt5" / "Ramon.mq5"
 def test_model_url_allows_host_and_compose_service_only() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "0.13"' in source
+    assert '#property version "0.14"' in source
     assert 'url=="http://127.0.0.1:8012/decision"' in source
     assert 'url=="http://model:8012/decision"' in source
     assert "!IsAllowedModelUrl(ModelUrl)" in source
@@ -19,7 +19,7 @@ def test_model_url_allows_host_and_compose_service_only() -> None:
 def test_live_account_session_lock() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "0.13"' in source
+    assert '#property version "0.14"' in source
     assert "input bool AutoLockCurrentAccount = true" in source
     assert "input bool EnableLiveTrading = false" in source
     assert "LockedAccountLogin=current_login" in source
@@ -41,3 +41,19 @@ def test_diagnostic_export_contains_operational_state() -> None:
     assert 'JsonNumber(reply,"forecast_high",forecast_high)' in source
     assert 'JsonNumber(reply,"edge",edge)' in source
     assert 'JsonNumber(reply,"spread_points",model_spread)' in source
+
+
+def test_chart_dashboard_and_copy_button() -> None:
+    source = EA.read_text(encoding="utf-8")
+
+    assert 'RAMON AI TRADER  v0.14' in source
+    assert 'UiButton("COPY","COPY DIAGNOSTIC"' in source
+    assert "void OnChartEvent(" in source
+    assert "CopyDiagnosticToClipboard()" in source
+    assert "MQL_DLLS_ALLOWED" in source
+    assert "SetClipboardData" in source
+    assert 'JsonNumber(reply,"buy_edge",buy_edge)' in source
+    assert 'JsonNumber(reply,"sell_edge",sell_edge)' in source
+    assert 'JsonNumber(reply,"signal_strength",signal_strength)' in source
+    assert '"EDGE "+PassFail(edge_pass)' in source
+    assert '"STRENGTH "+PassFail(strength_pass)' in source

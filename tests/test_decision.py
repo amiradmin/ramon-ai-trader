@@ -59,6 +59,12 @@ class DecisionTests(unittest.TestCase):
         result = evaluate(self.market, self.model)
         self.assertEqual(result.decision, "BUY")
         self.assertAlmostEqual(result.edge, 2.6)
+        self.assertAlmostEqual(result.buy_edge, 2.6)
+        self.assertAlmostEqual(result.sell_edge, -3.4)
+        self.assertAlmostEqual(result.minimum_edge, 0.6)
+        self.assertAlmostEqual(result.uncertainty, 6.0)
+        self.assertAlmostEqual(result.signal_strength, 2.6 / 6.0)
+        self.assertAlmostEqual(result.minimum_strength, 0.20)
         self.assertEqual(result.signal_bar_time, self.market.bars[-1].time)
         self.assertEqual(self.model.last_close, 100.0)
 
@@ -131,7 +137,11 @@ class DecisionTests(unittest.TestCase):
             "point": 0.01, "bars": [dict(time=b.time, open=b.open, high=b.high, low=b.low, close=b.close) for b in bars()],
         }).encode()
         with urlopen(Request(url + "/decision", data=payload, headers={"Content-Type": "application/json"}), timeout=5) as response:
-            self.assertEqual(json.load(response)["decision"], "BUY")
+            body = json.load(response)
+            self.assertEqual(body["decision"], "BUY")
+            self.assertIn("buy_edge", body)
+            self.assertIn("signal_strength", body)
+            self.assertEqual(body["minimum_strength"], 0.20)
         self.model.value = Forecast(float("nan"), 100.0, 101.0)
         with self.assertRaises(HTTPError) as raised:
             urlopen(Request(url + "/decision", data=payload), timeout=5)

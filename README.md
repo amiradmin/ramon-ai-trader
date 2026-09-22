@@ -311,3 +311,11 @@ bash -n scripts/setup_local.sh
 - [مدل Chronos‑2 کوچک در Hugging Face](https://huggingface.co/autogluon/chronos-2-small)
 - [مستندات MetaEditor برای کامپایل خط فرمان](https://www.metatrader5.com/en/metaeditor/help/beginning/integration_ide)
 - [مستندات MT5 برای WebRequest](https://www.mql5.com/en/docs/network/webrequest)
+
+### داشبورد روی چارت و دکمهٔ Copy Diagnostic
+
+از v0.14، Ramon به‌جای متن سادهٔ Comment یک داشبورد روی خود چارت می‌سازد. داشبورد وضعیت ARMED/DISARMED، account lock و مجوزها، تصمیم و دلیل مدل، forecast low/median/high، BuyEdge/SellEdge، حداقل edge، uncertainty، signal strength، ATR، فاصلهٔ SL/TP، تعداد معاملات روز و بودجهٔ ریسک را نشان می‌دهد. شرط‌های EDGE و STRENGTH به‌صورت PASS/FAIL نمایش داده می‌شوند.
+
+دکمهٔ **COPY DIAGNOSTIC** ابتدا فایل تشخیصی را refresh می‌کند و سپس همان متن را در Clipboard ویندوز/Wine کپی می‌کند. دسترسی Clipboard از WinAPI استفاده می‌کند؛ بنابراین برای خودِ کپی باید در Properties اکسپرت، بخش Dependencies/Common گزینهٔ **Allow DLL imports** فعال باشد. اگر DLL import غیرفعال باشد، معامله و فایل diagnostic همچنان کار می‌کنند و فقط کپی Clipboard انجام نمی‌شود. این دکمه هیچ سفارشی ارسال نمی‌کند.
+
+

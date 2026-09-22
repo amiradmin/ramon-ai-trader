@@ -103,6 +103,12 @@ class Decision:
     spread_points: int
     atr: float
     edge: float
+    buy_edge: float
+    sell_edge: float
+    minimum_edge: float
+    uncertainty: float
+    signal_strength: float
+    minimum_strength: float
     forecast_low: float
     forecast_median: float
     forecast_high: float
@@ -139,6 +145,11 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
     reason = ""
     forecast = Forecast(0.0, 0.0, 0.0)
     edge = 0.0
+    buy_edge = 0.0
+    sell_edge = 0.0
+    minimum = max(settings.minimum_edge_atr * atr, settings.minimum_edge_spreads * spread)
+    uncertainty = 0.0
+    signal_strength = 0.0
     side = "WAIT"
 
     if atr <= market.point or spread_points > settings.max_spread_points:
@@ -155,11 +166,13 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
         # Bars are broker Bid prices: BUY pays Ask; SELL later pays Ask.
         buy_edge = forecast.median - market.ask
         sell_edge = market.bid - (forecast.median + spread)
-        minimum = max(settings.minimum_edge_atr * atr, settings.minimum_edge_spreads * spread)
         uncertainty = max(forecast.high - forecast.low, market.point)
-        if buy_edge > sell_edge and buy_edge >= minimum and buy_edge / uncertainty >= settings.minimum_strength:
+        buy_strength = buy_edge / uncertainty
+        sell_strength = sell_edge / uncertainty
+        signal_strength = max(buy_strength, sell_strength)
+        if buy_edge > sell_edge and buy_edge >= minimum and buy_strength >= settings.minimum_strength:
             side, edge, reason = "BUY", buy_edge, "forecast_up"
-        elif sell_edge > buy_edge and sell_edge >= minimum and sell_edge / uncertainty >= settings.minimum_strength:
+        elif sell_edge > buy_edge and sell_edge >= minimum and sell_strength >= settings.minimum_strength:
             side, edge, reason = "SELL", sell_edge, "forecast_down"
         else:
             reason = "insufficient_model_edge"
@@ -171,6 +184,12 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
         spread_points=spread_points,
         atr=atr,
         edge=edge,
+        buy_edge=buy_edge,
+        sell_edge=sell_edge,
+        minimum_edge=minimum,
+        uncertainty=uncertainty,
+        signal_strength=signal_strength,
+        minimum_strength=settings.minimum_strength,
         forecast_low=forecast.low,
         forecast_median=forecast.median,
         forecast_high=forecast.high,

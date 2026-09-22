@@ -1,8 +1,24 @@
 #property strict
-#property version "0.13"
+#property version "0.14"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
+
+#define RAMON_GMEM_MOVEABLE 0x0002
+#define RAMON_CF_UNICODETEXT 13
+
+#import "user32.dll"
+int  OpenClipboard(long hwnd);
+int  EmptyClipboard();
+int  CloseClipboard();
+long SetClipboardData(uint format,long hMem);
+#import "kernel32.dll"
+long GlobalAlloc(uint flags,ulong bytes);
+long GlobalLock(long hMem);
+int  GlobalUnlock(long hMem);
+long GlobalFree(long hMem);
+long lstrcpyW(long dst,const string src);
+#import
 
 input string TradeSymbol = "XAUUSD_l";
 input string RequiredServerText = "LiteFinance";
@@ -20,6 +36,8 @@ input int MaxDeviationPoints = 30;
 input ulong MagicNumber = 26092212;
 input bool WriteDiagnosticFile = true;
 input string DiagnosticFileName = "Ramon_Diagnostic.txt";
+input bool ShowDashboard = true;
+input bool EnableClipboardButton = true;
 
 CTrade Trade;
 datetime LastProcessedBar = 0;
@@ -32,11 +50,19 @@ double LastForecast = 0.0;
 double LastForecastHigh = 0.0;
 double LastAtr = 0.0;
 double LastEdge = 0.0;
+double LastBuyEdge = 0.0;
+double LastSellEdge = 0.0;
+double LastMinimumEdge = 0.0;
+double LastUncertainty = 0.0;
+double LastSignalStrength = 0.0;
+double LastMinimumStrength = 0.20;
 double LastStopDistance = 0.0;
 double LastTargetDistance = 0.0;
 int LastModelSpreadPoints = 0;
 long LockedAccountLogin = 0;
 string LockedAccountServer = "";
+string LastCopyStatus = "Ready";
+const string UiPrefix = "RAMON_UI_";
 
 bool IsAllowedModelUrl(const string url)
 {
@@ -126,7 +152,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.13\n"
+      +"EA version: 0.14\n"
       +"Captured: "+TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS)+"\n"
       +"Symbol: "+_Symbol+"  Timeframe: M15\n"
       +"Bid: "+(tick_ok ? DoubleToString(tick.bid,_Digits) : "NA")
@@ -146,6 +172,14 @@ string BuildDiagnosticText()
       +"ATR: "+DoubleToString(LastAtr,2)
       +"  Edge: "+DoubleToString(LastEdge,_Digits)
       +"  ModelSpread(points): "+IntegerToString(LastModelSpreadPoints)+"\n"
+      +"BuyEdge: "+DoubleToString(LastBuyEdge,_Digits)
+      +"  SellEdge: "+DoubleToString(LastSellEdge,_Digits)
+      +"  MinimumEdge: "+DoubleToString(LastMinimumEdge,_Digits)+"\n"
+      +"Uncertainty: "+DoubleToString(LastUncertainty,_Digits)
+      +"  SignalStrength: "+DoubleToString(LastSignalStrength,3)
+      +"  MinimumStrength: "+DoubleToString(LastMinimumStrength,3)+"\n"
+      +"EdgeCondition: "+((MathMax(LastBuyEdge,LastSellEdge)>=LastMinimumEdge && LastMinimumEdge>0.0) ? "PASS" : "FAIL")
+      +"  StrengthCondition: "+((LastSignalStrength>=LastMinimumStrength && LastMinimumStrength>0.0) ? "PASS" : "FAIL")+"\n"
       +"StopDistance: "+DoubleToString(LastStopDistance,_Digits)
       +"  TargetDistance: "+DoubleToString(LastTargetDistance,_Digits)+"\n\n"
       +"=== ACCOUNT / EXECUTION ===\n"
@@ -185,22 +219,192 @@ void WriteDiagnostic()
    FileClose(handle);
 }
 
-void ShowStatus()
+void UiRect(const string name,const int x,const int y,const int w,const int h,const color bg,const color border)
 {
-   Comment(
-      "Ramon v0.13 | ",_Symbol," M15\n",
-      "Model: ",LastModelDecision," | ",StatusLine,"\n",
-      "Last closed: ",TimeToString(LastProcessedBar,TIME_DATE|TIME_MINUTES),
-      " | median: ",DoubleToString(LastForecast,_Digits),
-      " | ATR: ",DoubleToString(LastAtr,2),"\n",
-      "Live: ",(EnableLiveTrading ? "ARMED" : "DISARMED"),
-      " | account lock ",(AccountLockHealthy() ? "OK" : "FAIL"),
-      " | loss limit $",DoubleToString(RiskPerTradeUSD,2),
-      " | spread max ",IntegerToString(MaxSpreadPoints)
-   );
-   WriteDiagnostic();
+   string object=UiPrefix+name;
+   if(ObjectFind(0,object)<0)
+      ObjectCreate(0,object,OBJ_RECTANGLE_LABEL,0,0,0);
+   ObjectSetInteger(0,object,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+   ObjectSetInteger(0,object,OBJPROP_XDISTANCE,x);
+   ObjectSetInteger(0,object,OBJPROP_YDISTANCE,y);
+   ObjectSetInteger(0,object,OBJPROP_XSIZE,w);
+   ObjectSetInteger(0,object,OBJPROP_YSIZE,h);
+   ObjectSetInteger(0,object,OBJPROP_BGCOLOR,bg);
+   ObjectSetInteger(0,object,OBJPROP_COLOR,border);
+   ObjectSetInteger(0,object,OBJPROP_BACK,false);
+   ObjectSetInteger(0,object,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,object,OBJPROP_HIDDEN,true);
 }
 
+void UiLabel(const string name,const string text,const int x,const int y,const color text_color,const int size=9)
+{
+   string object=UiPrefix+name;
+   if(ObjectFind(0,object)<0)
+      ObjectCreate(0,object,OBJ_LABEL,0,0,0);
+   ObjectSetInteger(0,object,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+   ObjectSetInteger(0,object,OBJPROP_XDISTANCE,x);
+   ObjectSetInteger(0,object,OBJPROP_YDISTANCE,y);
+   ObjectSetInteger(0,object,OBJPROP_COLOR,text_color);
+   ObjectSetInteger(0,object,OBJPROP_FONTSIZE,size);
+   ObjectSetInteger(0,object,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,object,OBJPROP_HIDDEN,true);
+   ObjectSetString(0,object,OBJPROP_FONT,"Arial");
+   ObjectSetString(0,object,OBJPROP_TEXT,text);
+}
+
+void UiButton(const string name,const string text,const int x,const int y,const int w,const int h)
+{
+   string object=UiPrefix+name;
+   if(ObjectFind(0,object)<0)
+      ObjectCreate(0,object,OBJ_BUTTON,0,0,0);
+   ObjectSetInteger(0,object,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+   ObjectSetInteger(0,object,OBJPROP_XDISTANCE,x);
+   ObjectSetInteger(0,object,OBJPROP_YDISTANCE,y);
+   ObjectSetInteger(0,object,OBJPROP_XSIZE,w);
+   ObjectSetInteger(0,object,OBJPROP_YSIZE,h);
+   ObjectSetInteger(0,object,OBJPROP_BGCOLOR,C'31,41,55');
+   ObjectSetInteger(0,object,OBJPROP_COLOR,clrWhite);
+   ObjectSetInteger(0,object,OBJPROP_BORDER_COLOR,C'75,85,99');
+   ObjectSetInteger(0,object,OBJPROP_FONTSIZE,9);
+   ObjectSetInteger(0,object,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,object,OBJPROP_HIDDEN,true);
+   ObjectSetString(0,object,OBJPROP_FONT,"Arial");
+   ObjectSetString(0,object,OBJPROP_TEXT,text);
+}
+
+string PassFail(const bool value)
+{
+   return (value ? "PASS" : "FAIL");
+}
+
+void DrawDashboard()
+{
+   if(!ShowDashboard)
+   {
+      ObjectsDeleteAll(0,UiPrefix);
+      return;
+   }
+
+   int spread_points=(int)SymbolInfoInteger(_Symbol,SYMBOL_SPREAD);
+   int today=TradesToday();
+   bool lock_ok=AccountLockHealthy();
+   bool permissions=(bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED)
+      && (bool)MQLInfoInteger(MQL_TRADE_ALLOWED)
+      && (bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED);
+   double dominant_edge=MathMax(LastBuyEdge,LastSellEdge);
+   bool edge_pass=LastMinimumEdge>0.0 && dominant_edge>=LastMinimumEdge;
+   bool strength_pass=LastMinimumStrength>0.0 && LastSignalStrength>=LastMinimumStrength;
+   string dominant=(LastBuyEdge>=LastSellEdge ? "BUY" : "SELL");
+   color state_color=(LastModelDecision=="BUY" ? clrLime :
+      (LastModelDecision=="SELL" ? clrTomato : clrGold));
+   color live_color=(EnableLiveTrading && lock_ok && permissions ? clrLime : clrOrange);
+
+   UiRect("PANEL",12,24,448,324,C'15,23,42',C'71,85,105');
+   UiLabel("TITLE","RAMON AI TRADER  v0.14",28,36,clrWhite,12);
+   UiLabel("SUB",_Symbol+"  M15  |  Chronos-2",28,56,C'148,163,184',9);
+
+   UiLabel("LIVE","LIVE: "+(EnableLiveTrading ? "ARMED" : "DISARMED")
+      +"   LOCK: "+(lock_ok ? "OK" : "FAIL")
+      +"   PERMS: "+(permissions ? "OK" : "FAIL"),28,82,live_color,10);
+
+   UiLabel("DECISION","DECISION: "+LastModelDecision+"   "+LastModelReason,28,108,state_color,11);
+   UiLabel("SIGNAL","Signal: "+(LastSignalBarTime>0 ? TimeToString(LastSignalBarTime,TIME_DATE|TIME_MINUTES) : "NONE")
+      +"   Spread: "+IntegerToString(spread_points)+"/"+IntegerToString(MaxSpreadPoints),28,132,clrWhite,9);
+
+   UiLabel("FORECAST","Forecast L/M/H: "
+      +DoubleToString(LastForecastLow,_Digits)+" / "
+      +DoubleToString(LastForecast,_Digits)+" / "
+      +DoubleToString(LastForecastHigh,_Digits),28,154,C'191,219,254',9);
+
+   UiLabel("EDGE","Dominant: "+dominant
+      +"   BuyEdge: "+DoubleToString(LastBuyEdge,2)
+      +"   SellEdge: "+DoubleToString(LastSellEdge,2),28,178,clrWhite,9);
+   UiLabel("EDGE_PASS","EDGE "+PassFail(edge_pass)
+      +"   "+DoubleToString(dominant_edge,2)+" >= "+DoubleToString(LastMinimumEdge,2),28,200,
+      (edge_pass ? clrLime : clrTomato),9);
+
+   UiLabel("STRENGTH","STRENGTH "+PassFail(strength_pass)
+      +"   "+DoubleToString(LastSignalStrength,3)+" >= "+DoubleToString(LastMinimumStrength,3)
+      +"   Unc: "+DoubleToString(LastUncertainty,2),28,222,
+      (strength_pass ? clrLime : clrTomato),9);
+
+   UiLabel("RISK","ATR: "+DoubleToString(LastAtr,2)
+      +"   SL dist: "+DoubleToString(LastStopDistance,2)
+      +"   TP dist: "+DoubleToString(LastTargetDistance,2),28,244,C'203,213,225',9);
+
+   UiLabel("ACCOUNT","Balance: "+DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),2)
+      +"   Trades: "+IntegerToString(today)+"/"+IntegerToString(MaxTradesPerDay)
+      +"   Risk: $"+DoubleToString(RiskPerTradeUSD,2),28,266,C'203,213,225',9);
+
+   UiButton("COPY","COPY DIAGNOSTIC",28,294,176,30);
+   UiLabel("COPY_STATUS",LastCopyStatus,218,302,C'148,163,184',8);
+   ChartRedraw();
+}
+
+bool CopyDiagnosticToClipboard()
+{
+   WriteDiagnostic();
+   if(!EnableClipboardButton)
+   {
+      LastCopyStatus="Clipboard button disabled";
+      return false;
+   }
+   if(!(bool)MQLInfoInteger(MQL_DLLS_ALLOWED))
+   {
+      LastCopyStatus="Enable DLL imports to copy";
+      return false;
+   }
+
+   string text=BuildDiagnosticText();
+   ulong bytes=(ulong)(StringLen(text)+1)*2;
+   long hmem=GlobalAlloc(RAMON_GMEM_MOVEABLE,bytes);
+   if(hmem==0)
+   {
+      LastCopyStatus="Clipboard alloc failed";
+      return false;
+   }
+
+   long ptr=GlobalLock(hmem);
+   if(ptr==0)
+   {
+      GlobalFree(hmem);
+      LastCopyStatus="Clipboard lock failed";
+      return false;
+   }
+   lstrcpyW(ptr,text);
+   GlobalUnlock(hmem);
+
+   long hwnd=ChartGetInteger(0,CHART_WINDOW_HANDLE);
+   if(OpenClipboard(hwnd)==0)
+   {
+      GlobalFree(hmem);
+      LastCopyStatus="Clipboard open failed";
+      return false;
+   }
+   if(EmptyClipboard()==0)
+   {
+      CloseClipboard();
+      GlobalFree(hmem);
+      LastCopyStatus="Clipboard clear failed";
+      return false;
+   }
+   if(SetClipboardData(RAMON_CF_UNICODETEXT,hmem)==0)
+   {
+      CloseClipboard();
+      GlobalFree(hmem);
+      LastCopyStatus="Clipboard set failed";
+      return false;
+   }
+   CloseClipboard();
+   LastCopyStatus="COPIED "+TimeToString(TimeCurrent(),TIME_SECONDS);
+   return true;
+}
+
+void ShowStatus()
+{
+   WriteDiagnostic();
+   DrawDashboard();
+}
 bool JsonText(const string json,const string key,string &value)
 {
    string marker="\""+key+"\":\"";
@@ -365,6 +569,7 @@ void OnTimer()
    string decision="",reason="";
    double signal_time=0.0,median=0.0,atr=0.0,stop_distance=0.0,target_distance=0.0;
    double forecast_low=0.0,forecast_high=0.0,edge=0.0,model_spread=0.0;
+   double buy_edge=0.0,sell_edge=0.0,minimum_edge=0.0,uncertainty=0.0,signal_strength=0.0,minimum_strength=0.0;
    if(!JsonText(reply,"decision",decision)
       || !JsonText(reply,"reason",reason)
       || !JsonNumber(reply,"signal_bar_time",signal_time)
@@ -373,6 +578,12 @@ void OnTimer()
       || !JsonNumber(reply,"forecast_high",forecast_high)
       || !JsonNumber(reply,"atr",atr)
       || !JsonNumber(reply,"edge",edge)
+      || !JsonNumber(reply,"buy_edge",buy_edge)
+      || !JsonNumber(reply,"sell_edge",sell_edge)
+      || !JsonNumber(reply,"minimum_edge",minimum_edge)
+      || !JsonNumber(reply,"uncertainty",uncertainty)
+      || !JsonNumber(reply,"signal_strength",signal_strength)
+      || !JsonNumber(reply,"minimum_strength",minimum_strength)
       || !JsonNumber(reply,"spread_points",model_spread)
       || !JsonNumber(reply,"stop_distance",stop_distance)
       || !JsonNumber(reply,"target_distance",target_distance)
@@ -388,6 +599,12 @@ void OnTimer()
    LastForecastHigh=forecast_high;
    LastAtr=atr;
    LastEdge=edge;
+   LastBuyEdge=buy_edge;
+   LastSellEdge=sell_edge;
+   LastMinimumEdge=minimum_edge;
+   LastUncertainty=uncertainty;
+   LastSignalStrength=signal_strength;
+   LastMinimumStrength=minimum_strength;
    LastModelSpreadPoints=(int)model_spread;
    LastStopDistance=stop_distance;
    LastTargetDistance=target_distance;
@@ -444,6 +661,17 @@ void OnTimer()
    ShowStatus();
 }
 
+
+void OnChartEvent(const int id,const long &lparam,const double &dparam,const string &sparam)
+{
+   if(id!=CHARTEVENT_OBJECT_CLICK || sparam!=UiPrefix+"COPY")
+      return;
+
+   ObjectSetInteger(0,sparam,OBJPROP_STATE,false);
+   CopyDiagnosticToClipboard();
+   DrawDashboard();
+}
+
 int OnInit()
 {
    if(_Symbol!=TradeSymbol || _Period!=PERIOD_M15 || StringFind(_Symbol,"XAUUSD")!=0)
@@ -477,6 +705,7 @@ int OnInit()
    Trade.SetDeviationInPoints(MaxDeviationPoints);
    Trade.SetTypeFillingBySymbol(_Symbol);
    EventSetTimer(5);
+   ObjectsDeleteAll(0,UiPrefix);
    ShowStatus();
    return INIT_SUCCEEDED;
 }
@@ -484,5 +713,6 @@ int OnInit()
 void OnDeinit(const int reason)
 {
    EventKillTimer();
+   ObjectsDeleteAll(0,UiPrefix);
    Comment("");
 }
