@@ -175,8 +175,20 @@ class DecisionTests(unittest.TestCase):
             self.assertIn("signal_strength", body)
             self.assertEqual(body["minimum_strength"], 0.20)
         self.model.value = Forecast(float("nan"), 100.0, 101.0)
+        changed_payload = json.loads(payload)
+        changed_payload["bars"][-1]["open"] = 100.1
+        changed_payload["bars"][-1]["high"] = 100.6
+        changed_payload["bars"][-1]["low"] = 99.6
+        changed_payload["bars"][-1]["close"] = 100.1
         with self.assertRaises(HTTPError) as raised:
-            urlopen(Request(url + "/decision", data=payload), timeout=5)
+            urlopen(
+                Request(
+                    url + "/decision",
+                    data=json.dumps(changed_payload).encode(),
+                    headers={"Content-Type": "application/json"},
+                ),
+                timeout=5,
+            )
         self.assertEqual(raised.exception.code, 400)
 
 
