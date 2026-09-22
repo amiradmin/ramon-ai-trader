@@ -1,5 +1,5 @@
 #property strict
-#property version "0.26"
+#property version "0.27"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -34,7 +34,7 @@ input double RiskPerTradeUSD = 0.06; // Preferred sizing budget.
 input bool AllowMinLotRiskOverride = true; // Permit broker minimum lot above preferred budget.
 input double MaxExecutableRiskUSD = 0.20; // Hard planned-risk cap for minimum-lot override.
 input int MaxSpreadPoints = 50;
-input int MaxTradesPerDay = 4;
+input int MaxTradesPerDay = 20;
 input int MaximumHoldBars = 4;
 input int RequestTimeoutMs = 4000;
 input int SnapshotIntervalSeconds = 30; // Re-evaluate fresh Bid/Ask inside the same M15 bar.
@@ -307,7 +307,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.26\n"
+      +"EA version: 0.27\n"
       +"Captured: "+TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS)+"\n"
       +"Symbol: "+_Symbol+"  Timeframe: M15\n"
       +"Bid: "+(tick_ok ? DoubleToString(tick.bid,_Digits) : "NA")
@@ -528,7 +528,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.26",28,36,clrWhite,12);
+   UiLabel("TITLE","RAMON AI TRADER  v0.27",28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
 
