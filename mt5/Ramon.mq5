@@ -1,5 +1,5 @@
 #property strict
-#property version "0.10"
+#property version "0.11"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -24,6 +24,14 @@ string StatusLine = "Starting";
 string LastModelDecision = "NONE";
 double LastForecast = 0.0;
 double LastAtr = 0.0;
+
+bool IsAllowedModelUrl(const string url)
+{
+   return (
+      url=="http://127.0.0.1:8012/decision"
+      || url=="http://model:8012/decision"
+   );
+}
 
 bool ManagedPosition(ulong &ticket,datetime &opened)
 {
@@ -62,7 +70,7 @@ bool OtherPositionOnSymbol()
 void ShowStatus()
 {
    Comment(
-      "Ramon v0.10 | ",_Symbol," M15\n",
+      "Ramon v0.11 | ",_Symbol," M15\n",
       "Model: ",LastModelDecision," | ",StatusLine,"\n",
       "Last closed: ",TimeToString(LastProcessedBar,TIME_DATE|TIME_MINUTES),
       " | median: ",DoubleToString(LastForecast,_Digits),
@@ -311,7 +319,7 @@ int OnInit()
    { Print("Attach only to ",TradeSymbol," M15"); return INIT_FAILED; }
    if(MoneyUnitsPerUSD<=0.0 || RiskPerTradeUSD<=0.0 || RiskPerTradeUSD>0.50
       || MaxSpreadPoints<=0 || MaxTradesPerDay<1 || MaximumHoldBars<1
-      || StringFind(ModelUrl,"http://127.0.0.1:")!=0)
+      || !IsAllowedModelUrl(ModelUrl))
    { Print("Invalid risk or local server settings"); return INIT_FAILED; }
    if(EnableLiveTrading && (
       AllowedAccountLogin<=0
