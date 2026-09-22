@@ -21,19 +21,29 @@ for root in "${RAMON_WINEPREFIX:-}" "$HOME/.mt5" "$HOME/.wine"; do
   if [[ "$duplicate" == false ]]; then wine_roots+=("$root"); fi
 done
 
+select_metaeditor() {
+  # Wine installations can retain Windows casing (e.g. MetaEditor64.exe).
+  # Return the discovered path verbatim instead of inventing a lowercase name.
+  local directory="$1" candidate name fallback=""
+  while IFS= read -r -d '' candidate; do
+    name="${candidate##*/}"
+    case "${name,,}" in
+      metaeditor64.exe) metaeditor="$candidate"; return 0 ;;
+      metaeditor.exe) fallback="$candidate" ;;
+    esac
+  done < <(find "$directory" -maxdepth 1 -type f \
+    \( -iname 'metaeditor64.exe' -o -iname 'metaeditor.exe' \) -print0 2>/dev/null)
+  if [[ -n "$fallback" ]]; then metaeditor="$fallback"; return 0; fi
+  printf 'No existing MetaEditor executable in: %s\n' "$directory" >&2
+  return 1
+}
+
 resolve_mt5() {
   local candidate root candidate_dir existing seen
   local -a editors=() editor_dirs=() data_dirs=()
   if [[ -n "${RAMON_MT5_DIR:-}" ]]; then
     mt5_dir="$RAMON_MT5_DIR"
-    if [[ -f "$mt5_dir/metaeditor64.exe" ]]; then
-      metaeditor="$mt5_dir/metaeditor64.exe"
-    elif [[ -f "$mt5_dir/metaeditor.exe" ]]; then
-      metaeditor="$mt5_dir/metaeditor.exe"
-    else
-      printf 'RAMON_MT5_DIR has no metaeditor64.exe or metaeditor.exe: %s\n' "$mt5_dir" >&2
-      return 1
-    fi
+    select_metaeditor "$mt5_dir" || return 1
   else
     for root in "${wine_roots[@]}"; do
       while IFS= read -r -d '' candidate; do
@@ -55,11 +65,7 @@ resolve_mt5() {
       return 1
     fi
     mt5_dir="${editor_dirs[0]}"
-    if [[ -f "$mt5_dir/metaeditor64.exe" ]]; then
-      metaeditor="$mt5_dir/metaeditor64.exe"
-    else
-      metaeditor="$mt5_dir/metaeditor.exe"
-    fi
+    select_metaeditor "$mt5_dir" || return 1
   fi
 
   if [[ -n "${RAMON_MT5_DATA_DIR:-}" ]]; then
@@ -95,6 +101,7 @@ resolve_mt5() {
     return 1
   fi
   printf 'MetaEditor: %s\nMT5 data: %s\nWine prefix: %s\n' "$metaeditor" "$mt5_data_dir" "$wine_prefix"
+  if command -v file >/dev/null 2>&1; then file "$metaeditor"; fi
 }
 
 if [[ "$mode" == "--diagnose" ]]; then
