@@ -42,5 +42,28 @@ services:
     entrypoint: ["python"]
     command: ["-m", "ramon.preflight", "--device", "cpu"]
 
+  mt5:
+    profiles: ["mt5"]
+    build:
+      context: .
+      dockerfile: Dockerfile.mt5
+      args:
+        RAMON_UID: ${RAMON_UID:-1000}
+        RAMON_GID: ${RAMON_GID:-1000}
+    image: ramon-ai-trader-mt5:local
+    init: true
+    restart: unless-stopped
+    depends_on:
+      model:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:6080:6080"
+    environment:
+      RAMON_WINEPREFIX: /home/ramon/.wine
+    volumes:
+      - mt5_prefix:/home/ramon/.wine
+      - ./installer:/installer:ro
+
 volumes:
   chronos_cache:
+  mt5_prefix:
