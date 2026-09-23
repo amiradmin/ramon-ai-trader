@@ -35,4 +35,4 @@ docker compose exec -T \
   -e RAMON_REPORT_DB="$DB" \
   -e RAMON_REPORT_SYMBOL="$SYMBOL" \
   -e RAMON_REPORT_LIMIT="$LIMIT" \
-  model python - < "$(dirname "${BASH_SOURCE[0]}")/../src/ramon/report.py"
+  model python -m ramon.report
