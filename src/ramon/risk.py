@@ -59,9 +59,7 @@ def risk_features(snapshot: Mapping[str, Mapping[str, float]]) -> dict[str, floa
 
 
 def risk_multiplier(probability: float) -> tuple[float, str]:
-    """Map validated model probability to a bounded sizing multiplier."""
-    if probability < 0.55:
-        return 0.75, "DEFENSIVE"
+    """Map validated model probability to a non-blocking sizing multiplier."""
     if probability < 0.70:
         return 1.00, "NORMAL"
     if probability < 0.82:
