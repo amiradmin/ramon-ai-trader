@@ -15,6 +15,27 @@ TRADE_TELEMETRY_COLUMNS = {
     "exit_detail": "TEXT", "entry_ea_version": "TEXT",
 }
 
+MANUAL_EXIT_REASONS = {"DEAL_REASON_CLIENT", "DEAL_REASON_MOBILE", "DEAL_REASON_WEB"}
+
+
+def classify_training_status(exit_reason: str, exit_detail: str = "") -> str:
+    """Classify whether a realized outcome is a valid supervised-learning label.
+
+    Manual exits, stop-outs and legacy expert exits with an unknown trigger remain
+    in account-performance reporting but are censored from role-model training.
+    """
+    reason = str(exit_reason or "UNKNOWN")
+    detail = str(exit_detail or "")
+    if reason in MANUAL_EXIT_REASONS:
+        return "CENSORED_MANUAL"
+    if reason == "DEAL_REASON_SO":
+        return "CENSORED_STOP_OUT"
+    if reason in {"DEAL_REASON_SL", "DEAL_REASON_TP"}:
+        return "LEARNABLE"
+    if reason == "DEAL_REASON_EXPERT":
+        return "LEARNABLE" if detail else "CENSORED_AMBIGUOUS_EXPERT"
+    return "CENSORED_UNKNOWN_EXIT"
+
 
 HISTORY_SCHEMA = """
 CREATE TABLE IF NOT EXISTS history_bars (
@@ -73,9 +94,28 @@ def ensure_history_db(db: str | Path) -> Path:
             net_r REAL NOT NULL, exit_reason TEXT NOT NULL, received INTEGER NOT NULL
         )""")
         columns = {row[1] for row in conn.execute("PRAGMA table_info(trade_outcomes)")}
-        for name, definition in TRADE_TELEMETRY_COLUMNS.items():
+        for name, definition in {**TRADE_TELEMETRY_COLUMNS, "training_status": "TEXT"}.items():
             if name not in columns:
                 conn.execute(f"ALTER TABLE trade_outcomes ADD COLUMN {name} {definition}")
+        # Backfill deterministically from immutable broker exit provenance. Do not
+        # pretend legacy DEAL_REASON_EXPERT rows have an exact trigger.
+        conn.execute("""
+            UPDATE trade_outcomes
+            SET training_status = CASE
+                WHEN exit_reason IN ('DEAL_REASON_CLIENT','DEAL_REASON_MOBILE','DEAL_REASON_WEB')
+                    THEN 'CENSORED_MANUAL'
+                WHEN exit_reason='DEAL_REASON_SO'
+                    THEN 'CENSORED_STOP_OUT'
+                WHEN exit_reason IN ('DEAL_REASON_SL','DEAL_REASON_TP')
+                    THEN 'LEARNABLE'
+                WHEN exit_reason='DEAL_REASON_EXPERT' AND COALESCE(exit_detail,'')<>''
+                    THEN 'LEARNABLE'
+                WHEN exit_reason='DEAL_REASON_EXPERT'
+                    THEN 'CENSORED_AMBIGUOUS_EXPERT'
+                ELSE 'CENSORED_UNKNOWN_EXIT'
+            END
+            WHERE training_status IS NULL OR training_status=''
+        """)
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_history_symbol_tf_time "
             "ON history_bars(symbol,timeframe,time)"
@@ -241,7 +281,11 @@ def persist_trade_outcome(db: str | Path, payload: dict[str, object], received: 
             or not isfinite(net) or not isfinite(risk) or risk <= 0 or not isfinite(net / risk)):
         raise ValueError("invalid closed trade outcome")
     extra = validate_trade_telemetry(payload, net)
-    extra_names = list(TRADE_TELEMETRY_COLUMNS)
+    exit_reason = str(payload.get("exit_reason", "UNKNOWN"))
+    extra["training_status"] = classify_training_status(
+        exit_reason, str(extra.get("exit_detail", "") or "")
+    )
+    extra_names = [*TRADE_TELEMETRY_COLUMNS, "training_status"]
     updates = []
     for name in extra_names:
         if name in {"profit_units", "commission_units", "swap_units", "fee_units"}:
@@ -255,6 +299,8 @@ def persist_trade_outcome(db: str | Path, payload: dict[str, object], received: 
                            f"WHEN excluded.closed!=trade_outcomes.closed OR "
                            f"excluded.exit_reason!=trade_outcomes.exit_reason THEN NULL "
                            f"ELSE trade_outcomes.{name} END")
+        elif name == "training_status":
+            updates.append("training_status=excluded.training_status")
         else:
             updates.append(f"{name}=COALESCE(excluded.{name},trade_outcomes.{name})")
     extra_updates = ", ".join(updates)
@@ -273,7 +319,7 @@ def persist_trade_outcome(db: str | Path, payload: dict[str, object], received: 
               AND trade_outcomes.direction=excluded.direction
               AND trade_outcomes.opened=excluded.opened""",
             (trade_key, sample_key, symbol, direction, opened, closed, net, risk,
-             net / risk, str(payload.get("exit_reason", "UNKNOWN")), int(received),
+             net / risk, exit_reason, int(received),
              *(extra.get(name) for name in extra_names)))
 
 

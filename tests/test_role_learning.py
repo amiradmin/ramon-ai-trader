@@ -201,3 +201,25 @@ def test_bad_model_vectors_are_rejected(tmp_path):
     path.write_text(json.dumps(raw))
     with pytest.raises(ValueError, match="length"):
         BinaryLogisticModel.load(path)
+
+
+def test_role_training_excludes_manual_exit_labels(tmp_path):
+    db = ensure_history_db(tmp_path / "history.db")
+    seed_trade(db, 1)
+    time = 1_800_000_000 + 1 * 7200
+    persist_trade_outcome(
+        db,
+        {
+            "sample_key": f"{1:016x}",
+            "trade_key": "real-account:1",
+            "symbol": "XAUUSD_l",
+            "direction": "BUY",
+            "opened": time + 1,
+            "closed": time + 900,
+            "net_units": 10,
+            "initial_risk_units": 10,
+            "exit_reason": "DEAL_REASON_CLIENT",
+        },
+        time + 1002,
+    )
+    assert load_trade_examples(db, "XAUUSD_l", "test/model") == []
