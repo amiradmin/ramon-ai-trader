@@ -222,3 +222,16 @@ def test_daily_trade_cap_is_400_by_default() -> None:
 
     assert "input int MaxTradesPerDay = 400;" in source
     assert "today>=MaxTradesPerDay" in source
+
+
+def test_decision_webrequest_is_prioritized_over_trade_sync() -> None:
+    source = EA.read_text(encoding="utf-8")
+
+    on_timer = source.split("void OnTimer()", 1)[1].split("void OnTradeTransaction(", 1)[0]
+    idle_guard = """if(LastDecisionRequestTime>0
+      && now-LastDecisionRequestTime<SnapshotIntervalSeconds)
+   {
+      // Never issue trade telemetry immediately before a live model decision."""
+    assert idle_guard in on_timer
+    assert on_timer.index("SyncClosedTrades();") < on_timer.index("LastDecisionRequestTime=now;")
+    assert "SyncClosedTrades();\n   datetime closed=" not in on_timer
