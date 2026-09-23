@@ -10,6 +10,8 @@ from collections import defaultdict
 from pathlib import Path
 import argparse
 
+from .history import classify_training_status
+
 
 def pct(n: int, d: int) -> float:
     return 100.0 * n / d if d else 0.0
@@ -86,6 +88,15 @@ def exit_detail(row: dict) -> str:
             "DEAL_REASON_WEB": "web_manual", "DEAL_REASON_SO": "stop_out"}.get(reason, reason)
 
 
+def training_status(row: dict) -> str:
+    """Use persisted label quality when present; derive it read-only for legacy DBs."""
+    stored = row.get("training_status")
+    if stored:
+        return str(stored)
+    return classify_training_status(str(row.get("exit_reason", "UNKNOWN")),
+                                    str(row.get("exit_detail") or ""))
+
+
 def print_telemetry(trades: list[dict]) -> None:
     """Report coverage, reconciled cost components and immutable entry provenance."""
     total = len(trades)
@@ -96,6 +107,16 @@ def print_telemetry(trades: list[dict]) -> None:
     print("Legacy times remain BROKER unless an offset was recorded; received is server receipt UTC, not execution time.")
     print(f"Joined entry models: {sum(bool(r.get('chronos_model')) for r in trades)}/{total}")
     print(f"Entry EA versions: {sum(bool(r.get('entry_ea_version')) for r in trades)}/{total}")
+    print()
+    print("=== LEARNING LABEL QUALITY ===")
+    label_groups: dict[str, list[dict]] = defaultdict(list)
+    for row in trades:
+        label_groups[training_status(row)].append(row)
+    for status, rows in sorted(label_groups.items()):
+        print(f"{status:28} | trades={len(rows):3d} | net={sum(r['net_units'] for r in rows):+.4f}")
+    eligible = len(label_groups.get("LEARNABLE", []))
+    print(f"Eligible model labels: {eligible}/{total}")
+    print("Censored trades remain in account P/L but are excluded from supervised role-model labels.")
     print()
     print("=== COST BREAKDOWN (ACCOUNT UNITS) ===")
     keys = ("profit_units", "commission_units", "swap_units", "fee_units")
@@ -278,6 +299,7 @@ def generate_report(DB: str, SYMBOL: str = "XAUUSD_l", LIMIT: int = 20) -> None:
                 f"| {r['exit_reason']} / {exit_detail(r)}"
                 f" | model={r.get('chronos_model') or 'UNKNOWN'} bundle={bundle_label(r)}"
                 f" EA={r.get('entry_ea_version') or 'UNKNOWN'}"
+                f" label={training_status(r)}"
             )
             costs = " ".join(
                 f"{name}={float(r[name]):+.4f}" if r.get(name) is not None else f"{name}=UNKNOWN"
@@ -338,6 +360,8 @@ def generate_report(DB: str, SYMBOL: str = "XAUUSD_l", LIMIT: int = 20) -> None:
 
         for r in joined:
             r = dict(r)
+            if training_status(r) != "LEARNABLE":
+                continue
             entry = safe_json(r["entry_features"])
             regime = safe_json(r["regime_features"])
             news = safe_json(r["news_features"])
@@ -365,7 +389,7 @@ def generate_report(DB: str, SYMBOL: str = "XAUUSD_l", LIMIT: int = 20) -> None:
         flosses = [features for result, features in feature_records if result == "LOSS"]
 
         print("=== DIRECTION-ALIGNED WIN vs LOSS FEATURES ===")
-        print(f"Joined samples: {len(joined)} | wins={len(fwins)} | losses={len(flosses)}")
+        print(f"Joined samples: {len(feature_records)} | wins={len(fwins)} | losses={len(flosses)} (eligible labels only)")
         print("effect > 0 => feature higher in winners; effect < 0 => lower in winners")
         print("Exploratory only: small samples can produce unstable effect sizes.")
         print()

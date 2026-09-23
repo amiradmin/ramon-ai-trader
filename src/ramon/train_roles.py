@@ -53,10 +53,12 @@ def _regime_dataset(bars: tuple[Bar, ...]) -> list[Example]:
 
 
 def load_trade_examples(db: str | Path, symbol: str, chronos_model: str) -> list[Example]:
-    """Use one fully closed REAL position per decision, net of recorded deal costs.
+    """Use one clean fully closed REAL position per decision, net of deal costs.
 
-    Legacy snapshots and 15-minute midpoint proxies are deliberately excluded.
-    Both sample and trade timestamps are in broker time, not server wall time.
+    Manual exits, stop-outs and legacy expert exits without an exact trigger are
+    censored. Legacy snapshots and 15-minute midpoint proxies are also excluded.
+    Sample/trade ordering remains broker-event time; recorded UTC offsets are kept
+    separately for audit and reporting rather than guessed for legacy events.
     """
     ensure_history_db(db)
     with sqlite3.connect(db) as conn:
@@ -66,7 +68,8 @@ def load_trade_examples(db: str | Path, symbol: str, chronos_model: str) -> list
             FROM decision_samples s JOIN trade_outcomes t ON t.sample_key=s.sample_key
             WHERE s.symbol=? AND t.symbol=s.symbol AND s.chronos_model=?
               AND s.schema_version=3 AND s.news_features IS NOT NULL AND t.direction=s.direction
-              AND s.final_decision=t.direction AND t.opened>=s.quote_time
+              AND s.final_decision=t.direction AND t.training_status='LEARNABLE'
+              AND t.opened>=s.quote_time
               AND t.opened<=s.quote_time+90 AND t.closed>=t.opened
             ORDER BY s.quote_time,s.sample_key
         """, (symbol, chronos_model)).fetchall()
@@ -168,7 +171,8 @@ def train_bundle(*, db: str | Path, symbol: str, chronos_model: str, out: Path,
         raise ValueError("invalid promotion limits")
     examples = load_trade_examples(db, symbol, chronos_model)
     report = {"updated": False, "closed_trade_samples": len(examples), "chronos_model": chronos_model,
-              "dataset_source": "real_closed_positions_net_of_deal_costs"}
+              "dataset_source": "clean_real_closed_positions_net_of_deal_costs",
+              "label_policy": "exclude_manual_stopout_unknown_expert"}
     if len(examples) < minimum_samples:
         return {**report, "status": "waiting_for_closed_trades", "minimum_samples": minimum_samples}
     base, meta, holdout = temporal_windows(examples)

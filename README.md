@@ -481,3 +481,19 @@ bash scripts/setup_local.sh --mt5-only
 ```bash
 uv run python -m ramon.report --db /path/to/ramon_history.sqlite3 --all
 ```
+
+
+### Clean learning labels after EA 0.28 baseline
+
+The immutable pre-change baseline is kept on `stable/ramon-v0.28`. Account-performance
+reporting still includes every closed position, but supervised role-model training now
+uses only `LEARNABLE` outcomes. Desktop/mobile/web manual exits are
+`CENSORED_MANUAL`, broker stop-outs are `CENSORED_STOP_OUT`, and legacy
+`DEAL_REASON_EXPERT` rows without an exact recorded trigger are
+`CENSORED_AMBIGUOUS_EXPERT`. New EA 0.28 maximum-hold exits already persist
+`maximum_hold_bars`, so they remain learnable. No entry threshold, SL/TP distance,
+risk sizing, BUY/SELL enablement, or live execution rule is changed by this patch.
+
+`bash scripts/analyze_ramon.sh --all` now prints label-quality coverage and marks each
+trade's label status. UTC event-time telemetry remains the source of truth for new
+execution timestamps; legacy broker times are never guessed.

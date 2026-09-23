@@ -39,7 +39,7 @@ def test_legacy_migration_enrichment_and_duplicate_delivery(tmp_path):
     persist_trade_outcome(db, outcome(**telemetry()), 1_800_014_600)
     persist_trade_outcome(db, outcome(), 1_800_014_700)
     with sqlite3.connect(db) as con:
-        assert con.execute("SELECT COUNT(*),net_units,net_r,profit_units,commission_units,swap_units,fee_units,exit_detail FROM trade_outcomes").fetchone() == (1, 7.5, 1.25, 10, -2, -.4, -.1, "maximum_hold_bars")
+        assert con.execute("SELECT COUNT(*),net_units,net_r,profit_units,commission_units,swap_units,fee_units,exit_detail,training_status FROM trade_outcomes").fetchone() == (1, 7.5, 1.25, 10, -2, -.4, -.1, "maximum_hold_bars", "LEARNABLE")
 
 
 @pytest.mark.parametrize("extra", [
@@ -167,3 +167,42 @@ def test_checkpoint_revision_detects_replaced_weights_at_same_path(tmp_path):
     weights.write_bytes(b'new weights')
     assert first != checkpoint_revision(str(checkpoint), object())
     assert checkpoint_revision('autogluon/chronos-2-small', object()) is None
+
+
+def test_training_status_censors_manual_and_unknown_expert_until_enriched(tmp_path):
+    db = tmp_path / "history.sqlite3"
+    manual = outcome(
+        trade_key="server:1:manual", sample_key="b" * 16,
+        exit_reason="DEAL_REASON_CLIENT",
+    )
+    expert = outcome(
+        trade_key="server:1:expert", sample_key="c" * 16,
+        exit_reason="DEAL_REASON_EXPERT",
+    )
+    persist_trade_outcome(db, manual, 123)
+    persist_trade_outcome(db, expert, 124)
+    with sqlite3.connect(db) as con:
+        rows = dict(con.execute("SELECT trade_key,training_status FROM trade_outcomes"))
+    assert rows["server:1:manual"] == "CENSORED_MANUAL"
+    assert rows["server:1:expert"] == "CENSORED_AMBIGUOUS_EXPERT"
+
+    persist_trade_outcome(
+        db,
+        outcome(
+            trade_key="server:1:expert", sample_key="c" * 16,
+            exit_reason="DEAL_REASON_EXPERT", **telemetry(exit_detail="maximum_hold_bars")
+        ),
+        125,
+    )
+    with sqlite3.connect(db) as con:
+        assert con.execute(
+            "SELECT training_status FROM trade_outcomes WHERE trade_key='server:1:expert'"
+        ).fetchone()[0] == "LEARNABLE"
+
+    # A later legacy broker replay may omit the exact trigger; it must not
+    # downgrade already enriched telemetry or its training eligibility.
+    persist_trade_outcome(db, expert, 126)
+    with sqlite3.connect(db) as con:
+        assert con.execute(
+            "SELECT exit_detail,training_status FROM trade_outcomes WHERE trade_key='server:1:expert'"
+        ).fetchone() == ("maximum_hold_bars", "LEARNABLE")
