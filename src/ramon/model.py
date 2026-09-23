@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+import hashlib
 from pathlib import Path
 
 from .core import Forecast
@@ -16,6 +17,7 @@ class ChronosForecaster:
         self._np = np
         self.model_id = model_id
         self.pipeline = Chronos2Pipeline.from_pretrained(model_id, device_map=device)
+        self.revision = checkpoint_revision(model_id, self.pipeline)
 
     def forecast(self, closes: Sequence[float], horizon: int) -> Forecast:
         values = self._np.asarray(closes, dtype=self._np.float32)
@@ -40,3 +42,22 @@ def model_name(value: str) -> str:
     if not path.is_dir() or not (path / "config.json").exists():
         raise ValueError("model must be a supported Chronos-2 ID or local checkpoint")
     return str(path)
+
+
+def checkpoint_revision(model_id: str, pipeline: object) -> str | None:
+    """Identify loaded local weights once, or retain the resolved Hub commit when exposed."""
+    path = Path(model_id)
+    if path.is_dir():
+        files = sorted(p for p in path.rglob("*") if p.is_file()
+                       and p.suffix in {".json", ".safetensors", ".bin"})
+        if not files:
+            return None
+        digest = hashlib.sha256()
+        for file in files:
+            digest.update(str(file.relative_to(path)).encode() + b"\0")
+            with file.open("rb") as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(chunk)
+        return "sha256:" + digest.hexdigest()
+    config = getattr(getattr(pipeline, "model", None), "config", None)
+    return getattr(config, "_commit_hash", None)

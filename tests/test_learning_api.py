@@ -86,3 +86,29 @@ def test_recording_failure_does_not_create_unconfirmed_learning_success(learning
     decision = post("/decision", payload)
     assert decision["sample_saved"] == 0
     assert decision["decision"] == "BUY"  # telemetry still cannot invent/override a model decision
+
+
+def test_decision_metadata_and_enriched_outcome_round_trip(learning_server):
+    db, post = learning_server
+    candles = bars()
+    quote = candles[-1].time + 905
+    decision = post('/decision', {
+        'symbol': 'XAUUSD_l', 'timeframe': 'M15', 'bid': 100, 'ask': 100.4,
+        'point': .01, 'bars': [asdict(bar) for bar in candles], 'quote_time': quote,
+    })
+    payload = {
+        'trade_key': 'server:123:987', 'sample_key': decision['sample_key'],
+        'symbol': 'XAUUSD_l', 'direction': 'BUY', 'opened': quote + 2, 'closed': quote + 1800,
+        'net_units': 7.5, 'initial_risk_units': 6, 'exit_reason': 'DEAL_REASON_EXPERT',
+        'profit_units': 10, 'commission_units': -2, 'swap_units': -.4, 'fee_units': -.1,
+        'opened_utc_offset_seconds': 10800, 'closed_utc_offset_seconds': 10800,
+        'entry_ea_version': '0.28', 'exit_detail': 'maximum_hold_bars',
+    }
+    assert post('/trades', payload) == {'saved': True}
+    assert post('/trades', payload) == {'saved': True}
+    with sqlite3.connect(db) as con:
+        model_id, raw = con.execute('SELECT chronos_model,model_metadata FROM decision_samples').fetchone()
+        assert model_id == 'test/fake'
+        assert json.loads(raw)['ensemble_mode'] == 'bootstrap_chronos'
+        assert con.execute('SELECT COUNT(*),fee_units,exit_detail FROM trade_outcomes').fetchone() == (1, -.1, 'maximum_hold_bars')
+    assert len(load_trade_examples(db, 'XAUUSD_l', 'test/fake')) == 1

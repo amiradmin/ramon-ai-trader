@@ -80,7 +80,8 @@ def stage_bundle(root: Path, models: dict[str, BinaryLogisticModel], metadata: d
         path = directory / f"{role}.json"
         models[role].save(path)
         hashes[role] = hashlib.sha256(path.read_bytes()).hexdigest()
-    manifest = {**metadata, "schema_version": SCHEMA_VERSION, "bundle_id": bundle_id, "sha256": hashes}
+    manifest = {**metadata, "schema_version": SCHEMA_VERSION, "bundle_id": bundle_id, "sha256": hashes,
+                "created_at_utc": datetime.now(timezone.utc).isoformat()}
     atomic_json(directory / "manifest.json", manifest)
     load_bundle(root, bundle_id)
     return bundle_id

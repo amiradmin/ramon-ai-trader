@@ -1,5 +1,5 @@
 #property strict
-#property version "0.27"
+#property version "0.28"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -307,7 +307,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.27\n"
+      +"EA version: 0.28\n"
       +"Captured: "+TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS)+"\n"
       +"Symbol: "+_Symbol+"  Timeframe: M15\n"
       +"Bid: "+(tick_ok ? DoubleToString(tick.bid,_Digits) : "NA")
@@ -528,7 +528,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.27",28,36,clrWhite,12);
+   UiLabel("TITLE","RAMON AI TRADER  v0.28",28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
 
@@ -1051,22 +1051,78 @@ bool PositionIdOpen(const ulong identifier)
    return false;
 }
 
+// Persist event-time telemetry independently of optional CSV logging.
+// Never infer a historical deal's UTC offset from the current server offset.
+string DealTelemetryPath(const ulong deal)
+{
+   string server=AccountInfoString(ACCOUNT_SERVER);
+   StringReplace(server,"\\","_"); StringReplace(server,"/","_");
+   StringReplace(server,":","_");
+   return "RamonTelemetry\\"+server+"_"+IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN))
+      +"\\"+IntegerToString((long)deal)+".csv";
+}
+
+bool ReadDealTelemetry(const ulong deal,int &offset,string &version,string &detail)
+{
+   int file=FileOpen(DealTelemetryPath(deal),FILE_READ|FILE_CSV|FILE_ANSI|FILE_COMMON,'\t');
+   if(file==INVALID_HANDLE) return false;
+   string marker=FileReadString(file);
+   offset=(int)StringToInteger(FileReadString(file));
+   version=FileReadString(file);
+   detail=FileReadString(file);
+   FileClose(file);
+   return marker=="v1" && MathAbs(offset)<=14*3600 && version!="";
+}
+
+void RecordDealTelemetry(const ulong deal,const string close_detail="")
+{
+   if(deal==0 || !HistoryDealSelect(deal)) return;
+   if(HistoryDealGetString(deal,DEAL_SYMBOL)!=_Symbol
+      || (ulong)HistoryDealGetInteger(deal,DEAL_MAGIC)!=MagicNumber) return;
+   int offset=0;
+   string version="",detail="";
+   bool recorded=ReadDealTelemetry(deal,offset,version,detail);
+   if(!recorded)
+   {
+      // Only sample the clock at a fresh deal event. The terminal's OS clock must be correct.
+      datetime at=(datetime)HistoryDealGetInteger(deal,DEAL_TIME);
+      if(MathAbs((long)TimeCurrent()-(long)at)>60) return;
+      long delta=(long)TimeCurrent()-(long)TimeGMT();
+      // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
+      offset=(int)(MathRound((double)delta/900.0)*900.0);
+      if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
+      version="0.28";
+   }
+   if(close_detail!="") detail=close_detail;
+   int file=FileOpen(DealTelemetryPath(deal),FILE_WRITE|FILE_CSV|FILE_ANSI|FILE_COMMON,'\t');
+   if(file==INVALID_HANDLE)
+   {
+      Print("Ramon deal telemetry write failed: ",GetLastError());
+      return;
+   }
+   FileWrite(file,"v1",IntegerToString(offset),version,detail);
+   FileFlush(file);
+   FileClose(file);
+}
+
 bool ClosedTradePayload(const ulong identifier,string &payload)
 {
    if(PositionIdOpen(identifier) || !HistorySelectByPosition(identifier)) return false;
    string sample="",direction="",exit_reason="";
    datetime opened=0,closed=0;
+   ulong opening_deal=0,closing_deal=0;
    double in_volume=0.0,out_volume=0.0,net=0.0,risk=0.0;
+   double profit=0.0,commission=0.0,swap=0.0,fee=0.0;
    // Do not call HistoryDealSelect here: it resets the selected position history.
    for(int i=0;i<HistoryDealsTotal();i++)
    {
       ulong deal=HistoryDealGetTicket(i);
       if(deal==0) return false;
       if(HistoryDealGetString(deal,DEAL_SYMBOL)!=_Symbol) continue;
-      net+=HistoryDealGetDouble(deal,DEAL_PROFIT)
-         +HistoryDealGetDouble(deal,DEAL_COMMISSION)
-         +HistoryDealGetDouble(deal,DEAL_SWAP)
-         +HistoryDealGetDouble(deal,DEAL_FEE);
+      profit+=HistoryDealGetDouble(deal,DEAL_PROFIT);
+      commission+=HistoryDealGetDouble(deal,DEAL_COMMISSION);
+      swap+=HistoryDealGetDouble(deal,DEAL_SWAP);
+      fee+=HistoryDealGetDouble(deal,DEAL_FEE);
       long type=HistoryDealGetInteger(deal,DEAL_TYPE);
       if(type!=DEAL_TYPE_BUY && type!=DEAL_TYPE_SELL) continue;
       long entry=HistoryDealGetInteger(deal,DEAL_ENTRY);
@@ -1083,7 +1139,7 @@ bool ClosedTradePayload(const ulong identifier,string &payload)
             || (direction!="" && direction!=side)) return false;
          sample=key;
          direction=side;
-         if(opened==0 || at<opened) opened=at;
+         if(opened==0 || at<opened) { opened=at; opening_deal=deal; }
          in_volume+=volume;
          ulong order=(ulong)HistoryDealGetInteger(deal,DEAL_ORDER);
          double stop=HistoryOrderGetDouble(order,ORDER_SL);
@@ -1100,6 +1156,7 @@ bool ClosedTradePayload(const ulong identifier,string &payload)
          if(at>=closed)
          {
             closed=at;
+            closing_deal=deal;
             exit_reason=EnumToString((ENUM_DEAL_REASON)HistoryDealGetInteger(deal,DEAL_REASON));
          }
       }
@@ -1107,13 +1164,30 @@ bool ClosedTradePayload(const ulong identifier,string &payload)
    }
    if(sample=="" || risk<=0.0 || closed<opened || in_volume<=0.0
       || MathAbs(in_volume-out_volume)>0.000001) return false;
+   net=profit+commission+swap+fee;
    string trade_key=AccountInfoString(ACCOUNT_SERVER)+":"
       +IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN))+":"+IntegerToString((long)identifier);
    payload="{\"trade_key\":\""+JsonEscape(trade_key)+"\",\"sample_key\":\""+sample
       +"\",\"symbol\":\""+_Symbol+"\",\"direction\":\""+direction
       +"\",\"opened\":"+IntegerToString((long)opened)+",\"closed\":"+IntegerToString((long)closed)
       +",\"net_units\":"+DoubleToString(net,8)+",\"initial_risk_units\":"+DoubleToString(risk,8)
-      +",\"exit_reason\":\""+exit_reason+"\"}";
+      +",\"profit_units\":"+DoubleToString(profit,8)
+      +",\"commission_units\":"+DoubleToString(commission,8)
+      +",\"swap_units\":"+DoubleToString(swap,8)
+      +",\"fee_units\":"+DoubleToString(fee,8)
+      +",\"exit_reason\":\""+exit_reason+"\"";
+   int offset=0;
+   string version="",detail="";
+   if(ReadDealTelemetry(opening_deal,offset,version,detail))
+      payload+=",\"opened_utc_offset_seconds\":"+IntegerToString(offset)
+         +",\"entry_ea_version\":\""+JsonEscape(version)+"\"";
+   if(ReadDealTelemetry(closing_deal,offset,version,detail))
+   {
+      payload+=",\"closed_utc_offset_seconds\":"+IntegerToString(offset);
+      if(exit_reason=="DEAL_REASON_EXPERT" && detail!="")
+         payload+=",\"exit_detail\":\""+JsonEscape(detail)+"\"";
+   }
+   payload+="}";
    return true;
 }
 
@@ -1173,7 +1247,10 @@ void ManageOpenPosition()
    int age=iBarShift(_Symbol,PERIOD_M15,opened,false);
    if(age<MaximumHoldBars) { StatusLine="Managed position OPEN"; return; }
    if(Trade.PositionClose(ticket,MaxDeviationPoints))
+   {
+      RecordDealTelemetry(Trade.ResultDeal(),"maximum_hold_bars");
       StatusLine="TIME EXIT "+IntegerToString(age)+" bars";
+   }
    else
       StatusLine="TIME EXIT FAILED "+IntegerToString((int)Trade.ResultRetcode());
 }
@@ -1413,7 +1490,10 @@ void OnTradeTransaction(
 )
 {
    if(trans.type==TRADE_TRANSACTION_DEAL_ADD && trans.deal>0)
+   {
+      RecordDealTelemetry(trans.deal);
       AppendTradeCsv(trans.deal);
+   }
 }
 
 void OnChartEvent(const int id,const long &lparam,const double &dparam,const string &sparam)

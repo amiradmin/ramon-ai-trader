@@ -253,6 +253,7 @@ class EnsembleCoordinator:
     def __init__(self, root: str | Path, chronos_model: str | None = None) -> None:
         self.root = Path(root)
         self.regime = self.entry = self.news = self.meta = None
+        self.manifest: dict[str, object] = {}
         self.bundle_id = ""
         self.symbol = ""
         self.error = ""
@@ -267,6 +268,7 @@ class EnsembleCoordinator:
                 self.news = models.get("news")
                 self.meta = models.get("meta")
                 self.bundle_id = str(manifest["bundle_id"])
+                self.manifest = manifest
                 self.symbol = str(manifest["symbol"])
                 self.threshold = float(manifest["trade_threshold"])
             except (OSError, ValueError, KeyError, TypeError) as exc:

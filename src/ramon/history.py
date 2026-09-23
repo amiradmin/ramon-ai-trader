@@ -9,6 +9,13 @@ from pathlib import Path
 from .core import Bar, Market
 
 
+TRADE_TELEMETRY_COLUMNS = {
+    "profit_units": "REAL", "commission_units": "REAL", "swap_units": "REAL", "fee_units": "REAL",
+    "opened_utc_offset_seconds": "INTEGER", "closed_utc_offset_seconds": "INTEGER",
+    "exit_detail": "TEXT", "entry_ea_version": "TEXT",
+}
+
+
 HISTORY_SCHEMA = """
 CREATE TABLE IF NOT EXISTS history_bars (
     symbol TEXT NOT NULL,
@@ -54,6 +61,7 @@ def ensure_history_db(db: str | Path) -> Path:
             "sample_key": "TEXT", "chronos_model": "TEXT", "schema_version": "INTEGER DEFAULT 1",
             "quote_time": "INTEGER", "stop_distance": "REAL", "target_distance": "REAL",
             "final_decision": "TEXT", "bundle_id": "TEXT", "news_features": "TEXT",
+            "model_metadata": "TEXT",
         }.items():
             if name not in columns:
                 conn.execute(f"ALTER TABLE decision_samples ADD COLUMN {name} {definition}")
@@ -64,6 +72,10 @@ def ensure_history_db(db: str | Path) -> Path:
             net_units REAL NOT NULL, initial_risk_units REAL NOT NULL,
             net_r REAL NOT NULL, exit_reason TEXT NOT NULL, received INTEGER NOT NULL
         )""")
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(trade_outcomes)")}
+        for name, definition in TRADE_TELEMETRY_COLUMNS.items():
+            if name not in columns:
+                conn.execute(f"ALTER TABLE trade_outcomes ADD COLUMN {name} {definition}")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_history_symbol_tf_time "
             "ON history_bars(symbol,timeframe,time)"
@@ -134,6 +146,7 @@ def persist_decision_sample(
     target_distance: float | None = None,
     final_decision: str | None = None,
     bundle_id: str = "",
+    model_metadata: dict[str, object] | None = None,
 ) -> bool:
     """Persist one live inference sample for later role-model training."""
     path = ensure_history_db(db)
@@ -145,8 +158,8 @@ def persist_decision_sample(
             INSERT OR IGNORE INTO decision_samples
                 (captured,symbol,signal_bar_time,mid,spread,atr,direction,
                  base_decision,regime_features,entry_features,meta_base_features,news_features,
-                 sample_key,chronos_model,schema_version,quote_time,stop_distance,target_distance,final_decision,bundle_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 sample_key,chronos_model,schema_version,quote_time,stop_distance,target_distance,final_decision,bundle_id,model_metadata)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 int(captured),
@@ -163,6 +176,7 @@ def persist_decision_sample(
                 json.dumps(news_features, separators=(",", ":")) if news_features is not None else None,
                 sample_key, chronos_model, 3 if sample_key and quote_time and news_features is not None else (2 if sample_key and quote_time else 1), quote_time,
                 stop_distance, target_distance, final_decision, bundle_id,
+                json.dumps(model_metadata, allow_nan=False) if model_metadata is not None else None,
             ),
         )
         return cursor.rowcount == 1
@@ -226,18 +240,68 @@ def persist_trade_outcome(db: str | Path, payload: dict[str, object], received: 
             or direction not in {"BUY", "SELL"} or not 0 < opened <= closed
             or not isfinite(net) or not isfinite(risk) or risk <= 0 or not isfinite(net / risk)):
         raise ValueError("invalid closed trade outcome")
+    extra = validate_trade_telemetry(payload, net)
+    extra_names = list(TRADE_TELEMETRY_COLUMNS)
+    updates = []
+    for name in extra_names:
+        if name in {"profit_units", "commission_units", "swap_units", "fee_units"}:
+            # A later legacy correction may change net without resending components.
+            # Invalidate the stale breakdown instead of silently reporting inconsistent costs.
+            updates.append(f"{name}=CASE WHEN excluded.{name} IS NOT NULL THEN excluded.{name} "
+                           f"WHEN ABS(excluded.net_units-trade_outcomes.net_units)>0.0001 THEN NULL "
+                           f"ELSE trade_outcomes.{name} END")
+        elif name in {"exit_detail", "closed_utc_offset_seconds"}:
+            updates.append(f"{name}=CASE WHEN excluded.{name} IS NOT NULL THEN excluded.{name} "
+                           f"WHEN excluded.closed!=trade_outcomes.closed OR "
+                           f"excluded.exit_reason!=trade_outcomes.exit_reason THEN NULL "
+                           f"ELSE trade_outcomes.{name} END")
+        else:
+            updates.append(f"{name}=COALESCE(excluded.{name},trade_outcomes.{name})")
+    extra_updates = ", ".join(updates)
     path = ensure_history_db(db)
     with sqlite3.connect(path, timeout=10) as conn:
-        conn.execute("""INSERT INTO trade_outcomes
+        conn.execute(f"""INSERT INTO trade_outcomes
             (trade_key,sample_key,symbol,direction,opened,closed,net_units,initial_risk_units,
-             net_r,exit_reason,received) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+             net_r,exit_reason,received,{",".join(extra_names)})
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,{",".join("?" for _ in extra_names)})
             ON CONFLICT(trade_key) DO UPDATE SET
                 net_units=excluded.net_units, initial_risk_units=excluded.initial_risk_units,
                 net_r=excluded.net_r, closed=excluded.closed, exit_reason=excluded.exit_reason,
-                received=excluded.received
+                received=excluded.received, {extra_updates}
             WHERE trade_outcomes.sample_key=excluded.sample_key
               AND trade_outcomes.symbol=excluded.symbol
               AND trade_outcomes.direction=excluded.direction
               AND trade_outcomes.opened=excluded.opened""",
             (trade_key, sample_key, symbol, direction, opened, closed, net, risk,
-             net / risk, str(payload.get("exit_reason", "UNKNOWN")), int(received)))
+             net / risk, str(payload.get("exit_reason", "UNKNOWN")), int(received),
+             *(extra.get(name) for name in extra_names)))
+
+
+def validate_trade_telemetry(payload: dict[str, object], net: float) -> dict[str, object]:
+    """Keep missing legacy telemetry NULL; reject nonfinite or unreconciled costs."""
+    extra: dict[str, object] = {}
+    cost_names = ("profit_units", "commission_units", "swap_units", "fee_units")
+    present = [name for name in cost_names if payload.get(name) is not None]
+    if present:
+        if len(present) != len(cost_names):
+            raise ValueError("cost breakdown must include all four components")
+        for name in cost_names:
+            value = float(payload[name])
+            if not isfinite(value):
+                raise ValueError("invalid cost breakdown")
+            extra[name] = value
+        if abs(sum(float(extra[name]) for name in cost_names) - net) > 0.0001:
+            raise ValueError("cost breakdown does not reconcile to net_units")
+    for name in ("opened_utc_offset_seconds", "closed_utc_offset_seconds"):
+        if payload.get(name) is not None:
+            value = float(payload[name])
+            if not isfinite(value) or not value.is_integer() or abs(value) > 14 * 3600:
+                raise ValueError("invalid broker UTC offset")
+            extra[name] = int(value)
+    for name in ("exit_detail", "entry_ea_version"):
+        if payload.get(name):
+            value = str(payload[name])
+            if len(value) > 128 or any(ord(c) < 32 for c in value):
+                raise ValueError("invalid trade telemetry text")
+            extra[name] = value
+    return extra

@@ -156,6 +156,12 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                             target_distance=result.target_distance,
                             final_decision=str(response["decision"]),
                             bundle_id=ensemble.bundle_id,
+                            model_metadata={
+                                "chronos_revision": getattr(model, "revision", None),
+                                "ensemble_mode": ensemble.status()["ensemble_mode"],
+                                "ensemble_active": response.get("ensemble_active", 0),
+                                "role_manifest": ensemble.manifest,
+                            },
                         )
                         response["sample_saved"] = int(saved)
                     except Exception as exc:
