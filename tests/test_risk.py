@@ -44,8 +44,8 @@ def test_risk_feature_vector_is_complete() -> None:
     assert tuple(values) == RISK_FEATURES
 
 
-def test_probability_mapping_is_bounded() -> None:
-    assert risk_multiplier(0.40) == (0.75, "DEFENSIVE")
+def test_probability_mapping_is_accelerator_only() -> None:
+    assert risk_multiplier(0.40) == (1.0, "NORMAL")
     assert risk_multiplier(0.60) == (1.0, "NORMAL")
     assert risk_multiplier(0.75) == (1.5, "RISK_ON")
     assert risk_multiplier(0.90) == (2.0, "STRONG_RISK_ON")
