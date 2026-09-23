@@ -300,7 +300,15 @@ def persist_trade_outcome(db: str | Path, payload: dict[str, object], received: 
                            f"excluded.exit_reason!=trade_outcomes.exit_reason THEN NULL "
                            f"ELSE trade_outcomes.{name} END")
         elif name == "training_status":
-            updates.append("training_status=excluded.training_status")
+            updates.append(
+                "training_status=CASE "
+                "WHEN excluded.exit_reason=trade_outcomes.exit_reason "
+                "AND excluded.exit_reason='DEAL_REASON_EXPERT' "
+                "AND excluded.exit_detail IS NULL "
+                "AND trade_outcomes.exit_detail IS NOT NULL "
+                "THEN trade_outcomes.training_status "
+                "ELSE excluded.training_status END"
+            )
         else:
             updates.append(f"{name}=COALESCE(excluded.{name},trade_outcomes.{name})")
     extra_updates = ", ".join(updates)

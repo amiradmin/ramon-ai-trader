@@ -39,7 +39,7 @@ def test_legacy_migration_enrichment_and_duplicate_delivery(tmp_path):
     persist_trade_outcome(db, outcome(**telemetry()), 1_800_014_600)
     persist_trade_outcome(db, outcome(), 1_800_014_700)
     with sqlite3.connect(db) as con:
-        assert con.execute("SELECT COUNT(*),net_units,net_r,profit_units,commission_units,swap_units,fee_units,exit_detail FROM trade_outcomes").fetchone() == (1, 7.5, 1.25, 10, -2, -.4, -.1, "maximum_hold_bars")
+        assert con.execute("SELECT COUNT(*),net_units,net_r,profit_units,commission_units,swap_units,fee_units,exit_detail,training_status FROM trade_outcomes").fetchone() == (1, 7.5, 1.25, 10, -2, -.4, -.1, "maximum_hold_bars", "LEARNABLE")
 
 
 @pytest.mark.parametrize("extra", [
@@ -198,3 +198,11 @@ def test_training_status_censors_manual_and_unknown_expert_until_enriched(tmp_pa
         assert con.execute(
             "SELECT training_status FROM trade_outcomes WHERE trade_key='server:1:expert'"
         ).fetchone()[0] == "LEARNABLE"
+
+    # A later legacy broker replay may omit the exact trigger; it must not
+    # downgrade already enriched telemetry or its training eligibility.
+    persist_trade_outcome(db, expert, 126)
+    with sqlite3.connect(db) as con:
+        assert con.execute(
+            "SELECT exit_detail,training_status FROM trade_outcomes WHERE trade_key='server:1:expert'"
+        ).fetchone() == ("maximum_hold_bars", "LEARNABLE")
