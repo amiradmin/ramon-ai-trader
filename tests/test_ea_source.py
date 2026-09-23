@@ -217,8 +217,8 @@ def test_role_model_dashboard_and_response_fields() -> None:
     assert '"base_decision","base_reason","ensemble_ready","ensemble_active"' in source
 
 
-def test_daily_trade_cap_is_20_by_default() -> None:
+def test_daily_trade_cap_is_400_by_default() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert "input int MaxTradesPerDay = 20;" in source
+    assert "input int MaxTradesPerDay = 400;" in source
     assert "today>=MaxTradesPerDay" in source
