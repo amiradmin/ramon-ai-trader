@@ -14,6 +14,7 @@ from .ensemble import EnsembleCoordinator, dominant_direction
 from .history import persist_decision_sample, persist_market, persist_trade_outcome
 from .model import ChronosForecaster, model_name
 from .news import DEFAULT_FOREX_FACTORY_JSON, ForexFactoryNewsProvider
+from .risk import RiskModelCoordinator
 
 
 def persist_market_safely(db: str, market: Market) -> str:
@@ -49,6 +50,10 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
     history_db = os.getenv("RAMON_HISTORY_DB", "").strip()
     ensemble_dir = os.getenv("RAMON_ENSEMBLE_DIR", "/checkpoints/ensemble").strip()
     ensemble = EnsembleCoordinator(ensemble_dir, model.model_id)
+    risk_model = RiskModelCoordinator(
+        os.getenv("RAMON_RISK_MODEL_DIR", "/checkpoints/risk").strip() or "/checkpoints/risk",
+        model.model_id,
+    )
     news_enabled = os.getenv("RAMON_NEWS_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
     news_provider = ForexFactoryNewsProvider(
         enabled=news_enabled,
@@ -79,6 +84,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     "history_last_error": str(history_status["last_error"]),
                     "history_last_persisted_bar": int(history_status["last_persisted_bar"]),
                     **ensemble.status(),
+                    **risk_model.status(),
                     **news_provider.status(),
                 },
             )
@@ -127,8 +133,15 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         market, result, news_snapshot.features
                     )
 
+                risk_payload = risk_model.assess(
+                    feature_snapshot,
+                    symbol=market.symbol,
+                    news_source_ready=news_snapshot.source_ready,
+                )
+
                 response = result.to_dict()
                 response.update(ensemble_payload)
+                response.update(risk_payload)
                 response.update(news_snapshot.payload())
                 response["news_model_ready"] = int(ensemble.news_ready)
                 sample_key = uuid4().hex[:16]
