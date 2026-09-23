@@ -1187,7 +1187,6 @@ void OnTimer()
    datetime opened;
    bool has_managed=ManagedPosition(ticket,opened);
    if(has_managed) ManageOpenPosition(); // Exits always run before network telemetry.
-   SyncClosedTrades();
    datetime closed=iTime(_Symbol,PERIOD_M15,1);
    if(closed<=0)
       return;
@@ -1195,7 +1194,13 @@ void OnTimer()
    datetime now=TimeCurrent();
    if(LastDecisionRequestTime>0
       && now-LastDecisionRequestTime<SnapshotIntervalSeconds)
+   {
+      // Never issue trade telemetry immediately before a live model decision.
+      // On Wine/MT5, back-to-back WebRequest calls can fail locally with 1003/5203.
+      // Use idle timer cycles for learning telemetry and always prioritize /decision.
+      SyncClosedTrades();
       return;
+   }
    LastDecisionRequestTime=now;
 
    string payload,reply;
