@@ -35,7 +35,6 @@ input bool AllowMinLotRiskOverride = true; // Permit broker minimum lot above pr
 input double MaxExecutableRiskUSD = 0.20; // Absolute hard cap; dynamic sizing never exceeds it.
 input bool EnableDynamicRisk = true; // Use the learned Risk Model multiplier when promoted.
 input double MaxDynamicRiskMultiplier = 2.0; // Risk Model may never exceed this multiplier.
-input double MaxDailyLossPercent = 3.0; // Stop new entries after this Ramon-only realized daily drawdown.
 input bool RequireNonNegativeDayForRiskOn = true; // Do not lever above 1x while today's Ramon P/L is negative.
 input int MaxSpreadPoints = 50;
 input int MaxTradesPerDay = 20;
@@ -277,7 +276,7 @@ double EffectiveRiskMultiplier()
 {
    if(!EnableDynamicRisk || !LastRiskModelReady)
       return 1.0;
-   double multiplier=MathMax(0.50,MathMin(MaxDynamicRiskMultiplier,LastRiskMultiplier));
+   double multiplier=MathMax(1.00,MathMin(MaxDynamicRiskMultiplier,LastRiskMultiplier));
    if(RequireNonNegativeDayForRiskOn && DailyNetAccountUnits()<0.0 && multiplier>1.0)
       multiplier=1.0;
    return multiplier;
@@ -286,11 +285,6 @@ double EffectiveRiskMultiplier()
 double EffectiveRiskBudgetUSD()
 {
    return MathMin(MaxExecutableRiskUSD,RiskPerTradeUSD*EffectiveRiskMultiplier());
-}
-
-bool DailyLossStopTriggered()
-{
-   return MaxDailyLossPercent>0.0 && DailyNetPercent()<=-MaxDailyLossPercent;
 }
 
 bool MinimumLotExceedsRiskBudget()
@@ -1439,8 +1433,6 @@ void OnTimer()
    int today=TradesToday();
    if(today<0 || today>=MaxTradesPerDay)
    { StatusLine="Daily trade limit/history unavailable"; ShowStatus(); return; }
-   if(DailyLossStopTriggered())
-   { StatusLine="DAILY LOSS STOP"; ShowStatus(); return; }
    MqlTick tick;
    if(!SymbolInfoTick(_Symbol,tick) || TimeCurrent()-tick.time>30
       || (int)SymbolInfoInteger(_Symbol,SYMBOL_SPREAD)>MaxSpreadPoints)
@@ -1509,7 +1501,6 @@ int OnInit()
       || MaxExecutableRiskUSD<=0.0 || MaxExecutableRiskUSD>0.50
       || MaxExecutableRiskUSD<RiskPerTradeUSD
       || MaxDynamicRiskMultiplier<1.0 || MaxDynamicRiskMultiplier>3.0
-      || MaxDailyLossPercent<=0.0 || MaxDailyLossPercent>10.0
       || MaxSpreadPoints<=0 || MaxTradesPerDay<1 || MaximumHoldBars<1
       || SnapshotIntervalSeconds<10
       || (WriteDiagnosticFile && StringLen(DiagnosticFileName)==0)
