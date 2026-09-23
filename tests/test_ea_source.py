@@ -224,20 +224,21 @@ def test_daily_trade_cap_is_20_by_default() -> None:
     assert "today>=MaxTradesPerDay" in source
 
 
-def test_dynamic_risk_model_is_bounded_and_cannot_change_direction() -> None:
+def test_dynamic_risk_model_is_bounded_and_never_blocks_or_deleverages() -> None:
     source = EA.read_text(encoding="utf-8")
 
     assert "input bool EnableDynamicRisk = true" in source
     assert "input double MaxDynamicRiskMultiplier = 2.0" in source
-    assert "input double MaxDailyLossPercent = 3.0" in source
     assert "input bool RequireNonNegativeDayForRiskOn = true" in source
+    assert "input double MaxDailyLossPercent" not in source
     assert "double EffectiveRiskMultiplier()" in source
     assert "double EffectiveRiskBudgetUSD()" in source
-    assert "bool DailyLossStopTriggered()" in source
+    assert "MathMax(1.00,MathMin(MaxDynamicRiskMultiplier,LastRiskMultiplier))" in source
+    assert "DailyLossStopTriggered" not in source
+    assert 'StatusLine="DAILY LOSS STOP"' not in source
     assert 'JsonNumber(reply,"risk_model_ready",risk_model_ready)' in source
     assert 'JsonNumber(reply,"risk_probability",risk_probability)' in source
     assert 'JsonNumber(reply,"risk_multiplier",risk_multiplier)' in source
     assert 'JsonText(reply,"risk_mode",risk_mode)' in source
-    assert 'StatusLine="DAILY LOSS STOP"' in source
     assert "double budget=EffectiveRiskBudgetUSD()*MoneyUnitsPerUSD;" in source
     assert "MathMin(MaxExecutableRiskUSD,RiskPerTradeUSD*EffectiveRiskMultiplier())" in source
