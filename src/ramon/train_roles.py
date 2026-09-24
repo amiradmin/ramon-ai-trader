@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sqlite3
@@ -19,6 +20,10 @@ from .ensemble import (
 )
 from .history import ensure_history_db, load_bars
 from .news import NEWS_FEATURES
+
+DEFAULT_MINIMUM_SAMPLES = 500
+DEFAULT_REGIME_MINIMUM = 300
+DEFAULT_MINIMUM_TRADES = 20
 
 
 @dataclass(frozen=True)
@@ -62,7 +67,12 @@ def load_trade_examples(db: str | Path, symbol: str, chronos_model: str) -> list
     """
     ensure_history_db(db)
     with sqlite3.connect(db) as conn:
-        rows = conn.execute("""
+        return read_trade_examples(conn, symbol, chronos_model)
+
+
+def read_trade_examples(conn: sqlite3.Connection, symbol: str, chronos_model: str) -> list[Example]:
+    """Shared trainer/audit selection; caller owns the transaction, no migrations."""
+    rows = conn.execute("""
             SELECT s.quote_time,t.closed,s.regime_features,s.entry_features,
                    s.news_features,s.meta_base_features,t.net_r,s.base_decision
             FROM decision_samples s JOIN trade_outcomes t ON t.sample_key=s.sample_key
@@ -162,8 +172,8 @@ def promotion_gate(candidate: dict, incumbent: dict, baseline: dict,
 
 
 def train_bundle(*, db: str | Path, symbol: str, chronos_model: str, out: Path,
-                 minimum_samples: int = 500, regime_minimum: int = 300,
-                 minimum_trades: int = 20, threshold: float = 0.65,
+                 minimum_samples: int = DEFAULT_MINIMUM_SAMPLES, regime_minimum: int = DEFAULT_REGIME_MINIMUM,
+                 minimum_trades: int = DEFAULT_MINIMUM_TRADES, threshold: float = 0.65,
                  improvement: float = 0.5, maximum_drawdown: float = 8.0) -> dict:
     if minimum_samples < 100 or regime_minimum < 40 or minimum_trades < 1:
         raise ValueError("invalid sample limits")
@@ -171,6 +181,10 @@ def train_bundle(*, db: str | Path, symbol: str, chronos_model: str, out: Path,
         raise ValueError("invalid promotion limits")
     examples = load_trade_examples(db, symbol, chronos_model)
     report = {"updated": False, "closed_trade_samples": len(examples), "chronos_model": chronos_model,
+              "symbol": symbol, "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+              "minimum_samples": minimum_samples, "regime_minimum": regime_minimum,
+              "minimum_trades": minimum_trades,
+              "remaining_to_sample_gate": max(0, minimum_samples - len(examples)),
               "dataset_source": "clean_real_closed_positions_net_of_deal_costs",
               "label_policy": "exclude_manual_stopout_unknown_expert"}
     if len(examples) < minimum_samples:
@@ -245,9 +259,9 @@ def main() -> None:
     parser.add_argument("--out", default="/checkpoints/ensemble")
     parser.add_argument("--chronos-model", default="autogluon/chronos-2-small")
     parser.add_argument("--active-model-file", default="/checkpoints/active_model.txt")
-    parser.add_argument("--minimum-samples", type=int, default=500)
-    parser.add_argument("--regime-min-samples", type=int, default=300)
-    parser.add_argument("--minimum-trades", type=int, default=20)
+    parser.add_argument("--minimum-samples", type=int, default=DEFAULT_MINIMUM_SAMPLES)
+    parser.add_argument("--regime-min-samples", type=int, default=DEFAULT_REGIME_MINIMUM)
+    parser.add_argument("--minimum-trades", type=int, default=DEFAULT_MINIMUM_TRADES)
     args = parser.parse_args()
     model = args.chronos_model
     active_model = Path(args.active_model_file)

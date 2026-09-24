@@ -497,3 +497,53 @@ risk sizing, BUY/SELL enablement, or live execution rule is changed by this patc
 `bash scripts/analyze_ramon.sh --all` now prints label-quality coverage and marks each
 trade's label status. UTC event-time telemetry remains the source of truth for new
 execution timestamps; legacy broker times are never guessed.
+
+### بررسی دلیل ورود و وضعیت آموزش
+
+پس از دریافت این تغییرات، سرویس را بازسازی کنید؛ EA همچنان با نسخهٔ ۰٫۲۸ سازگار است:
+
+```bash
+docker compose build model
+docker compose up -d model
+bash scripts/audit_ramon.sh --trade-number 29
+```
+
+شمارهٔ معامله مطابق ترتیب گزارش `--all` است و با ورود سوابق قدیمی ممکن است عوض شود.
+برای بررسی مجدد، از `--trade-key` با شناسه‌ای که ابزار چاپ می‌کند استفاده کنید.
+این ابزار دیتابیس و checkpointها را فقط می‌خواند؛ آموزش، فعال‌سازی مدل یا معامله اجرا نمی‌کند.
+خروجی شامل سلامت سرویس، وضعیت timer، bundle روی دیسک، آخرین تلاش آموزش، تعداد دقیق
+نمونه‌های قابل‌آموزش با همان query مربی و اطلاعات تصمیم متصل به معامله است.
+مقدار `LEARNABLE` صرفاً کیفیت علت خروج را نشان می‌دهد؛ schema، مدل، جهت و فاصلهٔ زمانی
+ورود تا تصمیم نیز برای ورود به مجموعهٔ آموزشی بررسی می‌شوند. حد پیش‌فرض اولین مرحله
+۵۰۰ نمونه است؛ عبور از آن به‌تنهایی مدل را فعال نمی‌کند و شروط تفکیک زمانی، کلاس‌ها و
+اعتبارسنجی همچنان اعمال می‌شوند. وضعیت آخرین تلاش آموزش، وضعیت همین لحظه فرض نمی‌شود.
+
+از این نسخه، دلیل تصمیم پایه و نهایی و آستانه‌های زمان تصمیم در `model_metadata`
+ذخیره می‌شوند. دلیل ورود قدیمی که در دیتابیس ثبت نشده `UNKNOWN_LEGACY` می‌ماند.
+مسیر `ai_trend_continuation` در کد فعلی شرط حداقل `signal_strength` ندارد؛ بنابراین
+قدرت پایین به‌تنهایی اثبات خطای اجرا نیست. ریسک حداقل حجم هم در EA از قدرت سیگنال
+مشتق نمی‌شود؛ برای بررسی افزایش ریسک، دادهٔ حجم و minimum-lot override لازم است.
+
+اسکریپت به‌صورت اختیاری `Ramon_Signals.csv` را در prefixهای رایج Wine پیدا می‌کند و مسیر
+انتخاب‌شده را چاپ می‌کند. برای انتخاب دقیق فایل ترمینال موردنظر:
+
+```bash
+RAMON_SIGNAL_CSV='/path/to/Ramon_Signals.csv' bash scripts/audit_ramon.sh --trade-number 29
+```
+
+CSV قدیمی شناسهٔ تصمیم ندارد؛ ردیف‌های با فاصلهٔ حداکثر ۹۰ ثانیه از زمان تصمیم بروکر
+صرفاً «نامزد تطبیق» هستند و اثبات اجرای معامله نیستند. دادهٔ اصلی تغییر نمی‌کند.
+اگر فایل موجود نباشد، بررسی دیتابیس و وضعیت آموزش همچنان انجام می‌شود.
+
+اصلاح گزارش: `intrabar_move_atr` از قبل نسبت به جهت معامله محاسبه شده و برای SELL
+دوباره منفی نمی‌شود. `ai_trend_score` نیز اندازهٔ غیرمنفی حرکت است؛ جهت روند قدیمی در
+این ویژگی ذخیره نشده و گزارش آن را با ضرب در علامت معامله بازسازی نمی‌کند.
+این اصلاح به مقایسهٔ ویژگی‌ها مربوط است؛ جمع سود و زیان و سیاست معامله تغییری ندارند.
+
+برای بررسی کپی دیتابیس بدون Docker:
+
+```bash
+uv run python -m ramon.audit --db /path/to/ramon_history.sqlite3 \
+  --ensemble-dir /path/to/checkpoints/ensemble \
+  --chronos-model autogluon/chronos-2-small --trade-number 29
+```

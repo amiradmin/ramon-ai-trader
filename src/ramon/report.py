@@ -115,7 +115,8 @@ def print_telemetry(trades: list[dict]) -> None:
     for status, rows in sorted(label_groups.items()):
         print(f"{status:28} | trades={len(rows):3d} | net={sum(r['net_units'] for r in rows):+.4f}")
     eligible = len(label_groups.get("LEARNABLE", []))
-    print(f"Eligible model labels: {eligible}/{total}")
+    print(f"Clean exit labels: {eligible}/{total}")
+    print("Trainer eligibility also requires a matching model/schema/direction and entry within 90s of the decision.")
     print("Censored trades remain in account P/L but are excluded from supervised role-model labels.")
     print()
     print("=== COST BREAKDOWN (ACCOUNT UNITS) ===")
@@ -306,6 +307,7 @@ def generate_report(DB: str, SYMBOL: str = "XAUUSD_l", LIMIT: int = 20) -> None:
                 for name in ("profit_units", "commission_units", "swap_units", "fee_units")
             )
             print(f"      {costs}")
+            print(f"      trade_key={r['trade_key']} sample_key={r['sample_key']}")
         print()
 
         sl_rows = [r for r in trades if r["exit_reason"] == "DEAL_REASON_SL"]
@@ -325,18 +327,17 @@ def generate_report(DB: str, SYMBOL: str = "XAUUSD_l", LIMIT: int = 20) -> None:
             news_column = "s.news_features" if "news_features" in sample_columns else "NULL AS news_features"
             joined = con.execute(
                 f"""SELECT t.*, s.atr,s.spread,s.entry_features,s.regime_features,{news_column}
-                    FROM trade_outcomes t JOIN decision_samples s ON s.sample_key=t.sample_key
+                    FROM trade_outcomes t JOIN decision_samples s ON s.sample_key=t.sample_key AND s.symbol=t.symbol
                     WHERE t.symbol=? ORDER BY t.opened""", (SYMBOL,)
             ).fetchall()
 
         SIGNED = [
-            ("entry", "intrabar_move_atr"),
-            ("entry", "ai_trend_score"),
             ("regime", "ret_1_atr"),
             ("regime", "ret_4_atr"),
             ("regime", "ret_12_atr"),
         ]
         PLAIN = [
+            ("entry", "ai_trend_score"),
             ("entry", "edge_ratio"),
             ("entry", "signal_strength"),
             ("entry", "uncertainty_atr"),
@@ -376,6 +377,12 @@ def generate_report(DB: str, SYMBOL: str = "XAUUSD_l", LIMIT: int = 20) -> None:
                 if key in src[group]:
                     features[f"{group}.{key}.aligned"] = float(src[group][key]) * sign
 
+            # _intrabar_metrics already measures movement toward the candidate side.
+            # _model_trend_metrics returns a NONNEGATIVE score, not a signed return.
+            # Multiplying either by SELL's -1 invents a directional difference.
+            if "intrabar_move_atr" in entry:
+                features["entry.intrabar_move_atr.aligned"] = float(entry["intrabar_move_atr"])
+
             for group, key in PLAIN:
                 if key in src[group]:
                     features[f"{group}.{key}"] = float(src[group][key])
@@ -389,9 +396,10 @@ def generate_report(DB: str, SYMBOL: str = "XAUUSD_l", LIMIT: int = 20) -> None:
         flosses = [features for result, features in feature_records if result == "LOSS"]
 
         print("=== DIRECTION-ALIGNED WIN vs LOSS FEATURES ===")
-        print(f"Joined samples: {len(feature_records)} | wins={len(fwins)} | losses={len(flosses)} (eligible labels only)")
+        print(f"Joined samples: {len(feature_records)} | wins={len(fwins)} | losses={len(flosses)} (clean exit labels only)")
         print("effect > 0 => feature higher in winners; effect < 0 => lower in winners")
         print("Exploratory only: small samples can produce unstable effect sizes.")
+        print("Intrabar move is already direction-aligned; ai_trend_score is magnitude only (legacy trend direction is not stored).")
         print()
 
         if fwins and flosses:
@@ -428,7 +436,7 @@ def generate_report(DB: str, SYMBOL: str = "XAUUSD_l", LIMIT: int = 20) -> None:
                 "entry.signal_strength",
                 "entry.uncertainty_atr",
                 "entry.intrabar_move_atr.aligned",
-                "entry.ai_trend_score.aligned",
+                "entry.ai_trend_score",
                 "entry.ai_trend_consistency",
                 "entry.spread_atr",
                 "entry.forecast_distance_atr",
