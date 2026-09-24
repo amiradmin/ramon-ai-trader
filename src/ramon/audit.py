@@ -80,10 +80,8 @@ SIGNAL_COLUMNS_028 = (
 
 SIGNAL_COLUMNS_030 = (
     *SIGNAL_COLUMNS_028[:12],
-    "risk_model_ready", "risk_probability", "risk_multiplier",
-    *SIGNAL_COLUMNS_028[12:50],
-    "effective_risk_usd",
-    *SIGNAL_COLUMNS_028[50:],
+    "risk_multiplier",
+    *SIGNAL_COLUMNS_028[12:],
 )
 
 
@@ -115,16 +113,8 @@ def _valid_signal_layout(row: dict[str, str], columns: tuple[str, ...]) -> bool:
             and all(-1 <= numbers[key] <= 1 for key in
                     ("regime_probability", "entry_probability", "meta_probability"))):
         return False
-    if "risk_model_ready" in columns:
-        ready = row["risk_model_ready"] == "YES"
-        probability = numbers["risk_probability"]
-        multiplier = numbers["risk_multiplier"]
-        if not (-1 <= probability <= 1 and 0.50 <= multiplier <= 1.50):
-            return False
-        if ready and probability < 0:
-            return False
-        if not ready and (probability != -1.0 or abs(multiplier - 1.0) > 1e-9):
-            return False
+    if "risk_multiplier" in columns and not 0.50 <= numbers["risk_multiplier"] <= 1.50:
+        return False
     return True
 
 
@@ -178,8 +168,7 @@ def csv_candidates(stream, trade: dict, sample: dict) -> list[dict]:
     fields = ("captured", "symbol", "decision", "reason", "base_decision", "base_reason",
               "signal_strength", "minimum_strength", "buy_edge", "sell_edge", "minimum_edge",
               "ai_trend_confirmed", "ai_trend_direction", "ai_trend_move_atr",
-              "ai_trend_consistency", "intrabar_move_atr", "risk_usd", "effective_risk_usd",
-              "risk_model_ready", "risk_probability", "risk_multiplier",
+              "ai_trend_consistency", "intrabar_move_atr", "risk_usd", "risk_multiplier",
               "trend_min_path_atr", "trend_min_consistency", "trend_min_edge_fraction",
               "trend_min_micro_move_atr", "stop_distance", "target_distance",
               "money_units_per_usd", "risk_budget_units", "allow_min_lot_override",
