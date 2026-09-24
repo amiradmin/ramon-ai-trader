@@ -264,7 +264,9 @@ def test_v031_target_learning_is_observational_only() -> None:
     assert 'JsonNumber(reply,"target_tp3",target_tp3)' in source
     assert '"TargetLearning: "+(LastTargetLearningActive ? "COLLECTING" : "OFF")' in source
     assert '"ExecutionTargetMode: LEGACY_TP_UNCHANGED\\n\\n"' in source
-    # Candidate targets are telemetry only in v0.31; live order TP still uses LastTargetDistance.
-    assert "LastTargetTP1" not in source.split("bool OpenTrade(", 1)[1].split("void ManageOpenPosition", 1)[0]
-    assert "LastTargetTP2" not in source.split("bool OpenTrade(", 1)[1].split("void ManageOpenPosition", 1)[0]
-    assert "LastTargetTP3" not in source.split("bool OpenTrade(", 1)[1].split("void ManageOpenPosition", 1)[0]
+    # Candidate targets are telemetry only in v0.31; live order TP still uses target_distance.
+    assert 'double target=NormalizeDouble(entry+(decision=="BUY" ? target_distance : -target_distance),_Digits);' in source
+    execution = source[source.index('double target=NormalizeDouble') : source.index('void OnTradeTransaction(')]
+    assert "LastTargetTP1" not in execution
+    assert "LastTargetTP2" not in execution
+    assert "LastTargetTP3" not in execution
