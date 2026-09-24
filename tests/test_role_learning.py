@@ -142,7 +142,7 @@ def seed_trade(db: Path, index: int, *, chronos_model="test/model", schema=3) ->
                "exit_reason": "DEAL_REASON_TP" if positive else "DEAL_REASON_SL"}
     persist_trade_outcome(db, payload, time + 1000)
     persist_trade_outcome(db, payload, time + 1001)  # broker replay after restart is idempotent
-    return Example(time, time + 900, features, positive, 1.0 if positive else -1.0, True)
+    return Example(time, time + 900, features, positive, 1.0 if positive else -1.0, True, "BUY",\n                   "DEAL_REASON_TP" if positive else "DEAL_REASON_SL")
 
 
 def test_trade_join_deduplicates_and_excludes_legacy_wrong_model_and_direction(tmp_path):
