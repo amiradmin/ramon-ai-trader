@@ -11,7 +11,7 @@ import pytest
 from ramon.bundles import activate_bundle, load_active_bundle, stage_bundle
 from ramon.ensemble import (
     BinaryLogisticModel, EnsembleCoordinator, ENTRY_FEATURES, META_FEATURES,
-    META_BASE_FEATURES, REGIME_FEATURES,
+    META_BASE_FEATURES, REGIME_FEATURES, RISK_FEATURES,
 )
 from ramon.news import NEWS_FEATURES
 from ramon.history import ensure_history_db, persist_trade_outcome
@@ -32,7 +32,8 @@ def constant_model(names: tuple[str, ...], probability: float) -> BinaryLogistic
 def bundle(root: Path, probability: float = 0.5, **metadata) -> str:
     models = {role: constant_model(names, probability) for role, names in
               (("regime", REGIME_FEATURES), ("entry", ENTRY_FEATURES),
-               ("news", NEWS_FEATURES), ("meta", META_FEATURES))}
+               ("news", NEWS_FEATURES), ("meta", META_FEATURES),
+               ("risk", RISK_FEATURES))}
     return stage_bundle(root, models, {"chronos_model": "test/model", "symbol": "XAUUSD_l",
                                       "trade_threshold": 0.65, "promotion_gate_passed": True, **metadata})
 
@@ -187,6 +188,8 @@ def test_full_training_promotes_frozen_roles_then_requires_fresh_holdout(tmp_pat
     assert models["entry"].metadata["last_label_end"] < manifest["meta_start"]
     assert models["news"].metadata["last_label_end"] < manifest["meta_start"]
     assert models["meta"].metadata["last_label_end"] < manifest["holdout_start"]
+    assert models["risk"].metadata["last_label_end"] < manifest["meta_start"]
+    assert report["candidate"]["risk_balanced_accuracy"] >= 0.52
     assert report["candidate"]["net_r"] > report["chronos_baseline"]["net_r"]
     again = train_bundle(db=db, symbol="XAUUSD_l", chronos_model="test/model", out=root,
                          minimum_samples=200, regime_minimum=40)

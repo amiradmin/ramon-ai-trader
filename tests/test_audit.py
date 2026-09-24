@@ -6,7 +6,7 @@ import sqlite3
 import re
 from pathlib import Path
 
-from ramon.audit import audit, csv_candidates, SIGNAL_COLUMNS_028
+from ramon.audit import audit, csv_candidates, SIGNAL_COLUMNS_028, SIGNAL_COLUMNS_030
 from ramon.history import ensure_history_db
 from ramon.report import generate_report
 from ramon.train_roles import load_trade_examples, train_bundle
@@ -201,4 +201,4 @@ def test_reconstructed_layout_matches_the_actual_ea_writer():
     source = (Path(__file__).parents[1] / 'mt5' / 'Ramon.mq5').read_text()
     block = re.search(r'void AppendSignalCsv\(\).*?if\(empty\)\s*\{\s*FileWrite\(handle,(.*?)\);', source, re.S)
     assert block is not None
-    assert tuple(re.findall(r'"([a-z_]+)"', block.group(1))) == SIGNAL_COLUMNS_028
+    assert tuple(re.findall(r'"([a-z_]+)"', block.group(1))) == SIGNAL_COLUMNS_030

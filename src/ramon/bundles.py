@@ -16,12 +16,14 @@ from .ensemble import (
     LEGACY_META_FEATURES,
     META_FEATURES,
     REGIME_FEATURES,
+    RISK_FEATURES,
 )
 from .news import NEWS_FEATURES
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 LEGACY_FEATURES = {"regime": REGIME_FEATURES, "entry": ENTRY_FEATURES, "meta": LEGACY_META_FEATURES}
-FEATURES = {"regime": REGIME_FEATURES, "entry": ENTRY_FEATURES, "news": NEWS_FEATURES, "meta": META_FEATURES}
+V3_FEATURES = {"regime": REGIME_FEATURES, "entry": ENTRY_FEATURES, "news": NEWS_FEATURES, "meta": META_FEATURES}
+FEATURES = {**V3_FEATURES, "risk": RISK_FEATURES}
 
 
 def atomic_json(path: Path, value: dict[str, object]) -> None:
@@ -45,14 +47,18 @@ def load_bundle(root: Path, bundle_id: str, chronos_model: str | None = None) ->
     directory = root / "versions" / bundle_id
     manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
     schema_version = int(manifest["schema_version"])
-    if schema_version not in {2, SCHEMA_VERSION} or manifest["bundle_id"] != bundle_id:
+    if schema_version not in {2, 3, SCHEMA_VERSION} or manifest["bundle_id"] != bundle_id:
         raise ValueError("bundle schema/identity mismatch")
     if chronos_model is not None and manifest["chronos_model"] != chronos_model:
         raise ValueError("bundle belongs to a different Chronos checkpoint")
     threshold = float(manifest["trade_threshold"])
     if not 0.5 <= threshold < 1.0:
         raise ValueError("invalid trade threshold")
-    expected_features = FEATURES if schema_version == SCHEMA_VERSION else LEGACY_FEATURES
+    expected_features = (
+        FEATURES if schema_version == SCHEMA_VERSION
+        else V3_FEATURES if schema_version == 3
+        else LEGACY_FEATURES
+    )
     models = {}
     for role, expected in expected_features.items():
         path = directory / f"{role}.json"
@@ -71,7 +77,7 @@ def load_active_bundle(root: Path, chronos_model: str | None = None) -> tuple[di
 
 
 def stage_bundle(root: Path, models: dict[str, BinaryLogisticModel], metadata: dict[str, object]) -> str:
-    """Write all three models to a new directory; do not change active inference."""
+    """Write one immutable complete role bundle; do not change active inference."""
     bundle_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid4().hex[:8]
     directory = root / "versions" / bundle_id
     directory.mkdir(parents=True, exist_ok=False)

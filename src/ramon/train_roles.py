@@ -15,8 +15,8 @@ import sqlite3
 from .bundles import activate_bundle, atomic_json, load_active_bundle, stage_bundle
 from .core import Bar, atr14
 from .ensemble import (
-    ENTRY_FEATURES, META_FEATURES, META_BASE_FEATURES, REGIME_FEATURES, BinaryLogisticModel,
-    balanced_accuracy, regime_features, train_binary_logistic,
+    ENTRY_FEATURES, META_FEATURES, META_BASE_FEATURES, REGIME_FEATURES, RISK_FEATURES,
+    BinaryLogisticModel, balanced_accuracy, regime_features, train_binary_logistic,
 )
 from .history import ensure_history_db, load_bars
 from .news import NEWS_FEATURES
@@ -34,6 +34,7 @@ class Example:
     label: int
     net_r: float = 0.0
     base_trade: bool = False
+    direction: str = "NONE"
 
 
 def _regime_dataset(bars: tuple[Bar, ...]) -> list[Example]:
@@ -74,7 +75,7 @@ def read_trade_examples(conn: sqlite3.Connection, symbol: str, chronos_model: st
     """Shared trainer/audit selection; caller owns the transaction, no migrations."""
     rows = conn.execute("""
             SELECT s.quote_time,t.closed,s.regime_features,s.entry_features,
-                   s.news_features,s.meta_base_features,t.net_r,s.base_decision
+                   s.news_features,s.meta_base_features,t.net_r,s.base_decision,t.direction
             FROM decision_samples s JOIN trade_outcomes t ON t.sample_key=s.sample_key
             WHERE s.symbol=? AND t.symbol=s.symbol AND s.chronos_model=?
               AND s.schema_version=3 AND s.news_features IS NOT NULL AND t.direction=s.direction
@@ -85,7 +86,8 @@ def read_trade_examples(conn: sqlite3.Connection, symbol: str, chronos_model: st
         """, (symbol, chronos_model)).fetchall()
     return [Example(int(t), int(end), {"regime": json.loads(r), "entry": json.loads(e),
                                      "news": json.loads(n), "meta_base": json.loads(m)}, int(float(pnl) > 0),
-                    float(pnl), base in {"BUY", "SELL"}) for t, end, r, e, n, m, pnl, base in rows]
+                    float(pnl), base in {"BUY", "SELL"}, direction)
+            for t, end, r, e, n, m, pnl, base, direction in rows]
 
 
 def temporal_windows(examples: list[Example]) -> tuple[list[Example], list[Example], list[Example]]:
@@ -108,6 +110,47 @@ def fit_role(examples: list[Example], role: str, names: tuple[str, ...]) -> Bina
     return train_binary_logistic(
         [row.features[role] for row in examples], labels, names,
         metadata={"role": role, "samples": len(examples),
+                  "last_feature_time": max(row.time for row in examples),
+                  "last_label_end": max(row.label_end for row in examples)},
+    )
+
+
+def risk_features(row: Example) -> dict[str, float]:
+    """Reconstruct live risk-role features from immutable entry snapshots."""
+    entry = row.features["entry"]
+    regime = row.features["regime"]
+    if row.direction not in {"BUY", "SELL"}:
+        raise ValueError("risk: missing executed direction")
+    sign = -1.0 if row.direction == "SELL" else 1.0
+    return {
+        "side_sell": 1.0 if row.direction == "SELL" else 0.0,
+        "edge_ratio": entry["edge_ratio"],
+        "signal_strength": entry["signal_strength"],
+        "uncertainty_atr": entry["uncertainty_atr"],
+        "intrabar_move_atr": entry["intrabar_move_atr"],
+        "intrabar_rebound_atr": entry["intrabar_rebound_atr"],
+        "ai_trend_score": entry["ai_trend_score"],
+        "ai_trend_consistency": entry["ai_trend_consistency"],
+        "spread_atr": entry["spread_atr"],
+        "forecast_distance_atr": entry["forecast_distance_atr"],
+        "ret_1_atr_aligned": sign * regime["ret_1_atr"],
+        "ret_4_atr_aligned": sign * regime["ret_4_atr"],
+        "ret_12_atr_aligned": sign * regime["ret_12_atr"],
+        "range_12_atr": regime["range_12_atr"],
+        "body_efficiency_12": regime["body_efficiency_12"],
+        "atr_pct": regime["atr_pct"],
+    }
+
+
+def fit_risk_role(examples: list[Example]) -> BinaryLogisticModel:
+    labels = [row.label for row in examples]
+    if len(examples) < 40 or min(labels.count(0), labels.count(1)) < 10:
+        raise ValueError("risk: need >=40 samples and >=10 of each class in training window")
+    return train_binary_logistic(
+        [risk_features(row) for row in examples],
+        labels,
+        RISK_FEATURES,
+        metadata={"role": "risk", "samples": len(examples),
                   "last_feature_time": max(row.time for row in examples),
                   "last_label_end": max(row.label_end for row in examples)},
     )
@@ -145,9 +188,15 @@ def evaluate_roles(models: dict[str, BinaryLogisticModel], examples: list[Exampl
     labels = [row.label for row in examples]
     accepted = [p >= threshold and row.features["entry"]["edge_ratio"] > 0
                 for row, p in zip(examples, probabilities)]
-    return {**trade_metrics(examples, accepted),
-            "balanced_accuracy": balanced_accuracy(models["meta"], features, labels),
-            "brier": sum((p - y) ** 2 for p, y in zip(probabilities, labels)) / len(labels)}
+    result = {**trade_metrics(examples, accepted),
+              "balanced_accuracy": balanced_accuracy(models["meta"], features, labels),
+              "brier": sum((p - y) ** 2 for p, y in zip(probabilities, labels)) / len(labels)}
+    if "risk" in models:
+        risk_rows = [risk_features(row) for row in examples]
+        risk_probabilities = [models["risk"].predict_proba(row) for row in risk_rows]
+        result["risk_balanced_accuracy"] = balanced_accuracy(models["risk"], risk_rows, labels)
+        result["risk_brier"] = sum((p - y) ** 2 for p, y in zip(risk_probabilities, labels)) / len(labels)
+    return result
 
 
 def promotion_gate(candidate: dict, incumbent: dict, baseline: dict,
@@ -157,6 +206,8 @@ def promotion_gate(candidate: dict, incumbent: dict, baseline: dict,
         reasons.append("insufficient_holdout_trades")
     if candidate["balanced_accuracy"] < 0.52:
         reasons.append("weak_holdout_balanced_accuracy")
+    if candidate.get("risk_balanced_accuracy", 1.0) < 0.52:
+        reasons.append("weak_holdout_risk_balanced_accuracy")
     if candidate["net_r"] <= 0:
         reasons.append("nonpositive_holdout_net_r")
     for name, reference in (("incumbent", incumbent), ("chronos_baseline", baseline)):
@@ -213,7 +264,8 @@ def train_bundle(*, db: str | Path, symbol: str, chronos_model: str, out: Path,
     try:
         models = {"regime": fit_role(regime, "regime", REGIME_FEATURES),
                   "entry": fit_role(base, "entry", ENTRY_FEATURES),
-                  "news": fit_role(base, "news", NEWS_FEATURES)}
+                  "news": fit_role(base, "news", NEWS_FEATURES),
+                  "risk": fit_risk_role(base)}
         meta_examples = [Example(row.time, row.label_end, {"meta": meta_features(row, models)}, row.label)
                          for row in meta]
         models["meta"] = fit_role(meta_examples, "meta", META_FEATURES)

@@ -11,11 +11,11 @@ def source() -> str:
     return EA.read_text()
 
 
-def test_ea_029_keeps_sizing_telemetry_observational():
+def test_ea_030_keeps_sizing_telemetry_observational():
     text = source()
-    assert '#property version "0.29"' in text
-    assert 'EA version: 0.29' in text
-    assert 'RAMON AI TRADER  v0.29' in text
+    assert '#property version "0.30"' in text
+    assert 'EA version: 0.30' in text
+    assert 'RAMON AI TRADER  v0.30' in text
     # Telemetry staging is deliberately not a trade gate.
     assert 'if(!StageEntrySizing' not in text
     assert re.search(
@@ -48,8 +48,10 @@ def test_ea_execution_invariants_remain_model_and_hard_cap_guarded():
     assert 'if(today<0 || today>=MaxTradesPerDay)' in text
     assert 'if(volume<=0.0)' in text
     assert 'TRADE BLOCKED: min lot > hard risk cap' in text
-    assert 'if(!AllowMinLotRiskOverride || MaxExecutableRiskUSD<RiskPerTradeUSD' in text
+    assert 'if(!AllowMinLotRiskOverride || MaxExecutableRiskUSD<EffectiveRiskPerTradeUSD()' in text
     assert '|| -money>hard_cap+0.00001)' in text
+    assert 'double budget=EffectiveRiskPerTradeUSD()*MoneyUnitsPerUSD;' in text
+    assert 'risk_multiplier<0.50 || risk_multiplier>1.50' in text
     assert 'ManagedPosition(ticket,opened)' in text
     assert 'OtherPositionOnSymbol()' in text
 

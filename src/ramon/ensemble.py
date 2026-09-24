@@ -43,6 +43,28 @@ META_BASE_FEATURES = (
 LEGACY_META_FEATURES = META_BASE_FEATURES + ("regime_probability", "entry_probability")
 META_FEATURES = LEGACY_META_FEATURES + ("news_probability",)
 
+RISK_FEATURES = (
+    "side_sell",
+    "edge_ratio",
+    "signal_strength",
+    "uncertainty_atr",
+    "intrabar_move_atr",
+    "intrabar_rebound_atr",
+    "ai_trend_score",
+    "ai_trend_consistency",
+    "spread_atr",
+    "forecast_distance_atr",
+    "ret_1_atr_aligned",
+    "ret_4_atr_aligned",
+    "ret_12_atr_aligned",
+    "range_12_atr",
+    "body_efficiency_12",
+    "atr_pct",
+)
+
+RISK_MULTIPLIER_MIN = 0.50
+RISK_MULTIPLIER_MAX = 1.50
+
 
 @dataclass(frozen=True, slots=True)
 class BinaryLogisticModel:
@@ -247,12 +269,45 @@ def dominant_direction(decision: Decision) -> str:
     return "BUY" if decision.buy_edge >= decision.sell_edge else "SELL"
 
 
+def risk_features(market: Market, decision: Decision) -> dict[str, float]:
+    """Entry-time features for the learned risk-sizing role."""
+    entry = entry_features(market, decision)
+    regime = regime_features(market.bars)
+    direction = dominant_direction(decision)
+    sign = -1.0 if direction == "SELL" else 1.0
+    return {
+        "side_sell": 1.0 if direction == "SELL" else 0.0,
+        "edge_ratio": entry["edge_ratio"],
+        "signal_strength": entry["signal_strength"],
+        "uncertainty_atr": entry["uncertainty_atr"],
+        "intrabar_move_atr": entry["intrabar_move_atr"],
+        "intrabar_rebound_atr": entry["intrabar_rebound_atr"],
+        "ai_trend_score": entry["ai_trend_score"],
+        "ai_trend_consistency": entry["ai_trend_consistency"],
+        "spread_atr": entry["spread_atr"],
+        "forecast_distance_atr": entry["forecast_distance_atr"],
+        "ret_1_atr_aligned": sign * regime["ret_1_atr"],
+        "ret_4_atr_aligned": sign * regime["ret_4_atr"],
+        "ret_12_atr_aligned": sign * regime["ret_12_atr"],
+        "range_12_atr": regime["range_12_atr"],
+        "body_efficiency_12": regime["body_efficiency_12"],
+        "atr_pct": regime["atr_pct"],
+    }
+
+
+def probability_to_risk_multiplier(probability: float) -> float:
+    """Map learned win probability to a bounded live sizing multiplier."""
+    if not isfinite(probability) or not 0.0 <= probability <= 1.0:
+        raise ValueError("invalid risk probability")
+    return min(RISK_MULTIPLIER_MAX, max(RISK_MULTIPLIER_MIN, 2.0 * probability))
+
+
 class EnsembleCoordinator:
     """Learned regime, entry, news and meta roles around Chronos."""
 
     def __init__(self, root: str | Path, chronos_model: str | None = None) -> None:
         self.root = Path(root)
-        self.regime = self.entry = self.news = self.meta = None
+        self.regime = self.entry = self.news = self.meta = self.risk = None
         self.manifest: dict[str, object] = {}
         self.bundle_id = ""
         self.symbol = ""
@@ -267,12 +322,13 @@ class EnsembleCoordinator:
                 self.entry = models.get("entry")
                 self.news = models.get("news")
                 self.meta = models.get("meta")
+                self.risk = models.get("risk")
                 self.bundle_id = str(manifest["bundle_id"])
                 self.manifest = manifest
                 self.symbol = str(manifest["symbol"])
                 self.threshold = float(manifest["trade_threshold"])
             except (OSError, ValueError, KeyError, TypeError) as exc:
-                self.regime = self.entry = self.news = self.meta = None
+                self.regime = self.entry = self.news = self.meta = self.risk = None
                 self.error = f"invalid_role_bundle: {exc}"
 
     @property
@@ -283,6 +339,10 @@ class EnsembleCoordinator:
     def news_ready(self) -> bool:
         return self.news is not None
 
+    @property
+    def risk_ready(self) -> bool:
+        return self.risk is not None
+
     def status(self) -> dict[str, object]:
         return {
             "ensemble_ready": self.ready,
@@ -290,6 +350,7 @@ class EnsembleCoordinator:
             "entry_model_ready": self.entry is not None,
             "news_model_ready": self.news is not None,
             "meta_model_ready": self.meta is not None,
+            "risk_model_ready": self.risk_ready,
             "ensemble_bundle": self.bundle_id,
             "ensemble_error": self.error,
             "ensemble_mode": ("meta_news" if self.ready and self.news_ready else "meta_legacy") if self.ready else ("blocked" if self.error else "bootstrap_chronos"),
@@ -308,6 +369,8 @@ class EnsembleCoordinator:
         regime_probability = self.regime.predict_proba(r_features) if self.regime else -1.0
         entry_probability = self.entry.predict_proba(e_features) if self.entry else -1.0
         news_probability = self.news.predict_proba(n_features) if self.news else -1.0
+        risk_probability = self.risk.predict_proba(risk_features(market, decision)) if self.risk else -1.0
+        risk_multiplier = probability_to_risk_multiplier(risk_probability) if self.risk else 1.0
 
         meta_probability = -1.0
         final_decision = decision.decision
@@ -348,6 +411,9 @@ class EnsembleCoordinator:
             "entry_probability": entry_probability,
             "news_probability": news_probability,
             "meta_probability": meta_probability,
+            "risk_model_ready": int(self.risk_ready),
+            "risk_probability": risk_probability,
+            "risk_multiplier": risk_multiplier,
             "edge": max(decision.buy_edge, decision.sell_edge) if final_decision in {"BUY", "SELL"} else 0.0,
             "ensemble_bundle": self.bundle_id,
         }
