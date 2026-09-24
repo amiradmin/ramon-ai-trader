@@ -406,7 +406,66 @@ def print_stored_sizing(trades: list[dict]) -> None:
             f"| avgRisk={mean([float(row['initial_risk_units']) for row in rows]):.4f} "
             f"| avgRisk/budget={mean(risk_ratios):.3f}x"
         )
+        over_budget = sum(
+            float(row["initial_risk_units"]) > float(row["risk_budget_units"]) + 1e-5
+            for row in rows
+        )
+        over_cap = sum(
+            float(row["initial_risk_units"]) >
+            float(row["max_executable_risk_usd"]) * float(row["money_units_per_usd"]) + 1e-5
+            for row in rows
+        )
+        print(
+            f"  filled risk above preferred budget: {over_budget}/{len(rows)} "
+            f"| above planned hard cap: {over_cap}/{len(rows)} "
+            f"| max filled risk={max(float(row['initial_risk_units']) for row in rows):.4f} units"
+        )
+    print("Risk budget uses the entry-time risk-model multiplier; filled risk uses actual fill and initial SL.")
+    print("The hard cap is checked before the order; fill changes and execution costs can exceed it.")
     print("Exact sizing is descriptive provenance; it does not alter execution or trainer labels.")
+    print()
+
+
+def print_active_bundle_performance(trades: list[dict]) -> None:
+    """Attribute outcomes to the role bundle recorded at entry, never today's bundle."""
+    active: dict[str, list[dict]] = defaultdict(list)
+    bootstrap: list[dict] = []
+    unknown: list[dict] = []
+    for row in trades:
+        metadata = safe_json(row.get("model_metadata"))
+        bundle = bundle_label(row)
+        active_flag = metadata.get("ensemble_active")
+        if bundle not in ("NONE", "UNKNOWN") and active_flag in (1, True):
+            active[bundle].append(row)
+        elif bundle == "NONE" and active_flag in (0, False) and metadata.get("ensemble_mode") == "bootstrap_chronos":
+            bootstrap.append(row)
+        else:
+            unknown.append(row)
+
+    print("=== ROLE BUNDLE PERFORMANCE AT ENTRY ===")
+    def summary(label: str, rows: list[dict]) -> None:
+        if not rows:
+            print(f"{label} | trades=0")
+            return
+        gains = sum(max(float(row["net_units"]), 0.0) for row in rows)
+        losses = -sum(min(float(row["net_units"]), 0.0) for row in rows)
+        pf = f"{gains / losses:.3f}" if losses else "inf"
+        print(
+            f"{label} | trades={len(rows)} "
+            f"| WR={pct(sum(float(row['net_units']) > 0 for row in rows), len(rows)):.2f}% "
+            f"| net={sum(float(row['net_units']) for row in rows):+.4f} "
+            f"| avgR={mean([float(row['net_r']) for row in rows]):+.4f} "
+            f"| PF={pf}"
+        )
+
+    summary("Chronos bootstrap", bootstrap)
+    for bundle, rows in sorted(active.items()):
+        summary(f"ACTIVE bundle={bundle}", rows)
+    if not active:
+        print("No closed trade has a verified active role bundle at entry yet.")
+    summary("Unknown / inconsistent provenance", unknown)
+    print("Classification requires BOTH an entry-time bundle ID and ensemble_active=1.")
+    print("Differences versus bootstrap are descriptive, not a causal model comparison.")
     print()
 
 
@@ -483,6 +542,7 @@ def generate_report(DB: str, SYMBOL: str = "XAUUSD_l", LIMIT: int = 20) -> None:
         print_excursion_summary(trades, excursions)
 
         print_telemetry(trades)
+        print_active_bundle_performance(trades)
         print_stored_sizing(trades)
 
         print("=== BY DIRECTION ===")

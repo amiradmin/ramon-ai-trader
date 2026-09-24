@@ -37,9 +37,9 @@ docker compose exec -T \
   -e RAMON_REPORT_LIMIT="$LIMIT" \
   model python -m ramon.report
 
-# EA-side sizing telemetry (including min_lot_override_used) is historical CSV
-# evidence and is not persisted in SQLite. Add a strict, read-only candidate
-# comparison when that CSV is available on the host.
+# EA 0.29+ persists exact opening-deal sizing in SQLite. Older trades may have
+# historical CSV evidence only; compare those via a strict read-only candidate
+# match when that CSV is available on the host.
 CSV="${RAMON_SIGNAL_CSV:-}"
 if [[ -n "$CSV" && ! -f "$CSV" ]]; then
   echo "WARNING: RAMON_SIGNAL_CSV does not point to a file: $CSV" >&2

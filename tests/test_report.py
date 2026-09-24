@@ -14,6 +14,8 @@ from ramon.report import (
     drawdown_metrics,
     generate_report,
     loss_streak_metrics,
+    print_active_bundle_performance,
+    print_stored_sizing,
     rolling_trade_metrics,
     trade_time,
 )
@@ -100,6 +102,53 @@ def test_exact_sizing_telemetry_is_persisted_immutable_and_reported(tmp_path, ca
     assert "=== EXACT STORED ENTRY SIZING ===" in output
     assert "Exact sizing coverage: 1/1" in output
     assert "override=YES | trades=  1" in output
+    assert "filled risk above preferred budget: 0/1" in output
+
+
+def test_activation_report_only_counts_verified_entry_time_bundles(capsys):
+    def row(net, bundle, active, mode):
+        return {
+            "net_units": net, "net_r": net / 10,
+            "bundle_id": bundle,
+            "model_metadata": json.dumps({"ensemble_active": active, "ensemble_mode": mode}),
+        }
+
+    print_active_bundle_performance([
+        row(10, "", 0, "bootstrap_chronos"),
+        row(-5, "", 0, "bootstrap_chronos"),
+        row(8, "bundle-a", 1, "meta_legacy"),
+        row(-4, "bundle-a", 1, "meta_legacy"),
+        row(20, "bundle-b", 1, "meta_news"),
+        row(7, "bundle-c", 0, "bootstrap_chronos"),  # Inconsistent provenance.
+        {"net_units": -1, "net_r": -.1, "bundle_id": None, "model_metadata": None},
+    ])
+    output = capsys.readouterr().out
+    assert "Chronos bootstrap | trades=2 | WR=50.00% | net=+5.0000" in output
+    assert "ACTIVE bundle=bundle-a | trades=2 | WR=50.00% | net=+4.0000" in output
+    assert "ACTIVE bundle=bundle-b | trades=1 | WR=100.00% | net=+20.0000" in output
+    assert "Unknown / inconsistent provenance | trades=2" in output
+
+    print_active_bundle_performance([
+        row(3, "", 0, "bootstrap_chronos"),
+        row(-2, "", 0, "bootstrap_chronos"),
+    ])
+    output = capsys.readouterr().out
+    assert "Chronos bootstrap | trades=2" in output
+    assert "No closed trade has a verified active role bundle at entry yet." in output
+
+
+def test_filled_risk_report_flags_budget_and_planned_cap_overruns(capsys):
+    rows = [
+        {"net_units": -9, "net_r": -.75, "initial_risk_units": 12,
+         **sizing(min_lot_sl_units=12)},
+        {"net_units": -22, "net_r": -1, "initial_risk_units": 22,
+         **sizing(min_lot_sl_units=19)},
+    ]
+    print_stored_sizing(rows)
+    output = capsys.readouterr().out
+    assert "filled risk above preferred budget: 2/2" in output
+    assert "above planned hard cap: 1/2" in output
+    assert "max filled risk=22.0000 units" in output
 
 
 @pytest.mark.parametrize(
