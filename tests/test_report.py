@@ -10,7 +10,13 @@ from pathlib import Path
 import pytest
 
 from ramon.history import ensure_history_db, persist_trade_outcome
-from ramon.report import generate_report, trade_time
+from ramon.report import (
+    drawdown_metrics,
+    generate_report,
+    loss_streak_metrics,
+    rolling_trade_metrics,
+    trade_time,
+)
 
 
 def outcome(**changes):
@@ -263,3 +269,63 @@ def test_training_status_censors_manual_and_unknown_expert_until_enriched(tmp_pa
         assert con.execute(
             "SELECT exit_detail,training_status FROM trade_outcomes WHERE trade_key='server:1:expert'"
         ).fetchone() == ("maximum_hold_bars", "LEARNABLE")
+
+
+def test_path_risk_and_rolling_metrics_are_closed_trade_based():
+    trades = [
+        {"net_units": 10.0, "net_r": 1.0},
+        {"net_units": -4.0, "net_r": -0.4},
+        {"net_units": -7.0, "net_r": -0.7},
+        {"net_units": 3.0, "net_r": 0.3},
+    ]
+    dd_units, dd_r = drawdown_metrics(trades)
+    assert dd_units == pytest.approx(11.0)
+    assert dd_r == pytest.approx(1.1)
+
+    streak = loss_streak_metrics(trades)
+    assert streak["length"] == 2
+    assert streak["start"] == 2
+    assert streak["end"] == 3
+    assert streak["net_units"] == pytest.approx(-11.0)
+    assert streak["net_r"] == pytest.approx(-1.1)
+
+    windows = rolling_trade_metrics(trades, window=3)
+    assert len(windows) == 2
+    latest = windows[-1]
+    assert latest["start"] == 2
+    assert latest["end"] == 4
+    assert latest["pf"] == pytest.approx(3.0 / 11.0)
+    assert latest["expectancy_units"] == pytest.approx(-8.0 / 3.0)
+    assert latest["expectancy_r"] == pytest.approx(-0.8 / 3.0)
+
+
+def test_report_includes_m15_bar_envelope_excursion_estimates(tmp_path, capsys):
+    db = tmp_path / "history.sqlite3"
+    persist_trade_outcome(db, outcome(**telemetry()), 123)
+    with sqlite3.connect(db) as con:
+        con.execute(
+            """INSERT INTO decision_samples
+               (captured,symbol,signal_bar_time,mid,spread,atr,direction,base_decision,
+                regime_features,entry_features,meta_base_features,sample_key,chronos_model,
+                stop_distance)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                1_800_010_700, "XAUUSD_l", 1_800_010_700, 100.0, 0.4, 2.0,
+                "BUY", "BUY", "{}", "{}", "{}", "a" * 16, "checkpoint", 2.0,
+            ),
+        )
+        con.execute(
+            """INSERT INTO history_bars
+               (symbol,timeframe,time,open,high,low,close,spread_points)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            ("XAUUSD_l", "M15", 1_800_010_800, 100.0, 103.0, 99.0, 101.0, 40),
+        )
+
+    generate_report(str(db), LIMIT=0)
+    output = capsys.readouterr().out
+    assert "=== DRAWDOWN / LOSS STREAK ===" in output
+    assert "=== ROLLING 20-TRADE PERFORMANCE ===" in output
+    assert "=== MAE / MFE (M15 BAR-ENVELOPE APPROXIMATION) ===" in output
+    assert "Coverage: 1/1 closed trades" in output
+    assert "MFE~1.400R MAE~0.600R" in output
+    assert "Boundary bars may include prices before entry/after exit" in output
