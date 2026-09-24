@@ -6,6 +6,7 @@ from collections import Counter
 import csv
 from datetime import datetime, timezone
 import json
+import math
 import os
 from pathlib import Path
 import sqlite3
@@ -37,6 +38,77 @@ def read_json_file(path: Path) -> dict:
         return {"status": "UNREADABLE", "error": str(exc)}
 
 
+SIGNAL_COLUMNS_028 = (
+    "captured", "signal_bar_time", "symbol", "decision", "reason",
+    "base_decision", "base_reason", "ensemble_ready", "ensemble_active",
+    "regime_probability", "entry_probability", "meta_probability",
+    "signal_bid", "signal_ask", "spread_points", "forecast_low", "forecast_median",
+    "forecast_high", "atr", "buy_edge", "sell_edge", "minimum_edge", "uncertainty",
+    "signal_strength", "minimum_strength", "intrabar_confirmed", "intrabar_direction",
+    "intrabar_move_atr", "intrabar_rebound_atr", "intrabar_min_strength",
+    "intrabar_min_move_atr", "intrabar_min_rebound_atr", "ai_trend_confirmed",
+    "ai_trend_direction", "ai_trend_score", "ai_trend_move_atr", "ai_trend_consistency",
+    "trend_min_path_atr", "trend_min_consistency", "trend_min_edge_fraction",
+    "trend_min_micro_move_atr", "stop_distance", "target_distance", "live_armed",
+    "account_lock", "account_type", "account_currency", "balance_units", "balance_usd_approx",
+    "risk_usd", "money_units_per_usd", "risk_budget_units", "allow_min_lot_override",
+    "max_executable_risk_usd", "min_lot_override_used", "sizing_side", "planned_volume",
+    "estimated_sl_units", "estimated_sl_usd", "min_lot_sl_units", "min_executable_risk_usd",
+    "min_lot_blocked",
+)
+
+
+def valid_signal_028(row: dict[str, str]) -> bool:
+    """Check the source-defined layout before exposing reconstructed numeric fields."""
+    flags = {"ensemble_ready", "ensemble_active", "intrabar_confirmed", "ai_trend_confirmed",
+             "live_armed", "account_lock", "allow_min_lot_override", "min_lot_override_used",
+             "min_lot_blocked"}
+    text_fields = {"captured", "signal_bar_time", "symbol", "decision", "reason", "base_decision",
+                   "base_reason", "intrabar_direction", "ai_trend_direction", "account_type",
+                   "account_currency", "sizing_side"}
+    if any(row[key] not in {"YES", "NO"} for key in flags):
+        return False
+    if any(row[key] not in {"BUY", "SELL", "WAIT"} for key in ("decision", "base_decision")):
+        return False
+    if any(row[key] not in {"BUY", "SELL", "NONE", "WAIT"}
+           for key in ("intrabar_direction", "ai_trend_direction", "sizing_side")):
+        return False
+    try:
+        numbers = {key: float(row[key]) for key in SIGNAL_COLUMNS_028 if key not in flags | text_fields}
+    except (ValueError, TypeError):
+        return False
+    if not all(math.isfinite(value) for value in numbers.values()):
+        return False
+    return (0 < numbers["signal_bid"] <= numbers["signal_ask"]
+            and 0 <= numbers["forecast_low"] <= numbers["forecast_median"] <= numbers["forecast_high"]
+            and all(-1 <= numbers[key] <= 1 for key in
+                    ("regime_probability", "entry_probability", "meta_probability")))
+
+
+def decode_signal_row(header: list[str], raw: list[str]) -> tuple[dict, dict]:
+    """Older EAs leave their header in place while appending a newer, wider layout.
+
+    Only reconstruct the known 62-column layout from Ramon.mq5 at ff62b07.
+    Other mismatches keep the invariant five-column prefix and raw evidence only.
+    """
+    evidence = {"csv_header_columns": len(header), "csv_row_columns": len(raw)}
+    if len(raw) == len(header) and len(set(header)) == len(header):
+        row = dict(zip(header, raw))
+        if tuple(header) != SIGNAL_COLUMNS_028 or valid_signal_028(row):
+            return row, {**evidence, "csv_schema_status": "HEADER_MATCH"}
+    prefix = SIGNAL_COLUMNS_028[:5]
+    stable = dict(zip(prefix, raw[:5])) if tuple(header[:5]) == prefix and len(raw) >= 5 else {}
+    if stable and len(raw) == len(SIGNAL_COLUMNS_028):
+        candidate = dict(zip(SIGNAL_COLUMNS_028, raw))
+        if valid_signal_028(candidate):
+            return candidate, {**evidence, "csv_schema_status": "RECONSTRUCTED_KNOWN_LAYOUT",
+                               "csv_layout_source": "mt5/Ramon.mq5 at ff62b07 (EA 0.28 layout)",
+                               "csv_warning": "Layout inferred from row width and field checks; original header does not describe this row."}
+    return stable, {**evidence, "csv_schema_status": "UNREADABLE_LAYOUT",
+                    "csv_warning": "Numeric fields suppressed; only the stable prefix is usable.",
+                    "csv_raw_fields": raw}
+
+
 def csv_candidates(stream, trade: dict, sample: dict) -> list[dict]:
     """Legacy CSV has no sample key: time matches are candidates, never proof."""
     target = sample.get("quote_time") or trade["opened"]
@@ -45,8 +117,22 @@ def csv_candidates(stream, trade: dict, sample: dict) -> list[dict]:
               "signal_strength", "minimum_strength", "buy_edge", "sell_edge", "minimum_edge",
               "ai_trend_confirmed", "ai_trend_direction", "ai_trend_move_atr",
               "ai_trend_consistency", "intrabar_move_atr", "risk_usd",
-              "min_lot_override_used", "planned_volume", "estimated_sl_units", "min_lot_sl_units")
-    for row in csv.DictReader(stream):
+              "trend_min_path_atr", "trend_min_consistency", "trend_min_edge_fraction",
+              "trend_min_micro_move_atr", "stop_distance", "target_distance",
+              "money_units_per_usd", "risk_budget_units", "allow_min_lot_override",
+              "max_executable_risk_usd", "min_lot_override_used", "planned_volume",
+              "estimated_sl_units", "min_lot_sl_units")
+    reader = csv.reader(stream)
+    header = next(reader, [])
+    if header:
+        header[0] = header[0].lstrip("\ufeff")
+    for raw in reader:
+        if not raw:
+            continue
+        if raw[0].lstrip("\ufeff") == "captured":
+            header = [raw[0].lstrip("\ufeff"), *raw[1:]]
+            continue
+        row, evidence = decode_signal_row(header, raw)
         if row.get("symbol") != trade["symbol"]:
             continue
         try:
@@ -56,7 +142,8 @@ def csv_candidates(stream, trade: dict, sample: dict) -> list[dict]:
         except (KeyError, ValueError, TypeError):
             continue
         if abs(stamp - target) <= 90:
-            candidates.append({key: row.get(key, "UNKNOWN") for key in fields})
+            candidates.append({**{key: row.get(key, "UNKNOWN") for key in fields},
+                               **evidence, "seconds_from_stored_quote": stamp - target})
     return candidates
 
 
@@ -141,6 +228,7 @@ def audit(db: str, symbol: str, model: str, ensemble_dir: Path, *,
                 with open(signal_csv, encoding="utf-8-sig", errors="replace", newline="") as stream:
                     candidates = csv_candidates(stream, trade, sample)
             print_json(candidates)
+            print("RECONSTRUCTED_KNOWN_LAYOUT is an inferred historical layout; UNREADABLE_LAYOUT suppresses numeric fields.")
             print("CSV rows are decision/sizing previews; they do not prove an order was executed.")
         else:
             print("For legacy reason/sizing evidence, supply Ramon_Signals.csv; no historical reason is guessed.")
