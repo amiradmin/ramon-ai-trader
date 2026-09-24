@@ -36,6 +36,25 @@ def test_audit_matches_trainer_and_does_not_modify_database_or_checkpoints(tmp_p
     assert not root.exists()
 
 
+def test_audit_reports_exact_persisted_sizing_when_available(tmp_path, capsys):
+    db = ensure_history_db(tmp_path / 'history.db')
+    seed_trade(db, 1)
+    with sqlite3.connect(db) as con:
+        con.execute(
+            """UPDATE trade_outcomes
+               SET risk_budget_units=6.0, planned_volume=0.01, min_lot_sl_units=17.55,
+                   min_lot_override_used=1, max_executable_risk_usd=0.20,
+                   money_units_per_usd=100.0
+               WHERE trade_key='real-account:1'"""
+        )
+    audit(str(db), 'XAUUSD_l', 'test/model', tmp_path / 'roles', trade_key='real-account:1')
+    text = capsys.readouterr().out
+    assert '=== STORED ENTRY SIZING ===' in text
+    assert '"status": "EXACT"' in text
+    assert '"min_lot_override_used": 1' in text
+    assert '"risk_budget_units": 6.0' in text
+
+
 def test_audit_missing_legacy_schema_is_unknown_not_zero_and_keeps_trade_evidence(tmp_path, capsys):
     db = ensure_history_db(tmp_path / 'history.db')
     seed_trade(db, 1)
