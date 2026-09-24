@@ -35,6 +35,7 @@ class Example:
     net_r: float = 0.0
     base_trade: bool = False
     direction: str = "NONE"
+    exit_reason: str = "UNKNOWN"
 
 
 def _regime_dataset(bars: tuple[Bar, ...]) -> list[Example]:
@@ -75,7 +76,7 @@ def read_trade_examples(conn: sqlite3.Connection, symbol: str, chronos_model: st
     """Shared trainer/audit selection; caller owns the transaction, no migrations."""
     rows = conn.execute("""
             SELECT s.quote_time,t.closed,s.regime_features,s.entry_features,
-                   s.news_features,s.meta_base_features,t.net_r,s.base_decision,t.direction
+                   s.news_features,s.meta_base_features,t.net_r,s.base_decision,t.direction,t.exit_reason
             FROM decision_samples s JOIN trade_outcomes t ON t.sample_key=s.sample_key
             WHERE s.symbol=? AND t.symbol=s.symbol AND s.chronos_model=?
               AND s.schema_version=3 AND s.news_features IS NOT NULL AND t.direction=s.direction
@@ -86,8 +87,8 @@ def read_trade_examples(conn: sqlite3.Connection, symbol: str, chronos_model: st
         """, (symbol, chronos_model)).fetchall()
     return [Example(int(t), int(end), {"regime": json.loads(r), "entry": json.loads(e),
                                      "news": json.loads(n), "meta_base": json.loads(m)}, int(float(pnl) > 0),
-                    float(pnl), base in {"BUY", "SELL"}, direction)
-            for t, end, r, e, n, m, pnl, base, direction in rows]
+                    float(pnl), base in {"BUY", "SELL"}, direction, exit_reason)
+            for t, end, r, e, n, m, pnl, base, direction, exit_reason in rows]
 
 
 def temporal_windows(examples: list[Example]) -> tuple[list[Example], list[Example], list[Example]]:
@@ -143,14 +144,15 @@ def risk_features(row: Example) -> dict[str, float]:
 
 
 def fit_risk_role(examples: list[Example]) -> BinaryLogisticModel:
-    labels = [row.label for row in examples]
+    """Predict the probability that an otherwise valid entry ends at the full SL."""
+    labels = [int(row.exit_reason == "DEAL_REASON_SL") for row in examples]
     if len(examples) < 40 or min(labels.count(0), labels.count(1)) < 10:
         raise ValueError("risk: need >=40 samples and >=10 of each class in training window")
     return train_binary_logistic(
         [risk_features(row) for row in examples],
         labels,
         RISK_FEATURES,
-        metadata={"role": "risk", "samples": len(examples),
+        metadata={"role": "risk", "target": "full_stop_loss", "samples": len(examples),
                   "last_feature_time": max(row.time for row in examples),
                   "last_label_end": max(row.label_end for row in examples)},
     )
@@ -194,8 +196,9 @@ def evaluate_roles(models: dict[str, BinaryLogisticModel], examples: list[Exampl
     if "risk" in models:
         risk_rows = [risk_features(row) for row in examples]
         risk_probabilities = [models["risk"].predict_proba(row) for row in risk_rows]
-        result["risk_balanced_accuracy"] = balanced_accuracy(models["risk"], risk_rows, labels)
-        result["risk_brier"] = sum((p - y) ** 2 for p, y in zip(risk_probabilities, labels)) / len(labels)
+        risk_labels = [int(row.exit_reason == "DEAL_REASON_SL") for row in examples]
+        result["risk_balanced_accuracy"] = balanced_accuracy(models["risk"], risk_rows, risk_labels)
+        result["risk_brier"] = sum((p - y) ** 2 for p, y in zip(risk_probabilities, risk_labels)) / len(risk_labels)
     return result
 
 
