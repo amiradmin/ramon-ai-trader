@@ -92,7 +92,7 @@ def ensure_history_db(db: str | Path) -> Path:
             "sample_key": "TEXT", "chronos_model": "TEXT", "schema_version": "INTEGER DEFAULT 1",
             "quote_time": "INTEGER", "stop_distance": "REAL", "target_distance": "REAL",
             "final_decision": "TEXT", "bundle_id": "TEXT", "news_features": "TEXT",
-            "model_metadata": "TEXT",
+            "model_metadata": "TEXT", "target_structure": "TEXT",
         }.items():
             if name not in columns:
                 conn.execute(f"ALTER TABLE decision_samples ADD COLUMN {name} {definition}")
@@ -197,6 +197,7 @@ def persist_decision_sample(
     final_decision: str | None = None,
     bundle_id: str = "",
     model_metadata: dict[str, object] | None = None,
+    target_structure: dict[str, object] | None = None,
 ) -> bool:
     """Persist one live inference sample for later role-model training."""
     path = ensure_history_db(db)
@@ -208,8 +209,8 @@ def persist_decision_sample(
             INSERT OR IGNORE INTO decision_samples
                 (captured,symbol,signal_bar_time,mid,spread,atr,direction,
                  base_decision,regime_features,entry_features,meta_base_features,news_features,
-                 sample_key,chronos_model,schema_version,quote_time,stop_distance,target_distance,final_decision,bundle_id,model_metadata)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 sample_key,chronos_model,schema_version,quote_time,stop_distance,target_distance,final_decision,bundle_id,model_metadata,target_structure)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 int(captured),
@@ -224,9 +225,11 @@ def persist_decision_sample(
                 json.dumps(entry_features, separators=(",", ":")),
                 json.dumps(meta_base_features, separators=(",", ":")),
                 json.dumps(news_features, separators=(",", ":")) if news_features is not None else None,
-                sample_key, chronos_model, 3 if sample_key and quote_time and news_features is not None else (2 if sample_key and quote_time else 1), quote_time,
-                stop_distance, target_distance, final_decision, bundle_id,
+                sample_key, chronos_model,
+                4 if target_structure is not None else (3 if sample_key and quote_time and news_features is not None else (2 if sample_key and quote_time else 1)),
+                quote_time, stop_distance, target_distance, final_decision, bundle_id,
                 json.dumps(model_metadata, allow_nan=False) if model_metadata is not None else None,
+                json.dumps(target_structure, allow_nan=False, separators=(",", ":")) if target_structure is not None else None,
             ),
         )
         return cursor.rowcount == 1
