@@ -3,8 +3,10 @@ from __future__ import annotations
 import io
 import json
 import sqlite3
+import re
+from pathlib import Path
 
-from ramon.audit import audit, csv_candidates
+from ramon.audit import audit, csv_candidates, SIGNAL_COLUMNS_028
 from ramon.history import ensure_history_db
 from ramon.report import generate_report
 from ramon.train_roles import load_trade_examples, train_bundle
@@ -113,3 +115,71 @@ def test_waiting_training_report_records_limits_and_timestamp(tmp_path):
     assert report['remaining_to_sample_gate'] == 499
     assert report['symbol'] == 'XAUUSD_l'
     assert report['generated_at_utc'].endswith('+00:00')
+
+
+# Regression: the header emitted by early EA versions remains at the top of a
+# file when a newer EA appends 62-column rows. DictReader silently shifts fields.
+OLD_SIGNAL_HEADER = (
+    'captured,signal_bar_time,symbol,decision,reason,signal_bid,signal_ask,spread_points,'
+    'forecast_low,forecast_median,forecast_high,atr,buy_edge,sell_edge,minimum_edge,'
+    'uncertainty,signal_strength,minimum_strength,stop_distance,target_distance,'
+    'live_armed,account_lock,account_currency,balance_units,risk_usd,money_units_per_usd,'
+    'risk_budget_units,sizing_side,planned_volume,estimated_sl_units,min_lot_sl_units'
+)
+NEW_SIGNAL_ROW = (
+    '2026.09.23 18:14:41,2026.09.23 18:00,XAUUSD_l,BUY,ai_trend_continuation_up,'
+    'BUY,ai_trend_continuation_up,NO,NO,-1.000000,-1.000000,-1.000000,'
+    '4295.07,4295.49,42,4279.63,4296.52,4316.49,11.7021,1.03,-1.87,1.40,36.86,'
+    '0.028081,0.200000,NO,BUY,0.036745,0.128182,0.050000,0.030000,0.060000,'
+    'YES,BUY,0.148364,0.197819,0.750000,0.150000,0.750000,0.250000,0.030000,'
+    '17.55,35.11,YES,YES,REAL,CENT,1000.00,10.0000,0.0600,100.0000,6.0000,'
+    'YES,0.2000,YES,BUY,0.0100,17.5500,0.1755,17.5500,0.1755,YES'
+)
+
+
+def mixed_csv_candidates(header, *rows):
+    from datetime import datetime, timezone
+    quote = int(datetime(2026, 9, 23, 18, 14, 40, tzinfo=timezone.utc).timestamp())
+    return csv_candidates(io.StringIO('\ufeff' + header + '\n' + '\n'.join(rows)),
+                          {'symbol': 'XAUUSD_l', 'opened': quote + 1}, {'quote_time': quote})
+
+
+def test_old_header_new_row_recovers_known_layout_without_exposing_shifted_prices():
+    row, = mixed_csv_candidates(OLD_SIGNAL_HEADER, NEW_SIGNAL_ROW)
+    assert row['csv_schema_status'] == 'RECONSTRUCTED_KNOWN_LAYOUT'
+    assert row['csv_header_columns'] == 31
+    assert row['csv_row_columns'] == 62
+    assert row['signal_strength'] == '0.028081'
+    assert row['minimum_strength'] == '0.200000'
+    assert row['base_reason'] == 'ai_trend_continuation_up'
+    assert row['risk_usd'] == '0.0600'
+    assert row['min_lot_override_used'] == 'YES'
+    assert row['planned_volume'] == '0.0100'
+    assert row['estimated_sl_units'] == '17.5500'
+    assert row['seconds_from_stored_quote'] == 1
+
+
+def test_unknown_width_or_invalid_field_types_suppress_numeric_evidence():
+    truncated = NEW_SIGNAL_ROW.rsplit(',', 1)[0]
+    invalid = NEW_SIGNAL_ROW.replace(',NO,NO,', ',4295.49,NO,', 1)
+    for malformed in (truncated, invalid):
+        row, = mixed_csv_candidates(OLD_SIGNAL_HEADER, malformed)
+        assert row['csv_schema_status'] == 'UNREADABLE_LAYOUT'
+        assert row['reason'] == 'ai_trend_continuation_up'
+        assert row['signal_strength'] == 'UNKNOWN'
+        assert row['planned_volume'] == 'UNKNOWN'
+        assert row['csv_raw_fields']
+
+
+def test_matching_header_and_repeated_new_header_are_not_treated_as_mismatched():
+    header = ','.join(SIGNAL_COLUMNS_028)
+    rows = mixed_csv_candidates(OLD_SIGNAL_HEADER, NEW_SIGNAL_ROW, header, NEW_SIGNAL_ROW)
+    assert [r['csv_schema_status'] for r in rows] == ['RECONSTRUCTED_KNOWN_LAYOUT', 'HEADER_MATCH']
+    assert rows[0]['signal_strength'] == rows[1]['signal_strength']
+
+
+def test_reconstructed_layout_matches_the_actual_ea_writer():
+    source = (Path(__file__).parents[1] / 'mt5' / 'Ramon.mq5').read_text()
+    block = re.search(r'void AppendSignalCsv\(\).*?if\(empty\)\s*\{\s*FileWrite\(handle,(.*?)\);', source, re.S)
+    assert block is not None
+    assert tuple(re.findall(r'"([a-z_]+)"', block.group(1))) == SIGNAL_COLUMNS_028
