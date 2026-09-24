@@ -15,6 +15,7 @@ from .ensemble import EnsembleCoordinator, dominant_direction
 from .history import persist_decision_sample, persist_market, persist_trade_outcome
 from .model import ChronosForecaster, model_name
 from .news import DEFAULT_FOREX_FACTORY_JSON, ForexFactoryNewsProvider
+from .target_learning import build_target_structure
 
 
 def persist_market_safely(db: str, market: Market) -> str:
@@ -132,6 +133,31 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 response.update(ensemble_payload)
                 response.update(news_snapshot.payload())
                 response["news_model_ready"] = int(ensemble.news_ready)
+
+                target_direction = (
+                    str(response["decision"])
+                    if str(response.get("decision", "")) in {"BUY", "SELL"}
+                    else dominant_direction(result)
+                )
+                target_structure = build_target_structure(
+                    market,
+                    direction=target_direction,
+                    atr=result.atr,
+                    target_distance=result.target_distance,
+                )
+                target_payload = target_structure.to_dict()
+                response["target_learning_active"] = 1
+                response["target_structure_ready"] = target_structure.ready
+                response["target_method"] = target_structure.method
+                response["target_direction"] = target_structure.direction
+                response["target_impulse_start"] = target_structure.impulse_start
+                response["target_impulse_end"] = target_structure.impulse_end
+                response["target_impulse_range"] = target_structure.impulse_range
+                response["target_impulse_atr"] = target_structure.impulse_atr
+                response["target_tp1"] = target_structure.tp1
+                response["target_tp2"] = target_structure.tp2
+                response["target_tp3"] = target_structure.tp3
+                response["legacy_target_price"] = target_structure.legacy_target
                 sample_key = uuid4().hex[:16]
                 response["sample_key"] = sample_key
                 response["sample_saved"] = 0
@@ -157,13 +183,14 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                             target_distance=result.target_distance,
                             final_decision=str(response["decision"]),
                             bundle_id=ensemble.bundle_id,
+                            target_structure=target_payload,
                             model_metadata={
                                 "chronos_revision": getattr(model, "revision", None),
                                 "ensemble_mode": ensemble.status()["ensemble_mode"],
                                 "ensemble_active": response.get("ensemble_active", 0),
                                 "role_manifest": ensemble.manifest,
                                 "decision_audit": {
-                                    "schema_version": 1,
+                                    "schema_version": 2,
                                     "base": result.to_dict(),
                                     "final": ensemble_payload,
                                     "settings": asdict(settings),
