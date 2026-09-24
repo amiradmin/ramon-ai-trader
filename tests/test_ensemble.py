@@ -7,6 +7,7 @@ from ramon.ensemble import (
     BinaryLogisticModel,
     EnsembleCoordinator,
     balanced_accuracy,
+    probability_to_risk_multiplier,
     train_binary_logistic,
 )
 
@@ -95,4 +96,15 @@ def test_ensemble_stays_inactive_until_all_roles_exist(tmp_path: Path) -> None:
     assert payload["base_decision"] == "WAIT"
     assert payload["regime_probability"] == -1.0
     assert payload["news_probability"] == -1.0
+    assert payload["risk_model_ready"] == 0
+    assert payload["risk_probability"] == -1.0
+    assert payload["risk_multiplier"] == 1.0
     assert set(features) == {"regime", "entry", "news", "meta_base"}
+
+
+def test_risk_multiplier_is_bounded_and_neutral_at_half_probability() -> None:
+    assert probability_to_risk_multiplier(0.0) == 0.5
+    assert probability_to_risk_multiplier(0.25) == 0.5
+    assert probability_to_risk_multiplier(0.5) == 1.0
+    assert probability_to_risk_multiplier(0.75) == 1.5
+    assert probability_to_risk_multiplier(1.0) == 1.5
