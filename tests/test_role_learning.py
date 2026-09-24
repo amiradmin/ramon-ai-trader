@@ -11,7 +11,7 @@ import pytest
 from ramon.bundles import activate_bundle, load_active_bundle, stage_bundle
 from ramon.ensemble import (
     BinaryLogisticModel, EnsembleCoordinator, ENTRY_FEATURES, META_FEATURES,
-    META_BASE_FEATURES, REGIME_FEATURES, RISK_FEATURES,
+    META_BASE_FEATURES, REGIME_FEATURES, RISK_FEATURES, probability_to_risk_multiplier,
 )
 from ramon.news import NEWS_FEATURES
 from ramon.history import ensure_history_db, persist_trade_outcome
@@ -226,3 +226,19 @@ def test_role_training_excludes_manual_exit_labels(tmp_path):
         time + 1002,
     )
     assert load_trade_examples(db, "XAUUSD_l", "test/model") == []
+
+
+def test_full_stop_probability_reduces_risk_multiplier():
+    assert probability_to_risk_multiplier(0.10, target="full_stop_loss") == 1.5
+    assert probability_to_risk_multiplier(0.50, target="full_stop_loss") == 1.0
+    assert probability_to_risk_multiplier(0.80, target="full_stop_loss") == 0.5
+    # Backward compatibility for already-active risk bundles.
+    assert probability_to_risk_multiplier(0.80, target="win") == 1.5
+
+
+def test_trade_examples_preserve_full_stop_provenance(tmp_path):
+    db = ensure_history_db(tmp_path / "history.db")
+    seed_trade(db, 1)
+    seed_trade(db, 2)
+    rows = load_trade_examples(db, "XAUUSD_l", "test/model")
+    assert {row.exit_reason for row in rows} == {"DEAL_REASON_TP", "DEAL_REASON_SL"}
