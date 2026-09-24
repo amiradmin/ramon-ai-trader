@@ -295,11 +295,17 @@ def risk_features(market: Market, decision: Decision) -> dict[str, float]:
     }
 
 
-def probability_to_risk_multiplier(probability: float) -> float:
-    """Map learned win probability to a bounded live sizing multiplier."""
+def probability_to_risk_multiplier(probability: float, *, target: str = "win") -> float:
+    """Map a calibrated risk-role probability to bounded live sizing.
+
+    New models predict full-stop probability, so higher probability means smaller
+    size. Legacy bundles without target metadata retain their historical win-
+    probability interpretation until replaced by a validated new bundle.
+    """
     if not isfinite(probability) or not 0.0 <= probability <= 1.0:
         raise ValueError("invalid risk probability")
-    return min(RISK_MULTIPLIER_MAX, max(RISK_MULTIPLIER_MIN, 2.0 * probability))
+    quality_probability = 1.0 - probability if target == "full_stop_loss" else probability
+    return min(RISK_MULTIPLIER_MAX, max(RISK_MULTIPLIER_MIN, 2.0 * quality_probability))
 
 
 class EnsembleCoordinator:
@@ -370,7 +376,11 @@ class EnsembleCoordinator:
         entry_probability = self.entry.predict_proba(e_features) if self.entry else -1.0
         news_probability = self.news.predict_proba(n_features) if self.news else -1.0
         risk_probability = self.risk.predict_proba(risk_features(market, decision)) if self.risk else -1.0
-        risk_multiplier = probability_to_risk_multiplier(risk_probability) if self.risk else 1.0
+        risk_target = str(self.risk.metadata.get("target", "win")) if self.risk else "none"
+        risk_multiplier = (
+            probability_to_risk_multiplier(risk_probability, target=risk_target)
+            if self.risk else 1.0
+        )
 
         meta_probability = -1.0
         final_decision = decision.decision
@@ -413,6 +423,7 @@ class EnsembleCoordinator:
             "meta_probability": meta_probability,
             "risk_model_ready": int(self.risk_ready),
             "risk_probability": risk_probability,
+            "risk_target": risk_target,
             "risk_multiplier": risk_multiplier,
             "edge": max(decision.buy_edge, decision.sell_edge) if final_decision in {"BUY", "SELL"} else 0.0,
             "ensemble_bundle": self.bundle_id,
