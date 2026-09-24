@@ -218,6 +218,19 @@ def audit(db: str, symbol: str, model: str, ensemble_dir: Path, *,
         print_json({key: trade[key] for key in ("trade_key", "sample_key", "symbol", "direction",
                                                "net_units", "initial_risk_units", "net_r", "exit_reason")})
         print(f"Opened: {trade_time(trade, 'opened')} | Closed: {trade_time(trade, 'closed')}")
+        sizing_fields = (
+            "risk_budget_units", "planned_volume", "min_lot_sl_units",
+            "min_lot_override_used", "max_executable_risk_usd", "money_units_per_usd",
+        )
+        exact_sizing = {key: trade.get(key) for key in sizing_fields}
+        print("=== STORED ENTRY SIZING ===")
+        if all(value is not None for value in exact_sizing.values()):
+            print_json({"status": "EXACT", **exact_sizing})
+        else:
+            print_json({
+                "status": "NOT_RECORDED",
+                "reason": "Exact sizing telemetry was not persisted for this historical trade.",
+            })
         sample_columns = {row[1] for row in con.execute("PRAGMA table_info(decision_samples)")}
         row = (con.execute("SELECT * FROM decision_samples WHERE sample_key=? AND symbol=?",
                            (trade["sample_key"], symbol)).fetchone()

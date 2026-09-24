@@ -25,6 +25,18 @@ def telemetry(**changes):
             "exit_detail": "maximum_hold_bars", "entry_ea_version": "0.28", **changes}
 
 
+def sizing(**changes):
+    return {
+        "risk_budget_units": 6.0,
+        "planned_volume": 0.01,
+        "min_lot_sl_units": 17.55,
+        "min_lot_override_used": 1,
+        "max_executable_risk_usd": 0.20,
+        "money_units_per_usd": 100.0,
+        **changes,
+    }
+
+
 def test_legacy_migration_enrichment_and_duplicate_delivery(tmp_path):
     db = tmp_path / "history.sqlite3"
     with sqlite3.connect(db) as con:
@@ -53,6 +65,51 @@ def test_invalid_telemetry_cannot_overwrite_outcome(tmp_path, extra):
         persist_trade_outcome(db, outcome(**extra), 124)
     with sqlite3.connect(db) as con:
         assert con.execute("SELECT received,profit_units FROM trade_outcomes").fetchone() == (123, None)
+
+
+def test_exact_sizing_telemetry_is_persisted_immutable_and_reported(tmp_path, capsys):
+    db = tmp_path / "history.sqlite3"
+    payload = outcome(**telemetry(entry_ea_version="0.29"), **sizing())
+    persist_trade_outcome(db, payload, 123)
+    # A later broker replay without sizing must not erase it.
+    persist_trade_outcome(db, outcome(**telemetry(entry_ea_version="0.29")), 124)
+    # Even an enriched duplicate may not rewrite immutable entry sizing.
+    persist_trade_outcome(
+        db,
+        outcome(
+            **telemetry(entry_ea_version="0.29"),
+            **sizing(risk_budget_units=7.0, min_lot_sl_units=18.0),
+        ),
+        125,
+    )
+    with sqlite3.connect(db) as con:
+        assert con.execute(
+            """SELECT risk_budget_units,planned_volume,min_lot_sl_units,
+                      min_lot_override_used,max_executable_risk_usd,money_units_per_usd
+               FROM trade_outcomes"""
+        ).fetchone() == (6.0, 0.01, 17.55, 1, 0.20, 100.0)
+
+    generate_report(str(db), LIMIT=0)
+    output = capsys.readouterr().out
+    assert "=== EXACT STORED ENTRY SIZING ===" in output
+    assert "Exact sizing coverage: 1/1" in output
+    assert "override=YES | trades=  1" in output
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"risk_budget_units": 6.0},
+        sizing(min_lot_override_used=2),
+        sizing(min_lot_sl_units=5.0),
+        sizing(max_executable_risk_usd=0.10, min_lot_sl_units=17.55),
+        sizing(planned_volume=0.0),
+    ],
+)
+def test_invalid_or_partial_sizing_telemetry_is_rejected(tmp_path, extra):
+    db = tmp_path / "history.sqlite3"
+    with pytest.raises(ValueError):
+        persist_trade_outcome(db, outcome(**extra), 123)
 
 
 def test_report_legacy_database_is_read_only_and_does_not_guess(tmp_path, capsys):

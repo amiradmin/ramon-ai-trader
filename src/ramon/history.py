@@ -9,10 +9,20 @@ from pathlib import Path
 from .core import Bar, Market
 
 
+SIZING_TELEMETRY_COLUMNS = {
+    "risk_budget_units": "REAL",
+    "planned_volume": "REAL",
+    "min_lot_sl_units": "REAL",
+    "min_lot_override_used": "INTEGER",
+    "max_executable_risk_usd": "REAL",
+    "money_units_per_usd": "REAL",
+}
+
 TRADE_TELEMETRY_COLUMNS = {
     "profit_units": "REAL", "commission_units": "REAL", "swap_units": "REAL", "fee_units": "REAL",
     "opened_utc_offset_seconds": "INTEGER", "closed_utc_offset_seconds": "INTEGER",
     "exit_detail": "TEXT", "entry_ea_version": "TEXT",
+    **SIZING_TELEMETRY_COLUMNS,
 }
 
 MANUAL_EXIT_REASONS = {"DEAL_REASON_CLIENT", "DEAL_REASON_MOBILE", "DEAL_REASON_WEB"}
@@ -299,6 +309,10 @@ def persist_trade_outcome(db: str | Path, payload: dict[str, object], received: 
                            f"WHEN excluded.closed!=trade_outcomes.closed OR "
                            f"excluded.exit_reason!=trade_outcomes.exit_reason THEN NULL "
                            f"ELSE trade_outcomes.{name} END")
+        elif name in SIZING_TELEMETRY_COLUMNS:
+            # Entry sizing is immutable provenance. Enrich a legacy first delivery,
+            # but never replace sizing that was already persisted for this trade.
+            updates.append(f"{name}=COALESCE(trade_outcomes.{name},excluded.{name})")
         elif name == "training_status":
             updates.append(
                 "training_status=CASE "
@@ -358,4 +372,28 @@ def validate_trade_telemetry(payload: dict[str, object], net: float) -> dict[str
             if len(value) > 128 or any(ord(c) < 32 for c in value):
                 raise ValueError("invalid trade telemetry text")
             extra[name] = value
+
+    sizing_names = tuple(SIZING_TELEMETRY_COLUMNS)
+    sizing_present = [name for name in sizing_names if payload.get(name) is not None]
+    if sizing_present:
+        if len(sizing_present) != len(sizing_names):
+            raise ValueError("sizing telemetry must include all sizing fields")
+        for name in (
+            "risk_budget_units", "planned_volume", "min_lot_sl_units",
+            "max_executable_risk_usd", "money_units_per_usd",
+        ):
+            value = float(payload[name])
+            if not isfinite(value) or value <= 0:
+                raise ValueError("invalid sizing telemetry")
+            extra[name] = value
+        override = float(payload["min_lot_override_used"])
+        if not isfinite(override) or not override.is_integer() or int(override) not in {0, 1}:
+            raise ValueError("invalid min_lot_override_used")
+        extra["min_lot_override_used"] = int(override)
+        budget = float(extra["risk_budget_units"])
+        minimum_risk = float(extra["min_lot_sl_units"])
+        cap_units = float(extra["max_executable_risk_usd"]) * float(extra["money_units_per_usd"])
+        if extra["min_lot_override_used"]:
+            if minimum_risk <= budget or minimum_risk > cap_units + 0.0001:
+                raise ValueError("inconsistent minimum-lot override telemetry")
     return extra
