@@ -1616,12 +1616,13 @@ void OnTimer()
    double volume=SelectVolume(side,entry,stop);
    if(volume<=0.0)
    { StatusLine="TRADE BLOCKED: min lot > hard risk cap"; ShowStatus(); return; }
-   if(!StageEntrySizing(LastSampleKey,side,entry,stop,volume))
-   { StatusLine="Sizing telemetry unavailable"; ShowStatus(); return; }
    double margin=0.0;
    if(!OrderCalcMargin(side,_Symbol,volume,entry,margin)
       || margin>AccountInfoDouble(ACCOUNT_MARGIN_FREE)*0.8)
    { StatusLine="Insufficient margin"; ShowStatus(); return; }
+
+   // Telemetry is observational only: failure to stage it must never change execution.
+   StageEntrySizing(LastSampleKey,side,entry,stop,volume);
    // The broker owns SL/TP immediately. No position is opened when the model is unavailable.
    bool submitted=(
       decision=="BUY"
