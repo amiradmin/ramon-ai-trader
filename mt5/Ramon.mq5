@@ -1,5 +1,5 @@
 #property strict
-#property version "0.28"
+#property version "0.29"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -113,6 +113,13 @@ double LastEstimatedStopLossUnits = 0.0;
 double LastMinimumLotStopLossUnits = 0.0;
 double LastRiskBudgetUnits = 0.0;
 bool LastMinLotOverrideUsed = false;
+string PendingSizingSampleKey = "";
+double PendingSizingRiskBudgetUnits = 0.0;
+double PendingSizingPlannedVolume = 0.0;
+double PendingSizingMinLotSLUnits = 0.0;
+bool PendingSizingOverrideUsed = false;
+double PendingSizingMaxExecutableRiskUSD = 0.0;
+double PendingSizingMoneyUnitsPerUSD = 0.0;
 double LastStopDistance = 0.0;
 double LastTargetDistance = 0.0;
 int LastModelSpreadPoints = 0;
@@ -307,7 +314,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.28\n"
+      +"EA version: 0.29\n"
       +"Captured: "+TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS)+"\n"
       +"Symbol: "+_Symbol+"  Timeframe: M15\n"
       +"Bid: "+(tick_ok ? DoubleToString(tick.bid,_Digits) : "NA")
@@ -528,7 +535,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.28",28,36,clrWhite,12);
+   UiLabel("TITLE","RAMON AI TRADER  v0.29",28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
 
@@ -848,6 +855,51 @@ double SelectVolume(ENUM_ORDER_TYPE direction,double entry,double stop)
    return (-money<=budget+0.00001 ? volume : 0.0);
 }
 
+void ClearPendingSizing()
+{
+   PendingSizingSampleKey="";
+   PendingSizingRiskBudgetUnits=0.0;
+   PendingSizingPlannedVolume=0.0;
+   PendingSizingMinLotSLUnits=0.0;
+   PendingSizingOverrideUsed=false;
+   PendingSizingMaxExecutableRiskUSD=0.0;
+   PendingSizingMoneyUnitsPerUSD=0.0;
+}
+
+bool StageEntrySizing(
+   const string sample_key,
+   const ENUM_ORDER_TYPE side,
+   const double entry,
+   const double stop,
+   const double volume
+)
+{
+   ClearPendingSizing();
+   double minimum=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN);
+   double min_loss=0.0;
+   if(!ValidSampleKey(sample_key) || minimum<=0.0 || volume<=0.0
+      || !OrderCalcProfit(side,_Symbol,minimum,entry,stop,min_loss) || min_loss>=0.0)
+      return false;
+   double budget=RiskPerTradeUSD*MoneyUnitsPerUSD;
+   double hard_cap=MaxExecutableRiskUSD*MoneyUnitsPerUSD;
+   if(budget<=0.0 || hard_cap<=0.0 || MoneyUnitsPerUSD<=0.0)
+      return false;
+   double min_risk=MathAbs(min_loss);
+   PendingSizingSampleKey=sample_key;
+   PendingSizingRiskBudgetUnits=budget;
+   PendingSizingPlannedVolume=volume;
+   PendingSizingMinLotSLUnits=min_risk;
+   PendingSizingOverrideUsed=(
+      AllowMinLotRiskOverride
+      && min_risk>budget+0.00001
+      && volume<=minimum+0.00000001
+      && min_risk<=hard_cap+0.00001
+   );
+   PendingSizingMaxExecutableRiskUSD=MaxExecutableRiskUSD;
+   PendingSizingMoneyUnitsPerUSD=MoneyUnitsPerUSD;
+   return true;
+}
+
 void UpdateSizingPreview()
 {
    LastRiskBudgetUnits=RiskPerTradeUSD*MoneyUnitsPerUSD;
@@ -1071,7 +1123,54 @@ bool ReadDealTelemetry(const ulong deal,int &offset,string &version,string &deta
    version=FileReadString(file);
    detail=FileReadString(file);
    FileClose(file);
-   return marker=="v1" && MathAbs(offset)<=14*3600 && version!="";
+   return (marker=="v1" || marker=="v2") && MathAbs(offset)<=14*3600 && version!="";
+}
+
+bool ReadDealSizingTelemetry(
+   const ulong deal,
+   string &sample_key,
+   double &risk_budget_units,
+   double &planned_volume,
+   double &min_lot_sl_units,
+   bool &override_used,
+   double &max_executable_risk_usd,
+   double &money_units_per_usd
+)
+{
+   sample_key="";
+   risk_budget_units=0.0;
+   planned_volume=0.0;
+   min_lot_sl_units=0.0;
+   override_used=false;
+   max_executable_risk_usd=0.0;
+   money_units_per_usd=0.0;
+   int file=FileOpen(DealTelemetryPath(deal),FILE_READ|FILE_CSV|FILE_ANSI|FILE_COMMON,'\t');
+   if(file==INVALID_HANDLE) return false;
+   string marker=FileReadString(file);
+   FileReadString(file); // UTC offset
+   FileReadString(file); // EA version
+   FileReadString(file); // exit detail
+   if(marker!="v2")
+   {
+      FileClose(file);
+      return false;
+   }
+   sample_key=FileReadString(file);
+   risk_budget_units=StringToDouble(FileReadString(file));
+   planned_volume=StringToDouble(FileReadString(file));
+   min_lot_sl_units=StringToDouble(FileReadString(file));
+   override_used=(StringToInteger(FileReadString(file))==1);
+   max_executable_risk_usd=StringToDouble(FileReadString(file));
+   money_units_per_usd=StringToDouble(FileReadString(file));
+   FileClose(file);
+   return (
+      ValidSampleKey(sample_key)
+      && risk_budget_units>0.0
+      && planned_volume>0.0
+      && min_lot_sl_units>0.0
+      && max_executable_risk_usd>0.0
+      && money_units_per_usd>0.0
+   );
 }
 
 void RecordDealTelemetry(const ulong deal,const string close_detail="")
@@ -1091,18 +1190,59 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.28";
+      version="0.29";
    }
    if(close_detail!="") detail=close_detail;
+
+   string sizing_sample="";
+   double risk_budget_units=0.0,planned_volume=0.0,min_lot_sl_units=0.0;
+   double max_executable_risk_usd=0.0,money_units_per_usd=0.0;
+   bool override_used=false;
+   bool has_sizing=ReadDealSizingTelemetry(
+      deal,sizing_sample,risk_budget_units,planned_volume,min_lot_sl_units,
+      override_used,max_executable_risk_usd,money_units_per_usd
+   );
+
+   long entry_kind=HistoryDealGetInteger(deal,DEAL_ENTRY);
+   string comment=HistoryDealGetString(deal,DEAL_COMMENT);
+   string deal_sample=(StringFind(comment,"Ramon:")==0 ? StringSubstr(comment,6,16) : "");
+   if(!has_sizing && entry_kind==DEAL_ENTRY_IN && ValidSampleKey(deal_sample)
+      && deal_sample==PendingSizingSampleKey)
+   {
+      sizing_sample=PendingSizingSampleKey;
+      risk_budget_units=PendingSizingRiskBudgetUnits;
+      planned_volume=PendingSizingPlannedVolume;
+      min_lot_sl_units=PendingSizingMinLotSLUnits;
+      override_used=PendingSizingOverrideUsed;
+      max_executable_risk_usd=PendingSizingMaxExecutableRiskUSD;
+      money_units_per_usd=PendingSizingMoneyUnitsPerUSD;
+      has_sizing=(
+         risk_budget_units>0.0 && planned_volume>0.0 && min_lot_sl_units>0.0
+         && max_executable_risk_usd>0.0 && money_units_per_usd>0.0
+      );
+   }
+
    int file=FileOpen(DealTelemetryPath(deal),FILE_WRITE|FILE_CSV|FILE_ANSI|FILE_COMMON,'\t');
    if(file==INVALID_HANDLE)
    {
       Print("Ramon deal telemetry write failed: ",GetLastError());
       return;
    }
-   FileWrite(file,"v1",IntegerToString(offset),version,detail);
+   if(has_sizing)
+   {
+      FileWrite(
+         file,"v2",IntegerToString(offset),version,detail,sizing_sample,
+         DoubleToString(risk_budget_units,8),DoubleToString(planned_volume,8),
+         DoubleToString(min_lot_sl_units,8),(override_used ? "1" : "0"),
+         DoubleToString(max_executable_risk_usd,8),DoubleToString(money_units_per_usd,8)
+      );
+   }
+   else
+      FileWrite(file,"v1",IntegerToString(offset),version,detail);
    FileFlush(file);
    FileClose(file);
+   if(has_sizing && sizing_sample==PendingSizingSampleKey)
+      ClearPendingSizing();
 }
 
 bool ClosedTradePayload(const ulong identifier,string &payload)
@@ -1181,6 +1321,22 @@ bool ClosedTradePayload(const ulong identifier,string &payload)
    if(ReadDealTelemetry(opening_deal,offset,version,detail))
       payload+=",\"opened_utc_offset_seconds\":"+IntegerToString(offset)
          +",\"entry_ea_version\":\""+JsonEscape(version)+"\"";
+   string sizing_sample="";
+   double risk_budget_units=0.0,planned_volume=0.0,min_lot_sl_units=0.0;
+   double max_executable_risk_usd=0.0,money_units_per_usd=0.0;
+   bool override_used=false;
+   if(ReadDealSizingTelemetry(
+      opening_deal,sizing_sample,risk_budget_units,planned_volume,min_lot_sl_units,
+      override_used,max_executable_risk_usd,money_units_per_usd
+   ) && sizing_sample==sample)
+   {
+      payload+=",\"risk_budget_units\":"+DoubleToString(risk_budget_units,8)
+         +",\"planned_volume\":"+DoubleToString(planned_volume,8)
+         +",\"min_lot_sl_units\":"+DoubleToString(min_lot_sl_units,8)
+         +",\"min_lot_override_used\":"+IntegerToString(override_used ? 1 : 0)
+         +",\"max_executable_risk_usd\":"+DoubleToString(max_executable_risk_usd,8)
+         +",\"money_units_per_usd\":"+DoubleToString(money_units_per_usd,8);
+   }
    if(ReadDealTelemetry(closing_deal,offset,version,detail))
    {
       payload+=",\"closed_utc_offset_seconds\":"+IntegerToString(offset);
@@ -1460,6 +1616,8 @@ void OnTimer()
    double volume=SelectVolume(side,entry,stop);
    if(volume<=0.0)
    { StatusLine="TRADE BLOCKED: min lot > hard risk cap"; ShowStatus(); return; }
+   if(!StageEntrySizing(LastSampleKey,side,entry,stop,volume))
+   { StatusLine="Sizing telemetry unavailable"; ShowStatus(); return; }
    double margin=0.0;
    if(!OrderCalcMargin(side,_Symbol,volume,entry,margin)
       || margin>AccountInfoDouble(ACCOUNT_MARGIN_FREE)*0.8)
@@ -1472,7 +1630,10 @@ void OnTimer()
    );
    uint retcode=Trade.ResultRetcode();
    if(!submitted || (retcode!=TRADE_RETCODE_DONE && retcode!=TRADE_RETCODE_PLACED))
+   {
+      ClearPendingSizing();
       StatusLine="Order rejected "+IntegerToString((int)retcode);
+   }
    else
    {
       LastEntrySignalBar=bar_time;
