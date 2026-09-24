@@ -1,5 +1,5 @@
 #property strict
-#property version "0.30"
+#property version "0.31"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -125,6 +125,18 @@ double PendingSizingMaxExecutableRiskUSD = 0.0;
 double PendingSizingMoneyUnitsPerUSD = 0.0;
 double LastStopDistance = 0.0;
 double LastTargetDistance = 0.0;
+bool LastTargetLearningActive = false;
+bool LastTargetStructureReady = false;
+string LastTargetMethod = "NONE";
+string LastTargetDirection = "NONE";
+double LastTargetImpulseStart = 0.0;
+double LastTargetImpulseEnd = 0.0;
+double LastTargetImpulseRange = 0.0;
+double LastTargetImpulseAtr = 0.0;
+double LastTargetTP1 = 0.0;
+double LastTargetTP2 = 0.0;
+double LastTargetTP3 = 0.0;
+double LastLegacyTargetPrice = 0.0;
 int LastModelSpreadPoints = 0;
 long LockedAccountLogin = 0;
 string LockedAccountServer = "";
@@ -324,7 +336,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.30\n"
+      +"EA version: 0.31\n"
       +"Captured: "+TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS)+"\n"
       +"Symbol: "+_Symbol+"  Timeframe: M15\n"
       +"Bid: "+(tick_ok ? DoubleToString(tick.bid,_Digits) : "NA")
@@ -388,7 +400,18 @@ string BuildDiagnosticText()
       +"  EdgeFloor: "+DoubleToString(LastTrendMinEdgeFraction,2)+"x"
       +"  MicroFloor: "+DoubleToString(LastTrendMinMicroMoveAtr,3)+"\n"
       +"StopDistance: "+DoubleToString(LastStopDistance,_Digits)
-      +"  TargetDistance: "+DoubleToString(LastTargetDistance,_Digits)+"\n\n"
+      +"  TargetDistance: "+DoubleToString(LastTargetDistance,_Digits)+"\n"
+      +"TargetLearning: "+(LastTargetLearningActive ? "COLLECTING" : "OFF")
+      +"  Structure: "+(LastTargetStructureReady ? "READY" : "FALLBACK")
+      +"  Method: "+LastTargetMethod+"  Direction: "+LastTargetDirection+"\n"
+      +"Impulse: "+DoubleToString(LastTargetImpulseStart,_Digits)
+      +" -> "+DoubleToString(LastTargetImpulseEnd,_Digits)
+      +"  RangeATR: "+DoubleToString(LastTargetImpulseAtr,3)+"\n"
+      +"TP1/TP2/TP3 learn: "+DoubleToString(LastTargetTP1,_Digits)
+      +" / "+DoubleToString(LastTargetTP2,_Digits)
+      +" / "+DoubleToString(LastTargetTP3,_Digits)
+      +"  LegacyTP: "+DoubleToString(LastLegacyTargetPrice,_Digits)+"\n"
+      +"ExecutionTargetMode: LEGACY_TP_UNCHANGED\n\n"
       +"=== ACCOUNT / EXECUTION ===\n"
       +"Live: "+LiveStateText()
       +"  AccountLock: "+(AccountLockHealthy() ? "OK" : "FAIL")
@@ -550,7 +573,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.30",28,36,clrWhite,12);
+   UiLabel("TITLE","RAMON AI TRADER  v0.31",28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
 
@@ -1211,7 +1234,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.30";
+      version="0.31";
    }
    if(close_detail!="") detail=close_detail;
 
@@ -1471,6 +1494,10 @@ void OnTimer()
    double news_event_time=0.0,news_event_delta_minutes=0.0;
    string news_source="",news_event_title="",news_event_country="",news_event_impact="";
    double signal_time=0.0,signal_bid=0.0,signal_ask=0.0,median=0.0,atr=0.0,stop_distance=0.0,target_distance=0.0;
+   double target_learning_active=0.0,target_structure_ready=0.0;
+   string target_method="",target_direction="";
+   double target_impulse_start=0.0,target_impulse_end=0.0,target_impulse_range=0.0,target_impulse_atr=0.0;
+   double target_tp1=0.0,target_tp2=0.0,target_tp3=0.0,legacy_target_price=0.0;
    double forecast_low=0.0,forecast_high=0.0,edge=0.0,model_spread=0.0;
    double buy_edge=0.0,sell_edge=0.0,minimum_edge=0.0,uncertainty=0.0,signal_strength=0.0,minimum_strength=0.0;
    double intrabar_confirmed=0.0,intrabar_move_atr=0.0,intrabar_rebound_atr=0.0;
@@ -1537,6 +1564,18 @@ void OnTimer()
       || !JsonNumber(reply,"spread_points",model_spread)
       || !JsonNumber(reply,"stop_distance",stop_distance)
       || !JsonNumber(reply,"target_distance",target_distance)
+      || !JsonNumber(reply,"target_learning_active",target_learning_active)
+      || !JsonNumber(reply,"target_structure_ready",target_structure_ready)
+      || !JsonText(reply,"target_method",target_method)
+      || !JsonText(reply,"target_direction",target_direction)
+      || !JsonNumber(reply,"target_impulse_start",target_impulse_start)
+      || !JsonNumber(reply,"target_impulse_end",target_impulse_end)
+      || !JsonNumber(reply,"target_impulse_range",target_impulse_range)
+      || !JsonNumber(reply,"target_impulse_atr",target_impulse_atr)
+      || !JsonNumber(reply,"target_tp1",target_tp1)
+      || !JsonNumber(reply,"target_tp2",target_tp2)
+      || !JsonNumber(reply,"target_tp3",target_tp3)
+      || !JsonNumber(reply,"legacy_target_price",legacy_target_price)
       || risk_model_ready<0.0 || risk_model_ready>1.0
       || risk_probability<-1.0 || risk_probability>1.0
       || risk_multiplier<0.50 || risk_multiplier>1.50
@@ -1603,6 +1642,18 @@ void OnTimer()
    LastModelSpreadPoints=(int)model_spread;
    LastStopDistance=stop_distance;
    LastTargetDistance=target_distance;
+   LastTargetLearningActive=(target_learning_active>=0.5);
+   LastTargetStructureReady=(target_structure_ready>=0.5);
+   LastTargetMethod=target_method;
+   LastTargetDirection=target_direction;
+   LastTargetImpulseStart=target_impulse_start;
+   LastTargetImpulseEnd=target_impulse_end;
+   LastTargetImpulseRange=target_impulse_range;
+   LastTargetImpulseAtr=target_impulse_atr;
+   LastTargetTP1=target_tp1;
+   LastTargetTP2=target_tp2;
+   LastTargetTP3=target_tp3;
+   LastLegacyTargetPrice=legacy_target_price;
    StatusLine=reason;
    UpdateSizingPreview();
    AppendSignalCsv();
