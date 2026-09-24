@@ -228,7 +228,7 @@ def audit(db: str, symbol: str, model: str, ensemble_dir: Path, *,
             print_json({"status": "EXACT", **exact_sizing})
         else:
             print_json({
-                "status": "UNKNOWN_LEGACY",
+                "status": "NOT_RECORDED",
                 "reason": "Exact sizing telemetry was not persisted for this historical trade.",
             })
         sample_columns = {row[1] for row in con.execute("PRAGMA table_info(decision_samples)")}
