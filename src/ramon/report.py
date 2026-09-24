@@ -163,6 +163,45 @@ def print_telemetry(trades: list[dict]) -> None:
     print()
 
 
+def print_stored_sizing(trades: list[dict]) -> None:
+    """Report exact entry sizing persisted by EA 0.29+; legacy rows stay unknown."""
+    fields = (
+        "risk_budget_units", "planned_volume", "min_lot_sl_units",
+        "min_lot_override_used", "max_executable_risk_usd", "money_units_per_usd",
+    )
+    known = [row for row in trades if all(row.get(name) is not None for name in fields)]
+    print("=== EXACT STORED ENTRY SIZING ===")
+    print(f"Exact sizing coverage: {len(known)}/{len(trades)} closed trades")
+    print("EA 0.29+ stores these fields by sample_key via immutable opening-deal telemetry.")
+    print("Legacy rows without exact sizing remain UNKNOWN; CSV candidate analysis is separate.")
+    if not known:
+        print("No exact sizing telemetry has reached SQLite yet.")
+        print()
+        return
+    for flag in (1, 0):
+        rows = [row for row in known if int(row["min_lot_override_used"]) == flag]
+        label = "YES" if flag else "NO"
+        if not rows:
+            print(f"override={label:3} | trades=0")
+            continue
+        wins = sum(float(row["net_units"]) > 0 for row in rows)
+        losses = sum(float(row["net_units"]) < 0 for row in rows)
+        risk_ratios = [
+            float(row["initial_risk_units"]) / float(row["risk_budget_units"])
+            for row in rows if float(row["risk_budget_units"]) > 0
+        ]
+        print(
+            f"override={label:3} | trades={len(rows):3d} "
+            f"| W/L={wins}/{losses} | WR={pct(wins, len(rows)):.2f}% "
+            f"| net={sum(float(row['net_units']) for row in rows):+.4f} "
+            f"| avgR={mean([float(row['net_r']) for row in rows]):+.4f} "
+            f"| avgRisk={mean([float(row['initial_risk_units']) for row in rows]):.4f} "
+            f"| avgRisk/budget={mean(risk_ratios):.3f}x"
+        )
+    print("Exact sizing is descriptive provenance; it does not alter execution or trainer labels.")
+    print()
+
+
 def generate_report(DB: str, SYMBOL: str = "XAUUSD_l", LIMIT: int = 20) -> None:
     """Print a consistent, read-only snapshot of trade outcomes and decision features."""
     with sqlite3.connect(Path(DB).expanduser().resolve().as_uri() + "?mode=ro", uri=True) as con:
@@ -231,6 +270,7 @@ def generate_report(DB: str, SYMBOL: str = "XAUUSD_l", LIMIT: int = 20) -> None:
         print()
 
         print_telemetry(trades)
+        print_stored_sizing(trades)
 
         print("=== BY DIRECTION ===")
         direction_rows = con.execute(
