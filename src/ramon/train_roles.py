@@ -79,7 +79,7 @@ def read_trade_examples(conn: sqlite3.Connection, symbol: str, chronos_model: st
                    s.news_features,s.meta_base_features,t.net_r,s.base_decision,t.direction,t.exit_reason
             FROM decision_samples s JOIN trade_outcomes t ON t.sample_key=s.sample_key
             WHERE s.symbol=? AND t.symbol=s.symbol AND s.chronos_model=?
-              AND s.schema_version=3 AND s.news_features IS NOT NULL AND t.direction=s.direction
+              AND s.schema_version>=3 AND s.news_features IS NOT NULL AND t.direction=s.direction
               AND s.final_decision=t.direction AND t.training_status='LEARNABLE'
               AND t.opened>=s.quote_time
               AND t.opened<=s.quote_time+90 AND t.closed>=t.opened
