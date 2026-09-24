@@ -16,6 +16,7 @@ from .history import persist_decision_sample, persist_market, persist_trade_outc
 from .model import ChronosForecaster, model_name
 from .news import DEFAULT_FOREX_FACTORY_JSON, ForexFactoryNewsProvider
 from .target_learning import build_target_structure
+from .target_outcomes import backfill_target_outcomes
 
 
 def persist_market_safely(db: str, market: Market) -> str:
@@ -100,6 +101,13 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     if not history_db:
                         raise ValueError("history persistence is disabled")
                     persist_trade_outcome(history_db, payload, int(time.time()))
+                    try:
+                        backfill_target_outcomes(history_db, symbol=str(payload.get("symbol", "XAUUSD_l")))
+                    except Exception as exc:
+                        print(
+                            f"Ramon target-outcome backfill warning: {type(exc).__name__}: {exc}",
+                            flush=True,
+                        )
                     self.reply(200, {"saved": True})
                     return
                 market = Market.from_dict(payload)
@@ -121,6 +129,13 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         else:
                             last_persisted_bar[key] = newest
                             history_status["last_persisted_bar"] = newest
+                            try:
+                                backfill_target_outcomes(history_db, symbol=market.symbol)
+                            except Exception as exc:
+                                print(
+                                    f"Ramon target-outcome backfill warning: {type(exc).__name__}: {exc}",
+                                    flush=True,
+                                )
 
                 news_snapshot = news_provider.snapshot()
                 with guard:
