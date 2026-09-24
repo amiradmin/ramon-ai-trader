@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import os
@@ -161,6 +162,12 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                                 "ensemble_mode": ensemble.status()["ensemble_mode"],
                                 "ensemble_active": response.get("ensemble_active", 0),
                                 "role_manifest": ensemble.manifest,
+                                "decision_audit": {
+                                    "schema_version": 1,
+                                    "base": result.to_dict(),
+                                    "final": ensemble_payload,
+                                    "settings": asdict(settings),
+                                },
                             },
                         )
                         response["sample_saved"] = int(saved)

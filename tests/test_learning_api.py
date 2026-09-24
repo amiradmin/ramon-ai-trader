@@ -110,5 +110,11 @@ def test_decision_metadata_and_enriched_outcome_round_trip(learning_server):
         model_id, raw = con.execute('SELECT chronos_model,model_metadata FROM decision_samples').fetchone()
         assert model_id == 'test/fake'
         assert json.loads(raw)['ensemble_mode'] == 'bootstrap_chronos'
+        audit = json.loads(raw)['decision_audit']
+        assert audit['base']['reason'] == decision['base_reason']
+        assert audit['final']['reason'] == decision['reason']
+        assert audit['base']['signal_strength'] == decision['signal_strength']
+        assert audit['settings'] == asdict(Settings())
+        assert audit['final']['decision'] == payload['direction']
         assert con.execute('SELECT COUNT(*),fee_units,exit_detail FROM trade_outcomes').fetchone() == (1, -.1, 'maximum_hold_bars')
     assert len(load_trade_examples(db, 'XAUUSD_l', 'test/fake')) == 1
