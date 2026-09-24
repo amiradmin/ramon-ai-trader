@@ -134,6 +134,39 @@ def ensure_history_db(db: str | Path) -> Path:
             "CREATE INDEX IF NOT EXISTS idx_decision_samples_symbol_time "
             "ON decision_samples(symbol,captured)"
         )
+        conn.execute("""CREATE TABLE IF NOT EXISTS target_outcomes (
+            sample_key TEXT PRIMARY KEY,
+            trade_key TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            direction TEXT NOT NULL,
+            opened INTEGER NOT NULL,
+            closed INTEGER NOT NULL,
+            tp1 REAL NOT NULL,
+            tp2 REAL NOT NULL,
+            tp3 REAL NOT NULL,
+            tp1_hit INTEGER NOT NULL,
+            tp2_hit INTEGER NOT NULL,
+            tp3_hit INTEGER NOT NULL,
+            tp1_time INTEGER,
+            tp2_time INTEGER,
+            tp3_time INTEGER,
+            bars_to_tp1 INTEGER,
+            bars_to_tp2 INTEGER,
+            bars_to_tp3 INTEGER,
+            mfe_price REAL NOT NULL,
+            mae_price REAL NOT NULL,
+            mfe_atr REAL,
+            mae_atr REAL,
+            continuation_tp2 INTEGER NOT NULL,
+            continuation_tp3 INTEGER NOT NULL,
+            source TEXT NOT NULL,
+            computed_at INTEGER NOT NULL,
+            FOREIGN KEY(sample_key) REFERENCES decision_samples(sample_key)
+        )""")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_target_outcomes_symbol_opened "
+            "ON target_outcomes(symbol,opened)"
+        )
     return path
 
 
