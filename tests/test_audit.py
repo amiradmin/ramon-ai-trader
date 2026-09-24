@@ -198,6 +198,7 @@ def test_matching_header_and_repeated_new_header_are_not_treated_as_mismatched()
 
 
 def test_reconstructed_layout_matches_the_actual_ea_writer():
+    assert len(SIGNAL_COLUMNS_030) == 63  # MQL5 FileWrite supports at most 63 values.
     source = (Path(__file__).parents[1] / 'mt5' / 'Ramon.mq5').read_text()
     block = re.search(r'void AppendSignalCsv\(\).*?if\(empty\)\s*\{\s*FileWrite\(handle,(.*?)\);', source, re.S)
     assert block is not None
