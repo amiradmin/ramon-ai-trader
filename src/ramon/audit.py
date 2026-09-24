@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import sqlite3
 import sys
+import time
 from urllib.request import urlopen
 
 from .core import Settings
@@ -24,6 +25,26 @@ from .train_roles import (
 
 def print_json(value: object) -> None:
     print(json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False, allow_nan=False))
+
+
+def read_live_health(url: str, *, attempts: int = 5, delay_seconds: float = 1.0,
+                     timeout_seconds: float = 5.0) -> dict:
+    """Retry transient startup failures before declaring the live service unavailable."""
+    if attempts < 1:
+        raise ValueError("attempts must be >= 1")
+    last_error = "unknown error"
+    for attempt in range(1, attempts + 1):
+        try:
+            with urlopen(url, timeout=timeout_seconds) as response:
+                health = json.load(response)
+            if not isinstance(health, dict):
+                raise ValueError("health response is not an object")
+            return health
+        except (OSError, ValueError) as exc:
+            last_error = str(exc)
+            if attempt < attempts:
+                time.sleep(delay_seconds)
+    return {"status": "UNAVAILABLE", "error": last_error, "attempts": attempts}
 
 
 def read_json_file(path: Path) -> dict:
@@ -249,15 +270,7 @@ def main() -> None:
     args = parser.parse_args()
     if args.minimum_samples < 100:
         parser.error("minimum-samples must be >=100, matching the trainer")
-    health = None
-    if args.health_url:
-        try:
-            with urlopen(args.health_url, timeout=5) as response:
-                health = json.load(response)
-            if not isinstance(health, dict):
-                raise ValueError("health response is not an object")
-        except (OSError, ValueError) as exc:
-            health = {"status": "UNAVAILABLE", "error": str(exc)}
+    health = read_live_health(args.health_url) if args.health_url else None
     # The running service is authoritative; an explicit model selects another cohort.
     model = args.chronos_model or (health or {}).get("model")
     if not model:
