@@ -78,12 +78,22 @@ SIGNAL_COLUMNS_028 = (
     "min_lot_blocked",
 )
 
+SIGNAL_COLUMNS_030 = (
+    *SIGNAL_COLUMNS_028[:12],
+    "risk_model_ready", "risk_probability", "risk_multiplier",
+    *SIGNAL_COLUMNS_028[12:50],
+    "effective_risk_usd",
+    *SIGNAL_COLUMNS_028[50:],
+)
 
-def valid_signal_028(row: dict[str, str]) -> bool:
-    """Check the source-defined layout before exposing reconstructed numeric fields."""
+
+def _valid_signal_layout(row: dict[str, str], columns: tuple[str, ...]) -> bool:
+    """Check a source-defined layout before exposing reconstructed numeric fields."""
     flags = {"ensemble_ready", "ensemble_active", "intrabar_confirmed", "ai_trend_confirmed",
              "live_armed", "account_lock", "allow_min_lot_override", "min_lot_override_used",
              "min_lot_blocked"}
+    if "risk_model_ready" in columns:
+        flags.add("risk_model_ready")
     text_fields = {"captured", "signal_bar_time", "symbol", "decision", "reason", "base_decision",
                    "base_reason", "intrabar_direction", "ai_trend_direction", "account_type",
                    "account_currency", "sizing_side"}
@@ -95,36 +105,67 @@ def valid_signal_028(row: dict[str, str]) -> bool:
            for key in ("intrabar_direction", "ai_trend_direction", "sizing_side")):
         return False
     try:
-        numbers = {key: float(row[key]) for key in SIGNAL_COLUMNS_028 if key not in flags | text_fields}
-    except (ValueError, TypeError):
+        numbers = {key: float(row[key]) for key in columns if key not in flags | text_fields}
+    except (ValueError, TypeError, KeyError):
         return False
     if not all(math.isfinite(value) for value in numbers.values()):
         return False
-    return (0 < numbers["signal_bid"] <= numbers["signal_ask"]
+    if not (0 < numbers["signal_bid"] <= numbers["signal_ask"]
             and 0 <= numbers["forecast_low"] <= numbers["forecast_median"] <= numbers["forecast_high"]
             and all(-1 <= numbers[key] <= 1 for key in
-                    ("regime_probability", "entry_probability", "meta_probability")))
+                    ("regime_probability", "entry_probability", "meta_probability"))):
+        return False
+    if "risk_model_ready" in columns:
+        ready = row["risk_model_ready"] == "YES"
+        probability = numbers["risk_probability"]
+        multiplier = numbers["risk_multiplier"]
+        if not (-1 <= probability <= 1 and 0.50 <= multiplier <= 1.50):
+            return False
+        if ready and probability < 0:
+            return False
+        if not ready and (probability != -1.0 or abs(multiplier - 1.0) > 1e-9):
+            return False
+    return True
+
+
+def valid_signal_028(row: dict[str, str]) -> bool:
+    return _valid_signal_layout(row, SIGNAL_COLUMNS_028)
+
+
+def valid_signal_030(row: dict[str, str]) -> bool:
+    return _valid_signal_layout(row, SIGNAL_COLUMNS_030)
 
 
 def decode_signal_row(header: list[str], raw: list[str]) -> tuple[dict, dict]:
     """Older EAs leave their header in place while appending a newer, wider layout.
 
-    Only reconstruct the known 62-column layout from Ramon.mq5 at ff62b07.
+    Reconstruct only known Ramon layouts (EA 0.28/0.29 and EA 0.30).
     Other mismatches keep the invariant five-column prefix and raw evidence only.
     """
     evidence = {"csv_header_columns": len(header), "csv_row_columns": len(raw)}
     if len(raw) == len(header) and len(set(header)) == len(header):
         row = dict(zip(header, raw))
-        if tuple(header) != SIGNAL_COLUMNS_028 or valid_signal_028(row):
+        if tuple(header) == SIGNAL_COLUMNS_028:
+            valid = valid_signal_028(row)
+        elif tuple(header) == SIGNAL_COLUMNS_030:
+            valid = valid_signal_030(row)
+        else:
+            valid = True
+        if valid:
             return row, {**evidence, "csv_schema_status": "HEADER_MATCH"}
     prefix = SIGNAL_COLUMNS_028[:5]
     stable = dict(zip(prefix, raw[:5])) if tuple(header[:5]) == prefix and len(raw) >= 5 else {}
-    if stable and len(raw) == len(SIGNAL_COLUMNS_028):
-        candidate = dict(zip(SIGNAL_COLUMNS_028, raw))
-        if valid_signal_028(candidate):
-            return candidate, {**evidence, "csv_schema_status": "RECONSTRUCTED_KNOWN_LAYOUT",
-                               "csv_layout_source": "mt5/Ramon.mq5 at ff62b07 (EA 0.28 layout)",
-                               "csv_warning": "Layout inferred from row width and field checks; original header does not describe this row."}
+    known_layouts = (
+        (SIGNAL_COLUMNS_028, valid_signal_028, "EA 0.28/0.29 layout"),
+        (SIGNAL_COLUMNS_030, valid_signal_030, "EA 0.30 risk-multiplier layout"),
+    )
+    for columns, validator, label in known_layouts:
+        if stable and len(raw) == len(columns):
+            candidate = dict(zip(columns, raw))
+            if validator(candidate):
+                return candidate, {**evidence, "csv_schema_status": "RECONSTRUCTED_KNOWN_LAYOUT",
+                                   "csv_layout_source": f"mt5/Ramon.mq5 ({label})",
+                                   "csv_warning": "Layout inferred from row width and field checks; original header does not describe this row."}
     return stable, {**evidence, "csv_schema_status": "UNREADABLE_LAYOUT",
                     "csv_warning": "Numeric fields suppressed; only the stable prefix is usable.",
                     "csv_raw_fields": raw}
@@ -137,7 +178,8 @@ def csv_candidates(stream, trade: dict, sample: dict) -> list[dict]:
     fields = ("captured", "symbol", "decision", "reason", "base_decision", "base_reason",
               "signal_strength", "minimum_strength", "buy_edge", "sell_edge", "minimum_edge",
               "ai_trend_confirmed", "ai_trend_direction", "ai_trend_move_atr",
-              "ai_trend_consistency", "intrabar_move_atr", "risk_usd",
+              "ai_trend_consistency", "intrabar_move_atr", "risk_usd", "effective_risk_usd",
+              "risk_model_ready", "risk_probability", "risk_multiplier",
               "trend_min_path_atr", "trend_min_consistency", "trend_min_edge_fraction",
               "trend_min_micro_move_atr", "stop_distance", "target_distance",
               "money_units_per_usd", "risk_budget_units", "allow_min_lot_override",
