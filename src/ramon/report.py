@@ -63,7 +63,7 @@ def trade_time(row: dict, field: str) -> str:
 def load_report_trades(con: sqlite3.Connection, symbol: str) -> list[dict]:
     """Read old and new schemas without migrating or modifying the live database."""
     samples = {row[1] for row in con.execute("PRAGMA table_info(decision_samples)")}
-    names = ("chronos_model", "bundle_id", "model_metadata", "captured")
+    names = ("chronos_model", "bundle_id", "model_metadata", "captured", "mid", "spread", "stop_distance")
     if "sample_key" in samples:
         fields = ",".join(f"s.{n} AS {n}" if n in samples else f"NULL AS {n}" for n in names)
         query = f"SELECT t.*, {fields} FROM trade_outcomes t LEFT JOIN decision_samples s ON s.sample_key=t.sample_key AND s.symbol=t.symbol WHERE t.symbol=? ORDER BY t.closed,t.trade_key"
@@ -95,6 +95,214 @@ def training_status(row: dict) -> str:
         return str(stored)
     return classify_training_status(str(row.get("exit_reason", "UNKNOWN")),
                                     str(row.get("exit_detail") or ""))
+
+
+def drawdown_metrics(trades: list[dict]) -> tuple[float, float]:
+    """Return maximum closed-trade peak-to-trough drawdown in account units and R."""
+    equity_units = equity_r = 0.0
+    peak_units = peak_r = 0.0
+    max_dd_units = max_dd_r = 0.0
+    for row in trades:
+        equity_units += float(row["net_units"])
+        equity_r += float(row["net_r"])
+        peak_units = max(peak_units, equity_units)
+        peak_r = max(peak_r, equity_r)
+        max_dd_units = max(max_dd_units, peak_units - equity_units)
+        max_dd_r = max(max_dd_r, peak_r - equity_r)
+    return max_dd_units, max_dd_r
+
+
+def loss_streak_metrics(trades: list[dict]) -> dict[str, float | int]:
+    """Return the longest consecutive closed-trade losing streak."""
+    best = {"length": 0, "start": 0, "end": 0, "net_units": 0.0, "net_r": 0.0}
+    start = 0
+    length = 0
+    net_units = 0.0
+    net_r = 0.0
+    for index, row in enumerate(trades, 1):
+        if float(row["net_units"]) < 0:
+            if length == 0:
+                start = index
+            length += 1
+            net_units += float(row["net_units"])
+            net_r += float(row["net_r"])
+            if length > int(best["length"]) or (
+                length == int(best["length"]) and net_units < float(best["net_units"])
+            ):
+                best = {
+                    "length": length,
+                    "start": start,
+                    "end": index,
+                    "net_units": net_units,
+                    "net_r": net_r,
+                }
+        else:
+            length = 0
+            net_units = 0.0
+            net_r = 0.0
+    return best
+
+
+def rolling_trade_metrics(trades: list[dict], window: int = 20) -> list[dict[str, float | int]]:
+    """Calculate contiguous rolling closed-trade PF and expectancy."""
+    if window <= 0 or len(trades) < window:
+        return []
+    rows: list[dict[str, float | int]] = []
+    for end in range(window, len(trades) + 1):
+        subset = trades[end - window:end]
+        gains = sum(max(float(row["net_units"]), 0.0) for row in subset)
+        losses = abs(sum(min(float(row["net_units"]), 0.0) for row in subset))
+        rows.append({
+            "start": end - window + 1,
+            "end": end,
+            "pf": gains / losses if losses > 0 else float("inf"),
+            "expectancy_units": sum(float(row["net_units"]) for row in subset) / window,
+            "expectancy_r": sum(float(row["net_r"]) for row in subset) / window,
+            "net_units": sum(float(row["net_units"]) for row in subset),
+            "win_rate": pct(sum(float(row["net_units"]) > 0 for row in subset), window),
+        })
+    return rows
+
+
+def load_bar_excursions(
+    con: sqlite3.Connection, trades: list[dict], symbol: str
+) -> dict[str, dict[str, float | int]]:
+    """Approximate MFE/MAE from stored M15 bar envelopes and entry decision quotes.
+
+    Boundary M15 bars can contain prices from before entry or after exit, so these
+    are deliberately labelled approximations rather than exact tick-level excursions.
+    """
+    if not trades:
+        return {}
+    tables = {row[0] for row in con.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'"
+    )}
+    if "history_bars" not in tables:
+        return {}
+    columns = {row[1] for row in con.execute("PRAGMA table_info(history_bars)")}
+    if not {"symbol", "timeframe", "time", "high", "low"} <= columns:
+        return {}
+
+    start = min(int(row["opened"]) for row in trades) - 900
+    end = max(int(row["closed"]) for row in trades)
+    bars = [
+        dict(row) for row in con.execute(
+            """SELECT time,high,low FROM history_bars
+               WHERE symbol=? AND timeframe='M15' AND time>=? AND time<=?
+               ORDER BY time""",
+            (symbol, start, end),
+        )
+    ]
+    if not bars:
+        return {}
+
+    excursions: dict[str, dict[str, float | int]] = {}
+    for row in trades:
+        mid = row.get("mid")
+        spread = row.get("spread")
+        stop_distance = row.get("stop_distance")
+        if mid is None or spread is None or stop_distance is None or float(stop_distance) <= 0:
+            continue
+        overlapping = [
+            bar for bar in bars
+            if int(bar["time"]) <= int(row["closed"])
+            and int(bar["time"]) + 900 > int(row["opened"])
+        ]
+        if not overlapping:
+            continue
+        direction = str(row["direction"])
+        entry = float(mid) + float(spread) / 2.0 if direction == "BUY" else float(mid) - float(spread) / 2.0
+        high = max(float(bar["high"]) for bar in overlapping)
+        low = min(float(bar["low"]) for bar in overlapping)
+        if direction == "BUY":
+            favorable = max(0.0, high - entry)
+            adverse = max(0.0, entry - low)
+        else:
+            favorable = max(0.0, entry - low)
+            adverse = max(0.0, high - entry)
+        stop = float(stop_distance)
+        excursions[str(row["trade_key"])] = {
+            "mfe_r": favorable / stop,
+            "mae_r": adverse / stop,
+            "bars": len(overlapping),
+        }
+    return excursions
+
+
+def print_path_risk(trades: list[dict]) -> None:
+    max_dd_units, max_dd_r = drawdown_metrics(trades)
+    streak = loss_streak_metrics(trades)
+    print("=== DRAWDOWN / LOSS STREAK ===")
+    print(f"Maximum closed-trade DD : {max_dd_units:.4f} units (~${max_dd_units / 100.0:.4f})")
+    print(f"Maximum closed-trade DD : {max_dd_r:.4f}R")
+    if int(streak["length"]):
+        print(
+            f"Max consecutive losses  : {int(streak['length'])} trades "
+            f"(#{int(streak['start'])}-#{int(streak['end'])}) "
+            f"| net={float(streak['net_units']):+.4f} units "
+            f"| totalR={float(streak['net_r']):+.4f}R"
+        )
+    else:
+        print("Max consecutive losses  : 0")
+    print("Drawdown uses cumulative CLOSED trades from a zero P/L baseline; open-position drawdown is excluded.")
+    print()
+
+
+def print_rolling_performance(trades: list[dict], window: int = 20) -> None:
+    rows = rolling_trade_metrics(trades, window)
+    print(f"=== ROLLING {window}-TRADE PERFORMANCE ===")
+    if not rows:
+        print(f"Need at least {window} closed trades; currently {len(trades)}.")
+        print()
+        return
+    latest = rows[-1]
+    best = max(rows, key=lambda row: float(row["expectancy_r"]))
+    worst = min(rows, key=lambda row: float(row["expectancy_r"]))
+    def line(label: str, row: dict[str, float | int]) -> None:
+        pf_value = float(row["pf"])
+        pf_text = f"{pf_value:.3f}" if math.isfinite(pf_value) else "inf"
+        print(
+            f"{label:7} #{int(row['start'])}-{int(row['end'])} "
+            f"| PF={pf_text:>6} | WR={float(row['win_rate']):6.2f}% "
+            f"| expectancy={float(row['expectancy_units']):+.4f} units/trade "
+            f"| avgR={float(row['expectancy_r']):+.4f}R "
+            f"| net={float(row['net_units']):+.4f}"
+        )
+    line("Latest", latest)
+    line("Best", best)
+    line("Worst", worst)
+    print("Best/worst are selected by rolling average R, descriptively; they are not model-selection evidence.")
+    print()
+
+
+def print_excursion_summary(
+    trades: list[dict], excursions: dict[str, dict[str, float | int]]
+) -> None:
+    print("=== MAE / MFE (M15 BAR-ENVELOPE APPROXIMATION) ===")
+    print(f"Coverage: {len(excursions)}/{len(trades)} closed trades")
+    print("Uses decision-side quote plus stored M15 high/low and initial stop distance.")
+    print("Boundary bars may include prices before entry/after exit; values are approximate, not tick-exact.")
+    if not excursions:
+        print("No compatible entry quote/stop-distance + M15 bar coverage.")
+        print()
+        return
+    for label, subset in (
+        ("ALL", trades),
+        ("WIN", [row for row in trades if float(row["net_units"]) > 0]),
+        ("LOSS", [row for row in trades if float(row["net_units"]) < 0]),
+    ):
+        values = [excursions.get(str(row["trade_key"])) for row in subset]
+        values = [value for value in values if value is not None]
+        if not values:
+            continue
+        mfes = [float(value["mfe_r"]) for value in values]
+        maes = [float(value["mae_r"]) for value in values]
+        print(
+            f"{label:4} | trades={len(values):3d} "
+            f"| avgMFE={mean(mfes):.3f}R medMFE={statistics.median(mfes):.3f}R "
+            f"| avgMAE={mean(maes):.3f}R medMAE={statistics.median(maes):.3f}R"
+        )
+    print()
 
 
 def print_telemetry(trades: list[dict]) -> None:
@@ -269,6 +477,11 @@ def generate_report(DB: str, SYMBOL: str = "XAUUSD_l", LIMIT: int = 20) -> None:
         print("* USD approximation assumes the current CENT convention: 100 account units = 1 USD.")
         print()
 
+        excursions = load_bar_excursions(con, trades, SYMBOL)
+        print_path_risk(trades)
+        print_rolling_performance(trades, 20)
+        print_excursion_summary(trades, excursions)
+
         print_telemetry(trades)
         print_stored_sizing(trades)
 
@@ -341,6 +554,11 @@ def generate_report(DB: str, SYMBOL: str = "XAUUSD_l", LIMIT: int = 20) -> None:
                 f" | model={r.get('chronos_model') or 'UNKNOWN'} bundle={bundle_label(r)}"
                 f" EA={r.get('entry_ea_version') or 'UNKNOWN'}"
                 f" label={training_status(r)}"
+                + (
+                    f" | MFE~{float(excursions[str(r['trade_key'])]['mfe_r']):.3f}R"
+                    f" MAE~{float(excursions[str(r['trade_key'])]['mae_r']):.3f}R"
+                    if str(r["trade_key"]) in excursions else ""
+                )
             )
             costs = " ".join(
                 f"{name}={float(r[name]):+.4f}" if r.get(name) is not None else f"{name}=UNKNOWN"
