@@ -75,8 +75,9 @@ def compare(db: str | Path, chronos, *, symbol: str = "XAUUSD_l",
     trade_counts = {name: result["buys"] + result["sells"] for name, result in results.items()}
     return {
         "symbol": symbol,
-        "holdout": {"start_utc": datetime.fromtimestamp(bars[start].time, timezone.utc).isoformat(),
-                    "end_utc": datetime.fromtimestamp(bars[-1].time, timezone.utc).isoformat(),
+        "holdout": {"start_mt5_time": datetime.fromtimestamp(bars[start].time, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
+                    "end_mt5_time": datetime.fromtimestamp(bars[-1].time, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
+                    "clock": "raw MT5 broker-server bar time; UTC offset not established",
                     "bars": len(bars) - start, "recorded_spreads": len(bars) - start,
                     "stride": stride},
         "cost": {"roundtrip_r": cost_r, "source": cost_source,
