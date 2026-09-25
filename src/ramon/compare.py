@@ -109,8 +109,15 @@ def main() -> None:
     args = parser.parse_args()
     # Validate data and spread coverage before the potentially expensive model load.
     bars, spreads = load_bars(args.db, args.symbol)
-    if len(bars) < 600 or any(v <= 0 for v in spreads[max(256, len(bars) * 4 // 5):]):
-        parser.error("need >=600 bars and recorded spreads on every holdout bar")
+    if len(bars) < 600:
+        parser.error(f"found {len(bars)} completed {args.symbol}/M15 bars; need at least 600. "
+                     "Export/import MT5 closed M15 history with spread_points.")
+    start = max(256, len(bars) * 4 // 5)
+    missing = sum(v <= 0 for v in spreads[start:])
+    if missing:
+        parser.error(f"found {missing} holdout bars without recorded spread "
+                     f"(out of {len(bars) - start}); export/import MT5 closed M15 history "
+                     "with spread_points. No assumed spread is used for this comparison.")
     model = ChronosForecaster(model_name(args.model), args.device)
     report = compare(args.db, model, symbol=args.symbol, point=args.point,
                      stride=args.stride, cost_r=args.cost_r)
