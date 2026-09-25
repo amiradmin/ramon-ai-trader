@@ -268,14 +268,25 @@ docker compose --profile tools run --rm --no-deps tools -m ramon.compare \
 
 فرمان در صورت نبود اسپرد تاریخی در هر یک از کندل‌های دورهٔ آزمون متوقف می‌شود؛ باید دادهٔ اسپرد واقعی MT5 را وارد کنید. کمیسیون، سوآپ و کارمزد به R تبدیل و از معاملات بستهٔ ثبت‌شده تخمین زده می‌شوند. اگر دادهٔ کامل این اقلام موجود نباشد، خروجی صریحاً **فقط پس از اسپرد** است و دربارهٔ سود خالص پس از همهٔ هزینه‌ها نتیجه نمی‌دهد. برای فرض هزینهٔ معلوم می‌توانید `--cost-r 0.05` را وارد کنید؛ این مقدار نمونهٔ فرضی است و باید از حساب خودتان به‌دست آید. لغزش، تیک، گپ، اخبار، حجم و خروج دقیق EA با کندل M15 بازسازی نمی‌شوند. تعداد معاملهٔ کمتر از ۲۰ در هر یک از دو روش برای مقایسهٔ عملکرد ناکافی گزارش می‌شود.
 
-اگر خطای تعداد کندل یا اسپرد ناقص دیدید، اسکریپت `mt5/ExportRamonHistory.mq5` را در MetaEditor با F7 کامپایل و یک بار در MT5 اجرا کنید (پیش‌فرض: ۱۰٬۰۰۰ کندل بستهٔ `XAUUSD_l/M15`). سپس CSV پوشهٔ مشترک MT5 را وارد کنید و گزارش بالا را دوباره اجرا کنید:
+اگر خطای تعداد کندل یا اسپرد ناقص دیدید، در MT5 از **File → Open Data Folder** پوشهٔ همان ترمینال را باز کنید، فایل `mt5/ExportRamonHistory.mq5` را در `MQL5/Scripts` آن قرار دهید، در MetaEditor با F7 کامپایل کنید و اسکریپت را یک بار روی نمودار اجرا کنید (پیش‌فرض: ۱۰٬۰۰۰ کندل بستهٔ `XAUUSD_l/M15`). تا زمانی که در Experts پیام `Ramon history export complete` نیامده، فایل CSV ساخته نشده است. برای پیدا کردن فایل در Wine:
 
 ~~~bash
-mkdir -p data/imports
-cp "$HOME/.mt5/drive_c/users/$USER/AppData/Roaming/MetaQuotes/Terminal/Common/Files/Ramon_XAUUSD_l_M15_History.csv" data/imports/
-docker compose --profile tools run --rm --no-deps tools -m ramon.import_history \
-  /data/imports/Ramon_XAUUSD_l_M15_History.csv \
-  --db /data/ramon_history.sqlite3 --symbol XAUUSD_l
+find "$HOME/.mt5" "$HOME/.wine" -type f -iname 'Ramon*History*.csv' -print 2>/dev/null
+~~~
+
+مسیر CSV پیدا‌شده را در متغیر `CSV` بگذارید؛ اگر مسیر پیش‌فرض درست است، فرمان‌های زیر آماده‌اند. شرط `if` اجازه نمی‌دهد در صورت نبود CSV، import اجرا شود:
+
+~~~bash
+CSV="$HOME/.mt5/drive_c/users/$USER/AppData/Roaming/MetaQuotes/Terminal/Common/Files/Ramon_XAUUSD_l_M15_History.csv"
+if [[ -f "$CSV" ]]; then
+  mkdir -p data/imports
+  cp -- "$CSV" data/imports/Ramon_XAUUSD_l_M15_History.csv
+  docker compose --profile tools run --rm --no-deps tools -m ramon.import_history \
+    /data/imports/Ramon_XAUUSD_l_M15_History.csv \
+    --db /data/ramon_history.sqlite3 --symbol XAUUSD_l
+else
+  printf 'CSV not found: %s\n' "$CSV"
+fi
 ~~~
 
 واردکردن داده، کندل‌های هم‌زمان را به‌روزرسانی می‌کند و معاملات ثبت‌شده را حذف نمی‌کند. اسپرد کندل تاریخی MT5 تقریب اجرای bid/ask است؛ اسپرد واقعی تیک اجرای سفارش و لغزش را بازسازی نمی‌کند.
