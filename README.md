@@ -255,10 +255,12 @@ uv run --extra model python -m ramon.replay \
 
 ### مقایسهٔ Chronos با خط مبنای ثابت
 
-برای مقایسهٔ دو مدل روی همان ۲۰٪ آخر تاریخچه، با اسپرد **ثبت‌شده در هر کندل**:
+برای مقایسهٔ دو مدل روی همان ۲۰٪ آخر تاریخچه، با اسپرد **ثبت‌شده در هر کندل**، پس از دریافت شاخه ابتدا image ابزارها را از کد جدید بسازید. صرف `git switch` فایل‌های برنامهٔ نصب‌شده در کانتینر در حال اجرا را به‌روز نمی‌کند. این مسیر سرویس زندهٔ `model` را راه‌اندازی مجدد نمی‌کند:
 
 ~~~bash
-docker compose exec -T model python -m ramon.compare --db /data/ramon_history.sqlite3 \
+docker compose --profile tools build tools
+docker compose --profile tools run --rm --no-deps tools -m ramon.compare \
+  --db /data/ramon_history.sqlite3 \
   --symbol XAUUSD_l --model autogluon/chronos-2-small --stride 4
 ~~~
 
