@@ -51,6 +51,8 @@ def test_compare_distinguishes_spread_only_and_explicit_fees(tmp_path):
     with_fees = compare(db, RisingForecast(), stride=4, cost_r=0.1)
     assert spread_only["cost"]["roundtrip_r"] is None
     assert spread_only["holdout"]["bars"] == 124
+    assert "start_utc" not in spread_only["holdout"]
+    assert spread_only["holdout"]["clock"].startswith("raw MT5 broker-server")
     assert with_fees["cost"]["source"] == "user supplied R per round trip"
     for key in ("chronos", "momentum_baseline"):
         trades = with_fees["results"][key]["buys"] + with_fees["results"][key]["sells"]
