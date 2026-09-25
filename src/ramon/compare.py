@@ -47,6 +47,42 @@ def observed_cost_r(db: str | Path, symbol: str) -> tuple[float | None, int]:
                 for commission, swap, fee, risk in rows), len(rows)
 
 
+def nearby_broker_offset(db: str | Path, symbol: str, bar_time: int) -> tuple[int | None, int]:
+    """Use fresh, agreeing deal-clock samples; never guess a historical zone."""
+    with sqlite3.connect(db) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(trade_outcomes)")}
+        if not {"opened_utc_offset_seconds", "closed_utc_offset_seconds"} <= columns:
+            return None, 0
+        offsets = [int(value) for (value,) in conn.execute("""
+            SELECT opened_utc_offset_seconds FROM trade_outcomes
+            WHERE symbol=? AND opened BETWEEN ? AND ? AND opened_utc_offset_seconds IS NOT NULL
+            UNION ALL
+            SELECT closed_utc_offset_seconds FROM trade_outcomes
+            WHERE symbol=? AND closed BETWEEN ? AND ? AND closed_utc_offset_seconds IS NOT NULL
+        """, (symbol, bar_time - 86400, bar_time + 86400,
+              symbol, bar_time - 86400, bar_time + 86400))]
+    return (offsets[0], len(offsets)) if offsets and len(set(offsets)) == 1 else (None, len(offsets))
+
+
+def holdout_metadata(db: str | Path, symbol: str, bars, start: int, stride: int) -> dict[str, object]:
+    """Label broker-clock boundaries and convert only with nearby offset evidence."""
+    holdout: dict[str, object] = {
+        "start_mt5_time": datetime.fromtimestamp(bars[start].time, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
+        "end_mt5_time": datetime.fromtimestamp(bars[-1].time, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
+        "clock": "raw MT5 broker-server bar time; UTC offset shown only when supported by nearby deal telemetry",
+        "bars": len(bars) - start,
+        "recorded_spreads": len(bars) - start,
+        "stride": stride,
+    }
+    for name, bar in (("start", bars[start]), ("end", bars[-1])):
+        offset, samples = nearby_broker_offset(db, symbol, bar.time)
+        if offset is not None:
+            holdout[name + "_utc"] = datetime.fromtimestamp(bar.time - offset, timezone.utc).isoformat()
+            holdout[name + "_utc_offset_seconds"] = offset
+            holdout[name + "_offset_samples"] = samples
+    return holdout
+
+
 def compare(db: str | Path, chronos, *, symbol: str = "XAUUSD_l",
             point: float = 0.01, stride: int = 4,
             cost_r: float | None = None) -> dict[str, object]:
@@ -75,11 +111,7 @@ def compare(db: str | Path, chronos, *, symbol: str = "XAUUSD_l",
     trade_counts = {name: result["buys"] + result["sells"] for name, result in results.items()}
     return {
         "symbol": symbol,
-        "holdout": {"start_mt5_time": datetime.fromtimestamp(bars[start].time, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
-                    "end_mt5_time": datetime.fromtimestamp(bars[-1].time, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
-                    "clock": "raw MT5 broker-server bar time; UTC offset not established",
-                    "bars": len(bars) - start, "recorded_spreads": len(bars) - start,
-                    "stride": stride},
+        "holdout": holdout_metadata(db, symbol, bars, start, stride),
         "cost": {"roundtrip_r": cost_r, "source": cost_source,
                  "metric": "net R after recorded spread and estimated broker fees" if cost_r is not None
                  else "R after recorded spread only; broker fees unavailable"},
@@ -107,6 +139,8 @@ def main() -> None:
     parser.add_argument("--stride", type=int, default=4)
     parser.add_argument("--cost-r", type=float, default=None,
                         help="Explicit estimated broker fees per round trip in initial R; otherwise infer from closed trades")
+    parser.add_argument("--time-only", action="store_true",
+                        help="Print holdout timestamps without running the forecasts")
     args = parser.parse_args()
     # Validate data and spread coverage before the potentially expensive model load.
     bars, spreads = load_bars(args.db, args.symbol)
@@ -119,6 +153,10 @@ def main() -> None:
         parser.error(f"found {missing} holdout bars without recorded spread "
                      f"(out of {len(bars) - start}); export/import MT5 closed M15 history "
                      "with spread_points. No assumed spread is used for this comparison.")
+    if args.time_only:
+        print(json.dumps({"symbol": args.symbol,
+                          "holdout": holdout_metadata(args.db, args.symbol, bars, start, args.stride)}, indent=2))
+        return
     model = ChronosForecaster(model_name(args.model), args.device)
     report = compare(args.db, model, symbol=args.symbol, point=args.point,
                      stride=args.stride, cost_r=args.cost_r)
