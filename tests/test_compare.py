@@ -1,10 +1,13 @@
 import sqlite3
+from datetime import datetime, timezone
+import json
+import sys
 
 import pytest
 
-from ramon.compare import MomentumBaseline, compare, observed_cost_r
+from ramon.compare import MomentumBaseline, compare, holdout_metadata, main, observed_cost_r
 from ramon.core import Forecast
-from ramon.history import ensure_history_db
+from ramon.history import ensure_history_db, load_bars
 
 
 class RisingForecast:
@@ -70,3 +73,41 @@ def test_observed_fees_normalize_to_account_r(tmp_path):
              initial_risk_units,net_r,exit_reason,received,commission_units,swap_units,fee_units)
             VALUES ('t','s','XAUUSD_l','BUY',1,2,3,10,0.3,'DEAL_REASON_TP',3,-1,0,0)""")
     assert observed_cost_r(db, "XAUUSD_l") == (0.1, 1)
+
+
+def test_holdout_utc_requires_consistent_nearby_deal_offsets(tmp_path):
+    db = tmp_path / "history.sqlite3"
+    seed(db)
+    bars, _ = load_bars(db, "XAUUSD_l")
+    end = bars[-1].time
+    with sqlite3.connect(db) as conn:
+        conn.execute("""INSERT INTO trade_outcomes
+            (trade_key,sample_key,symbol,direction,opened,closed,net_units,
+             initial_risk_units,net_r,exit_reason,received,opened_utc_offset_seconds)
+            VALUES ('t1','s1','XAUUSD_l','BUY',?,?,1,10,0.1,'DEAL_REASON_TP',?,10800)""",
+                     (end - 900, end, end))
+    holdout = holdout_metadata(db, "XAUUSD_l", bars, 496, 4)
+    assert holdout["end_utc"] == datetime.fromtimestamp(end - 10800, timezone.utc).isoformat()
+    assert holdout["end_utc_offset_seconds"] == 10800
+    assert holdout["end_offset_samples"] == 1
+    assert "start_utc" not in holdout
+
+    with sqlite3.connect(db) as conn:
+        conn.execute("""INSERT INTO trade_outcomes
+            (trade_key,sample_key,symbol,direction,opened,closed,net_units,
+             initial_risk_units,net_r,exit_reason,received,closed_utc_offset_seconds)
+            VALUES ('t2','s2','XAUUSD_l','SELL',?,?,1,10,0.1,'DEAL_REASON_TP',?,7200)""",
+                     (end - 1800, end, end))
+    assert "end_utc" not in holdout_metadata(db, "XAUUSD_l", bars, 496, 4)
+
+
+def test_time_only_does_not_load_chronos(tmp_path, monkeypatch, capsys):
+    db = tmp_path / "history.sqlite3"
+    seed(db)
+    monkeypatch.setattr(sys, "argv", ["compare", "--db", str(db), "--time-only"])
+    monkeypatch.setattr("ramon.compare.ChronosForecaster",
+                        lambda *args: pytest.fail("time-only must not load Chronos"))
+    main()
+    report = json.loads(capsys.readouterr().out)
+    assert report["holdout"]["bars"] == 124
+    assert "end_utc" not in report["holdout"]
