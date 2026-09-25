@@ -8,3 +8,4 @@ runtime/
 data/
 checkpoints/
 installer/
+.ramon/
