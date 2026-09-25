@@ -33,11 +33,16 @@ def replay(
     start: int | None = None,
     stride: int = 1,
     fallback_spread_points: int = 42,
+    require_recorded_spreads: bool = False,
+    roundtrip_cost_r: float = 0.0,
 ) -> ReplayResult:
     """One-position historical replay with next-bar entry and conservative fills."""
-    if len(bars) != len(spreads) or stride < 1 or point <= 0 or fallback_spread_points <= 0:
+    if (len(bars) != len(spreads) or stride < 1 or point <= 0
+            or fallback_spread_points <= 0 or roundtrip_cost_r < 0):
         raise ValueError("invalid replay input")
     start_at = max(256, start if start is not None else len(bars) * 4 // 5)
+    if require_recorded_spreads and any(value <= 0 for value in spreads[start_at:]):
+        raise ValueError("holdout contains missing recorded spreads; cannot price execution")
     i = start_at
     decisions = buys = sells = wins = losses = timed_out = 0
     net_r = 0.0
@@ -101,6 +106,7 @@ def replay(
                 else entry - exit_ask
             )
             net_r += delta / result.stop_distance
+        net_r -= roundtrip_cost_r
         peak_r = max(peak_r, net_r)
         max_drawdown_r = max(max_drawdown_r, peak_r - net_r)
         i = closed_at + 1  # no overlapping positions
