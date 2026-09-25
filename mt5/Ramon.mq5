@@ -1,5 +1,5 @@
 #property strict
-#property version "0.31"
+#property version "0.32"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -36,6 +36,9 @@ input double MaxExecutableRiskUSD = 0.20; // Hard planned-risk cap for minimum-l
 input int MaxSpreadPoints = 50;
 input int MaxTradesPerDay = 400;
 input int MaximumHoldBars = 4;
+input bool ObserveProfitProtection = true; // Telemetry only: never closes or modifies a position.
+input double ProfitProtectionActivationUnits = 10.0; // Start observing after peak floating profit reaches this level.
+input double ProfitProtectionGivebackUnits = 6.0; // Shadow exit would trigger after this much giveback from peak.
 input int RequestTimeoutMs = 4000;
 input int SnapshotIntervalSeconds = 30; // Re-evaluate fresh Bid/Ask inside the same M15 bar.
 input int MaxDeviationPoints = 30;
@@ -142,6 +145,13 @@ long LockedAccountLogin = 0;
 string LockedAccountServer = "";
 string LastCopyStatus = "Ready";
 const string UiPrefix = "RAMON_UI_";
+ulong ProfitProtectionTicket = 0;
+double ProfitProtectionPeakUnits = 0.0;
+double ProfitProtectionCurrentUnits = 0.0;
+double ProfitProtectionGivebackNowUnits = 0.0;
+bool ProfitProtectionArmed = false;
+bool ProfitProtectionShadowTriggered = false;
+datetime ProfitProtectionShadowTriggerTime = 0;
 
 bool IsAllowedModelUrl(const string url)
 {
@@ -431,6 +441,14 @@ string BuildDiagnosticText()
       +" account="+BoolText((bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED))+"\n"
       +"Status: "+StatusLine+"\n"
       +"Managed position: "+position_line+"\n"
+      +"ProfitProtection: "+(ObserveProfitProtection ? "OBSERVE_ONLY" : "OFF")
+      +"  Armed: "+BoolText(ProfitProtectionArmed)
+      +"  ShadowTrigger: "+BoolText(ProfitProtectionShadowTriggered)+"\n"
+      +"ProfitProtectionUnits: current="+DoubleToString(ProfitProtectionCurrentUnits,2)
+      +"  peak="+DoubleToString(ProfitProtectionPeakUnits,2)
+      +"  giveback="+DoubleToString(ProfitProtectionGivebackNowUnits,2)
+      +"  activate="+DoubleToString(ProfitProtectionActivationUnits,2)
+      +"  triggerGiveback="+DoubleToString(ProfitProtectionGivebackUnits,2)+"\n"
       +"Trades today: "+IntegerToString(today)+"/"+IntegerToString(MaxTradesPerDay)+"\n"
       +"RiskPerTradeUSD: "+DoubleToString(RiskPerTradeUSD,2)
       +"  EffectiveRiskUSD: "+DoubleToString(EffectiveRiskPerTradeUSD(),3)
@@ -1439,11 +1457,62 @@ void SyncClosedTrades()
    }
 }
 
+void ResetProfitProtectionState()
+{
+   ProfitProtectionTicket=0;
+   ProfitProtectionPeakUnits=0.0;
+   ProfitProtectionCurrentUnits=0.0;
+   ProfitProtectionGivebackNowUnits=0.0;
+   ProfitProtectionArmed=false;
+   ProfitProtectionShadowTriggered=false;
+   ProfitProtectionShadowTriggerTime=0;
+}
+
+void ObserveOpenPositionProfit(const ulong ticket)
+{
+   if(!ObserveProfitProtection || ticket==0 || !PositionSelectByTicket(ticket))
+      return;
+
+   if(ProfitProtectionTicket!=ticket)
+   {
+      ResetProfitProtectionState();
+      ProfitProtectionTicket=ticket;
+   }
+
+   ProfitProtectionCurrentUnits=PositionGetDouble(POSITION_PROFIT);
+   if(ProfitProtectionCurrentUnits>ProfitProtectionPeakUnits)
+      ProfitProtectionPeakUnits=ProfitProtectionCurrentUnits;
+
+   ProfitProtectionArmed=(ProfitProtectionPeakUnits>=ProfitProtectionActivationUnits);
+   ProfitProtectionGivebackNowUnits=MathMax(
+      0.0,ProfitProtectionPeakUnits-ProfitProtectionCurrentUnits
+   );
+
+   if(ProfitProtectionArmed
+      && !ProfitProtectionShadowTriggered
+      && ProfitProtectionGivebackNowUnits>=ProfitProtectionGivebackUnits)
+   {
+      ProfitProtectionShadowTriggered=true;
+      ProfitProtectionShadowTriggerTime=TimeCurrent();
+      Print("Ramon PROFIT PROTECTION SHADOW trigger ticket=",ticket,
+         " current=",DoubleToString(ProfitProtectionCurrentUnits,2),
+         " peak=",DoubleToString(ProfitProtectionPeakUnits,2),
+         " giveback=",DoubleToString(ProfitProtectionGivebackNowUnits,2),
+         " activation=",DoubleToString(ProfitProtectionActivationUnits,2),
+         " threshold=",DoubleToString(ProfitProtectionGivebackUnits,2));
+   }
+}
+
 void ManageOpenPosition()
 {
    ulong ticket;
    datetime opened;
-   if(!ManagedPosition(ticket,opened)) return;
+   if(!ManagedPosition(ticket,opened))
+   {
+      ResetProfitProtectionState();
+      return;
+   }
+   ObserveOpenPositionProfit(ticket);
    int age=iBarShift(_Symbol,PERIOD_M15,opened,false);
    if(age<MaximumHoldBars) { StatusLine="Managed position OPEN"; return; }
    if(Trade.PositionClose(ticket,MaxDeviationPoints))
@@ -1760,6 +1829,7 @@ int OnInit()
       || MaxExecutableRiskUSD<=0.0 || MaxExecutableRiskUSD>0.50
       || MaxExecutableRiskUSD<EffectiveRiskPerTradeUSD()
       || MaxSpreadPoints<=0 || MaxTradesPerDay<1 || MaximumHoldBars<1
+      || ProfitProtectionActivationUnits<0.0 || ProfitProtectionGivebackUnits<=0.0
       || SnapshotIntervalSeconds<10
       || (WriteDiagnosticFile && StringLen(DiagnosticFileName)==0)
       || (WriteCsvLogs && (StringLen(SignalCsvFileName)==0 || StringLen(TradeCsvFileName)==0))
