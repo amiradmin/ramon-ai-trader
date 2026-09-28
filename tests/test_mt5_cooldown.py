@@ -138,3 +138,13 @@ def test_execution_gate_precedes_order_and_does_not_gate_position_management():
     assert 'WebRequest' not in gate
     assert 'ValidSampleKey' not in gate
     assert 'training_status' not in gate
+
+
+def test_cooldown_is_never_called_by_display_functions():
+    source = (ROOT / 'mt5/Ramon.mq5').read_text()
+    call = 'LocalLossCooldownBlocked(decision,cooldown_reason)'
+    assert source.count(call) == 1
+    before_timer, timer = source.split('void OnTimer()', 1)
+    assert call not in before_timer
+    assert call in timer
+    assert 'string cooldown_reason="";' not in before_timer

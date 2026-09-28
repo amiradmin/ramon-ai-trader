@@ -325,9 +325,6 @@ string BuildDiagnosticText()
    bool tick_ok=SymbolInfoTick(_Symbol,tick) && tick.bid>0.0 && tick.ask>tick.bid;
    int spread_points=(int)SymbolInfoInteger(_Symbol,SYMBOL_SPREAD);
    datetime closed=iTime(_Symbol,PERIOD_M15,1);
-   string cooldown_reason="";
-   if(LocalLossCooldownBlocked(decision,cooldown_reason))
-   { StatusLine=cooldown_reason; ShowStatus(); return; }
    int today=TradesToday();
 
    ulong ticket=0;
@@ -559,9 +556,6 @@ void DrawDashboard()
    }
 
    int spread_points=(int)SymbolInfoInteger(_Symbol,SYMBOL_SPREAD);
-   string cooldown_reason="";
-   if(LocalLossCooldownBlocked(decision,cooldown_reason))
-   { StatusLine=cooldown_reason; ShowStatus(); return; }
    int today=TradesToday();
    bool lock_ok=AccountLockHealthy();
    bool permissions=(bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED)
