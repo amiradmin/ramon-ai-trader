@@ -284,3 +284,18 @@ def test_v035_profit_protection_is_active_and_auditable() -> None:
     assert 'RecordDealTelemetry(Trade.ResultDeal(),"profit_protection")' in source
     assert '"ProfitProtection: "+(EnableProfitProtection ? "ACTIVE" : "OFF")' in source
     assert "ProfitProtectionGivebackUnits>=ProfitProtectionActivationUnits" in source
+
+
+def test_early_reversal_exit_is_shadow_only() -> None:
+    source = EA.read_text(encoding="utf-8")
+
+    assert "input bool ObserveEarlyReversalExit = true" in source
+    assert "input double EarlyReversalMinPeakUnits = 2.0" in source
+    assert "input double EarlyReversalGivebackUnits = 6.0" in source
+    assert "input double EarlyReversalMaxCurrentUnits = 0.0" in source
+    assert "EarlyReversalShadowTriggered=true;" in source
+    assert '"Ramon EARLY REVERSAL SHADOW ticket="' in source
+    shadow = source.split("if(ObserveEarlyReversalExit", 1)[1].split("void ManageOpenPosition()", 1)[0]
+    assert "Trade.PositionClose" not in shadow
+    assert "!LastIntrabarConfirmed" in shadow
+    assert "!LastAiTrendConfirmed" in shadow
