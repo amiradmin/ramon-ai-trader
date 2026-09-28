@@ -48,6 +48,22 @@ docker compose --profile tools run --rm --no-deps tools -m ramon.eliot_research 
   --units-per-price 1 --max-decisions 100
 ```
 
+If the 256-bar uninterrupted M5 context leaves too few decisions after
+session gaps, measure a shorter context separately (this changes Chronos
+inputs, so its forecasts cannot be compared as the same strategy):
+
+```bash
+docker compose --profile tools run --rm --no-deps tools -m ramon.eliot_research \
+  --db /data/ramon_history.sqlite3 --symbol XAUUSD_l \
+  --model autogluon/chronos-2-small --device cpu \
+  --units-per-price 1 --max-decisions 500 --context-bars 64
+```
+
+The report includes skipped-bar counts and the median, 90th percentile, and
+maximum forecast moves alongside the required entry move. Do not choose the
+context length or lower the entry threshold using the final fifth and then
+claim that same period is an untouched out-of-sample test.
+
 The `--units-per-price 1` assumption comes from the supplied MT5 history:
 at 0.01 lot, several closed gold trades show approximately one CENT-account
 unit for a 1.0 price move. Confirm this against `OrderCalcProfit` on the
