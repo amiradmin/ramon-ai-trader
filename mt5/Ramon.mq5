@@ -1,5 +1,5 @@
 #property strict
-#property version "0.39"
+#property version "0.40"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -184,6 +184,9 @@ datetime TPStageHitTime = 0;
 int TPStageWeakSnapshots = 0;
 double TPStageProgress = 0.0;
 string TPStageStatus = "INACTIVE";
+bool MarketClosedExitPause = false;
+datetime MarketClosedExitPauseTickTime = 0;
+ulong MarketClosedExitPauseTicket = 0;
 
 bool IsAllowedModelUrl(const string url)
 {
@@ -400,7 +403,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.39\n"
+      +"EA version: 0.40\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
       +"Symbol: "+_Symbol+"  Timeframe: M15\n"
       +"Bid: "+(tick_ok ? DoubleToString(tick.bid,_Digits) : "NA")
@@ -496,6 +499,9 @@ string BuildDiagnosticText()
       +" account="+BoolText((bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED))+"\n"
       +"Status: "+StatusLine+"\n"
       +"Managed position: "+position_line+"\n"
+      +"MarketClosedExitPause: "+BoolText(MarketClosedExitPause)
+      +"  PauseTicket: "+IntegerToString((long)MarketClosedExitPauseTicket)
+      +"  PauseTick: "+(MarketClosedExitPauseTickTime>0 ? UTCText(MarketClosedExitPauseTickTime,TIME_DATE|TIME_SECONDS) : "NONE")+"\n"
       +"ProfitProtection: "+(EnableProfitProtection ? "ACTIVE" : "OFF")
       +"  Armed: "+BoolText(ProfitProtectionArmed)
       +"  ShadowTrigger: "+BoolText(ProfitProtectionShadowTriggered)+"\n"
@@ -660,7 +666,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.39",28,36,clrWhite,12);
+   UiLabel("TITLE","RAMON AI TRADER  v0.40",28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
 
@@ -1321,7 +1327,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.39";
+      version="0.40";
    }
    if(close_detail!="") detail=close_detail;
 
@@ -1778,6 +1784,64 @@ bool TPStageModelSupportive()
    return direction_support && (intrabar_support || trend_support);
 }
 
+void ResetMarketClosedExitPause()
+{
+   MarketClosedExitPause=false;
+   MarketClosedExitPauseTickTime=0;
+   MarketClosedExitPauseTicket=0;
+}
+
+bool ManagedExitPausedForMarketClosed(const ulong ticket)
+{
+   if(!MarketClosedExitPause)
+      return false;
+   if(ticket==0 || ticket!=MarketClosedExitPauseTicket)
+   {
+      ResetMarketClosedExitPause();
+      return false;
+   }
+
+   MqlTick tick;
+   if(!SymbolInfoTick(_Symbol,tick) || tick.time<=MarketClosedExitPauseTickTime)
+      return true;
+
+   Print("Ramon exit retry resumed after fresh tick ticket=",ticket,
+      " old_tick=",TimeToString(MarketClosedExitPauseTickTime,TIME_DATE|TIME_SECONDS),
+      " new_tick=",TimeToString(tick.time,TIME_DATE|TIME_SECONDS));
+   ResetMarketClosedExitPause();
+   return false;
+}
+
+void HandleManagedExitFailure(const ulong ticket,const string prefix)
+{
+   uint retcode=Trade.ResultRetcode();
+   if(retcode==TRADE_RETCODE_MARKET_CLOSED)
+   {
+      MqlTick tick;
+      datetime tick_time=0;
+      if(SymbolInfoTick(_Symbol,tick))
+         tick_time=tick.time;
+
+      bool first_pause=(
+         !MarketClosedExitPause
+         || MarketClosedExitPauseTicket!=ticket
+         || MarketClosedExitPauseTickTime!=tick_time
+      );
+      MarketClosedExitPause=true;
+      MarketClosedExitPauseTicket=ticket;
+      MarketClosedExitPauseTickTime=tick_time;
+      StatusLine="EXIT PAUSED: MARKET CLOSED";
+      if(first_pause)
+         Print("Ramon execution: ",StatusLine,
+            " ticket=",ticket,
+            " retry only after fresh tick");
+      return;
+   }
+
+   StatusLine=prefix+" FAILED "+IntegerToString((int)retcode);
+   Print("Ramon execution: ",StatusLine);
+}
+
 bool ManageTPStages(const ulong ticket)
 {
    if(!LoadTPStagePlan(ticket))
@@ -1811,15 +1875,20 @@ bool ManageTPStages(const ulong ticket)
    {
       TPStage=3;
       TPStageStatus="TP3_EXIT";
+      if(ManagedExitPausedForMarketClosed(ticket))
+      {
+         StatusLine="EXIT PAUSED: MARKET CLOSED";
+         return true;
+      }
       if(Trade.PositionClose(ticket,MaxDeviationPoints))
       {
+         ResetMarketClosedExitPause();
          RecordDealTelemetry(Trade.ResultDeal(),"tp3_stage_exit");
          StatusLine="TP3 STAGE EXIT";
          Print("Ramon execution: ",StatusLine);
          return true;
       }
-      StatusLine="TP3 STAGE EXIT FAILED "+IntegerToString((int)Trade.ResultRetcode());
-      Print("Ramon execution: ",StatusLine);
+      HandleManagedExitFailure(ticket,"TP3 STAGE EXIT");
       return true;
    }
 
@@ -1863,8 +1932,14 @@ bool ManageTPStages(const ulong ticket)
    {
       string detail=(TPStage==1 ? "tp1_stall_exit" : "tp2_stall_exit");
       TPStageStatus=(retraced ? "RETRACE_EXIT" : "WEAK_EXIT");
+      if(ManagedExitPausedForMarketClosed(ticket))
+      {
+         StatusLine="EXIT PAUSED: MARKET CLOSED";
+         return true;
+      }
       if(Trade.PositionClose(ticket,MaxDeviationPoints))
       {
+         ResetMarketClosedExitPause();
          RecordDealTelemetry(Trade.ResultDeal(),detail);
          StatusLine=(TPStage==1 ? "TP1->TP2 SMART EXIT" : "TP2->TP3 SMART EXIT");
          Print("Ramon execution: ",StatusLine,
@@ -1873,8 +1948,7 @@ bool ManageTPStages(const ulong ticket)
             " supportive=",BoolText(supportive));
          return true;
       }
-      StatusLine="TP STAGE EXIT FAILED "+IntegerToString((int)Trade.ResultRetcode());
-      Print("Ramon execution: ",StatusLine);
+      HandleManagedExitFailure(ticket,"TP STAGE EXIT");
       return true;
    }
    return false;
@@ -2004,6 +2078,7 @@ void ManageOpenPosition()
    {
       ResetProfitProtectionState();
       ResetTPStageRuntime();
+      ResetMarketClosedExitPause();
       return;
    }
    if(ManageTPStages(ticket))
@@ -2011,8 +2086,14 @@ void ManageOpenPosition()
    ObserveOpenPositionProfit(ticket);
    if(EnableProfitProtection && ProfitProtectionShadowTriggered)
    {
+      if(ManagedExitPausedForMarketClosed(ticket))
+      {
+         StatusLine="EXIT PAUSED: MARKET CLOSED";
+         return;
+      }
       if(Trade.PositionClose(ticket,MaxDeviationPoints))
       {
+         ResetMarketClosedExitPause();
          RecordDealTelemetry(Trade.ResultDeal(),"profit_protection");
          StatusLine="PROFIT PROTECTION EXIT peak="
             +DoubleToString(ProfitProtectionPeakUnits,2)
@@ -2020,20 +2101,24 @@ void ManageOpenPosition()
          Print("Ramon execution: ",StatusLine);
          return;
       }
-      StatusLine="PROFIT PROTECTION EXIT FAILED "
-         +IntegerToString((int)Trade.ResultRetcode());
-      Print("Ramon execution: ",StatusLine);
+      HandleManagedExitFailure(ticket,"PROFIT PROTECTION EXIT");
       return;
    }
    int age=iBarShift(_Symbol,PERIOD_M15,opened,false);
    if(age<MaximumHoldBars) { StatusLine="Managed position OPEN"; return; }
+   if(ManagedExitPausedForMarketClosed(ticket))
+   {
+      StatusLine="EXIT PAUSED: MARKET CLOSED";
+      return;
+   }
    if(Trade.PositionClose(ticket,MaxDeviationPoints))
    {
+      ResetMarketClosedExitPause();
       RecordDealTelemetry(Trade.ResultDeal(),"maximum_hold_bars");
       StatusLine="TIME EXIT "+IntegerToString(age)+" bars";
    }
    else
-      StatusLine="TIME EXIT FAILED "+IntegerToString((int)Trade.ResultRetcode());
+      HandleManagedExitFailure(ticket,"TIME EXIT");
 }
 
 void OnTimer()
