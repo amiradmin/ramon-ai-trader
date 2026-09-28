@@ -1,5 +1,5 @@
 #property strict
-#property version "0.360"
+#property version "0.370"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -37,8 +37,13 @@ input int MaxSpreadPoints = 50;
 input int MaxTradesPerDay = 400;
 input int MaximumHoldBars = 4;
 input bool EnableProfitProtection = true; // Close a managed position after an armed profit giveback.
-const double ProfitProtectionActivationUnits = 7.0; // Fixed activation threshold; MT5 chart inputs cannot override this value.
-input double ProfitProtectionGivebackUnits = 6.0; // Active exit after this much giveback from an armed peak.
+const double ProfitProtectionFallbackActivationUnits = 7.0; // Used only if live position risk cannot be reconstructed.
+const double ProfitProtectionActivationMinUnits = 5.0;
+const double ProfitProtectionActivationMaxUnits = 9.0;
+const double ProfitProtectionActivationRiskFraction = 0.60; // Activation scales with the position's initial SL risk.
+const double ProfitProtectionGivebackMinUnits = 3.0;
+const double ProfitProtectionGivebackMaxUnits = 5.0;
+const double ProfitProtectionGivebackFraction = 0.60; // Giveback scales with the selected activation threshold.
 input bool ObserveEarlyReversalExit = true; // Shadow-only: record damaged trades without closing them.
 input double EarlyReversalMinPeakUnits = 2.0; // Require at least this much favorable excursion first.
 input double EarlyReversalGivebackUnits = 6.0; // Require this much giveback from peak.
@@ -153,6 +158,9 @@ ulong ProfitProtectionTicket = 0;
 double ProfitProtectionPeakUnits = 0.0;
 double ProfitProtectionCurrentUnits = 0.0;
 double ProfitProtectionGivebackNowUnits = 0.0;
+double ProfitProtectionInitialRiskUnits = 0.0;
+double ProfitProtectionActivationUnits = ProfitProtectionFallbackActivationUnits;
+double ProfitProtectionGivebackUnits = 4.2;
 bool ProfitProtectionArmed = false;
 bool ProfitProtectionShadowTriggered = false;
 datetime ProfitProtectionShadowTriggerTime = 0;
@@ -352,7 +360,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.36\n"
+      +"EA version: 0.37\n"
       +"Captured: "+TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS)+"\n"
       +"Symbol: "+_Symbol+"  Timeframe: M15\n"
       +"Bid: "+(tick_ok ? DoubleToString(tick.bid,_Digits) : "NA")
@@ -455,7 +463,9 @@ string BuildDiagnosticText()
       +"  peak="+DoubleToString(ProfitProtectionPeakUnits,2)
       +"  giveback="+DoubleToString(ProfitProtectionGivebackNowUnits,2)
       +"  activate="+DoubleToString(ProfitProtectionActivationUnits,2)
-      +"  triggerGiveback="+DoubleToString(ProfitProtectionGivebackUnits,2)+"\n"
+      +"  triggerGiveback="+DoubleToString(ProfitProtectionGivebackUnits,2)
+      +"  mode=DYNAMIC"
+      +"  initialRisk="+DoubleToString(ProfitProtectionInitialRiskUnits,2)+"\n"
       +"EarlyReversalShadow: "+BoolText(EarlyReversalShadowTriggered)
       +"  observe="+BoolText(ObserveEarlyReversalExit)
       +"  minPeak="+DoubleToString(EarlyReversalMinPeakUnits,2)
@@ -603,7 +613,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.36",28,36,clrWhite,12);
+   UiLabel("TITLE","RAMON AI TRADER  v0.37",28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
 
@@ -1597,11 +1607,57 @@ void ResetProfitProtectionState()
    ProfitProtectionPeakUnits=0.0;
    ProfitProtectionCurrentUnits=0.0;
    ProfitProtectionGivebackNowUnits=0.0;
+   ProfitProtectionInitialRiskUnits=0.0;
+   ProfitProtectionActivationUnits=ProfitProtectionFallbackActivationUnits;
+   ProfitProtectionGivebackUnits=MathMax(
+      ProfitProtectionGivebackMinUnits,
+      MathMin(ProfitProtectionGivebackMaxUnits,
+         ProfitProtectionFallbackActivationUnits*ProfitProtectionGivebackFraction)
+   );
    ProfitProtectionArmed=false;
    ProfitProtectionShadowTriggered=false;
    ProfitProtectionShadowTriggerTime=0;
    EarlyReversalShadowTriggered=false;
    EarlyReversalShadowTriggerTime=0;
+}
+
+double ManagedPositionInitialRiskUnits(const ulong ticket)
+{
+   if(ticket==0 || !PositionSelectByTicket(ticket))
+      return 0.0;
+
+   double entry=PositionGetDouble(POSITION_PRICE_OPEN);
+   double stop=PositionGetDouble(POSITION_SL);
+   double volume=PositionGetDouble(POSITION_VOLUME);
+   if(entry<=0.0 || stop<=0.0 || volume<=0.0)
+      return 0.0;
+
+   long position_type=PositionGetInteger(POSITION_TYPE);
+   ENUM_ORDER_TYPE side=(position_type==POSITION_TYPE_BUY ? ORDER_TYPE_BUY : ORDER_TYPE_SELL);
+   double money=0.0;
+   if(!OrderCalcProfit(side,_Symbol,volume,entry,stop,money) || money>=0.0)
+      return 0.0;
+   return MathAbs(money);
+}
+
+void SelectDynamicProfitProtectionThresholds(const ulong ticket)
+{
+   ProfitProtectionInitialRiskUnits=ManagedPositionInitialRiskUnits(ticket);
+   double activation=ProfitProtectionFallbackActivationUnits;
+   if(ProfitProtectionInitialRiskUnits>0.0)
+      activation=ProfitProtectionInitialRiskUnits*ProfitProtectionActivationRiskFraction;
+
+   ProfitProtectionActivationUnits=MathMax(
+      ProfitProtectionActivationMinUnits,
+      MathMin(ProfitProtectionActivationMaxUnits,activation)
+   );
+   ProfitProtectionGivebackUnits=MathMax(
+      ProfitProtectionGivebackMinUnits,
+      MathMin(
+         ProfitProtectionGivebackMaxUnits,
+         ProfitProtectionActivationUnits*ProfitProtectionGivebackFraction
+      )
+   );
 }
 
 void ObserveOpenPositionProfit(const ulong ticket)
@@ -1613,6 +1669,11 @@ void ObserveOpenPositionProfit(const ulong ticket)
    {
       ResetProfitProtectionState();
       ProfitProtectionTicket=ticket;
+      SelectDynamicProfitProtectionThresholds(ticket);
+      Print("Ramon PROFIT PROTECTION dynamic ticket=",ticket,
+         " initial_risk=",DoubleToString(ProfitProtectionInitialRiskUnits,2),
+         " activation=",DoubleToString(ProfitProtectionActivationUnits,2),
+         " giveback=",DoubleToString(ProfitProtectionGivebackUnits,2));
    }
 
    ProfitProtectionCurrentUnits=PositionGetDouble(POSITION_PROFIT);
@@ -2001,8 +2062,14 @@ int OnInit()
       || MaxExecutableRiskUSD<=0.0 || MaxExecutableRiskUSD>0.50
       || MaxExecutableRiskUSD<EffectiveRiskPerTradeUSD()
       || MaxSpreadPoints<=0 || MaxTradesPerDay<1 || MaximumHoldBars<1
-      || ProfitProtectionActivationUnits<=0.0 || ProfitProtectionGivebackUnits<=0.0
-      || ProfitProtectionGivebackUnits>=ProfitProtectionActivationUnits
+      || ProfitProtectionFallbackActivationUnits<=0.0
+      || ProfitProtectionActivationMinUnits<=0.0
+      || ProfitProtectionActivationMaxUnits<ProfitProtectionActivationMinUnits
+      || ProfitProtectionActivationRiskFraction<=0.0
+      || ProfitProtectionGivebackMinUnits<=0.0
+      || ProfitProtectionGivebackMaxUnits<ProfitProtectionGivebackMinUnits
+      || ProfitProtectionGivebackFraction<=0.0
+      || ProfitProtectionGivebackMaxUnits>=ProfitProtectionActivationMinUnits
       || EarlyReversalMinPeakUnits<=0.0 || EarlyReversalGivebackUnits<=0.0
       || EarlyReversalMaxCurrentUnits>0.0
       || SnapshotIntervalSeconds<10
