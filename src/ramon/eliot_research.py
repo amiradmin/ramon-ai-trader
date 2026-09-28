@@ -54,6 +54,8 @@ def replay(
     decisions = entries = 0
     outcomes: Counter[str] = Counter()
     pnl: list[float] = []
+    forecast_moves: list[float] = []
+    required_moves: list[float] = []
     while i + horizon < len(rows) and decisions < max_decisions:
         context = rows[i - 255:i + 1]
         if any(b.bar.time - a.bar.time != 300 for a, b in zip(context, context[1:])):
@@ -69,6 +71,8 @@ def replay(
         forecast = model.forecast([row.bar.close for row in context], horizon)
         decisions += 1
         delta = forecast.median - rows[i].bar.close
+        forecast_moves.append(abs(delta))
+        required_moves.append(target + rows[i].spread)
         # Median must clear both desired profit and known spread. Model-only
         # signals are exploratory; role models have not been trained on M5.
         if abs(delta) <= target + rows[i].spread:
@@ -100,11 +104,24 @@ def replay(
         outcomes[result] += 1
         entries += 1
         i += horizon  # Single position, no overlapping entries.
+    forecast_moves.sort()
+    required_moves.sort()
+
+    def percentile(values: list[float], fraction: float) -> float | None:
+        if not values:
+            return None
+        return round(values[int((len(values) - 1) * fraction)], 4)
+
     return {
         "period_start_utc": datetime.fromtimestamp(rows[start].bar.time, timezone.utc).isoformat(),
         "period_end_utc": datetime.fromtimestamp(rows[min(i, len(rows)-1)].bar.time, timezone.utc).isoformat(),
         "model_decisions": decisions, "entries": entries,
         "outcomes": dict(outcomes), "net_account_units": round(sum(pnl), 3),
+        "forecast_abs_move_price_p50": percentile(forecast_moves, .5),
+        "forecast_abs_move_price_p90": percentile(forecast_moves, .9),
+        "forecast_abs_move_price_max": percentile(forecast_moves, 1),
+        "entry_required_move_price_p50": percentile(required_moves, .5),
+        "entry_required_move_price_max": percentile(required_moves, 1),
         "mean_units_per_entry": round(sum(pnl) / entries, 4) if entries else None,
         "target_units": target_units, "stop_units": stop_units,
         "units_per_price_assumption": units_per_price,
