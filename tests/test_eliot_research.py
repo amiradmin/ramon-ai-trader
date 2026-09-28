@@ -43,3 +43,18 @@ def test_gap_in_context_skips_forecast_and_trade():
     result = replay(rows, UpForecast(), start=256, max_decisions=1)
     assert result["model_decisions"] == 0
     assert result["entries"] == 0
+    assert result["skipped_bars"]["context_gap"] > 0
+
+
+def test_shorter_contiguous_context_allows_more_eligible_bars():
+    rows = [Row(Bar(i * 300 + 300, 100, 100, 100, 100), .42)
+            for i in range(300)]
+    rows[70] = Row(Bar(71 * 300 + 3600, 100, 100, 100, 100), .42)
+    rows[71] = Row(Bar(72 * 300 + 3600, 100, 100, 100, 100), .42)
+    # A break at bar 70 is outside a 64-bar context at index 256,
+    # but remains inside a 256-bar context at the same index.
+    short = replay(rows, WeakForecast(), start=256, max_decisions=1, context_bars=64)
+    long = replay(rows, WeakForecast(), start=256, max_decisions=1)
+    assert short["model_decisions"] == 1
+    assert short["context_bars"] == 64
+    assert long["model_decisions"] == 0
