@@ -120,7 +120,7 @@ docker compose --profile tools run --rm --no-deps tools -m ramon.eliot_forward e
   --model autogluon/chronos-2-small --device cpu --units-per-price 1
 ```
 
-Only decisions **after** the frozen timestamp appear in this comparison.
+For later sessions, first rerun the MT5 exporter with `PERIOD_M5` and the same\n`Ramon_XAUUSD_l_M5_History.csv` output name. Then run from the repository root:\n\n```bash\nbash scripts/evaluate_eliot_fresh.sh\n```\n\nThis checks that the exported last completed bar is newer than both the frozen\ntraining cutoff and the last imported M5 bar before importing and evaluating.\nIt uses only the frozen models and the isolated M5 history, and does not place\norders. If the export has not advanced, it exits without modifying the database.\n\nOnly decisions **after** the frozen timestamp appear in this comparison.
 The M5 candle data still cannot show actual broker order fills, and role
 training does not turn Eliot into a live trading EA. Accumulate enough fresh
 bars and actual candidate trades before judging the model.
