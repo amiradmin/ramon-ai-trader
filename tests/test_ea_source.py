@@ -277,7 +277,7 @@ def test_v035_profit_protection_is_active_and_auditable() -> None:
 
     assert '#property version "0.360"' in source
     assert "input bool EnableProfitProtection = true" in source
-    assert "input double ProfitProtectionActivationUnits = 10.0" in source
+    assert "input double ProfitProtectionActivationUnits = 7.0" in source
     assert "input double ProfitProtectionGivebackUnits = 6.0" in source
     assert "if(EnableProfitProtection && ProfitProtectionShadowTriggered)" in source
     assert 'Trade.PositionClose(ticket,MaxDeviationPoints)' in source
