@@ -1,5 +1,5 @@
 #property strict
-#property version "0.34"
+#property version "0.350"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -32,11 +32,11 @@ input bool ConfirmMoneyUnitsPerUSD = false; // Must be true before live trading 
 input string ExpectedAccountCurrency = ""; // Optional exact ACCOUNT_CURRENCY check when non-empty.
 input double RiskPerTradeUSD = 0.06; // Preferred sizing budget.
 input bool AllowMinLotRiskOverride = true; // Permit broker minimum lot above preferred budget.
-input double MaxExecutableRiskUSD = 0.12; // Hard planned-risk cap; blocks oversized broker-minimum-lot trades.
+input double MaxExecutableRiskUSD = 0.14; // Hard planned-risk cap; blocks oversized broker-minimum-lot trades.
 input int MaxSpreadPoints = 50;
 input int MaxTradesPerDay = 400;
 input int MaximumHoldBars = 4;
-input bool ObserveProfitProtection = true; // Telemetry only: never closes or modifies a position.
+input bool EnableProfitProtection = true; // Close a managed position after an armed profit giveback.
 input double ProfitProtectionActivationUnits = 10.0; // Start observing after peak floating profit reaches this level.
 input double ProfitProtectionGivebackUnits = 6.0; // Shadow exit would trigger after this much giveback from peak.
 input int RequestTimeoutMs = 4000;
@@ -346,7 +346,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.34\n"
+      +"EA version: 0.35\n"
       +"Captured: "+TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS)+"\n"
       +"Symbol: "+_Symbol+"  Timeframe: M15\n"
       +"Bid: "+(tick_ok ? DoubleToString(tick.bid,_Digits) : "NA")
@@ -442,7 +442,7 @@ string BuildDiagnosticText()
       +" account="+BoolText((bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED))+"\n"
       +"Status: "+StatusLine+"\n"
       +"Managed position: "+position_line+"\n"
-      +"ProfitProtection: "+(ObserveProfitProtection ? "OBSERVE_ONLY" : "OFF")
+      +"ProfitProtection: "+(EnableProfitProtection ? "ACTIVE" : "OFF")
       +"  Armed: "+BoolText(ProfitProtectionArmed)
       +"  ShadowTrigger: "+BoolText(ProfitProtectionShadowTriggered)+"\n"
       +"ProfitProtectionUnits: current="+DoubleToString(ProfitProtectionCurrentUnits,2)
@@ -592,7 +592,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.34",28,36,clrWhite,12);
+   UiLabel("TITLE","RAMON AI TRADER  v0.35",28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
 
@@ -1253,7 +1253,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.34";
+      version="0.35";
    }
    if(close_detail!="") detail=close_detail;
 
@@ -1593,7 +1593,7 @@ void ResetProfitProtectionState()
 
 void ObserveOpenPositionProfit(const ulong ticket)
 {
-   if(!ObserveProfitProtection || ticket==0 || !PositionSelectByTicket(ticket))
+   if(!EnableProfitProtection || ticket==0 || !PositionSelectByTicket(ticket))
       return;
 
    if(ProfitProtectionTicket!=ticket)
@@ -1617,7 +1617,7 @@ void ObserveOpenPositionProfit(const ulong ticket)
    {
       ProfitProtectionShadowTriggered=true;
       ProfitProtectionShadowTriggerTime=TimeCurrent();
-      Print("Ramon PROFIT PROTECTION SHADOW trigger ticket=",ticket,
+      Print("Ramon PROFIT PROTECTION trigger ticket=",ticket,
          " current=",DoubleToString(ProfitProtectionCurrentUnits,2),
          " peak=",DoubleToString(ProfitProtectionPeakUnits,2),
          " giveback=",DoubleToString(ProfitProtectionGivebackNowUnits,2),
@@ -1636,6 +1636,22 @@ void ManageOpenPosition()
       return;
    }
    ObserveOpenPositionProfit(ticket);
+   if(EnableProfitProtection && ProfitProtectionShadowTriggered)
+   {
+      if(Trade.PositionClose(ticket,MaxDeviationPoints))
+      {
+         RecordDealTelemetry(Trade.ResultDeal(),"profit_protection");
+         StatusLine="PROFIT PROTECTION EXIT peak="
+            +DoubleToString(ProfitProtectionPeakUnits,2)
+            +" giveback="+DoubleToString(ProfitProtectionGivebackNowUnits,2);
+         Print("Ramon execution: ",StatusLine);
+         return;
+      }
+      StatusLine="PROFIT PROTECTION EXIT FAILED "
+         +IntegerToString((int)Trade.ResultRetcode());
+      Print("Ramon execution: ",StatusLine);
+      return;
+   }
    int age=iBarShift(_Symbol,PERIOD_M15,opened,false);
    if(age<MaximumHoldBars) { StatusLine="Managed position OPEN"; return; }
    if(Trade.PositionClose(ticket,MaxDeviationPoints))
@@ -1955,7 +1971,8 @@ int OnInit()
       || MaxExecutableRiskUSD<=0.0 || MaxExecutableRiskUSD>0.50
       || MaxExecutableRiskUSD<EffectiveRiskPerTradeUSD()
       || MaxSpreadPoints<=0 || MaxTradesPerDay<1 || MaximumHoldBars<1
-      || ProfitProtectionActivationUnits<0.0 || ProfitProtectionGivebackUnits<=0.0
+      || ProfitProtectionActivationUnits<=0.0 || ProfitProtectionGivebackUnits<=0.0
+      || ProfitProtectionGivebackUnits>=ProfitProtectionActivationUnits
       || SnapshotIntervalSeconds<10
       || (WriteDiagnosticFile && StringLen(DiagnosticFileName)==0)
       || (WriteCsvLogs && (StringLen(SignalCsvFileName)==0 || StringLen(TradeCsvFileName)==0))
