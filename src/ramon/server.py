@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import os
 from pathlib import Path
+import sqlite3
 from threading import Lock
 import time
 from uuid import uuid4
@@ -26,6 +27,31 @@ def persist_market_safely(db: str, market: Market) -> str:
     except Exception as exc:
         return f"{type(exc).__name__}: {exc}"
     return ""
+
+
+def same_direction_sl_cooldown(
+    db: str, *, symbol: str, direction: str, now: int, bars: int = 2
+) -> bool:
+    """Block a direction briefly after two consecutive full-SL losses in it."""
+    if not db or direction not in {"BUY", "SELL"} or bars < 1:
+        return False
+    try:
+        with sqlite3.connect(db) as conn:
+            rows = conn.execute(
+                """SELECT direction, exit_reason, closed
+                   FROM trade_outcomes
+                   WHERE symbol=? AND training_status='LEARNABLE'
+                   ORDER BY closed DESC LIMIT 2""",
+                (symbol,),
+            ).fetchall()
+    except (sqlite3.Error, OSError):
+        return False
+    if len(rows) < 2:
+        return False
+    if not all(row[0] == direction and row[1] == "DEAL_REASON_SL" for row in rows):
+        return False
+    last_closed = int(rows[0][2])
+    return 0 <= now - last_closed < bars * 15 * 60
 
 
 class CachedForecaster:
@@ -146,6 +172,24 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
 
                 response = result.to_dict()
                 response.update(ensemble_payload)
+
+                final_direction = str(response.get("decision", "WAIT"))
+                cooldown_now = quote_time if quote_time is not None else int(time.time())
+                cooldown_active = (
+                    history_db
+                    and final_direction in {"BUY", "SELL"}
+                    and same_direction_sl_cooldown(
+                        history_db,
+                        symbol=market.symbol,
+                        direction=final_direction,
+                        now=cooldown_now,
+                    )
+                )
+                response["loss_streak_cooldown"] = int(bool(cooldown_active))
+                if cooldown_active:
+                    response["decision"] = "WAIT"
+                    response["reason"] = "same_direction_sl_cooldown"
+
                 response.update(news_snapshot.payload())
                 response["news_model_ready"] = int(ensemble.news_ready)
 
