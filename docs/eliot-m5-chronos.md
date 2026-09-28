@@ -64,6 +64,29 @@ maximum forecast moves alongside the required entry move. Do not choose the
 context length or lower the entry threshold using the final fifth and then
 claim that same period is an untouched out-of-sample test.
 
+## Eliot M5 learned roles
+
+To train three independent M5 roles (market regime, direction, and entry)
+on the first 70% of closed bars and compare them alongside Chronos 2 on
+the next 10% and final 20%, run:
+
+```bash
+docker compose --profile tools build tools
+docker compose --profile tools run --rm --no-deps tools -m ramon.eliot_roles \
+  --db /data/ramon_history.sqlite3 --symbol XAUUSD_l \
+  --model autogluon/chronos-2-small --device cpu --units-per-price 1
+```
+
+The role checkpoints are written only to `data/eliot_models/`. They are not
+the Ramon M15 role bundle. The output reports each chronological period's
+Chronos-only relaxed direction probe next to the same candidate signals
+filtered by the three trained roles. A Chronos direction probe requires
+at least 1.0 price move and is a separate experiment from the conservative
+5.42-price-unit entry rule above. If the trained models reject everything,
+that is an honest zero-trade outcome. Neither result authorizes M5 live orders.
+The last 20% was already inspected in the Chronos-only experiment, so its
+result is exploratory; collect fresh later data for a clean future test.
+
 The `--units-per-price 1` assumption comes from the supplied MT5 history:
 at 0.01 lot, several closed gold trades show approximately one CENT-account
 unit for a 1.0 price move. Confirm this against `OrderCalcProfit` on the
@@ -78,7 +101,7 @@ This is an exploratory Eliot probe, not a live trading signal or a net-profit cl
 1. Run Chronos 2 on a separately keyed M5 context and forecast horizon.
 2. Build and validate role-model features and labels on M5 data only. Do not
    reuse the trained M15 role bundle on M5.
-3. Replay chronological, untouched M5 periods with recorded spread and
+3. Replay chronological M5 periods with recorded spread and
    conservative stop-first ordering for same-bar target/stop touches. Evaluate
    net return, drawdown and win rate; candle data cannot prove tick fill order.
 4. Size using `OrderCalcProfit` for the broker's minimum volume. Reject entry
