@@ -1,5 +1,5 @@
 #property strict
-#property version "0.40"
+#property version "0.41"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -55,6 +55,10 @@ input bool ObserveEarlyReversalExit = true; // Shadow-only: record damaged trade
 input double EarlyReversalMinPeakUnits = 2.0; // Require at least this much favorable excursion first.
 input double EarlyReversalGivebackUnits = 6.0; // Require this much giveback from peak.
 input double EarlyReversalMaxCurrentUnits = 0.0; // Trigger only after the trade has returned to breakeven/loss.
+const bool EnableEarlyAdverseExit = true; // Active loss reduction: exit only after material loss plus repeated signal failure.
+const double EarlyAdverseRiskFraction = 0.60; // Arm at 60% of reconstructed initial SL risk.
+const int EarlyAdverseWeakSnapshotsRequired = 2; // Require two distinct model snapshots with no support.
+const int EarlyAdverseMinAgeSeconds = 120; // Give a new trade two minutes before adverse-exit evaluation.
 input int RequestTimeoutMs = 4000;
 input int SnapshotIntervalSeconds = 30; // Re-evaluate fresh Bid/Ask inside the same M15 bar.
 input int MaxDeviationPoints = 30;
@@ -173,6 +177,12 @@ bool ProfitProtectionShadowTriggered = false;
 datetime ProfitProtectionShadowTriggerTime = 0;
 bool EarlyReversalShadowTriggered = false;
 datetime EarlyReversalShadowTriggerTime = 0;
+ulong EarlyAdverseTicket = 0;
+double EarlyAdverseInitialRiskUnits = 0.0;
+double EarlyAdverseTriggerLossUnits = 0.0;
+int EarlyAdverseWeakSnapshots = 0;
+datetime EarlyAdverseLastDecisionTime = 0;
+bool EarlyAdverseTriggered = false;
 ulong TPStagePositionIdentifier = 0;
 string TPStageSampleKey = "";
 string TPStageDirection = "NONE";
@@ -403,7 +413,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.40\n"
+      +"EA version: 0.41\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
       +"Symbol: "+_Symbol+"  Timeframe: M15\n"
       +"Bid: "+(tick_ok ? DoubleToString(tick.bid,_Digits) : "NA")
@@ -524,6 +534,12 @@ string BuildDiagnosticText()
       +"  minPeak="+DoubleToString(EarlyReversalMinPeakUnits,2)
       +"  giveback="+DoubleToString(EarlyReversalGivebackUnits,2)
       +"  maxCurrent="+DoubleToString(EarlyReversalMaxCurrentUnits,2)+"\n"
+      +"EarlyAdverseExit: "+(EnableEarlyAdverseExit ? "ACTIVE" : "OFF")
+      +"  triggered="+BoolText(EarlyAdverseTriggered)
+      +"  lossTrigger="+DoubleToString(EarlyAdverseTriggerLossUnits,2)
+      +"  weak="+IntegerToString(EarlyAdverseWeakSnapshots)+"/"+IntegerToString(EarlyAdverseWeakSnapshotsRequired)
+      +"  riskFraction="+DoubleToString(EarlyAdverseRiskFraction,2)
+      +"  minAgeSec="+IntegerToString(EarlyAdverseMinAgeSeconds)+"\n"
       +"Trades today: "+IntegerToString(today)+"/"+IntegerToString(MaxTradesPerDay)+"\n"
       +"RiskPerTradeUSD: "+DoubleToString(RiskPerTradeUSD,2)
       +"  EffectiveRiskUSD: "+DoubleToString(EffectiveRiskPerTradeUSD(),3)
@@ -666,7 +682,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.40",28,36,clrWhite,12);
+   UiLabel("TITLE","RAMON AI TRADER  v0.41",28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
 
@@ -1327,7 +1343,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.40";
+      version="0.41";
    }
    if(close_detail!="") detail=close_detail;
 
@@ -1993,6 +2009,106 @@ double ManagedPositionInitialRiskUnits(const ulong ticket)
    return MathAbs(money);
 }
 
+void ResetEarlyAdverseState()
+{
+   EarlyAdverseTicket=0;
+   EarlyAdverseInitialRiskUnits=0.0;
+   EarlyAdverseTriggerLossUnits=0.0;
+   EarlyAdverseWeakSnapshots=0;
+   EarlyAdverseLastDecisionTime=0;
+   EarlyAdverseTriggered=false;
+}
+
+bool ManageEarlyAdverseExit(const ulong ticket,const datetime opened)
+{
+   if(!EnableEarlyAdverseExit || ticket==0 || !PositionSelectByTicket(ticket))
+      return false;
+
+   if(EarlyAdverseTicket!=ticket)
+   {
+      ResetEarlyAdverseState();
+      EarlyAdverseTicket=ticket;
+      EarlyAdverseInitialRiskUnits=ManagedPositionInitialRiskUnits(ticket);
+      if(EarlyAdverseInitialRiskUnits>0.0)
+         EarlyAdverseTriggerLossUnits=EarlyAdverseInitialRiskUnits*EarlyAdverseRiskFraction;
+      Print("Ramon EARLY ADVERSE init ticket=",ticket,
+         " initial_risk=",DoubleToString(EarlyAdverseInitialRiskUnits,2),
+         " trigger_loss=",DoubleToString(EarlyAdverseTriggerLossUnits,2),
+         " fraction=",DoubleToString(EarlyAdverseRiskFraction,2));
+   }
+
+   if(EarlyAdverseInitialRiskUnits<=0.0 || EarlyAdverseTriggerLossUnits<=0.0)
+      return false;
+
+   datetime now=TimeCurrent();
+   if(opened<=0 || now-opened<EarlyAdverseMinAgeSeconds)
+      return false;
+
+   double current_units=PositionGetDouble(POSITION_PROFIT);
+   double loss_units=MathMax(0.0,-current_units);
+   if(loss_units+0.00001<EarlyAdverseTriggerLossUnits)
+   {
+      EarlyAdverseWeakSnapshots=0;
+      return false;
+   }
+
+   // Never interpret missing/stale model data as evidence that the trade is bad.
+   if(LastDecisionRequestTime<=0
+      || now-LastDecisionRequestTime>SnapshotIntervalSeconds*2+15
+      || (LastModelDecision!="BUY" && LastModelDecision!="SELL" && LastModelDecision!="WAIT"))
+      return false;
+
+   // Count at most once per distinct model snapshot; OnTimer itself runs every five seconds.
+   if(EarlyAdverseLastDecisionTime!=LastDecisionRequestTime)
+   {
+      EarlyAdverseLastDecisionTime=LastDecisionRequestTime;
+      long position_type=PositionGetInteger(POSITION_TYPE);
+      string direction=(position_type==POSITION_TYPE_BUY ? "BUY" : "SELL");
+      bool model_support=(LastModelDecision==direction);
+      bool intrabar_support=(LastIntrabarConfirmed && LastIntrabarDirection==direction);
+      bool trend_support=(LastAiTrendConfirmed && LastAiTrendDirection==direction);
+      bool weak=(!model_support && !intrabar_support && !trend_support);
+
+      if(weak)
+         EarlyAdverseWeakSnapshots++;
+      else
+         EarlyAdverseWeakSnapshots=0;
+
+      Print("Ramon EARLY ADVERSE check ticket=",ticket,
+         " loss=",DoubleToString(loss_units,2),
+         " trigger=",DoubleToString(EarlyAdverseTriggerLossUnits,2),
+         " direction=",direction,
+         " model=",LastModelDecision,
+         " intrabar=",BoolText(intrabar_support),
+         " trend=",BoolText(trend_support),
+         " weak=",IntegerToString(EarlyAdverseWeakSnapshots),"/",
+            IntegerToString(EarlyAdverseWeakSnapshotsRequired));
+   }
+
+   if(EarlyAdverseWeakSnapshots<EarlyAdverseWeakSnapshotsRequired)
+      return false;
+
+   EarlyAdverseTriggered=true;
+   if(ManagedExitPausedForMarketClosed(ticket))
+   {
+      StatusLine="EARLY ADVERSE EXIT PAUSED: MARKET CLOSED";
+      return true;
+   }
+   if(Trade.PositionClose(ticket,MaxDeviationPoints))
+   {
+      ResetMarketClosedExitPause();
+      RecordDealTelemetry(Trade.ResultDeal(),"early_adverse_exit");
+      StatusLine="EARLY ADVERSE EXIT loss="
+         +DoubleToString(loss_units,2)
+         +" trigger="+DoubleToString(EarlyAdverseTriggerLossUnits,2);
+      Print("Ramon execution: ",StatusLine);
+      return true;
+   }
+
+   HandleManagedExitFailure(ticket,"EARLY ADVERSE EXIT");
+   return true;
+}
+
 void SelectDynamicProfitProtectionThresholds(const ulong ticket)
 {
    ProfitProtectionInitialRiskUnits=ManagedPositionInitialRiskUnits(ticket);
@@ -2078,12 +2194,15 @@ void ManageOpenPosition()
    {
       ResetProfitProtectionState();
       ResetTPStageRuntime();
+      ResetEarlyAdverseState();
       ResetMarketClosedExitPause();
       return;
    }
    if(ManageTPStages(ticket))
       return;
    ObserveOpenPositionProfit(ticket);
+   if(ManageEarlyAdverseExit(ticket,opened))
+      return;
    if(EnableProfitProtection && ProfitProtectionShadowTriggered)
    {
       if(ManagedExitPausedForMarketClosed(ticket))
@@ -2444,6 +2563,8 @@ int OnInit()
       || TP2RetraceFraction<=0.0 || TP2RetraceFraction>=1.0
       || EarlyReversalMinPeakUnits<=0.0 || EarlyReversalGivebackUnits<=0.0
       || EarlyReversalMaxCurrentUnits>0.0
+      || EarlyAdverseRiskFraction<=0.0 || EarlyAdverseRiskFraction>=1.0
+      || EarlyAdverseWeakSnapshotsRequired<1 || EarlyAdverseMinAgeSeconds<0
       || SnapshotIntervalSeconds<10
       || (WriteDiagnosticFile && StringLen(DiagnosticFileName)==0)
       || (WriteCsvLogs && (StringLen(SignalCsvFileName)==0 || StringLen(TradeCsvFileName)==0))
