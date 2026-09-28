@@ -87,11 +87,49 @@ that is an honest zero-trade outcome. Neither result authorizes M5 live orders.
 The last 20% was already inspected in the Chronos-only experiment, so its
 result is exploratory; collect fresh later data for a clean future test.
 
+## Freeze Chronos-aligned roles for fresh bars
+
+The original M5 roles trained on all bars and rejected every signal. The
+forward experiment trains three different labels **only for Chronos candidate
+signals**: realized positive account-unit return, TP-first, and SL-first.
+The candidate features include historical volatility, signed price changes,
+spread, and Chronos' predicted movement and uncertainty. Its thresholds are
+fixed before new bars arrive. Historical training results are not a profit
+claim; the old holdout has already been used in earlier investigations.
+
+Freeze the currently imported 10,000-bar dataset by specifying its exact last
+completed M5 timestamp. Do this once, on the existing Eliot branch:
+
+```bash
+docker compose --profile tools run --rm --no-deps tools -m ramon.eliot_forward fit \
+  --db /data/ramon_history.sqlite3 --symbol XAUUSD_l \
+  --model autogluon/chronos-2-small --device cpu \
+  --units-per-price 1 --cutoff-time 1790613000
+```
+
+The frozen bundle is stored in `data/eliot_forward/`, entirely separate from
+Ramon. The fit command refuses to overwrite an existing bundle. A later
+`evaluate` call without newer completed bars says `AWAITING_NEW_M5_BARS`.
+After new trading sessions, export M5 history again with the same script and
+filename, import the CSV as above (existing timestamps update, new timestamps
+append), and run:
+
+```bash
+docker compose --profile tools run --rm --no-deps tools -m ramon.eliot_forward evaluate \
+  --db /data/ramon_history.sqlite3 --symbol XAUUSD_l \
+  --model autogluon/chronos-2-small --device cpu --units-per-price 1
+```
+
+Only decisions **after** the frozen timestamp appear in this comparison.
+The M5 candle data still cannot show actual broker order fills, and role
+training does not turn Eliot into a live trading EA. Accumulate enough fresh
+bars and actual candidate trades before judging the model.
+
 The `--units-per-price 1` assumption comes from the supplied MT5 history:
 at 0.01 lot, several closed gold trades show approximately one CENT-account
 unit for a 1.0 price move. Confirm this against `OrderCalcProfit` on the
-actual symbol before treating the results as executable. The replay uses
-Chronos 2 forecast medians only; M5 role models are still to be trained.
+actual symbol before treating the results as executable. The baseline replay
+uses only Chronos 2 forecast medians.
 It enters at the following M5 open, applies the recorded bar spread, counts
 same-bar stop and target as a stop, and closes after at most three bars.
 This is an exploratory Eliot probe, not a live trading signal or a net-profit claim.
