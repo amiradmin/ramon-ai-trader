@@ -146,6 +146,11 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
 
                 response = result.to_dict()
                 response.update(ensemble_payload)
+
+                # The terminal owns the loss-streak gate. Uploaded history can lag
+                # fresh closes or omit intervening outcomes; it is not authoritative.
+                response["loss_streak_cooldown_source"] = "mt5_history"
+
                 response.update(news_snapshot.payload())
                 response["news_model_ready"] = int(ensemble.news_ready)
 

@@ -1,5 +1,5 @@
 #property strict
-#property version "0.32"
+#property version "0.350"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -32,11 +32,11 @@ input bool ConfirmMoneyUnitsPerUSD = false; // Must be true before live trading 
 input string ExpectedAccountCurrency = ""; // Optional exact ACCOUNT_CURRENCY check when non-empty.
 input double RiskPerTradeUSD = 0.06; // Preferred sizing budget.
 input bool AllowMinLotRiskOverride = true; // Permit broker minimum lot above preferred budget.
-input double MaxExecutableRiskUSD = 0.20; // Hard planned-risk cap for minimum-lot override.
+input double MaxExecutableRiskUSD = 0.14; // Hard planned-risk cap; blocks oversized broker-minimum-lot trades.
 input int MaxSpreadPoints = 50;
 input int MaxTradesPerDay = 400;
 input int MaximumHoldBars = 4;
-input bool ObserveProfitProtection = true; // Telemetry only: never closes or modifies a position.
+input bool EnableProfitProtection = true; // Close a managed position after an armed profit giveback.
 input double ProfitProtectionActivationUnits = 10.0; // Start observing after peak floating profit reaches this level.
 input double ProfitProtectionGivebackUnits = 6.0; // Shadow exit would trigger after this much giveback from peak.
 input int RequestTimeoutMs = 4000;
@@ -346,7 +346,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.32\n"
+      +"EA version: 0.35\n"
       +"Captured: "+TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS)+"\n"
       +"Symbol: "+_Symbol+"  Timeframe: M15\n"
       +"Bid: "+(tick_ok ? DoubleToString(tick.bid,_Digits) : "NA")
@@ -362,6 +362,7 @@ string BuildDiagnosticText()
       +"Decision: "+LastModelDecision+"  Reason: "+LastModelReason+"\n"
       +"DecisionID: "+LastSampleKey+"  Saved: "+BoolText(LastSampleSaved)+"  Bundle: "+LastBundleId+"\n"
       +"TradeLearning: "+TradeLearningStatus+"\n"
+      +"LossCooldown: MT5_HISTORY | 2 consecutive same-direction net-loss SL closes | 30min\n"
       +"BaseDecision: "+LastBaseDecision+"  BaseReason: "+LastBaseReason+"\n"
       +"RoleModels: "+(LastEnsembleReady ? "READY" : "LEARNING")
       +"  Active: "+BoolText(LastEnsembleActive)
@@ -441,7 +442,7 @@ string BuildDiagnosticText()
       +" account="+BoolText((bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED))+"\n"
       +"Status: "+StatusLine+"\n"
       +"Managed position: "+position_line+"\n"
-      +"ProfitProtection: "+(ObserveProfitProtection ? "OBSERVE_ONLY" : "OFF")
+      +"ProfitProtection: "+(EnableProfitProtection ? "ACTIVE" : "OFF")
       +"  Armed: "+BoolText(ProfitProtectionArmed)
       +"  ShadowTrigger: "+BoolText(ProfitProtectionShadowTriggered)+"\n"
       +"ProfitProtectionUnits: current="+DoubleToString(ProfitProtectionCurrentUnits,2)
@@ -591,7 +592,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.32",28,36,clrWhite,12);
+   UiLabel("TITLE","RAMON AI TRADER  v0.35",28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
 
@@ -1252,7 +1253,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.31";
+      version="0.35";
    }
    if(close_detail!="") detail=close_detail;
 
@@ -1409,6 +1410,128 @@ bool ClosedTradePayload(const ulong identifier,string &payload)
    return true;
 }
 
+// Read execution history independently of learning labels, sample IDs and uploads.
+// Result: -1 = unreadable, 0 = other robot/open position, 1 = our closed position.
+int ReadCooldownPosition(const ulong identifier,string &direction,
+                         datetime &closed,bool &sl_loss)
+{
+   direction="";
+   closed=0;
+   sl_loss=false;
+   if(PositionIdOpen(identifier)) return 0;
+   if(!HistorySelectByPosition(identifier)) return -1;
+   bool ours=false,foreign=false,ambiguous=false;
+   double in_volume=0.0,out_volume=0.0,net=0.0;
+   long last_msc=-1,last_reason=-1;
+   ulong last_ticket=0;
+   for(int i=0;i<HistoryDealsTotal();i++)
+   {
+      ulong deal=HistoryDealGetTicket(i);
+      if(deal==0) return -1;
+      if(HistoryDealGetString(deal,DEAL_SYMBOL)!=_Symbol) continue;
+      net+=HistoryDealGetDouble(deal,DEAL_PROFIT)
+         +HistoryDealGetDouble(deal,DEAL_COMMISSION)
+         +HistoryDealGetDouble(deal,DEAL_SWAP)
+         +HistoryDealGetDouble(deal,DEAL_FEE);
+      long type=HistoryDealGetInteger(deal,DEAL_TYPE);
+      if(type!=DEAL_TYPE_BUY && type!=DEAL_TYPE_SELL) continue;
+      long entry=HistoryDealGetInteger(deal,DEAL_ENTRY);
+      double volume=HistoryDealGetDouble(deal,DEAL_VOLUME);
+      if(entry==DEAL_ENTRY_IN || entry==DEAL_ENTRY_INOUT)
+      {
+         if((ulong)HistoryDealGetInteger(deal,DEAL_MAGIC)==MagicNumber) ours=true;
+         else foreign=true;
+         string side=(type==DEAL_TYPE_BUY ? "BUY" : "SELL");
+         if(direction!="" && direction!=side) ambiguous=true;
+         direction=side;
+         in_volume+=volume;
+         if(entry==DEAL_ENTRY_INOUT) ambiguous=true;
+      }
+      if(entry==DEAL_ENTRY_OUT || entry==DEAL_ENTRY_OUT_BY || entry==DEAL_ENTRY_INOUT)
+      {
+         out_volume+=volume;
+         long msc=HistoryDealGetInteger(deal,DEAL_TIME_MSC);
+         if(msc>last_msc || (msc==last_msc && deal>last_ticket))
+         {
+            last_msc=msc;
+            last_ticket=deal;
+            closed=(datetime)HistoryDealGetInteger(deal,DEAL_TIME);
+            last_reason=HistoryDealGetInteger(deal,DEAL_REASON);
+         }
+      }
+   }
+   if(!ours) return 0;
+   // Unknown/mixed/manual outcomes break the streak; never skip our position
+   // merely because it would not qualify as a supervised-learning sample.
+   sl_loss=(!foreign && !ambiguous && in_volume>0.0
+      && MathAbs(in_volume-out_volume)<=0.000001
+      && last_reason==DEAL_REASON_SL && net<0.0);
+   return 1;
+}
+
+bool LocalLossCooldownBlocked(const string direction,string &reason)
+{
+   reason="";
+   datetime now=TimeCurrent();
+   if(!HistorySelect(0,now))
+   { reason="loss_cooldown_history_unavailable"; return true; }
+   // Snapshot IDs before HistorySelectByPosition replaces the selected deal list.
+   // Sort by final exit milliseconds, independently of terminal iteration order.
+   ulong identifiers[];
+   long exit_times[];
+   for(int i=HistoryDealsTotal()-1;i>=0;i--)
+   {
+      ulong deal=HistoryDealGetTicket(i);
+      if(deal==0)
+      { reason="loss_cooldown_history_unavailable"; return true; }
+      if(HistoryDealGetString(deal,DEAL_SYMBOL)!=_Symbol) continue;
+      long entry=HistoryDealGetInteger(deal,DEAL_ENTRY);
+      if(entry!=DEAL_ENTRY_OUT && entry!=DEAL_ENTRY_OUT_BY && entry!=DEAL_ENTRY_INOUT) continue;
+      ulong identifier=(ulong)HistoryDealGetInteger(deal,DEAL_POSITION_ID);
+      long msc=HistoryDealGetInteger(deal,DEAL_TIME_MSC);
+      int found=-1;
+      for(int j=0;j<ArraySize(identifiers);j++) if(identifiers[j]==identifier) found=j;
+      if(found>=0)
+      { if(msc>exit_times[found]) exit_times[found]=msc; continue; }
+      int count=ArraySize(identifiers);
+      ArrayResize(identifiers,count+1);
+      ArrayResize(exit_times,count+1);
+      identifiers[count]=identifier;
+      exit_times[count]=msc;
+   }
+   for(int i=0;i<ArraySize(identifiers);i++)
+      for(int j=i+1;j<ArraySize(identifiers);j++)
+         if(exit_times[j]>exit_times[i])
+         {
+            long at=exit_times[i]; exit_times[i]=exit_times[j]; exit_times[j]=at;
+            ulong id=identifiers[i]; identifiers[i]=identifiers[j]; identifiers[j]=id;
+         }
+   int losses=0;
+   datetime latest_close=0;
+   for(int i=0;i<ArraySize(identifiers);i++)
+   {
+      string side="";
+      datetime closed=0;
+      bool sl_loss=false;
+      int state=ReadCooldownPosition(identifiers[i],side,closed,sl_loss);
+      if(state<0)
+      { reason="loss_cooldown_history_unavailable"; return true; }
+      if(state==0) continue;
+      if(losses==0)
+      {
+         latest_close=closed;
+         if(latest_close>now)
+         { reason="loss_cooldown_history_time_invalid"; return true; }
+         if(now-latest_close>=2*15*60) return false;
+      }
+      if(!sl_loss || side!=direction) return false;
+      losses++;
+      if(losses==2)
+      { reason="same_direction_sl_cooldown"; return true; }
+   }
+   return false;
+}
+
 void SyncClosedTrades()
 {
    if(!AccountLockHealthy() || AccountInfoInteger(ACCOUNT_TRADE_MODE)!=ACCOUNT_TRADE_MODE_REAL)
@@ -1470,7 +1593,7 @@ void ResetProfitProtectionState()
 
 void ObserveOpenPositionProfit(const ulong ticket)
 {
-   if(!ObserveProfitProtection || ticket==0 || !PositionSelectByTicket(ticket))
+   if(!EnableProfitProtection || ticket==0 || !PositionSelectByTicket(ticket))
       return;
 
    if(ProfitProtectionTicket!=ticket)
@@ -1494,7 +1617,7 @@ void ObserveOpenPositionProfit(const ulong ticket)
    {
       ProfitProtectionShadowTriggered=true;
       ProfitProtectionShadowTriggerTime=TimeCurrent();
-      Print("Ramon PROFIT PROTECTION SHADOW trigger ticket=",ticket,
+      Print("Ramon PROFIT PROTECTION trigger ticket=",ticket,
          " current=",DoubleToString(ProfitProtectionCurrentUnits,2),
          " peak=",DoubleToString(ProfitProtectionPeakUnits,2),
          " giveback=",DoubleToString(ProfitProtectionGivebackNowUnits,2),
@@ -1513,6 +1636,22 @@ void ManageOpenPosition()
       return;
    }
    ObserveOpenPositionProfit(ticket);
+   if(EnableProfitProtection && ProfitProtectionShadowTriggered)
+   {
+      if(Trade.PositionClose(ticket,MaxDeviationPoints))
+      {
+         RecordDealTelemetry(Trade.ResultDeal(),"profit_protection");
+         StatusLine="PROFIT PROTECTION EXIT peak="
+            +DoubleToString(ProfitProtectionPeakUnits,2)
+            +" giveback="+DoubleToString(ProfitProtectionGivebackNowUnits,2);
+         Print("Ramon execution: ",StatusLine);
+         return;
+      }
+      StatusLine="PROFIT PROTECTION EXIT FAILED "
+         +IntegerToString((int)Trade.ResultRetcode());
+      Print("Ramon execution: ",StatusLine);
+      return;
+   }
    int age=iBarShift(_Symbol,PERIOD_M15,opened,false);
    if(age<MaximumHoldBars) { StatusLine="Managed position OPEN"; return; }
    if(Trade.PositionClose(ticket,MaxDeviationPoints))
@@ -1749,6 +1888,9 @@ void OnTimer()
    { StatusLine="Trade permission denied"; ShowStatus(); return; }
    if(SymbolInfoInteger(_Symbol,SYMBOL_TRADE_MODE)!=SYMBOL_TRADE_MODE_FULL)
    { StatusLine="Symbol trading disabled"; ShowStatus(); return; }
+   string cooldown_reason="";
+   if(LocalLossCooldownBlocked(decision,cooldown_reason))
+   { StatusLine=cooldown_reason; ShowStatus(); return; }
    int today=TradesToday();
    if(today<0 || today>=MaxTradesPerDay)
    { StatusLine="Daily trade limit/history unavailable"; ShowStatus(); return; }
@@ -1829,7 +1971,8 @@ int OnInit()
       || MaxExecutableRiskUSD<=0.0 || MaxExecutableRiskUSD>0.50
       || MaxExecutableRiskUSD<EffectiveRiskPerTradeUSD()
       || MaxSpreadPoints<=0 || MaxTradesPerDay<1 || MaximumHoldBars<1
-      || ProfitProtectionActivationUnits<0.0 || ProfitProtectionGivebackUnits<=0.0
+      || ProfitProtectionActivationUnits<=0.0 || ProfitProtectionGivebackUnits<=0.0
+      || ProfitProtectionGivebackUnits>=ProfitProtectionActivationUnits
       || SnapshotIntervalSeconds<10
       || (WriteDiagnosticFile && StringLen(DiagnosticFileName)==0)
       || (WriteCsvLogs && (StringLen(SignalCsvFileName)==0 || StringLen(TradeCsvFileName)==0))

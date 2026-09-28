@@ -115,6 +115,8 @@ class Settings:
     trend_min_consistency: float = 0.75
     trend_min_edge_fraction: float = 0.25
     trend_min_micro_move_atr: float = 0.03
+    trend_conflict_lookback: int = 12
+    trend_conflict_atr: float = 3.0
     stop_atr: float = 1.5
     target_atr: float = 3.0
 
@@ -258,6 +260,8 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
         and 0 <= settings.trend_min_consistency <= 1
         and 0 <= settings.trend_min_edge_fraction <= 1
         and settings.trend_min_micro_move_atr >= 0
+        and settings.trend_conflict_lookback >= 2
+        and settings.trend_conflict_atr > 0
     ):
         raise ValueError("invalid intrabar/trend settings")
 
@@ -349,7 +353,20 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
         ):
             ai_trend_confirmed = 1
 
-        if dominant_buy and buy_edge >= minimum and buy_strength >= settings.minimum_strength:
+        lookback = min(settings.trend_conflict_lookback, len(market.bars) - 1)
+        recent_move_atr = (
+            (market.bars[-1].close - market.bars[-1 - lookback].close) / atr
+            if lookback >= 2 else 0.0
+        )
+        aligned_recent_move_atr = recent_move_atr if dominant_buy else -recent_move_atr
+        trend_conflict = aligned_recent_move_atr <= -settings.trend_conflict_atr
+
+        # A strong Chronos point forecast must not repeatedly fade an extreme
+        # completed-bar move in the opposite direction. This is intentionally
+        # a narrow veto, not a generic trend-following replacement for Chronos.
+        if trend_conflict:
+            reason = "trend_conflict"
+        elif dominant_buy and buy_edge >= minimum and buy_strength >= settings.minimum_strength:
             side, edge, reason = "BUY", buy_edge, "forecast_up"
         elif not dominant_buy and sell_edge >= minimum and sell_strength >= settings.minimum_strength:
             side, edge, reason = "SELL", sell_edge, "forecast_down"

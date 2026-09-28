@@ -614,3 +614,29 @@ uv run python -m ramon.audit --db /path/to/ramon_history.sqlite3 \
   --ensemble-dir /path/to/checkpoints/ensemble \
   --chronos-model autogluon/chronos-2-small --trade-number 29
 ```
+
+### Loss controls v0.34 (feature/loss-control-v1)
+
+- The 12-completed-bar / 3-ATR trend-conflict veto now survives an active Meta
+  bundle. Meta probabilities are still recorded; the final decision stays WAIT.
+- The EA checks the latest two fully closed positions for its current account,
+  symbol and opening magic directly in MT5 history before placing a new order.
+  Two same-direction, net-negative positions whose final exit reason is SL block
+  that direction for 1,800 seconds after the latest close. At exactly 1,800 seconds
+  the cooldown expires. This is elapsed broker time, not candle-boundary counting.
+- Manual closes, TP, non-negative SL outcomes and opposite-direction closes break
+  the streak. Partial deals count once per fully closed position; open positions
+  and other robots are excluded. Net includes deal profit, commission, swap and fee.
+  Unreadable history blocks new entry, while existing-position management runs first.
+- Learning upload order and training labels no longer control cooldown. The old
+  server-side database gate is removed because its history can be incomplete.
+  Deploy **both** server and EA v0.34 together; an older EA with this server does
+  not implement the local cooldown.
+- Default preferred risk remains $0.06 and the minimum-lot planned-risk cap $0.12.
+  Existing MT5 Inputs may retain old values. Chronos weights, strength thresholds,
+  SL/TP distances, training labels and observe-only profit protection are unchanged.
+
+Validation includes Python regressions for both-direction Meta vetoes and a C++
+API adapter executing the actual MQL cooldown functions against synthetic deal
+history (manual/partial exits, fees, other robots, expiry, restart and history
+errors). This does not replace MetaEditor compilation or terminal validation.

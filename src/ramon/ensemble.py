@@ -410,6 +410,10 @@ class EnsembleCoordinator:
                 final_decision = "WAIT"
                 final_reason = "ensemble_meta_veto"
 
+        # Execution vetoes survive the learned Meta decision in every mode.
+        if decision.reason == "trend_conflict":
+            final_decision, final_reason = "WAIT", "trend_conflict"
+
         payload: dict[str, object] = {
             "base_decision": decision.decision,
             "base_reason": decision.reason,
