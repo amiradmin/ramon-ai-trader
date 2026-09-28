@@ -295,7 +295,7 @@ def test_v035_profit_protection_is_active_and_auditable() -> None:
     assert 'Trade.PositionClose(ticket,MaxDeviationPoints)' in source
     assert 'RecordDealTelemetry(Trade.ResultDeal(),"profit_protection")' in source
     assert '"ProfitProtection: "+(EnableProfitProtection ? "ACTIVE" : "OFF")' in source
-    assert "ProfitProtectionGivebackMaxUnits>=ProfitProtectionActivationMinUnits" in source
+    assert "ProfitProtectionGivebackMinUnits>=ProfitProtectionActivationMinUnits" in source
     assert "ProfitProtectionActivationUnits*ProfitProtectionGivebackFraction" in source
     assert "ProfitProtectionInitialRiskUnits*ProfitProtectionActivationRiskFraction" in source
 

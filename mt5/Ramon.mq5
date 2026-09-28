@@ -2330,7 +2330,7 @@ int OnInit()
       || ProfitProtectionGivebackMinUnits<=0.0
       || ProfitProtectionGivebackMaxUnits<ProfitProtectionGivebackMinUnits
       || ProfitProtectionGivebackFraction<=0.0
-      || ProfitProtectionGivebackMaxUnits>=ProfitProtectionActivationMinUnits
+      || ProfitProtectionGivebackMinUnits>=ProfitProtectionActivationMinUnits
       || TPStageWeakSnapshotsRequired<1 || TP1GraceSeconds<0 || TP2GraceSeconds<0
       || TP1HealthyProgressFraction<=0.0 || TP1HealthyProgressFraction>=1.0
       || TP1RetraceFraction<=0.0 || TP1RetraceFraction>=1.0
