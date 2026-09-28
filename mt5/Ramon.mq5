@@ -1,5 +1,5 @@
 #property strict
-#property version "0.380"
+#property version "0.390"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -287,6 +287,28 @@ string BoolText(const bool value)
    return (value ? "YES" : "NO");
 }
 
+long BrokerUtcOffsetSeconds()
+{
+   long delta=(long)TimeCurrent()-(long)TimeGMT();
+   long rounded=(long)(MathRound((double)delta/900.0)*900.0);
+   if(MathAbs(rounded)>14*3600 || MathAbs(delta-rounded)>30)
+      return 0;
+   return rounded;
+}
+
+datetime BrokerTimeToUTC(const datetime broker_time)
+{
+   if(broker_time<=0)
+      return 0;
+   return (datetime)((long)broker_time-BrokerUtcOffsetSeconds());
+}
+
+string UTCText(const datetime broker_time,const int mode)
+{
+   datetime utc=BrokerTimeToUTC(broker_time);
+   return (utc>0 ? TimeToString(utc,mode)+" UTC" : "NONE");
+}
+
 string AccountTypeText()
 {
    return (AccountIsCent ? "CENT" : "STANDARD");
@@ -378,19 +400,19 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.38\n"
-      +"Captured: "+TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS)+"\n"
+      +"EA version: 0.39\n"
+      +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
       +"Symbol: "+_Symbol+"  Timeframe: M15\n"
       +"Bid: "+(tick_ok ? DoubleToString(tick.bid,_Digits) : "NA")
       +"  Ask: "+(tick_ok ? DoubleToString(tick.ask,_Digits) : "NA")
       +"  Spread(points): "+IntegerToString(spread_points)+"\n"
       +"Market: "+(SymbolInfoInteger(_Symbol,SYMBOL_TRADE_MODE)==SYMBOL_TRADE_MODE_FULL ? "OPEN/FULL" : "RESTRICTED")
-      +"  TerminalConnected: "+BoolText((bool)TerminalInfoInteger(TERMINAL_CONNECTED))+"\n\n"
+      +"  TerminalConnected: "+BoolText((bool)TerminalInfoInteger(TERMINAL_CONNECTED))+"\n"+"Clock: UTC canonical  BrokerUTCOffsetSec: "+IntegerToString((int)BrokerUtcOffsetSeconds())+"\n\n"
       +"=== MODEL / SIGNAL ===\n"
       +"ModelUrl: "+ModelUrl+"\n"
       +"Snapshot cadence: "+IntegerToString(SnapshotIntervalSeconds)+"s"
       +"  Last request: "+(LastDecisionRequestTime>0
-         ? TimeToString(LastDecisionRequestTime,TIME_DATE|TIME_SECONDS) : "NONE")+"\n"
+         ? UTCText(LastDecisionRequestTime,TIME_DATE|TIME_SECONDS) : "NONE")+"\n"
       +"Decision: "+LastModelDecision+"  Reason: "+LastModelReason+"\n"
       +"DecisionID: "+LastSampleKey+"  Saved: "+BoolText(LastSampleSaved)+"  Bundle: "+LastBundleId+"\n"
       +"TradeLearning: "+TradeLearningStatus+"\n"
@@ -411,8 +433,8 @@ string BuildDiagnosticText()
       +"  AgeSec: "+DoubleToString(LastNewsSourceAgeSeconds,0)
       +"  Event: "+LastNewsEventCountry+" "+LastNewsEventImpact+" "+LastNewsEventTitle
       +"  DeltaMin: "+DoubleToString(LastNewsEventDeltaMinutes,1)+"\n"
-      +"Signal bar: "+(LastSignalBarTime>0 ? TimeToString(LastSignalBarTime,TIME_DATE|TIME_MINUTES) : "NONE")
-      +"  Last closed: "+(closed>0 ? TimeToString(closed,TIME_DATE|TIME_MINUTES) : "NONE")+"\n"
+      +"Signal bar: "+UTCText(LastSignalBarTime,TIME_DATE|TIME_MINUTES)
+      +"  Last closed: "+UTCText(closed,TIME_DATE|TIME_MINUTES)+"\n"
       +"SignalBid: "+DoubleToString(LastSignalBid,_Digits)
       +"  SignalAsk: "+DoubleToString(LastSignalAsk,_Digits)+"\n"
       +"Forecast low/median/high: "
@@ -647,7 +669,7 @@ void DrawDashboard()
       +"   PERMS: "+(permissions ? "OK" : "FAIL"),28,82,live_color,10);
 
    UiLabel("DECISION","DECISION: "+LastModelDecision+"   "+LastModelReason,28,108,state_color,11);
-   UiLabel("SIGNAL","Signal: "+(LastSignalBarTime>0 ? TimeToString(LastSignalBarTime,TIME_DATE|TIME_MINUTES) : "NONE")
+   UiLabel("SIGNAL","Signal: "+UTCText(LastSignalBarTime,TIME_DATE|TIME_MINUTES)
       +"   Spread: "+IntegerToString(spread_points)+"/"+IntegerToString(MaxSpreadPoints),28,132,clrWhite,9);
    UiLabel("SIGNAL_PRICE","Signal Bid/Ask: "+DoubleToString(LastSignalBid,_Digits)
       +" / "+DoubleToString(LastSignalAsk,_Digits),28,154,C'203,213,225',9);
@@ -801,7 +823,7 @@ bool CopyDiagnosticToClipboard()
       return false;
    }
    CloseClipboard();
-   LastCopyStatus="COPIED "+TimeToString(TimeCurrent(),TIME_SECONDS);
+   LastCopyStatus="COPIED "+TimeToString(TimeGMT(),TIME_SECONDS)+" UTC";
    return true;
 }
 
@@ -1299,7 +1321,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.38";
+      version="0.39";
    }
    if(close_detail!="") detail=close_detail;
 
@@ -2216,7 +2238,7 @@ void OnTimer()
    StatusLine=reason;
    UpdateSizingPreview();
    AppendSignalCsv();
-   Print("Ramon ",TimeToString(bar_time)," ",decision," ",reason,
+   Print("Ramon ",UTCText(bar_time,TIME_DATE|TIME_SECONDS)," ",decision," ",reason,
       " median=",DoubleToString(median,_Digits));
 
    // Learning snapshots continue while positions exist; execution remains single-position.
