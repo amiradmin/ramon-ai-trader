@@ -1,5 +1,5 @@
 #property strict
-#property version "0.35"
+#property version "0.350"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -1593,7 +1593,7 @@ void ResetProfitProtectionState()
 
 void ObserveOpenPositionProfit(const ulong ticket)
 {
-   if(!ObserveProfitProtection || ticket==0 || !PositionSelectByTicket(ticket))
+   if(!EnableProfitProtection || ticket==0 || !PositionSelectByTicket(ticket))
       return;
 
    if(ProfitProtectionTicket!=ticket)
@@ -1971,7 +1971,8 @@ int OnInit()
       || MaxExecutableRiskUSD<=0.0 || MaxExecutableRiskUSD>0.50
       || MaxExecutableRiskUSD<EffectiveRiskPerTradeUSD()
       || MaxSpreadPoints<=0 || MaxTradesPerDay<1 || MaximumHoldBars<1
-      || ProfitProtectionActivationUnits<=0.0 || ProfitProtectionGivebackUnits<=0.0\n      || ProfitProtectionGivebackUnits>=ProfitProtectionActivationUnits
+      || ProfitProtectionActivationUnits<=0.0 || ProfitProtectionGivebackUnits<=0.0
+      || ProfitProtectionGivebackUnits>=ProfitProtectionActivationUnits
       || SnapshotIntervalSeconds<10
       || (WriteDiagnosticFile && StringLen(DiagnosticFileName)==0)
       || (WriteCsvLogs && (StringLen(SignalCsvFileName)==0 || StringLen(TradeCsvFileName)==0))
