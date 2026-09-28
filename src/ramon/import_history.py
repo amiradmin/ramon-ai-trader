@@ -13,8 +13,8 @@ REQUIRED = ("time", "open", "high", "low", "close")
 
 def import_csv(db: str | Path, csv_path: str | Path, *, symbol: str, timeframe: str = "M15") -> dict[str, int]:
     """Import MT5-exported closed bars using MT5 epoch seconds without timezone conversion."""
-    if timeframe != "M15":
-        raise ValueError("only M15 history is supported")
+    if timeframe not in {"M5", "M15"}:
+        raise ValueError("only M5 and M15 history is supported")
     if not symbol.upper().startswith("XAUUSD"):
         raise ValueError("only XAUUSD variants are supported")
 
@@ -82,7 +82,7 @@ def import_csv(db: str | Path, csv_path: str | Path, *, symbol: str, timeframe: 
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Import MT5 closed M15 bars into Ramon SQLite history")
+    parser = argparse.ArgumentParser(description="Import MT5 closed M5/M15 bars into Ramon SQLite history")
     parser.add_argument("csv")
     parser.add_argument("--db", default="/data/ramon_history.sqlite3")
     parser.add_argument("--symbol", default="XAUUSD_l")
