@@ -125,6 +125,52 @@ The M5 candle data still cannot show actual broker order fills, and role
 training does not turn Eliot into a live trading EA. Accumulate enough fresh
 bars and actual candidate trades before judging the model.
 
+## Broker ticks and account-unit conversion
+
+Compile `mt5/CheckEliotMoneyUnits.mq5` and `mt5/ExportEliotTicks.mq5` in
+MetaEditor (Scripts folder). Run the money-check script on the **same account**
+and `XAUUSD_l`. Copy its `ELIOT MONEY CHECK` Experts line. The printed buy and
+sell profits are **account currency units** for the broker minimum volume and
+a price move of 1.0; check the volume is 0.01. Use the measured value as
+`--units-per-price` instead of assuming it is 1. The script does not trade.
+
+Then run the tick-export script with `DaysBack=2`. It writes
+`FILE_COMMON/Eliot_XAUUSD_l_Ticks.csv` in 15-minute download chunks and
+prints the number of ticks and whether the export hit its row cap. A cap
+means the requested date range is incomplete; shorten the range or increase
+`MaxTicksToExport` for a full coverage check. Export the latest M5 bars again
+using `ExportRamonHistory.mq5` and reimport them so timestamps overlap.
+
+```bash
+docker compose --profile tools build tools
+COMMON="$HOME/.mt5/drive_c/users/$USER/AppData/Roaming/MetaQuotes/Terminal/Common/Files"
+test -s "$COMMON/Eliot_XAUUSD_l_Ticks.csv" || exit 1
+mkdir -p data/imports
+cp -- "$COMMON/Eliot_XAUUSD_l_Ticks.csv" data/imports/
+docker compose --profile tools run --rm --no-deps tools -m ramon.eliot_ticks \
+  /data/imports/Eliot_XAUUSD_l_Ticks.csv \
+  --db /data/eliot_ticks.sqlite3 --bars-db /data/ramon_history.sqlite3 \
+  --symbol XAUUSD_l
+```
+
+The importer stores Eliot ticks in an **independent** SQLite file, accepts
+repeat exports, and checks first quote versus M5 open in at least 20 bars.
+An alignment error means the tick and bar clocks or prices do not agree;
+investigate it before interpreting any replay. Once aligned, compare the
+same Chronos candidates at the next bar open and over three bars. Replace
+`1` with the money-check result when needed:
+
+```bash
+docker compose --profile tools run --rm --no-deps tools -m ramon.eliot_tick_audit \
+  --db /data/ramon_history.sqlite3 --ticks-db /data/eliot_ticks.sqlite3 \
+  --symbol XAUUSD_l --model autogluon/chronos-2-small --device cpu \
+  --units-per-price 1
+```
+
+The tick audit only compares intervals with quote coverage and reports
+tick and M5 candle outcomes for identical signals. It does not simulate
+latency, commissions, slippage or actual broker execution.
+
 The `--units-per-price 1` assumption comes from the supplied MT5 history:
 at 0.01 lot, several closed gold trades show approximately one CENT-account
 unit for a 1.0 price move. Confirm this against `OrderCalcProfit` on the
