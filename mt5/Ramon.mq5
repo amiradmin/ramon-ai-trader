@@ -38,7 +38,11 @@ input int MaxTradesPerDay = 400;
 input int MaximumHoldBars = 4;
 input bool EnableProfitProtection = true; // Close a managed position after an armed profit giveback.
 input double ProfitProtectionActivationUnits = 10.0; // Start observing after peak floating profit reaches this level.
-input double ProfitProtectionGivebackUnits = 6.0; // Shadow exit would trigger after this much giveback from peak.
+input double ProfitProtectionGivebackUnits = 6.0; // Active exit after this much giveback from an armed peak.
+input bool ObserveEarlyReversalExit = true; // Shadow-only: record damaged trades without closing them.
+input double EarlyReversalMinPeakUnits = 2.0; // Require at least this much favorable excursion first.
+input double EarlyReversalGivebackUnits = 6.0; // Require this much giveback from peak.
+input double EarlyReversalMaxCurrentUnits = 0.0; // Trigger only after the trade has returned to breakeven/loss.
 input int RequestTimeoutMs = 4000;
 input int SnapshotIntervalSeconds = 30; // Re-evaluate fresh Bid/Ask inside the same M15 bar.
 input int MaxDeviationPoints = 30;
@@ -152,6 +156,8 @@ double ProfitProtectionGivebackNowUnits = 0.0;
 bool ProfitProtectionArmed = false;
 bool ProfitProtectionShadowTriggered = false;
 datetime ProfitProtectionShadowTriggerTime = 0;
+bool EarlyReversalShadowTriggered = false;
+datetime EarlyReversalShadowTriggerTime = 0;
 
 bool IsAllowedModelUrl(const string url)
 {
@@ -450,6 +456,11 @@ string BuildDiagnosticText()
       +"  giveback="+DoubleToString(ProfitProtectionGivebackNowUnits,2)
       +"  activate="+DoubleToString(ProfitProtectionActivationUnits,2)
       +"  triggerGiveback="+DoubleToString(ProfitProtectionGivebackUnits,2)+"\n"
+      +"EarlyReversalShadow: "+BoolText(EarlyReversalShadowTriggered)
+      +"  observe="+BoolText(ObserveEarlyReversalExit)
+      +"  minPeak="+DoubleToString(EarlyReversalMinPeakUnits,2)
+      +"  giveback="+DoubleToString(EarlyReversalGivebackUnits,2)
+      +"  maxCurrent="+DoubleToString(EarlyReversalMaxCurrentUnits,2)+"\n"
       +"Trades today: "+IntegerToString(today)+"/"+IntegerToString(MaxTradesPerDay)+"\n"
       +"RiskPerTradeUSD: "+DoubleToString(RiskPerTradeUSD,2)
       +"  EffectiveRiskUSD: "+DoubleToString(EffectiveRiskPerTradeUSD(),3)
@@ -1589,6 +1600,8 @@ void ResetProfitProtectionState()
    ProfitProtectionArmed=false;
    ProfitProtectionShadowTriggered=false;
    ProfitProtectionShadowTriggerTime=0;
+   EarlyReversalShadowTriggered=false;
+   EarlyReversalShadowTriggerTime=0;
 }
 
 void ObserveOpenPositionProfit(const ulong ticket)
@@ -1623,6 +1636,23 @@ void ObserveOpenPositionProfit(const ulong ticket)
          " giveback=",DoubleToString(ProfitProtectionGivebackNowUnits,2),
          " activation=",DoubleToString(ProfitProtectionActivationUnits,2),
          " threshold=",DoubleToString(ProfitProtectionGivebackUnits,2));
+   }
+
+   if(ObserveEarlyReversalExit
+      && !EarlyReversalShadowTriggered
+      && ProfitProtectionPeakUnits>=EarlyReversalMinPeakUnits
+      && ProfitProtectionGivebackNowUnits>=EarlyReversalGivebackUnits
+      && ProfitProtectionCurrentUnits<=EarlyReversalMaxCurrentUnits
+      && !LastIntrabarConfirmed
+      && !LastAiTrendConfirmed)
+   {
+      EarlyReversalShadowTriggered=true;
+      EarlyReversalShadowTriggerTime=TimeCurrent();
+      Print("Ramon EARLY REVERSAL SHADOW ticket=",ticket,
+         " current=",DoubleToString(ProfitProtectionCurrentUnits,2),
+         " peak=",DoubleToString(ProfitProtectionPeakUnits,2),
+         " giveback=",DoubleToString(ProfitProtectionGivebackNowUnits,2),
+         " intrabar=FAIL ai_trend=FAIL");
    }
 }
 
@@ -1973,6 +2003,8 @@ int OnInit()
       || MaxSpreadPoints<=0 || MaxTradesPerDay<1 || MaximumHoldBars<1
       || ProfitProtectionActivationUnits<=0.0 || ProfitProtectionGivebackUnits<=0.0
       || ProfitProtectionGivebackUnits>=ProfitProtectionActivationUnits
+      || EarlyReversalMinPeakUnits<=0.0 || EarlyReversalGivebackUnits<=0.0
+      || EarlyReversalMaxCurrentUnits>0.0
       || SnapshotIntervalSeconds<10
       || (WriteDiagnosticFile && StringLen(DiagnosticFileName)==0)
       || (WriteCsvLogs && (StringLen(SignalCsvFileName)==0 || StringLen(TradeCsvFileName)==0))
