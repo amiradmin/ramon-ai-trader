@@ -9,6 +9,21 @@ class UpForecast:
         return Forecast(closes[-1] + 9, closes[-1] + 9, closes[-1] + 9)
 
 
+class WeakForecast:
+    def forecast(self, closes, horizon):
+        return Forecast(closes[-1], closes[-1] + 2, closes[-1] + 3)
+
+
+def test_wait_reports_forecast_move_and_required_move():
+    rows = [Row(Bar(i * 300 + 300, 100, 100, 100, 100), .42)
+            for i in range(264)]
+    result = replay(rows, WeakForecast(), start=256, max_decisions=1)
+    assert result["outcomes"] == {"WAIT": 1}
+    assert result["forecast_abs_move_price_p50"] == 2
+    assert result["entry_required_move_price_p50"] == 5.42
+    assert result["forecast_abs_move_price_max"] == 2
+
+
 def test_ambiguous_entry_bar_counts_stop_first_and_uses_ask_entry():
     rows = [Row(Bar(i * 300 + 300, 100, 100, 100, 100), .42)
             for i in range(264)]
