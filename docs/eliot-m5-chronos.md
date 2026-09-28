@@ -22,6 +22,7 @@ From the repository root, import the file into the existing database, where
 M5 and M15 rows are stored separately:
 
 ```bash
+docker compose --profile tools build tools
 CSV="$HOME/.mt5/drive_c/users/$USER/AppData/Roaming/MetaQuotes/Terminal/Common/Files/Ramon_XAUUSD_l_M5_History.csv"
 test -s "$CSV" || { echo "M5 CSV missing: $CSV" >&2; exit 1; }
 mkdir -p data/imports
@@ -30,6 +31,11 @@ docker compose --profile tools run --rm --no-deps tools -m ramon.import_history 
   /data/imports/Ramon_XAUUSD_l_M5_History.csv \
   --db /data/ramon_history.sqlite3 --symbol XAUUSD_l --timeframe M5
 ```
+
+The tools image bundles project code at build time. Rebuild `tools` after
+pulling this branch; `docker compose run` alone uses the previous image.
+Rebuilding the shared image tag does not recreate the running M15 model
+container; leave that container running while evaluating Eliot offline.
 
 ## Offline Chronos 2 probe
 
