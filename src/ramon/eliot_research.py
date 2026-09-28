@@ -37,14 +37,15 @@ def replay(
     rows: list[Row], model: Forecaster, *, start: int, max_decisions: int = 100,
     target_units: float = 5.0, stop_units: float = 6.0,
     units_per_price: float = 1.0, max_spread_points: int = 50,
-    point: float = 0.01,
+    point: float = 0.01, context_bars: int = 256,
 ) -> dict[str, object]:
     """Chronological model-only probe; pessimistically count an ambiguous bar as SL.
 
     Forecast context ends at i; a signal fills at the next bar's open. Thus the
     next bar's spread is used for fills, never to select the signal.
     """
-    if (start < 256 or max_decisions < 1 or target_units <= 0 or stop_units <= 0
+    if (context_bars < 32 or start < context_bars - 1 or max_decisions < 1
+            or target_units <= 0 or stop_units <= 0
             or units_per_price <= 0 or point <= 0 or max_spread_points <= 0):
         raise ValueError("invalid replay settings")
     horizon = 3
@@ -56,16 +57,20 @@ def replay(
     pnl: list[float] = []
     forecast_moves: list[float] = []
     required_moves: list[float] = []
+    skipped: Counter[str] = Counter()
     while i + horizon < len(rows) and decisions < max_decisions:
-        context = rows[i - 255:i + 1]
+        context = rows[i - context_bars + 1:i + 1]
         if any(b.bar.time - a.bar.time != 300 for a, b in zip(context, context[1:])):
+            skipped["context_gap"] += 1
             i += 1
             continue
         if any(rows[j].bar.time - rows[j - 1].bar.time != 300
                for j in range(i + 1, i + horizon + 1)):
+            skipped["trade_horizon_gap"] += 1
             i += 1
             continue
         if rows[i].spread > max_spread_points * point:
+            skipped["spread"] += 1
             i += 1
             continue
         forecast = model.forecast([row.bar.close for row in context], horizon)
@@ -116,6 +121,7 @@ def replay(
         "period_start_utc": datetime.fromtimestamp(rows[start].bar.time, timezone.utc).isoformat(),
         "period_end_utc": datetime.fromtimestamp(rows[min(i, len(rows)-1)].bar.time, timezone.utc).isoformat(),
         "model_decisions": decisions, "entries": entries,
+        "context_bars": context_bars, "skipped_bars": dict(skipped),
         "outcomes": dict(outcomes), "net_account_units": round(sum(pnl), 3),
         "forecast_abs_move_price_p50": percentile(forecast_moves, .5),
         "forecast_abs_move_price_p90": percentile(forecast_moves, .9),
@@ -136,6 +142,8 @@ def main() -> None:
     parser.add_argument("--model", default="autogluon/chronos-2-small")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--max-decisions", type=int, default=100)
+    parser.add_argument("--context-bars", type=int, default=256,
+                        help="contiguous M5 closes for each Chronos forecast (minimum 32)")
     parser.add_argument("--units-per-price", type=float, required=True,
                         help="MT5 OrderCalcProfit: account units per 1.0 XAUUSD move at minimum volume")
     args = parser.parse_args()
@@ -145,7 +153,7 @@ def main() -> None:
     # Entire final fifth remains out-of-sample; no optimization on those bars.
     result = replay(rows, ChronosForecaster(args.model, args.device),
                     start=len(rows) * 4 // 5, max_decisions=args.max_decisions,
-                    units_per_price=args.units_per_price)
+                    units_per_price=args.units_per_price, context_bars=args.context_bars)
     print(json.dumps(result, indent=2))
 
 
