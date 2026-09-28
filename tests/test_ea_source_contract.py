@@ -13,7 +13,7 @@ def source() -> str:
 
 def test_ea_035_keeps_sizing_telemetry_observational():
     text = source()
-    assert '#property version "0.370"' in text
+    assert '#property version "0.380"' in text
     assert 'EA version: 0.36' in text
     assert 'RAMON AI TRADER  v0.36' in text
     assert 'version="0.35";' in text
