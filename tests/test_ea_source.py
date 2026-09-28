@@ -166,7 +166,7 @@ def test_minimum_lot_override_has_hard_cap() -> None:
     assert '#property version "0.360"' in source
     assert "input double RiskPerTradeUSD = 0.06" in source
     assert "input bool AllowMinLotRiskOverride = true" in source
-    assert "input double MaxExecutableRiskUSD = 0.12" in source
+    assert "const double MaxExecutableRiskUSD = 0.12" in source
     assert "bool MinimumLotOverrideEligible()" in source
     assert "bool RiskGateBlocked()" in source
     assert "double MaxExecutableRiskUnits()" in source
