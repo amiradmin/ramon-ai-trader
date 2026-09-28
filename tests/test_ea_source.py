@@ -166,7 +166,7 @@ def test_minimum_lot_override_has_hard_cap() -> None:
     assert '#property version "0.360"' in source
     assert "input double RiskPerTradeUSD = 0.06" in source
     assert "input bool AllowMinLotRiskOverride = true" in source
-    assert "input double MaxExecutableRiskUSD = 0.12" in source
+    assert "const double MaxExecutableRiskUSD = 0.12" in source
     assert "bool MinimumLotOverrideEligible()" in source
     assert "bool RiskGateBlocked()" in source
     assert "double MaxExecutableRiskUnits()" in source
@@ -277,7 +277,7 @@ def test_v035_profit_protection_is_active_and_auditable() -> None:
 
     assert '#property version "0.360"' in source
     assert "input bool EnableProfitProtection = true" in source
-    assert "input double ProfitProtectionActivationUnits = 10.0" in source
+    assert "input double ProfitProtectionActivationUnits = 7.0" in source
     assert "input double ProfitProtectionGivebackUnits = 6.0" in source
     assert "if(EnableProfitProtection && ProfitProtectionShadowTriggered)" in source
     assert 'Trade.PositionClose(ticket,MaxDeviationPoints)' in source
