@@ -1,5 +1,5 @@
 #property strict
-#property version "0.360"
+#property version "0.380"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -37,8 +37,20 @@ input int MaxSpreadPoints = 50;
 input int MaxTradesPerDay = 400;
 input int MaximumHoldBars = 4;
 input bool EnableProfitProtection = true; // Close a managed position after an armed profit giveback.
-const double ProfitProtectionActivationUnits = 7.0; // Fixed activation threshold; MT5 chart inputs cannot override this value.
-input double ProfitProtectionGivebackUnits = 6.0; // Active exit after this much giveback from an armed peak.
+const double ProfitProtectionFallbackActivationUnits = 7.0; // Used only if live position risk cannot be reconstructed.
+const double ProfitProtectionActivationMinUnits = 5.0;
+const double ProfitProtectionActivationMaxUnits = 9.0;
+const double ProfitProtectionActivationRiskFraction = 0.60; // Activation scales with the position's initial SL risk.
+const double ProfitProtectionGivebackMinUnits = 3.0;
+const double ProfitProtectionGivebackMaxUnits = 5.0;
+const double ProfitProtectionGivebackFraction = 0.60; // Giveback scales with the selected activation threshold.
+const bool EnableTPStageManagement = true; // Live TP1/TP2/TP3 state machine.
+const int TPStageWeakSnapshotsRequired = 2; // Consecutive weak 30s snapshots before an early stage exit.
+const int TP1GraceSeconds = 60; // Give TP1->TP2 continuation one minute before weakness exit.
+const int TP2GraceSeconds = 30; // Shorter grace after TP2.
+const double TP1HealthyProgressFraction = 0.35; // Progress toward TP2 considered healthy.
+const double TP1RetraceFraction = 0.15; // Exit if price gives back this fraction of TP1->TP2 below TP1.
+const double TP2RetraceFraction = 0.20; // Exit if price gives back this fraction of TP2->TP3 below TP2.
 input bool ObserveEarlyReversalExit = true; // Shadow-only: record damaged trades without closing them.
 input double EarlyReversalMinPeakUnits = 2.0; // Require at least this much favorable excursion first.
 input double EarlyReversalGivebackUnits = 6.0; // Require this much giveback from peak.
@@ -153,11 +165,25 @@ ulong ProfitProtectionTicket = 0;
 double ProfitProtectionPeakUnits = 0.0;
 double ProfitProtectionCurrentUnits = 0.0;
 double ProfitProtectionGivebackNowUnits = 0.0;
+double ProfitProtectionInitialRiskUnits = 0.0;
+double ProfitProtectionActivationUnits = ProfitProtectionFallbackActivationUnits;
+double ProfitProtectionGivebackUnits = 4.2;
 bool ProfitProtectionArmed = false;
 bool ProfitProtectionShadowTriggered = false;
 datetime ProfitProtectionShadowTriggerTime = 0;
 bool EarlyReversalShadowTriggered = false;
 datetime EarlyReversalShadowTriggerTime = 0;
+ulong TPStagePositionIdentifier = 0;
+string TPStageSampleKey = "";
+string TPStageDirection = "NONE";
+double TPStageTP1 = 0.0;
+double TPStageTP2 = 0.0;
+double TPStageTP3 = 0.0;
+int TPStage = 0;
+datetime TPStageHitTime = 0;
+int TPStageWeakSnapshots = 0;
+double TPStageProgress = 0.0;
+string TPStageStatus = "INACTIVE";
 
 bool IsAllowedModelUrl(const string url)
 {
@@ -352,7 +378,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.36\n"
+      +"EA version: 0.38\n"
       +"Captured: "+TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS)+"\n"
       +"Symbol: "+_Symbol+"  Timeframe: M15\n"
       +"Bid: "+(tick_ok ? DoubleToString(tick.bid,_Digits) : "NA")
@@ -455,7 +481,16 @@ string BuildDiagnosticText()
       +"  peak="+DoubleToString(ProfitProtectionPeakUnits,2)
       +"  giveback="+DoubleToString(ProfitProtectionGivebackNowUnits,2)
       +"  activate="+DoubleToString(ProfitProtectionActivationUnits,2)
-      +"  triggerGiveback="+DoubleToString(ProfitProtectionGivebackUnits,2)+"\n"
+      +"  triggerGiveback="+DoubleToString(ProfitProtectionGivebackUnits,2)
+      +"  mode=DYNAMIC"
+      +"  initialRisk="+DoubleToString(ProfitProtectionInitialRiskUnits,2)+"\n"
+      +"TPStage: "+IntegerToString(TPStage)
+      +"  status="+TPStageStatus
+      +"  dir="+TPStageDirection
+      +"  TP1/TP2/TP3="+DoubleToString(TPStageTP1,_Digits)+"/"
+         +DoubleToString(TPStageTP2,_Digits)+"/"+DoubleToString(TPStageTP3,_Digits)
+      +"  progress="+DoubleToString(TPStageProgress*100.0,1)+"%"
+      +"  weak="+IntegerToString(TPStageWeakSnapshots)+"/"+IntegerToString(TPStageWeakSnapshotsRequired)+"\n"
       +"EarlyReversalShadow: "+BoolText(EarlyReversalShadowTriggered)
       +"  observe="+BoolText(ObserveEarlyReversalExit)
       +"  minPeak="+DoubleToString(EarlyReversalMinPeakUnits,2)
@@ -603,7 +638,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.36",28,36,clrWhite,12);
+   UiLabel("TITLE","RAMON AI TRADER  v0.38",28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
 
@@ -1264,7 +1299,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.35";
+      version="0.38";
    }
    if(close_detail!="") detail=close_detail;
 
@@ -1591,17 +1626,295 @@ void SyncClosedTrades()
    }
 }
 
+string TPPlanGlobalKey(const string sample_key,const string suffix)
+{
+   return "RamonTP."+IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN))+"."+sample_key+"."+suffix;
+}
+
+bool ValidDirectionalTargets(
+   const string direction,const double entry,
+   const double tp1,const double tp2,const double tp3
+)
+{
+   if(entry<=0.0 || tp1<=0.0 || tp2<=0.0 || tp3<=0.0)
+      return false;
+   if(direction=="BUY")
+      return entry<tp1 && tp1<tp2 && tp2<tp3;
+   if(direction=="SELL")
+      return entry>tp1 && tp1>tp2 && tp2>tp3;
+   return false;
+}
+
+void PersistTPPlan(
+   const string sample_key,const string direction,
+   const double entry,const double tp1,const double tp2,const double tp3
+)
+{
+   if(!EnableTPStageManagement || !ValidSampleKey(sample_key)
+      || !ValidDirectionalTargets(direction,entry,tp1,tp2,tp3))
+      return;
+   GlobalVariableSet(TPPlanGlobalKey(sample_key,"DIR"),direction=="BUY" ? 1.0 : -1.0);
+   GlobalVariableSet(TPPlanGlobalKey(sample_key,"TP1"),tp1);
+   GlobalVariableSet(TPPlanGlobalKey(sample_key,"TP2"),tp2);
+   GlobalVariableSet(TPPlanGlobalKey(sample_key,"TP3"),tp3);
+   GlobalVariableSet(TPPlanGlobalKey(sample_key,"STAGE"),0.0);
+   GlobalVariableSet(TPPlanGlobalKey(sample_key,"HIT"),0.0);
+}
+
+void ResetTPStageRuntime()
+{
+   TPStagePositionIdentifier=0;
+   TPStageSampleKey="";
+   TPStageDirection="NONE";
+   TPStageTP1=0.0;
+   TPStageTP2=0.0;
+   TPStageTP3=0.0;
+   TPStage=0;
+   TPStageHitTime=0;
+   TPStageWeakSnapshots=0;
+   TPStageProgress=0.0;
+   TPStageStatus="INACTIVE";
+}
+
+bool LoadTPStagePlan(const ulong ticket)
+{
+   if(!EnableTPStageManagement || ticket==0 || !PositionSelectByTicket(ticket))
+      return false;
+
+   ulong identifier=(ulong)PositionGetInteger(POSITION_IDENTIFIER);
+   if(identifier==0)
+      return false;
+   if(TPStagePositionIdentifier==identifier && ValidSampleKey(TPStageSampleKey))
+      return true;
+
+   string comment=PositionGetString(POSITION_COMMENT);
+   string sample_key=(StringFind(comment,"Ramon:")==0 ? StringSubstr(comment,6,16) : "");
+   if(!ValidSampleKey(sample_key))
+   {
+      TPStageStatus="NO_PLAN";
+      return false;
+   }
+
+   string kdir=TPPlanGlobalKey(sample_key,"DIR");
+   string ktp1=TPPlanGlobalKey(sample_key,"TP1");
+   string ktp2=TPPlanGlobalKey(sample_key,"TP2");
+   string ktp3=TPPlanGlobalKey(sample_key,"TP3");
+   if(!GlobalVariableCheck(kdir) || !GlobalVariableCheck(ktp1)
+      || !GlobalVariableCheck(ktp2) || !GlobalVariableCheck(ktp3))
+   {
+      TPStageStatus="NO_PLAN";
+      return false;
+   }
+
+   string direction=(GlobalVariableGet(kdir)>=0.0 ? "BUY" : "SELL");
+   double tp1=GlobalVariableGet(ktp1);
+   double tp2=GlobalVariableGet(ktp2);
+   double tp3=GlobalVariableGet(ktp3);
+   double entry=PositionGetDouble(POSITION_PRICE_OPEN);
+   if(!ValidDirectionalTargets(direction,entry,tp1,tp2,tp3))
+   {
+      TPStageStatus="INVALID_PLAN";
+      return false;
+   }
+
+   TPStagePositionIdentifier=identifier;
+   TPStageSampleKey=sample_key;
+   TPStageDirection=direction;
+   TPStageTP1=tp1;
+   TPStageTP2=tp2;
+   TPStageTP3=tp3;
+   TPStage=(GlobalVariableCheck(TPPlanGlobalKey(sample_key,"STAGE"))
+      ? (int)GlobalVariableGet(TPPlanGlobalKey(sample_key,"STAGE")) : 0);
+   TPStageHitTime=(GlobalVariableCheck(TPPlanGlobalKey(sample_key,"HIT"))
+      ? (datetime)GlobalVariableGet(TPPlanGlobalKey(sample_key,"HIT")) : 0);
+   TPStageWeakSnapshots=0;
+   TPStageProgress=0.0;
+   TPStageStatus="ACTIVE";
+   return true;
+}
+
+bool TargetReached(const string direction,const double exit_price,const double target)
+{
+   return (direction=="BUY" ? exit_price>=target : exit_price<=target);
+}
+
+double DirectionalProgress(
+   const string direction,const double from_price,const double to_price,const double current_price
+)
+{
+   double span=MathAbs(to_price-from_price);
+   if(span<=0.0) return 0.0;
+   double moved=(direction=="BUY" ? current_price-from_price : from_price-current_price);
+   return moved/span;
+}
+
+bool TPStageModelSupportive()
+{
+   bool direction_support=(LastModelDecision==TPStageDirection);
+   bool intrabar_support=(LastIntrabarConfirmed && LastIntrabarDirection==TPStageDirection);
+   bool trend_support=(LastAiTrendConfirmed && LastAiTrendDirection==TPStageDirection);
+   return direction_support && (intrabar_support || trend_support);
+}
+
+bool ManageTPStages(const ulong ticket)
+{
+   if(!LoadTPStagePlan(ticket))
+      return false;
+
+   MqlTick tick;
+   if(!SymbolInfoTick(_Symbol,tick))
+      return false;
+   double exit_price=(TPStageDirection=="BUY" ? tick.bid : tick.ask);
+   datetime now=TimeCurrent();
+
+   if(TPStage<1 && TargetReached(TPStageDirection,exit_price,TPStageTP1))
+   {
+      TPStage=1;
+      TPStageHitTime=now;
+      TPStageWeakSnapshots=0;
+      GlobalVariableSet(TPPlanGlobalKey(TPStageSampleKey,"STAGE"),1.0);
+      GlobalVariableSet(TPPlanGlobalKey(TPStageSampleKey,"HIT"),(double)now);
+      Print("Ramon TP STAGE 1 hit ticket=",ticket," tp1=",DoubleToString(TPStageTP1,_Digits));
+   }
+   if(TPStage<2 && TargetReached(TPStageDirection,exit_price,TPStageTP2))
+   {
+      TPStage=2;
+      TPStageHitTime=now;
+      TPStageWeakSnapshots=0;
+      GlobalVariableSet(TPPlanGlobalKey(TPStageSampleKey,"STAGE"),2.0);
+      GlobalVariableSet(TPPlanGlobalKey(TPStageSampleKey,"HIT"),(double)now);
+      Print("Ramon TP STAGE 2 hit ticket=",ticket," tp2=",DoubleToString(TPStageTP2,_Digits));
+   }
+   if(TargetReached(TPStageDirection,exit_price,TPStageTP3))
+   {
+      TPStage=3;
+      TPStageStatus="TP3_EXIT";
+      if(Trade.PositionClose(ticket,MaxDeviationPoints))
+      {
+         RecordDealTelemetry(Trade.ResultDeal(),"tp3_stage_exit");
+         StatusLine="TP3 STAGE EXIT";
+         Print("Ramon execution: ",StatusLine);
+         return true;
+      }
+      StatusLine="TP3 STAGE EXIT FAILED "+IntegerToString((int)Trade.ResultRetcode());
+      Print("Ramon execution: ",StatusLine);
+      return true;
+   }
+
+   if(TPStage==0)
+   {
+      TPStageStatus="BEFORE_TP1";
+      TPStageProgress=DirectionalProgress(
+         TPStageDirection,
+         PositionGetDouble(POSITION_PRICE_OPEN),
+         TPStageTP1,
+         exit_price
+      );
+      return false;
+   }
+
+   double next_target=(TPStage==1 ? TPStageTP2 : TPStageTP3);
+   double base_target=(TPStage==1 ? TPStageTP1 : TPStageTP2);
+   TPStageProgress=DirectionalProgress(TPStageDirection,base_target,next_target,exit_price);
+   bool supportive=TPStageModelSupportive();
+   if(supportive)
+      TPStageWeakSnapshots=0;
+   else
+      TPStageWeakSnapshots++;
+
+   int grace=(TPStage==1 ? TP1GraceSeconds : TP2GraceSeconds);
+   double retrace_fraction=(TPStage==1 ? TP1RetraceFraction : TP2RetraceFraction);
+   double stage_span=MathAbs(next_target-base_target);
+   double retrace_price=(TPStageDirection=="BUY"
+      ? base_target-stage_span*retrace_fraction
+      : base_target+stage_span*retrace_fraction);
+   bool retraced=(TPStageDirection=="BUY" ? exit_price<=retrace_price : exit_price>=retrace_price);
+   bool grace_over=(TPStageHitTime>0 && now-TPStageHitTime>=grace);
+   bool weak_exit=(
+      grace_over
+      && TPStageWeakSnapshots>=TPStageWeakSnapshotsRequired
+      && (TPStage==2 || TPStageProgress<TP1HealthyProgressFraction)
+   );
+
+   TPStageStatus=(supportive ? "CONTINUE" : "WATCH");
+   if(grace_over && (retraced || weak_exit))
+   {
+      string detail=(TPStage==1 ? "tp1_stall_exit" : "tp2_stall_exit");
+      TPStageStatus=(retraced ? "RETRACE_EXIT" : "WEAK_EXIT");
+      if(Trade.PositionClose(ticket,MaxDeviationPoints))
+      {
+         RecordDealTelemetry(Trade.ResultDeal(),detail);
+         StatusLine=(TPStage==1 ? "TP1->TP2 SMART EXIT" : "TP2->TP3 SMART EXIT");
+         Print("Ramon execution: ",StatusLine,
+            " progress=",DoubleToString(TPStageProgress,3),
+            " weak=",TPStageWeakSnapshots,
+            " supportive=",BoolText(supportive));
+         return true;
+      }
+      StatusLine="TP STAGE EXIT FAILED "+IntegerToString((int)Trade.ResultRetcode());
+      Print("Ramon execution: ",StatusLine);
+      return true;
+   }
+   return false;
+}
+
 void ResetProfitProtectionState()
 {
    ProfitProtectionTicket=0;
    ProfitProtectionPeakUnits=0.0;
    ProfitProtectionCurrentUnits=0.0;
    ProfitProtectionGivebackNowUnits=0.0;
+   ProfitProtectionInitialRiskUnits=0.0;
+   ProfitProtectionActivationUnits=ProfitProtectionFallbackActivationUnits;
+   ProfitProtectionGivebackUnits=MathMax(
+      ProfitProtectionGivebackMinUnits,
+      MathMin(ProfitProtectionGivebackMaxUnits,
+         ProfitProtectionFallbackActivationUnits*ProfitProtectionGivebackFraction)
+   );
    ProfitProtectionArmed=false;
    ProfitProtectionShadowTriggered=false;
    ProfitProtectionShadowTriggerTime=0;
    EarlyReversalShadowTriggered=false;
    EarlyReversalShadowTriggerTime=0;
+}
+
+double ManagedPositionInitialRiskUnits(const ulong ticket)
+{
+   if(ticket==0 || !PositionSelectByTicket(ticket))
+      return 0.0;
+
+   double entry=PositionGetDouble(POSITION_PRICE_OPEN);
+   double stop=PositionGetDouble(POSITION_SL);
+   double volume=PositionGetDouble(POSITION_VOLUME);
+   if(entry<=0.0 || stop<=0.0 || volume<=0.0)
+      return 0.0;
+
+   long position_type=PositionGetInteger(POSITION_TYPE);
+   ENUM_ORDER_TYPE side=(position_type==POSITION_TYPE_BUY ? ORDER_TYPE_BUY : ORDER_TYPE_SELL);
+   double money=0.0;
+   if(!OrderCalcProfit(side,_Symbol,volume,entry,stop,money) || money>=0.0)
+      return 0.0;
+   return MathAbs(money);
+}
+
+void SelectDynamicProfitProtectionThresholds(const ulong ticket)
+{
+   ProfitProtectionInitialRiskUnits=ManagedPositionInitialRiskUnits(ticket);
+   double activation=ProfitProtectionFallbackActivationUnits;
+   if(ProfitProtectionInitialRiskUnits>0.0)
+      activation=ProfitProtectionInitialRiskUnits*ProfitProtectionActivationRiskFraction;
+
+   ProfitProtectionActivationUnits=MathMax(
+      ProfitProtectionActivationMinUnits,
+      MathMin(ProfitProtectionActivationMaxUnits,activation)
+   );
+   ProfitProtectionGivebackUnits=MathMax(
+      ProfitProtectionGivebackMinUnits,
+      MathMin(
+         ProfitProtectionGivebackMaxUnits,
+         ProfitProtectionActivationUnits*ProfitProtectionGivebackFraction
+      )
+   );
 }
 
 void ObserveOpenPositionProfit(const ulong ticket)
@@ -1613,6 +1926,11 @@ void ObserveOpenPositionProfit(const ulong ticket)
    {
       ResetProfitProtectionState();
       ProfitProtectionTicket=ticket;
+      SelectDynamicProfitProtectionThresholds(ticket);
+      Print("Ramon PROFIT PROTECTION dynamic ticket=",ticket,
+         " initial_risk=",DoubleToString(ProfitProtectionInitialRiskUnits,2),
+         " activation=",DoubleToString(ProfitProtectionActivationUnits,2),
+         " giveback=",DoubleToString(ProfitProtectionGivebackUnits,2));
    }
 
    ProfitProtectionCurrentUnits=PositionGetDouble(POSITION_PROFIT);
@@ -1663,8 +1981,11 @@ void ManageOpenPosition()
    if(!ManagedPosition(ticket,opened))
    {
       ResetProfitProtectionState();
+      ResetTPStageRuntime();
       return;
    }
+   if(ManageTPStages(ticket))
+      return;
    ObserveOpenPositionProfit(ticket);
    if(EnableProfitProtection && ProfitProtectionShadowTriggered)
    {
@@ -1946,8 +2267,9 @@ void OnTimer()
       || margin>AccountInfoDouble(ACCOUNT_MARGIN_FREE)*0.8)
    { StatusLine="Insufficient margin"; ShowStatus(); return; }
 
-   // Telemetry is observational only: failure to stage it must never change execution.
+   // Telemetry/management staging must never block an otherwise valid entry.
    StageEntrySizing(LastSampleKey,side,entry,stop,volume);
+   PersistTPPlan(LastSampleKey,decision,entry,LastTargetTP1,LastTargetTP2,LastTargetTP3);
    // The broker owns SL/TP immediately. No position is opened when the model is unavailable.
    bool submitted=(
       decision=="BUY"
@@ -2001,8 +2323,18 @@ int OnInit()
       || MaxExecutableRiskUSD<=0.0 || MaxExecutableRiskUSD>0.50
       || MaxExecutableRiskUSD<EffectiveRiskPerTradeUSD()
       || MaxSpreadPoints<=0 || MaxTradesPerDay<1 || MaximumHoldBars<1
-      || ProfitProtectionActivationUnits<=0.0 || ProfitProtectionGivebackUnits<=0.0
-      || ProfitProtectionGivebackUnits>=ProfitProtectionActivationUnits
+      || ProfitProtectionFallbackActivationUnits<=0.0
+      || ProfitProtectionActivationMinUnits<=0.0
+      || ProfitProtectionActivationMaxUnits<ProfitProtectionActivationMinUnits
+      || ProfitProtectionActivationRiskFraction<=0.0
+      || ProfitProtectionGivebackMinUnits<=0.0
+      || ProfitProtectionGivebackMaxUnits<ProfitProtectionGivebackMinUnits
+      || ProfitProtectionGivebackFraction<=0.0
+      || ProfitProtectionGivebackMaxUnits>=ProfitProtectionActivationMinUnits
+      || TPStageWeakSnapshotsRequired<1 || TP1GraceSeconds<0 || TP2GraceSeconds<0
+      || TP1HealthyProgressFraction<=0.0 || TP1HealthyProgressFraction>=1.0
+      || TP1RetraceFraction<=0.0 || TP1RetraceFraction>=1.0
+      || TP2RetraceFraction<=0.0 || TP2RetraceFraction>=1.0
       || EarlyReversalMinPeakUnits<=0.0 || EarlyReversalGivebackUnits<=0.0
       || EarlyReversalMaxCurrentUnits>0.0
       || SnapshotIntervalSeconds<10
