@@ -16,6 +16,7 @@ from ramon.report import (
     loss_streak_metrics,
     print_active_bundle_performance,
     print_profit_since_small_mode,
+    SMALL_MODE_START_EPOCH,
     print_stored_sizing,
     rolling_trade_metrics,
     trade_time,
@@ -98,39 +99,37 @@ def test_trade_role_and_entry_magic_are_persisted_and_validated(tmp_path):
         )
 
 
-def test_profit_since_small_mode_uses_legacy_boundary_and_exact_roles(capsys):
+def test_profit_since_small_mode_uses_fixed_utc_cutoff_and_combines_all_roles(capsys):
     rows = [
         {
-            **outcome(trade_key="a", sample_key="1" * 16, opened=100, closed=110,
-                      net_units=-5, entry_ea_version="0.41"),
-            "trade_role": None,
+            **outcome(trade_key="before", sample_key="1" * 16,
+                      opened=SMALL_MODE_START_EPOCH - 1, closed=SMALL_MODE_START_EPOCH + 10,
+                      net_units=99, entry_ea_version="0.41"),
+            "trade_role": "MAIN",
         },
         {
-            **outcome(trade_key="b", sample_key="2" * 16, opened=200, closed=210,
-                      net_units=2, entry_ea_version="0.42"),
-            "trade_role": None,
-        },
-        {
-            **outcome(trade_key="c", sample_key="3" * 16, opened=300, closed=310,
+            **outcome(trade_key="main", sample_key="2" * 16,
+                      opened=SMALL_MODE_START_EPOCH, closed=SMALL_MODE_START_EPOCH + 20,
                       net_units=3, entry_ea_version="0.48"),
             "trade_role": "MAIN",
         },
         {
-            **outcome(trade_key="d", sample_key="4" * 16, opened=400, closed=410,
+            **outcome(trade_key="small", sample_key="3" * 16,
+                      opened=SMALL_MODE_START_EPOCH + 30, closed=SMALL_MODE_START_EPOCH + 40,
                       net_units=-1, entry_ea_version="0.48"),
             "trade_role": "SMALL",
         },
     ]
     print_profit_since_small_mode(rows)
     output = capsys.readouterr().out
-    assert "=== PROFIT SINCE 2-CENT MODE ===" in output
-    assert "legacy fallback: first EA >= 0.42 trade" in output
-    assert "COMBINED | trades=3" in output
-    assert "net=+4.0000 account units" in output
-    assert "MAIN     | exact-role trades=1" in output
-    assert "SMALL    | exact-role trades=1" in output
-    assert "UNKNOWN  | legacy-role trades=1" in output
-
+    assert "=== TOTAL PROFIT SINCE 2-CENT MODE START ===" in output
+    assert "Start (UTC): 2026-09-29 04:45:00 UTC" in output
+    assert "Trades      : 2" in output
+    assert "Wins/Losses : 1/1" in output
+    assert "Net units   : +2.0000" in output
+    assert "Net cents   : +2.00" in output
+    assert "Net USD     : $+0.0200" in output
+    assert "MAIN + SMALL combined" in output
 
 def test_exact_sizing_telemetry_is_persisted_immutable_and_reported(tmp_path, capsys):
     db = tmp_path / "history.sqlite3"
