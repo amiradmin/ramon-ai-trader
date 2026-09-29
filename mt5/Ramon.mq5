@@ -1,5 +1,5 @@
 #property strict
-#property version "1.540"
+#property version "1.560"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -504,7 +504,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.54\n"
+      +"EA version: 0.56\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -815,7 +815,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.54 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.56 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
@@ -1915,7 +1915,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.54";
+      version="0.56";
    }
    if(close_detail!="") detail=close_detail;
 
