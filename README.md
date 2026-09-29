@@ -633,10 +633,76 @@ uv run python -m ramon.audit --db /path/to/ramon_history.sqlite3 \
   Deploy **both** server and EA v0.34 together; an older EA with this server does
   not implement the local cooldown.
 - Default preferred risk remains $0.06 and the minimum-lot planned-risk cap $0.12.
-  Existing MT5 Inputs may retain old values. Chronos weights, strength thresholds,
+  The current v0.41 hard cap is $0.20; existing MT5 Inputs may retain old values. Chronos weights, strength thresholds,
   SL/TP distances, training labels and observe-only profit protection are unchanged.
 
 Validation includes Python regressions for both-direction Meta vetoes and a C++
 API adapter executing the actual MQL cooldown functions against synthetic deal
 history (manual/partial exits, fees, other robots, expiry, restart and history
 errors). This does not replace MetaEditor compilation or terminal validation.
+
+### پژوهش فقط‌خواندنی برای ریسک ورود و مدل رقیب
+
+این ابزارها هیچ تغییری در فایل `Ramon.mq5`، سرویس زنده، حجم، آستانهٔ ورود یا
+قواعد خروج ایجاد نمی‌کنند. ابتدا از پایگاه دادهٔ معامله‌ها یک **کپی** بگیرید؛
+همهٔ دستورهای زیر روی کپی کار می‌کنند. کپی باید تاریخچهٔ کندل ۱۵ دقیقه‌ای با
+اسپرد ثبت‌شده نیز داشته باشد.
+
+۱. اسکریپت `mt5/InspectGoldContracts.mq5` را در متاتریدر، در بخش Scripts، کامپایل
+و **یک بار اجرا** کنید. نماد طلا باید در Market Watch باشد. در تب Experts برای
+هر نماد طلا، «زیان دلاری حداقل حجم
+به‌ازای حرکت ۱٫۰۰ قیمت» و ریسک حد ضرر نمونه را می‌بینید. ورودی
+`MoneyUnitsPerUSD=100` فقط برای حساب واقعی سنتی با همین تبدیل معتبر است؛
+مقدار واقعی قرارداد و حجم باید از همان حسابِ متصل خوانده شود. این اسکریپت هیچ
+سفارشی ارسال نمی‌کند.
+
+۲. عدد «زیان دلاری به‌ازای حرکت ۱٫۰۰» نماد موردنظر را در دستور زیر بگذارید.
+ورودی CSV تاریخچهٔ **M5 بسته‌شده** و صادرشده از متاتریدر است؛ فقط سه‌تایی‌های
+کامل به کندل M15 تبدیل می‌شوند:
+
+```bash
+uv run python -m ramon.stop_feasibility \
+  /path/to/Ramon_XAUUSD_l_M5_History.csv \
+  --cap-usd 0.06 --min-lot-usd-per-price VALUE_FROM_MT5
+```
+
+این خروجی درصد زمان‌هایی را که حداقل حجم با بودجهٔ ۶ سنت جور می‌شود و یک
+تقریب برخورد به حد ضررهای ۱٫۵، ۱٫۲۵ و ۱ برابر نوسان را نشان می‌دهد. **آزمون
+سودآوری رامون نیست**: هر دو جهت فرضی، بدون تصمیم ورود واقعی، تست می‌شوند.
+کم‌کردن فاصلهٔ حد ضرر صرفاً برای رسیدن به ۶ سنت می‌تواند دفعات برخورد را زیاد کند.
+
+۳. برای بررسی یک شرط ورود ثابت در معاملات واقعی، دو دورهٔ اول و آخر را جدا
+ببینید. این نمونه فقط برای تشخیص است؛ آستانه را با نگاه‌کردن به دورهٔ آخر
+انتخاب نکنید:
+
+```bash
+uv run python -m ramon.entry_audit \
+  --db /path/to/ramon_history_COPY.sqlite3 --symbol XAUUSD_l \
+  --feature signal_strength --threshold 0.20 --keep above
+```
+
+این گزارش تنها معاملات **واقعاً اجراشده و دارای برچسب خروج تمیز** را می‌شناسد.
+اگر معامله‌ای حذف می‌شد، فرصت‌های بعدی تغییر می‌کردند؛ بنابراین جمع معاملات
+«نگه‌داشته‌شده» برآورد سود اجرای فیلتر نیست. با حدود ۹۰ معاملهٔ تمیز فعلی، بخش
+آخر کمتر از ۲۰ معامله است و برای تصمیم دربارهٔ آستانه کافی نیست.
+
+۴. کرونوس، خط مبنای ساده و مدل رقیب «تایمز‌اف‌ام ۲٫۵» را فقط روی بخش آخر
+تاریخچهٔ **M15 با اسپرد واقعی** مقایسه کنید. وابستگی این مدل فقط در محیط
+پژوهشی نصب می‌شود و به تصویر Docker زنده افزوده نشده است. دانلود اولیهٔ وزن
+مدل نیاز به اینترنت و فضای دیسک دارد:
+
+```bash
+uv run --extra model --extra timesfm-shadow python -m ramon.compare \
+  --db /path/to/ramon_history_COPY.sqlite3 --symbol XAUUSD_l \
+  --time-only
+
+uv run --extra model --extra timesfm-shadow python -m ramon.compare \
+  --db /path/to/ramon_history_COPY.sqlite3 --symbol XAUUSD_l \
+  --device cpu --timesfm-shadow --stride 4
+```
+
+بررسی زمان و وجود اسپرد قبل از بارگذاری مدل اجرا می‌شود. این بازپخش، خروج‌های
+چندمرحله‌ای و پرشدن‌های واقعی اکسپرت را بازسازی نمی‌کند؛ نتیجهٔ بهتر یک مدل در
+این آزمایش به‌تنهایی دلیل فعال‌کردن آن در حساب زنده نیست. وزن مدل ۳٫۰
+تایمز‌اف‌ام مجوز جداگانهٔ غیرتجاری دارد؛ این مقایسه عمداً از نسخهٔ ۲٫۵ استفاده
+می‌کند.

@@ -85,7 +85,7 @@ def holdout_metadata(db: str | Path, symbol: str, bars, start: int, stride: int)
 
 def compare(db: str | Path, chronos, *, symbol: str = "XAUUSD_l",
             point: float = 0.01, stride: int = 4,
-            cost_r: float | None = None) -> dict[str, object]:
+            cost_r: float | None = None, challenger=None) -> dict[str, object]:
     bars, spreads = load_bars(db, symbol)
     if len(bars) < 600:
         raise ValueError("need >=600 completed bars for the chronological holdout")
@@ -108,6 +108,8 @@ def compare(db: str | Path, chronos, *, symbol: str = "XAUUSD_l",
     baseline_result = replay(bars, spreads, MomentumBaseline(), **kwargs)
     chronos_result = replay(bars, spreads, chronos, **kwargs)
     results = {"momentum_baseline": asdict(baseline_result), "chronos": asdict(chronos_result)}
+    if challenger is not None:
+        results["timesfm_shadow"] = asdict(replay(bars, spreads, challenger, **kwargs))
     trade_counts = {name: result["buys"] + result["sells"] for name, result in results.items()}
     return {
         "symbol": symbol,
@@ -125,6 +127,7 @@ def compare(db: str | Path, chronos, *, symbol: str = "XAUUSD_l",
             "Closed M15 OHLC cannot reconstruct intrabar fill order, gaps, slippage or live EA exits.",
             "Both forecasts use completed bars and simulated next-bar entries; this is not a live PnL comparison.",
             "The last 20% is a chronological holdout, but no strategy parameters were fitted here.",
+            "Models may trade at different timestamps; this is a strategy replay, not a matched-trade causal test.",
         ],
     }
 
@@ -135,6 +138,8 @@ def main() -> None:
     parser.add_argument("--symbol", default="XAUUSD_l")
     parser.add_argument("--model", default="autogluon/chronos-2-small")
     parser.add_argument("--device", default="cpu")
+    parser.add_argument("--timesfm-shadow", action="store_true",
+                        help="Offline-only TimesFM 2.5 challenger; does not affect the live server")
     parser.add_argument("--point", type=float, default=0.01)
     parser.add_argument("--stride", type=int, default=4)
     parser.add_argument("--cost-r", type=float, default=None,
@@ -158,10 +163,16 @@ def main() -> None:
                           "holdout": holdout_metadata(args.db, args.symbol, bars, start, args.stride)}, indent=2))
         return
     model = ChronosForecaster(model_name(args.model), args.device)
+    challenger = None
+    if args.timesfm_shadow:
+        from .timesfm_shadow import TimesFMShadow
+        challenger = TimesFMShadow()
     report = compare(args.db, model, symbol=args.symbol, point=args.point,
-                     stride=args.stride, cost_r=args.cost_r)
+                     stride=args.stride, cost_r=args.cost_r, challenger=challenger)
     report["chronos_model"] = args.model
     report["chronos_revision"] = model.revision
+    if challenger is not None:
+        report["timesfm_checkpoint"] = challenger.checkpoint
     print(json.dumps(report, indent=2))
 
 
