@@ -1,5 +1,5 @@
 #property strict
-#property version "1.560"
+#property version "1.570"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -36,6 +36,7 @@ input string ExpectedAccountCurrency = ""; // Optional exact ACCOUNT_CURRENCY ch
 input double RiskPerTradeUSD = 0.06; // Preferred sizing budget.
 input bool AllowMinLotRiskOverride = true; // Permit broker minimum lot above preferred budget.
 const double MaxExecutableRiskUSD = 0.20; // Hard fixed cap; MT5 chart inputs cannot override this value.
+const double MaxCombinedOpenRiskUSD = 0.20; // Shared cap across the primary and small EA on this account.
 input int MaxSpreadPoints = 50;
 input int MaxTradesPerDay = 400;
 input int MaximumHoldBars = 4;
@@ -198,6 +199,7 @@ string LockedAccountServer = "";
 string LastCopyStatus = "Ready";
 const string UiPrefix = "RAMON_UI_";
 ulong ProfitProtectionTicket = 0;
+ulong ProfitProtectionIdentifier = 0;
 double ProfitProtectionPeakUnits = 0.0;
 double ProfitProtectionCurrentUnits = 0.0;
 double ProfitProtectionGivebackNowUnits = 0.0;
@@ -357,6 +359,83 @@ bool OtherPositionOnSymbol()
    return false;
 }
 
+string SharedRiskLockKey()
+{
+   return "RamonRisk."+IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN));
+}
+
+bool AcquireSharedRiskLock(double &lease)
+{
+   lease=0.0;
+   string key=SharedRiskLockKey();
+   if(!GlobalVariableCheck(key)) return false; // Created during OnInit; fail closed if unavailable.
+   double previous=GlobalVariableGet(key);
+   double now=(double)TimeLocal();
+   if(previous>now) return false;
+   lease=now+60.0;
+   return GlobalVariableSetOnCondition(key,lease,previous);
+}
+
+void ReleaseSharedRiskLock(const double lease)
+{
+   if(lease>0.0)
+      GlobalVariableSetOnCondition(SharedRiskLockKey(),0.0,lease);
+}
+
+bool SharedRiskAllowsEntry(
+   const ENUM_ORDER_TYPE side,const double entry,const double stop,
+   const double volume,string &reason
+)
+{
+   reason="";
+   double existing=0.0;
+   // An accepted but unfilled order can become a position after the lock is released.
+   for(int i=OrdersTotal()-1;i>=0;i--)
+   {
+      ulong order=OrderGetTicket(i);
+      if(order==0) { reason="Shared risk order inventory unavailable"; return false; }
+      ulong magic=(ulong)OrderGetInteger(ORDER_MAGIC);
+      if(magic==PrimaryMagicNumber || magic==SmallProfitMagicNumber)
+      { reason="Shared risk pending Ramon order"; return false; }
+   }
+   for(int i=PositionsTotal()-1;i>=0;i--)
+   {
+      ulong ticket=PositionGetTicket(i);
+      if(ticket==0 || !PositionSelectByTicket(ticket))
+      { reason="Shared risk position inventory unavailable"; return false; }
+      ulong magic=(ulong)PositionGetInteger(POSITION_MAGIC);
+      if(magic!=PrimaryMagicNumber && magic!=SmallProfitMagicNumber) continue;
+      string symbol=PositionGetString(POSITION_SYMBOL);
+      double open=PositionGetDouble(POSITION_PRICE_OPEN);
+      double sl=PositionGetDouble(POSITION_SL);
+      double held_volume=PositionGetDouble(POSITION_VOLUME);
+      if(symbol=="" || open<=0.0 || sl<=0.0 || held_volume<=0.0)
+      { reason="Shared risk position has no measurable broker stop"; return false; }
+      ENUM_ORDER_TYPE held_side=(PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY
+         ? ORDER_TYPE_BUY : ORDER_TYPE_SELL);
+      double result=0.0;
+      if(!OrderCalcProfit(held_side,symbol,held_volume,open,sl,result))
+      { reason="Shared risk stop calculation failed"; return false; }
+      existing+=MathMax(0.0,-result);
+   }
+   double point=SymbolInfoDouble(_Symbol,SYMBOL_POINT);
+   if(point<=0.0 || MoneyUnitsPerUSD<=0.0)
+   { reason="Shared risk unit conversion unavailable"; return false; }
+   // Reserve for the largest entry slippage that this EA itself permits.
+   double worst_entry=entry+(side==ORDER_TYPE_BUY ? 1.0 : -1.0)*MaxDeviationPoints*point;
+   double result=0.0;
+   if(!OrderCalcProfit(side,_Symbol,volume,worst_entry,stop,result) || result>=0.0)
+   { reason="Shared risk new stop calculation failed"; return false; }
+   if(existing-result>MaxCombinedOpenRiskUSD*MoneyUnitsPerUSD+0.00001)
+   {
+      reason="Shared risk cap: open="+DoubleToString(existing,2)
+         +" new="+DoubleToString(-result,2)
+         +" limit="+DoubleToString(MaxCombinedOpenRiskUSD*MoneyUnitsPerUSD,2);
+      return false;
+   }
+   return true;
+}
+
 string EffectiveDiagnosticFileName()
 {
    return (SmallOnlyMode ? "Ramon_Small_Diagnostic.txt" : DiagnosticFileName);
@@ -504,7 +583,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.56\n"
+      +"EA version: 0.57\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -614,6 +693,8 @@ string BuildDiagnosticText()
       +"  ExpectedCurrency: "+(StringLen(ExpectedAccountCurrency)>0 ? ExpectedAccountCurrency : "NOT_SET")+"\n"
       +"MoneyUnitsConfirmed: "+BoolText(ConfirmMoneyUnitsPerUSD)
       +"  MoneyUnitsPerUSD: "+DoubleToString(MoneyUnitsPerUSD,2)+"\n"
+      +"SharedRamonRiskCapUSD: "+DoubleToString(MaxCombinedOpenRiskUSD,2)
+      +"  Includes PRIMARY and SMALL on this MT5 terminal\n"
       +"BalanceUnits: "+DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),2)
       +"  BalanceUSDApprox: "+DoubleToString(AccountUnitsToUSD(AccountInfoDouble(ACCOUNT_BALANCE)),2)
       +"  EquityUSDApprox: "+DoubleToString(AccountUnitsToUSD(AccountInfoDouble(ACCOUNT_EQUITY)),2)+"\n"
@@ -632,6 +713,8 @@ string BuildDiagnosticText()
       +"  ShadowTrigger: "+BoolText(ProfitProtectionShadowTriggered)+"\n"
       +"ProfitProtectionUnits: current="+DoubleToString(ProfitProtectionCurrentUnits,2)
       +"  peak="+DoubleToString(ProfitProtectionPeakUnits,2)
+      +"  PeakSaved="+BoolText(ProfitProtectionIdentifier>0
+         && GlobalVariableCheck(ProfitPeakGlobalKey(ProfitProtectionIdentifier)))
       +"  giveback="+DoubleToString(ProfitProtectionGivebackNowUnits,2)
       +"  activate="+DoubleToString(ProfitProtectionActivationUnits,2)
       +"  triggerGiveback="+DoubleToString(ProfitProtectionGivebackUnits,2)
@@ -815,7 +898,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.56 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.57 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
@@ -1915,7 +1998,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.56";
+      version="0.57";
    }
    if(close_detail!="") detail=close_detail;
 
@@ -2689,6 +2772,7 @@ bool ManageMainFastProfit(const ulong ticket,const datetime opened)
 void ResetProfitProtectionState()
 {
    ProfitProtectionTicket=0;
+   ProfitProtectionIdentifier=0;
    ProfitProtectionPeakUnits=0.0;
    ProfitProtectionCurrentUnits=0.0;
    ProfitProtectionGivebackNowUnits=0.0;
@@ -2704,6 +2788,12 @@ void ResetProfitProtectionState()
    ProfitProtectionShadowTriggerTime=0;
    EarlyReversalShadowTriggered=false;
    EarlyReversalShadowTriggerTime=0;
+}
+
+string ProfitPeakGlobalKey(const ulong identifier)
+{
+   return "RamonPeak."+IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN))
+      +"."+IntegerToString((long)identifier);
 }
 
 double ManagedPositionInitialRiskUnits(const ulong ticket)
@@ -2908,7 +2998,18 @@ void ObserveOpenPositionProfit(const ulong ticket)
    {
       ResetProfitProtectionState();
       ProfitProtectionTicket=ticket;
+      ProfitProtectionIdentifier=(ulong)PositionGetInteger(POSITION_IDENTIFIER);
       SelectDynamicProfitProtectionThresholds(ticket);
+      if(ProfitProtectionIdentifier>0)
+      {
+         string key=ProfitPeakGlobalKey(ProfitProtectionIdentifier);
+         if(GlobalVariableCheck(key))
+         {
+            double saved=GlobalVariableGet(key);
+            if(MathIsValidNumber(saved) && saved>0.0)
+               ProfitProtectionPeakUnits=saved;
+         }
+      }
       Print("Ramon PROFIT PROTECTION dynamic ticket=",ticket,
          " initial_risk=",DoubleToString(ProfitProtectionInitialRiskUnits,2),
          " activation=",DoubleToString(ProfitProtectionActivationUnits,2),
@@ -2917,7 +3018,15 @@ void ObserveOpenPositionProfit(const ulong ticket)
 
    ProfitProtectionCurrentUnits=PositionGetDouble(POSITION_PROFIT);
    if(ProfitProtectionCurrentUnits>ProfitProtectionPeakUnits)
+   {
       ProfitProtectionPeakUnits=ProfitProtectionCurrentUnits;
+      if(ProfitProtectionIdentifier>0)
+      {
+         GlobalVariableSet(ProfitPeakGlobalKey(ProfitProtectionIdentifier),
+            ProfitProtectionPeakUnits);
+         GlobalVariablesFlush();
+      }
+   }
 
    ProfitProtectionArmed=(ProfitProtectionPeakUnits>=ProfitProtectionActivationUnits);
    ProfitProtectionGivebackNowUnits=MathMax(
@@ -3337,6 +3446,18 @@ void OnTimer()
       || margin>AccountInfoDouble(ACCOUNT_MARGIN_FREE)*0.8)
    { StatusLine="Insufficient margin"; ShowStatus(); return; }
 
+   double risk_lease=0.0;
+   if(!AcquireSharedRiskLock(risk_lease))
+   { StatusLine="Shared risk lock busy or unavailable"; ShowStatus(); return; }
+   string shared_risk_reason="";
+   if(!SharedRiskAllowsEntry(side,entry,stop,volume,shared_risk_reason))
+   {
+      ReleaseSharedRiskLock(risk_lease);
+      StatusLine=shared_risk_reason;
+      ShowStatus();
+      return;
+   }
+
    // Telemetry/management staging must never block an otherwise valid entry.
    StageEntrySizing(LastSampleKey,side,entry,stop,volume);
    if(!small_profit)
@@ -3349,6 +3470,7 @@ void OnTimer()
       : Trade.Sell(volume,_Symbol,0.0,stop,target,trade_comment)
    );
    uint retcode=Trade.ResultRetcode();
+   ReleaseSharedRiskLock(risk_lease);
    if(!submitted || (retcode!=TRADE_RETCODE_DONE && retcode!=TRADE_RETCODE_PLACED))
    {
       ClearPendingSizing();
@@ -3424,7 +3546,7 @@ int OnInit()
       || EarlyAdverseRiskFraction<=0.0 || EarlyAdverseRiskFraction>=1.0
       || SmallEarlyAdverseRiskFraction<=0.0 || SmallEarlyAdverseRiskFraction>=1.0
       || EarlyAdverseWeakSnapshotsRequired<1 || EarlyAdverseMinAgeSeconds<0
-      || SnapshotIntervalSeconds<5
+      || SnapshotIntervalSeconds<5 || MaxDeviationPoints<0
       || (WriteDiagnosticFile && StringLen(DiagnosticFileName)==0)
       || (WriteCsvLogs && (StringLen(SignalCsvFileName)==0 || StringLen(TradeCsvFileName)==0))
       || (EnableImprovementShadowPack && WriteCsvLogs && StringLen(ShadowCsvFileName)==0)
@@ -3459,6 +3581,9 @@ int OnInit()
       Print("Ramon live BLOCKED: ConfirmMoneyUnitsPerUSD is false");
    if(EnableLiveTrading && !AccountLockHealthy())
       Print("Ramon live BLOCKED: account/server lock mismatch");
+   if(!GlobalVariableCheck(SharedRiskLockKey())
+      && GlobalVariableSet(SharedRiskLockKey(),0.0)==0)
+   { Print("Ramon shared risk lock unavailable"); return INIT_FAILED; }
    Trade.SetExpertMagicNumber(MagicNumber);
    Trade.SetDeviationInPoints(MaxDeviationPoints);
    Trade.SetTypeFillingBySymbol(_Symbol);
