@@ -13,10 +13,10 @@ def source() -> str:
 
 def test_ea_038_keeps_sizing_telemetry_observational():
     text = source()
-    assert '#property version "1.560"' in text
-    assert 'EA version: 0.56' in text
-    assert 'RAMON AI TRADER  v0.56' in text
-    assert 'version="0.56";' in text
+    assert '#property version "1.570"' in text
+    assert 'EA version: 0.57' in text
+    assert 'RAMON AI TRADER  v0.57' in text
+    assert 'version="0.57";' in text
     # Telemetry staging is deliberately not a trade gate.
     assert 'if(!StageEntrySizing' not in text
     assert re.search(
@@ -79,3 +79,25 @@ def test_deal_telemetry_reader_is_backward_compatible():
     text = source()
     assert '(marker=="v1" || marker=="v2")' in text
     assert 'if(marker!="v2")' in text
+
+
+def test_shared_account_risk_is_checked_under_lock_before_any_order() -> None:
+    ea = source()
+    timer = ea.split("void OnTimer()", 1)[1].split("void OnTradeTransaction(", 1)[0]
+    acquire = timer.index("AcquireSharedRiskLock(risk_lease)")
+    audit = timer.index("SharedRiskAllowsEntry(side,entry,stop,volume,shared_risk_reason)")
+    order = timer.index("Trade.Buy(volume,_Symbol")
+    release = timer.index("ReleaseSharedRiskLock(risk_lease);", order)
+    assert acquire < audit < order < release
+    guard = ea.split("bool SharedRiskAllowsEntry(", 1)[1].split("string EffectiveDiagnosticFileName", 1)[0]
+    assert "OrdersTotal()" in guard and "PositionsTotal()" in guard
+    assert "magic==PrimaryMagicNumber || magic==SmallProfitMagicNumber" in guard
+    assert "MaxCombinedOpenRiskUSD*MoneyUnitsPerUSD" in guard
+
+
+def test_peak_recovery_is_per_position_and_saved_before_giveback_trigger() -> None:
+    ea = source()
+    observe = ea.split("void ObserveOpenPositionProfit(", 1)[1].split("void ManageOpenPosition()", 1)[0]
+    assert "POSITION_IDENTIFIER" in observe
+    assert observe.index("GlobalVariableGet(key)") < observe.index("ProfitProtectionCurrentUnits=PositionGetDouble")
+    assert observe.index("GlobalVariablesFlush()") < observe.index("ProfitProtectionArmed=")

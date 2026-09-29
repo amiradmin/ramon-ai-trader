@@ -6,7 +6,7 @@ from math import isclose
 from ramon.core import Bar, Forecast
 from ramon.model import ChronosForecaster
 from ramon.time_context import forecast_clock_inputs, tehran_hour
-from ramon.time_context_eval import compare, directional_result, windows
+from ramon.time_context_eval import compare, directional_result, market_regime, path_result, windows
 
 
 def test_known_future_hours_are_derived_only_from_utc_timestamps() -> None:
@@ -80,3 +80,33 @@ def test_direction_audit_charges_spread_and_abstains_without_edge() -> None:
     assert buy == "BUY" and isclose(buy_net, 0.4)
     assert sell == "SELL" and isclose(sell_net, 0.4)
     assert directional_result(100.1, 100, 101, 0.2, 2) == ("WAIT", 0.0)
+
+
+def test_first_touch_path_charges_spread_and_resolves_ambiguous_bar_as_loss() -> None:
+    bar = Bar(900, 100, 105, 96, 102)
+    assert path_result("BUY", 100, (bar,), 0.4, 2) == -1.5
+    assert path_result("SELL", 100, (bar,), 0.4, 2) == -1.5
+    profitable = Bar(900, 100, 107, 100, 105)
+    assert path_result("BUY", 100, (profitable,), 0.4, 2) == 3.0
+    assert path_result("WAIT", 100, (profitable,), 0.4, 2) == 0.0
+
+
+def test_regime_uses_only_completed_history_and_report_has_path_and_buckets() -> None:
+    start = 1_800_000_000
+    history = tuple(Bar(start + i * 900, 100 + i, 101 + i, 99 + i, 100 + i)
+                    for i in range(13))
+    assert market_regime(history, 2) == "UP_TREND"
+
+    class FakeModel:
+        model_id = "fake"
+        def forecast(self, closes, horizon):
+            return Forecast(101, 102, 103)
+        def forecast_with_hour(self, closes, timestamps, horizon):
+            return Forecast(99, 100, 101)
+
+    bars = tuple(Bar(start + i * 900, 100, 101, 99, 100) for i in range(140))
+    report = compare(bars, FakeModel(), context=128, max_windows=3,
+                     spreads=(0.2,) * len(bars))
+    assert report["all"]["realized_best_side_counts"]["WAIT"] == 3
+    assert report["all"]["baseline_path_mean_net_atr"] < 0
+    assert report["market_regimes"]["RANGE_OR_UNCLEAR"]["windows"] == 3

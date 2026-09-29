@@ -709,3 +709,37 @@ Validation includes Python regressions for both-direction Meta vetoes and a C++
 API adapter executing the actual MQL cooldown functions against synthetic deal
 history (manual/partial exits, fees, other robots, expiry, restart and history
 errors). This does not replace MetaEditor compilation or terminal validation.
+# v0.57: shared live risk, restart-safe profit peak, market-condition research
+
+The primary EA (`26092212`) and parallel SMALL EA (`26092213`) now share a
+fixed **USD 0.20 aggregate broker-stop risk limit** on the same MT5 account.
+Before submitting either order, the EA acquires an account-wide terminal-global
+lock, checks both EAs' open positions and outstanding orders, and reserves the
+new stop loss with its permitted entry deviation. Missing stop/risk information
+blocks the new entry. This limit includes existing main and small positions;
+the separate per-trade caps still apply. It does not change or close an open
+position. Both charts must run v0.57 to enforce the joint limit consistently.
+
+The profit-protection peak is saved in an MT5 terminal global variable keyed by
+account and position identifier, flushed on each new peak and recovered when
+the EA is reattached or the terminal restarts. The broker SL/TP remains the
+fallback when the terminal is disconnected. Terminal global variables are
+local to one MT5 installation; running the two EAs on different terminals
+does not coordinate their joint risk.
+
+The offline `ramon.time_context_eval` report now also includes tentative
+BUY/SELL/WAIT labels, first-touch SL/TP results and summaries by Tehran time
+and market condition. If a 15-minute candle touches both limits, the audit
+counts the stop first. It assumes a constant observed spread and has no
+intrabar quotes, slippage or fill history, so this is **research, not live
+execution P&L or a calibrated probability of winning**. Run the existing
+hour-aware paired evaluation with the broker's actual symbol point:
+
+```bash
+uv run --extra model python -m ramon.time_context_eval \
+  --db /data/ramon_history.sqlite3 --symbol XAUUSD_l --point 0.01
+```
+
+Do not enable the hour-aware forecast or change the live 30-second snapshot
+cadence merely because one time bucket looks favorable; compare independent
+later windows and executed net results before promoting a challenger.
