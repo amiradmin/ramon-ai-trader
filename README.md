@@ -709,6 +709,47 @@ Validation includes Python regressions for both-direction Meta vetoes and a C++
 API adapter executing the actual MQL cooldown functions against synthetic deal
 history (manual/partial exits, fees, other robots, expiry, restart and history
 errors). This does not replace MetaEditor compilation or terminal validation.
+# v0.58: optional one-to-five-minute SMALL scalp experiment
+
+The EA has a separate, **off by default** `EnableSmallRapidScalp` input on
+the `SMALL 2c` chart. When enabled, it keeps the existing `WAIT`-only model
+entry, same-direction confirmation, minimum lot, broker stop of at most 4 cent
+account units and the shared $0.20 open risk cap. It requires at least two of
+the last three **closed** M1 changes to agree with the model candidate and a
+positive three-minute net move. It looks at 12 **closed** M1
+candles and the current spread. If that observed movement is too small relative
+to the spread and a positive target, the order is skipped. Otherwise it sets
+a broker TP between 1 and 3 cent account units (USD $0.01–$0.03 under the
+configured 100 units per USD), computed from the observed range. The exact
+target may differ by one broker tick. The M1 range is a feasibility screen,
+not a forecast that price will move in the chosen direction.
+
+While the MT5 terminal remains connected and able to trade, an open SMALL
+position is sent for closure after `SmallScalpMaxHoldSeconds` (60–300 seconds,
+default 300) if its broker TP, SL, profit
+protection or adverse exit has not already closed it. The 5-second timer and
+execution latency make this an approximate limit. At the selected time it
+can close at a **loss**; spread, commission and slippage can also make realized
+P&L different from the broker's estimated TP. The broker SL/TP remains in
+place if the terminal disconnects. Existing MAIN orders and MAIN entry/exit
+logic are unchanged. If `EnableSmallRapidScalp` is false, SMALL retains
+the fixed 2-unit TP and up to three M15 bars hold.
+
+Deploy by copying `mt5/Ramon.mq5` into MT5 and compiling version 1.580 in
+MetaEditor, then attach/refresh **both** charts with the same version for the
+shared risk gate. Set `EnableSmallRapidScalp=true` only on the SMALL chart
+(`SmallOnlyMode=true`, `MagicNumber=26092213`); leave it false on MAIN. The
+diagnostic shows `SmallRapidScalp: ACTIVE` when selected. Compare net
+executed SMALL P&L, drawdown, average hold duration and trade count with the
+previous mode before keeping the experiment on. No profit rate is established
+by this implementation alone.
+
+For faster decisions you may set `SnapshotIntervalSeconds=5` on the SMALL chart
+after checking that the local model service responds reliably at that rate.
+The MAIN chart can remain at 30 seconds. More frequent checks do not add
+market information to the M15 forecast and can increase CPU usage and entries;
+the M1 confirmation still uses completed candles.
+
 # v0.57: shared live risk, restart-safe profit peak, market-condition research
 
 The primary EA (`26092212`) and parallel SMALL EA (`26092213`) now share a
