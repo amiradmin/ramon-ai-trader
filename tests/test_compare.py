@@ -64,6 +64,17 @@ def test_compare_distinguishes_spread_only_and_explicit_fees(tmp_path):
             spread_only["results"][key]["net_r"] - trades * 0.1, abs=0.00011)
 
 
+def test_challenger_has_same_holdout_and_costs_but_does_not_change_baseline(tmp_path):
+    db = tmp_path / "history.sqlite3"
+    seed(db)
+    original = compare(db, RisingForecast(), stride=4, cost_r=0.1)
+    shadow = compare(db, RisingForecast(), stride=4, cost_r=0.1,
+                     challenger=RisingForecast())
+    assert shadow["results"]["chronos"] == original["results"]["chronos"]
+    assert shadow["results"]["momentum_baseline"] == original["results"]["momentum_baseline"]
+    assert shadow["results"]["timesfm_shadow"] == shadow["results"]["chronos"]
+
+
 def test_observed_fees_normalize_to_account_r(tmp_path):
     db = tmp_path / "history.sqlite3"
     ensure_history_db(db)
