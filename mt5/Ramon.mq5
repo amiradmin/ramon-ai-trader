@@ -1,5 +1,5 @@
 #property strict
-#property version "1.570"
+#property version "1.580"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -48,6 +48,12 @@ const double MainFastProfitMinProfitUnits = 0.20; // Never close a losing MAIN t
 const double MainFastProfitMinProgressToTP1 = 0.35; // Below 35% of entry->TP1 after 2 bars is considered slow.
 const int MainFastProfitWeakSnapshotsRequired = 2; // Require repeated weak 30s snapshots.
 input bool EnableSmallProfitTrades = true; // Optional live 2-cent entries when main model says WAIT.
+input bool EnableSmallRapidScalp = false; // Opt-in: variable target and 1..5 minute time exit; validate on cent account first.
+input int SmallScalpMaxHoldSeconds = 300; // 60..300 seconds; a shorter window may reject more entries.
+const double SmallScalpMinTargetUnits = 1.0;
+const double SmallScalpMaxTargetUnits = 3.0;
+const double SmallScalpSpreadCostMultiple = 1.25;
+const int SmallScalpM1Lookback = 12;
 const double SmallProfitTargetUnits = 2.0; // CENT account units = USD 0.02 when MoneyUnitsPerUSD=100.
 const double ShadowSmallTP1Units = 2.0; // Observe-only SMALL stage 1.
 const double ShadowSmallTP2Units = 2.5; // Observe-only SMALL stage 2.
@@ -583,7 +589,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.57\n"
+      +"EA version: 0.58\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -754,6 +760,11 @@ string BuildDiagnosticText()
       +"  BrokerSLMaxUnits: "+DoubleToString(SmallProfitMaxLossUnits,2)
       +"  Today: "+(today<0 ? "history unavailable" : IntegerToString(today))
       +"/unlimited\n"
+      +"SmallRapidScalp: "+(SmallOnlyMode && EnableSmallRapidScalp ? "ACTIVE" : "OFF")
+      +"  HoldSec: "+IntegerToString(SmallScalpMaxHoldSeconds)
+      +"  TargetRangeUnits: "+DoubleToString(SmallScalpMinTargetUnits,2)
+      +".."+DoubleToString(SmallScalpMaxTargetUnits,2)
+      +"  M1Lookback: "+IntegerToString(SmallScalpM1Lookback)+"\n"
       +"Small entries per signal bar: "+IntegerToString(SmallProfitMaxEntriesPerSignalBar)
       +" max; second blocked after same-bar loss\n"      +"SmallEntryQualityFilter: ACTIVE"
       +"  Rule: edge>=minimum AND (intrabar OR ai_trend) same direction\n"
@@ -898,7 +909,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.57 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.58 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
@@ -1374,8 +1385,65 @@ bool SmallProfitCandidate(const string decision,const string reason,
    return true;
 }
 
+// Closed M1 candles measure available movement, never predict its direction.
+// Fail closed on missing or stale M1 history and when costs consume the range.
+bool SmallScalpMicroConfirm(const string direction)
+{
+   datetime last_closed=iTime(_Symbol,PERIOD_M1,1);
+   if(last_closed<=0 || TimeCurrent()-last_closed>120) return false;
+   int favorable=0;
+   double net_move=0.0;
+   double sign=(direction=="BUY" ? 1.0 : -1.0);
+   for(int bar=1;bar<=3;bar++)
+   {
+      double current=iClose(_Symbol,PERIOD_M1,bar);
+      double previous=iClose(_Symbol,PERIOD_M1,bar+1);
+      if(current<=0.0 || previous<=0.0) return false;
+      double move=sign*(current-previous);
+      if(move>0.0) favorable++;
+      net_move+=move;
+   }
+   return favorable>=2 && net_move>0.0;
+}
+
+bool SmallScalpTargetUnits(const ENUM_ORDER_TYPE side,const double entry,
+   const double volume,const MqlTick &quote,double &units)
+{
+   units=0.0;
+   datetime last_closed=iTime(_Symbol,PERIOD_M1,1);
+   if(last_closed<=0 || TimeCurrent()-last_closed>120) return false;
+   double range_sum=0.0;
+   for(int bar=1;bar<=SmallScalpM1Lookback;bar++)
+   {
+      double high=iHigh(_Symbol,PERIOD_M1,bar);
+      double low=iLow(_Symbol,PERIOD_M1,bar);
+      double previous=iClose(_Symbol,PERIOD_M1,bar+1);
+      if(high<=0.0 || low<=0.0 || previous<=0.0 || high<low)
+         return false;
+      range_sum+=MathMax(high-low,MathMax(MathAbs(high-previous),MathAbs(low-previous)));
+   }
+   double spread_cost=0.0;
+   double exit_quote=(side==ORDER_TYPE_BUY ? quote.bid : quote.ask);
+   if(!OrderCalcProfit(side,_Symbol,volume,entry,exit_quote,spread_cost)
+      || spread_cost>=0.0) return false;
+   spread_cost=-spread_cost;
+   double expected_move=(range_sum/SmallScalpM1Lookback)
+      *MathSqrt((double)SmallScalpMaxHoldSeconds/60.0)*0.75;
+   double favorable_price=entry+(side==ORDER_TYPE_BUY ? expected_move : -expected_move);
+   double favorable_units=0.0;
+   if(!OrderCalcProfit(side,_Symbol,volume,entry,favorable_price,favorable_units)
+      || favorable_units<SmallScalpMinTargetUnits
+      || favorable_units<spread_cost*(1.0+SmallScalpSpreadCostMultiple))
+      return false;
+   units=MathMin(SmallScalpMaxTargetUnits,
+      MathMax(SmallScalpMinTargetUnits,0.65*favorable_units));
+   if(units<spread_cost*SmallScalpSpreadCostMultiple)
+      return false;
+   return true;
+}
+
 bool SmallProfitTarget(const ENUM_ORDER_TYPE side,const double entry,
-   const double volume,const MqlTick &quote,double &target)
+   const double volume,const MqlTick &quote,const double desired_units,double &target)
 {
    double point=SymbolInfoDouble(_Symbol,SYMBOL_POINT);
    double tick_size=SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_SIZE);
@@ -1388,7 +1456,7 @@ bool SmallProfitTarget(const ENUM_ORDER_TYPE side,const double entry,
       return false;
    double min_stop=(double)SymbolInfoInteger(_Symbol,SYMBOL_TRADE_STOPS_LEVEL)*point;
    double required_from_quote=(side==ORDER_TYPE_BUY ? quote.bid : quote.ask);
-   double distance=MathMax(SmallProfitTargetUnits/unit_gain,
+   double distance=MathMax(desired_units/unit_gain,
       MathAbs(required_from_quote-entry)+min_stop+2*point);
    double steps=MathCeil(distance/tick_size-0.00000001);
    for(int attempt=0;attempt<32;attempt++)
@@ -1396,8 +1464,8 @@ bool SmallProfitTarget(const ENUM_ORDER_TYPE side,const double entry,
       target=NormalizeDouble(entry+sign*(steps+attempt)*tick_size,_Digits);
       double gain=0.0;
       if(!OrderCalcProfit(side,_Symbol,volume,entry,target,gain)) return false;
-      if(gain+0.00001>=SmallProfitTargetUnits)
-         return gain<=SmallProfitTargetUnits+0.25;
+      if(gain+0.00001>=desired_units)
+         return gain<=desired_units+0.25;
    }
    return false;
 }
@@ -3107,6 +3175,21 @@ void ManageOpenPosition()
       HandleManagedExitFailure(ticket,"PROFIT PROTECTION EXIT");
       return;
    }
+   if(IsSmallProfitPosition(ticket) && EnableSmallRapidScalp
+      && TimeCurrent()-opened>=SmallScalpMaxHoldSeconds)
+   {
+      if(ManagedExitPausedForMarketClosed(ticket))
+      { StatusLine="SMALL SCALP EXIT PAUSED: MARKET CLOSED"; return; }
+      bool close_sent=Trade.PositionClose(ticket,MaxDeviationPoints);
+      if(close_sent && Trade.ResultRetcode()==TRADE_RETCODE_DONE)
+      {
+         ResetMarketClosedExitPause();
+         RecordDealTelemetry(Trade.ResultDeal(),"small_scalp_time_exit");
+         StatusLine="SMALL SCALP TIME EXIT";
+      }
+      else HandleManagedExitFailure(ticket,"SMALL SCALP TIME EXIT");
+      return;
+   }
    int age=iBarShift(_Symbol,PERIOD_M15,opened,false);
    int hold_bars=(IsSmallProfitPosition(ticket) ? SmallProfitMaximumHoldBars : MaximumHoldBars);
    if(age<hold_bars) { StatusLine="Managed position OPEN"; return; }
@@ -3374,6 +3457,8 @@ void OnTimer()
    { ShowStatus(); return; }
    if(small_profit)
       decision=small_direction;
+   if(small_profit && EnableSmallRapidScalp && !SmallScalpMicroConfirm(decision))
+   { StatusLine="SMALL: M1 direction not confirmed"; ShowStatus(); return; }
    int small_entries_on_bar=0;
    if(SmallOnlyMode)
    {
@@ -3438,8 +3523,12 @@ void OnTimer()
          || stop_loss_units>=0.0
          || -stop_loss_units>small_risk_cap+0.00001)
       { StatusLine="Small profit risk > 4 cents"; ShowStatus(); return; }
-      if(!SmallProfitTarget(side,entry,volume,tick,target))
-      { StatusLine="Broker cannot place 2-cent target"; ShowStatus(); return; }
+      double desired_units=SmallProfitTargetUnits;
+      if(EnableSmallRapidScalp
+         && !SmallScalpTargetUnits(side,entry,volume,tick,desired_units))
+      { StatusLine="SMALL: M1 range insufficient for spread and target"; ShowStatus(); return; }
+      if(!SmallProfitTarget(side,entry,volume,tick,desired_units,target))
+      { StatusLine="Broker cannot place SMALL target"; ShowStatus(); return; }
    }
    double margin=0.0;
    if(!OrderCalcMargin(side,_Symbol,volume,entry,margin)
@@ -3545,6 +3634,8 @@ int OnInit()
       || EarlyReversalMaxCurrentUnits>0.0
       || EarlyAdverseRiskFraction<=0.0 || EarlyAdverseRiskFraction>=1.0
       || SmallEarlyAdverseRiskFraction<=0.0 || SmallEarlyAdverseRiskFraction>=1.0
+      || (SmallOnlyMode && EnableSmallRapidScalp
+         && (SmallScalpMaxHoldSeconds<60 || SmallScalpMaxHoldSeconds>300))
       || EarlyAdverseWeakSnapshotsRequired<1 || EarlyAdverseMinAgeSeconds<0
       || SnapshotIntervalSeconds<5 || MaxDeviationPoints<0
       || (WriteDiagnosticFile && StringLen(DiagnosticFileName)==0)
