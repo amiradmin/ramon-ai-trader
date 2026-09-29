@@ -130,7 +130,8 @@ def test_live_snapshots_re_evaluate_inside_same_m15_bar() -> None:
     assert "now-LastDecisionRequestTime<SnapshotIntervalSeconds" in source
     assert "closed==LastProcessedBar" not in source
     assert "LastProcessedBar=bar_time" not in source
-    assert 'StatusLine="Entry already used for this M15 signal bar"' in source
+    assert '"Entry already used for this M15 signal bar"' in source
+    assert '"BOOST already used for this MAIN M15 entry"' in source
     assert "LastEntrySignalBar=bar_time" in source
     assert "SnapshotIntervalSeconds<10" in source
 
