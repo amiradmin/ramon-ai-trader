@@ -60,6 +60,21 @@ def test_ea_execution_invariants_remain_model_and_hard_cap_guarded():
     assert 'OtherPositionOnSymbol()' in text
 
 
+def test_fast_snapshot_uses_successful_model_responses_and_preserves_exit_confirmation():
+    text = source()
+    assert 'SnapshotIntervalSeconds<5' in text
+    assert 'EventSetTimer(5)' in text
+    assert 'LastDecisionSuccessTime=TimeCurrent();' in text
+    assert 'const int WeakConfirmationIntervalSeconds = 30;' in text
+    for name in ('TPStageLastDecisionTime', 'MainFastProfitLastDecisionTime',
+                 'EarlyAdverseLastDecisionTime'):
+        assert f'LastDecisionSuccessTime-{name}>=WeakConfirmationIntervalSeconds' in text
+    assert 'if(!weak)\n      {\n         EarlyAdverseWeakSnapshots=0;' in text
+    assert 'if(!weak)\n      {\n         MainFastProfitWeakSnapshots=0;' in text
+    assert 'LastDecisionSuccessTime>=TPStageHitTime' in text
+    assert '&& fresh && TPStageWeakSnapshots>=TPStageWeakSnapshotsRequired' in text
+
+
 def test_deal_telemetry_reader_is_backward_compatible():
     text = source()
     assert '(marker=="v1" || marker=="v2")' in text

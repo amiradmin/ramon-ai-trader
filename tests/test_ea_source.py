@@ -132,7 +132,7 @@ def test_live_snapshots_re_evaluate_inside_same_m15_bar() -> None:
     assert "LastProcessedBar=bar_time" not in source
     assert 'StatusLine="Entry already used for this M15 signal bar"' in source
     assert "LastEntrySignalBar=bar_time" in source
-    assert "SnapshotIntervalSeconds<10" in source
+    assert "SnapshotIntervalSeconds<5" in source
 
 
 def test_intrabar_reversal_payload_and_dashboard() -> None:
@@ -410,7 +410,7 @@ def test_v052_main_fast_profit_is_main_only_and_conservative() -> None:
     assert "age<MainFastProfitMinAgeBars" in fn
     assert "current_units<MainFastProfitMinProfitUnits" in fn
     assert "MainFastProfitProgress>=MainFastProfitMinProgressToTP1" in fn
-    assert "LastDecisionRequestTime" in fn
+    assert "LastDecisionSuccessTime" in fn
     assert "LastModelDecision==direction" in fn
     assert "LastIntrabarConfirmed && LastIntrabarDirection==direction" in fn
     assert "LastAiTrendConfirmed && LastAiTrendDirection==direction" in fn

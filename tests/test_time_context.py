@@ -6,7 +6,7 @@ from math import isclose
 from ramon.core import Bar, Forecast
 from ramon.model import ChronosForecaster
 from ramon.time_context import forecast_clock_inputs, tehran_hour
-from ramon.time_context_eval import compare, windows
+from ramon.time_context_eval import compare, directional_result, windows
 
 
 def test_known_future_hours_are_derived_only_from_utc_timestamps() -> None:
@@ -72,3 +72,11 @@ def test_evaluator_uses_paired_windows_and_excludes_future_gap() -> None:
     assert result["all"]["windows"] == 3
     assert result["all"]["hour_mae_atr"] == 0
     assert result["all"]["baseline_mae_atr"] > 0
+
+
+def test_direction_audit_charges_spread_and_abstains_without_edge() -> None:
+    buy, buy_net = directional_result(101, 100, 101, 0.2, 2)
+    sell, sell_net = directional_result(99, 100, 99, 0.2, 2)
+    assert buy == "BUY" and isclose(buy_net, 0.4)
+    assert sell == "SELL" and isclose(sell_net, 0.4)
+    assert directional_result(100.1, 100, 101, 0.2, 2) == ("WAIT", 0.0)

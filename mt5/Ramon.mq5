@@ -82,8 +82,9 @@ const double EarlyAdverseRiskFraction = 0.60; // MAIN: arm at 60% of reconstruct
 const double SmallEarlyAdverseRiskFraction = 0.50; // SMALL: evaluate earlier at 50% of risk (~2c on a 4c stop).
 const int EarlyAdverseWeakSnapshotsRequired = 2; // Require two distinct model snapshots with no support.
 const int EarlyAdverseMinAgeSeconds = 120; // Give a new trade two minutes before adverse-exit evaluation.
+const int WeakConfirmationIntervalSeconds = 30; // Fast polling must not shorten exit confirmation.
 input int RequestTimeoutMs = 4000;
-input int SnapshotIntervalSeconds = 30; // Re-evaluate fresh Bid/Ask inside the same M15 bar.
+input int SnapshotIntervalSeconds = 30; // Set to 5 for experimental fast quote decisions.
 input int MaxDeviationPoints = 30;
 input ulong MagicNumber = 26092212;
 input bool WriteDiagnosticFile = true;
@@ -98,6 +99,7 @@ input string ShadowCsvFileName = "Ramon_Shadow_Improvements.csv";
 
 CTrade Trade;
 datetime LastDecisionRequestTime = 0;
+datetime LastDecisionSuccessTime = 0;
 datetime LastEntrySignalBar = 0;
 int LastSmallEntriesOnSignalBar = 0;
 string StatusLine = "Starting";
@@ -223,6 +225,7 @@ double TPStageTP3 = 0.0;
 int TPStage = 0;
 datetime TPStageHitTime = 0;
 int TPStageWeakSnapshots = 0;
+datetime TPStageLastDecisionTime = 0;
 double TPStageProgress = 0.0;
 string TPStageStatus = "INACTIVE";
 bool MarketClosedExitPause = false;
@@ -2287,6 +2290,7 @@ void ResetTPStageRuntime()
    TPStage=0;
    TPStageHitTime=0;
    TPStageWeakSnapshots=0;
+   TPStageLastDecisionTime=0;
    TPStageProgress=0.0;
    TPStageStatus="INACTIVE";
 }
@@ -2343,6 +2347,7 @@ bool LoadTPStagePlan(const ulong ticket)
    TPStageHitTime=(GlobalVariableCheck(TPPlanGlobalKey(sample_key,"HIT"))
       ? (datetime)GlobalVariableGet(TPPlanGlobalKey(sample_key,"HIT")) : 0);
    TPStageWeakSnapshots=0;
+   TPStageLastDecisionTime=0;
    TPStageProgress=0.0;
    TPStageStatus="ACTIVE";
    return true;
@@ -2445,6 +2450,7 @@ bool ManageTPStages(const ulong ticket)
       TPStage=1;
       TPStageHitTime=now;
       TPStageWeakSnapshots=0;
+      TPStageLastDecisionTime=0;
       GlobalVariableSet(TPPlanGlobalKey(TPStageSampleKey,"STAGE"),1.0);
       GlobalVariableSet(TPPlanGlobalKey(TPStageSampleKey,"HIT"),(double)now);
       Print("Ramon TP STAGE 1 hit ticket=",ticket," tp1=",DoubleToString(TPStageTP1,_Digits));
@@ -2454,6 +2460,7 @@ bool ManageTPStages(const ulong ticket)
       TPStage=2;
       TPStageHitTime=now;
       TPStageWeakSnapshots=0;
+      TPStageLastDecisionTime=0;
       GlobalVariableSet(TPPlanGlobalKey(TPStageSampleKey,"STAGE"),2.0);
       GlobalVariableSet(TPPlanGlobalKey(TPStageSampleKey,"HIT"),(double)now);
       Print("Ramon TP STAGE 2 hit ticket=",ticket," tp2=",DoubleToString(TPStageTP2,_Digits));
@@ -2494,11 +2501,22 @@ bool ManageTPStages(const ulong ticket)
    double next_target=(TPStage==1 ? TPStageTP2 : TPStageTP3);
    double base_target=(TPStage==1 ? TPStageTP1 : TPStageTP2);
    TPStageProgress=DirectionalProgress(TPStageDirection,base_target,next_target,exit_price);
-   bool supportive=TPStageModelSupportive();
-   if(supportive)
+   bool fresh=(LastDecisionSuccessTime>0
+      && now-LastDecisionSuccessTime<=SnapshotIntervalSeconds*2+15);
+   bool supportive=(fresh && TPStageModelSupportive());
+   if(fresh && supportive)
+   {
       TPStageWeakSnapshots=0;
-   else
+      TPStageLastDecisionTime=0;
+   }
+   else if(fresh && LastDecisionSuccessTime>=TPStageHitTime
+      && LastDecisionSuccessTime!=TPStageLastDecisionTime
+      && (TPStageLastDecisionTime==0
+         || LastDecisionSuccessTime-TPStageLastDecisionTime>=WeakConfirmationIntervalSeconds))
+   {
+      TPStageLastDecisionTime=LastDecisionSuccessTime;
       TPStageWeakSnapshots++;
+   }
 
    int grace=(TPStage==1 ? TP1GraceSeconds : TP2GraceSeconds);
    double retrace_fraction=(TPStage==1 ? TP1RetraceFraction : TP2RetraceFraction);
@@ -2510,7 +2528,7 @@ bool ManageTPStages(const ulong ticket)
    bool grace_over=(TPStageHitTime>0 && now-TPStageHitTime>=grace);
    bool weak_exit=(
       grace_over
-      && TPStageWeakSnapshots>=TPStageWeakSnapshotsRequired
+      && fresh && TPStageWeakSnapshots>=TPStageWeakSnapshotsRequired
       && (TPStage==2 || TPStageProgress<TP1HealthyProgressFraction)
    );
 
@@ -2605,25 +2623,31 @@ bool ManageMainFastProfit(const ulong ticket,const datetime opened)
    }
 
    datetime now=TimeCurrent();
-   if(LastDecisionRequestTime<=0
-      || now-LastDecisionRequestTime>SnapshotIntervalSeconds*2+15)
+   if(LastDecisionSuccessTime<=0
+      || now-LastDecisionSuccessTime>SnapshotIntervalSeconds*2+15)
    {
       MainFastProfitStatus="STALE_MODEL";
       return false;
    }
 
-   if(MainFastProfitLastDecisionTime!=LastDecisionRequestTime)
+   if(MainFastProfitLastDecisionTime!=LastDecisionSuccessTime)
    {
-      MainFastProfitLastDecisionTime=LastDecisionRequestTime;
       bool model_support=(LastModelDecision==direction);
       bool intrabar_support=(LastIntrabarConfirmed && LastIntrabarDirection==direction);
       bool trend_support=(LastAiTrendConfirmed && LastAiTrendDirection==direction);
       bool weak=(!model_support && !intrabar_support && !trend_support);
 
-      if(weak)
-         MainFastProfitWeakSnapshots++;
-      else
+      if(!weak)
+      {
          MainFastProfitWeakSnapshots=0;
+         MainFastProfitLastDecisionTime=LastDecisionSuccessTime;
+      }
+      else if(MainFastProfitLastDecisionTime==0
+         || LastDecisionSuccessTime-MainFastProfitLastDecisionTime>=WeakConfirmationIntervalSeconds)
+      {
+         MainFastProfitWeakSnapshots++;
+         MainFastProfitLastDecisionTime=LastDecisionSuccessTime;
+      }
 
       Print("Ramon MAIN FAST PROFIT check ticket=",ticket,
          " age=",age,
@@ -2787,15 +2811,14 @@ bool ManageEarlyAdverseExit(const ulong ticket,const datetime opened)
    }
 
    // Never interpret missing/stale model data as evidence that the trade is bad.
-   if(LastDecisionRequestTime<=0
-      || now-LastDecisionRequestTime>SnapshotIntervalSeconds*2+15
+   if(LastDecisionSuccessTime<=0
+      || now-LastDecisionSuccessTime>SnapshotIntervalSeconds*2+15
       || (LastModelDecision!="BUY" && LastModelDecision!="SELL" && LastModelDecision!="WAIT"))
       return false;
 
    // Count at most once per distinct model snapshot; OnTimer itself runs every five seconds.
-   if(EarlyAdverseLastDecisionTime!=LastDecisionRequestTime)
+   if(EarlyAdverseLastDecisionTime!=LastDecisionSuccessTime)
    {
-      EarlyAdverseLastDecisionTime=LastDecisionRequestTime;
       long position_type=PositionGetInteger(POSITION_TYPE);
       string direction=(position_type==POSITION_TYPE_BUY ? "BUY" : "SELL");
       bool model_support=(LastModelDecision==direction);
@@ -2803,10 +2826,17 @@ bool ManageEarlyAdverseExit(const ulong ticket,const datetime opened)
       bool trend_support=(LastAiTrendConfirmed && LastAiTrendDirection==direction);
       bool weak=(!model_support && !intrabar_support && !trend_support);
 
-      if(weak)
-         EarlyAdverseWeakSnapshots++;
-      else
+      if(!weak)
+      {
          EarlyAdverseWeakSnapshots=0;
+         EarlyAdverseLastDecisionTime=LastDecisionSuccessTime;
+      }
+      else if(EarlyAdverseLastDecisionTime==0
+         || LastDecisionSuccessTime-EarlyAdverseLastDecisionTime>=WeakConfirmationIntervalSeconds)
+      {
+         EarlyAdverseWeakSnapshots++;
+         EarlyAdverseLastDecisionTime=LastDecisionSuccessTime;
+      }
 
       Print("Ramon EARLY ADVERSE check ticket=",ticket,
          " loss=",DoubleToString(loss_units,2),
@@ -3120,6 +3150,7 @@ void OnTimer()
       || (datetime)signal_time!=bar_time
       || (decision!="BUY" && decision!="SELL" && decision!="WAIT"))
    { StatusLine="Invalid/stale model response"; ShowStatus(); return; }
+   LastDecisionSuccessTime=TimeCurrent();
    LastSampleKey=sample_key;
    LastSampleSaved=(sample_saved>=0.5);
    LastBundleId=bundle_id;
@@ -3393,7 +3424,7 @@ int OnInit()
       || EarlyAdverseRiskFraction<=0.0 || EarlyAdverseRiskFraction>=1.0
       || SmallEarlyAdverseRiskFraction<=0.0 || SmallEarlyAdverseRiskFraction>=1.0
       || EarlyAdverseWeakSnapshotsRequired<1 || EarlyAdverseMinAgeSeconds<0
-      || SnapshotIntervalSeconds<10
+      || SnapshotIntervalSeconds<5
       || (WriteDiagnosticFile && StringLen(DiagnosticFileName)==0)
       || (WriteCsvLogs && (StringLen(SignalCsvFileName)==0 || StringLen(TradeCsvFileName)==0))
       || (EnableImprovementShadowPack && WriteCsvLogs && StringLen(ShadowCsvFileName)==0)
@@ -3434,7 +3465,7 @@ int OnInit()
    EventSetTimer(5);
    // Stagger the second chart's WebRequest cadence from the primary chart.
    if(SmallOnlyMode)
-      LastDecisionRequestTime=TimeCurrent()-SnapshotIntervalSeconds+15;
+      LastDecisionRequestTime=TimeCurrent()-SnapshotIntervalSeconds+MathMin(2,SnapshotIntervalSeconds-1);
    ObjectsDeleteAll(0,UiPrefix);
    ShowStatus();
    return INIT_SUCCEEDED;

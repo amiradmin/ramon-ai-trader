@@ -30,7 +30,7 @@ def summary(rows: list[dict]) -> dict:
         return {"windows": 0}
     baseline = sum(row["baseline_error_atr"] for row in rows) / len(rows)
     clock = sum(row["hour_error_atr"] for row in rows) / len(rows)
-    return {
+    result = {
         "windows": len(rows),
         "baseline_mae_atr": round(baseline, 5),
         "hour_mae_atr": round(clock, 5),
@@ -38,10 +38,32 @@ def summary(rows: list[dict]) -> dict:
         "hour_better_windows": sum(row["hour_error_atr"] < row["baseline_error_atr"]
                                    for row in rows),
     }
+    for name in ("baseline", "hour"):
+        trades = [row for row in rows if row[f"{name}_side"] != "WAIT"]
+        result[f"{name}_direction_count"] = len(trades)
+        result[f"{name}_direction_hits"] = sum(row[f"{name}_net_atr"] > 0 for row in trades)
+        result[f"{name}_direction_hit_rate"] = (round(result[f"{name}_direction_hits"] / len(trades), 4)
+                                                 if trades else None)
+        result[f"{name}_mean_net_atr"] = (round(sum(row[f"{name}_net_atr"] for row in trades)
+                                                  / len(trades), 5) if trades else None)
+    return result
+
+
+def directional_result(median: float, last_close: float, actual: float,
+                       spread: float, atr: float) -> tuple[str, float]:
+    """Indicative bid-to-bid hold return after entry/exit spread; no stops."""
+    if median > last_close + spread:
+        return "BUY", (actual - last_close - spread) / atr
+    if median < last_close - spread:
+        return "SELL", (last_close - actual - spread) / atr
+    return "WAIT", 0.0
 
 
 def compare(bars: tuple[Bar, ...], model: ChronosForecaster, *, context: int = 256,
-            horizon: int = 4, stride: int = 4, max_windows: int = 48) -> dict:
+            horizon: int = 4, stride: int = 4, max_windows: int = 48,
+            spreads: tuple[float, ...] | None = None) -> dict:
+    if spreads is not None and len(spreads) != len(bars):
+        raise ValueError("one spread per bar required")
     candidates = windows(bars, context=context, horizon=horizon,
                          stride=stride, max_windows=max_windows)
     rows: list[dict] = []
@@ -56,11 +78,22 @@ def compare(bars: tuple[Bar, ...], model: ChronosForecaster, *, context: int = 2
         if not all(isfinite(value) and value > 0 for value in
                    (baseline.median, hour_aware.median, actual, atr)):
             raise ValueError("nonfinite model output or invalid ATR")
+        spread = spreads[index] if spreads is not None else 0.0
+        if not isfinite(spread) or spread < 0:
+            raise ValueError("invalid historical spread")
+        baseline_side, baseline_net = directional_result(
+            baseline.median, history[-1].close, actual, spread, atr)
+        hour_side, hour_net = directional_result(
+            hour_aware.median, history[-1].close, actual, spread, atr)
         rows.append({
             "time": history[-1].time,
             "tehran_hour": int(tehran_hour(history[-1].time)),
             "baseline_error_atr": abs(baseline.median - actual) / atr,
             "hour_error_atr": abs(hour_aware.median - actual) / atr,
+            "baseline_side": baseline_side,
+            "baseline_net_atr": baseline_net,
+            "hour_side": hour_side,
+            "hour_net_atr": hour_net,
         })
     # The final third is reported separately. It is not used to choose
     # covariates, thresholds or model weights in this evaluator.
@@ -77,7 +110,8 @@ def compare(bars: tuple[Bar, ...], model: ChronosForecaster, *, context: int = 2
                 [row for row in rows if start <= row["tehran_hour"] < start + 6]
             ) for start in (0, 6, 12, 18)
         },
-        "scope": "paired forecast error on continuous future M15 bars; no trading P&L estimate",
+        "scope": "paired M15 endpoint direction and error; indicative spread-adjusted hold return "
+                 "without stops, slippage, execution or intrabar path; not a trading P&L estimate",
     }
 
 
@@ -89,10 +123,23 @@ def main() -> None:
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--max-windows", type=int, default=48)
     parser.add_argument("--stride", type=int, default=4)
+    parser.add_argument("--point", type=float, required=True,
+                        help="Broker SYMBOL_POINT, e.g. 0.01; used to convert recorded spread points")
+    parser.add_argument("--horizon", type=int, choices=(1, 4), action="append",
+                        help="Forecast steps to assess; defaults to both 1 and 4")
     args = parser.parse_args()
-    bars, _ = load_bars(args.db, args.symbol)
-    result = compare(bars, ChronosForecaster(model_name(args.model), args.device),
-                     stride=args.stride, max_windows=args.max_windows)
+    bars, spread_points = load_bars(args.db, args.symbol)
+    parser_point = float(args.point)
+    if not isfinite(parser_point) or parser_point <= 0:
+        raise ValueError("positive broker point required")
+    model = ChronosForecaster(model_name(args.model), args.device)
+    result = {
+        f"horizon_{horizon}": compare(
+            bars, model, horizon=horizon, stride=args.stride,
+            max_windows=args.max_windows,
+            spreads=tuple(points * parser_point for points in spread_points))
+        for horizon in (args.horizon or [1, 4])
+    }
     print(json.dumps(result, indent=2))
 
 
