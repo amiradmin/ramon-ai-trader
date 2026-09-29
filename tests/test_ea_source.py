@@ -334,7 +334,7 @@ def test_v050_small_dynamic_target_is_shadow_only() -> None:
 
     assert '#property version "1.500"' in source
     assert "const double SmallProfitTargetUnits = 2.0" in source
-    assert "const double ShadowSmallStrongTargetUnits = 2.5" in source
+    assert "const double ShadowSmallStrongTargetUnits = ShadowSmallTP2Units" in source
     assert "ShadowSmallStrongTargetCandidate=(" in source
     assert "&& intrabar_support" in source
     assert "&& trend_support" in source
