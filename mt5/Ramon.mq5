@@ -1,5 +1,5 @@
 #property strict
-#property version "1.500"
+#property version "1.510"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -25,9 +25,11 @@ input string RequiredServerText = "LiteFinance";
 input bool AutoLockCurrentAccount = true; // Bind this EA session to the account active at OnInit.
 input long AllowedAccountLogin = 0; // Used only when AutoLockCurrentAccount=false.
 input bool EnableLiveTrading = false;
-input bool SmallOnlyMode = false; // Attach second EA instance on another M15 chart for parallel 2-cent trades.
+input bool SmallOnlyMode = false; // Dedicated SMALL role on a second M15 chart.
+input bool BoostOnlyMode = false; // Dedicated BOOST role: one small add-on only for a strong profitable MAIN entry.
 const ulong PrimaryMagicNumber = 26092212;
 const ulong SmallProfitMagicNumber = 26092213;
+const ulong BoostMagicNumber = 26092214;
 input string ModelUrl = "http://127.0.0.1:8012/decision";
 input double MoneyUnitsPerUSD = 100.0; // CENT account: 100 account units = 1 USD.
 input bool AccountIsCent = true; // Configured account mode; MT5 ACCOUNT_CURRENCY alone cannot identify CENT.
@@ -51,6 +53,10 @@ const double SmallProfitProtectionGivebackUnits = 0.5;
 const double SmallProfitMaxRiskUSD = 0.04; // Independent ceiling for new small entries.
 const int SmallProfitMaxEntriesPerSignalBar = 2; // Sequential entries only; an open position still blocks another entry.
 const int SmallProfitMaximumHoldBars = 3;
+const double BoostTargetUnits = 2.0;
+const double BoostMaxLossUnits = 4.0;
+const double BoostMaxRiskUSD = 0.04;
+const int BoostMaximumHoldBars = 2;
 input bool EnableProfitProtection = true; // Close a managed position after an armed profit giveback.
 const double ProfitProtectionFallbackActivationUnits = 7.0; // Used only if live position risk cannot be reconstructed.
 const double ProfitProtectionActivationMinUnits = 5.0;
@@ -217,8 +223,15 @@ string TPStageStatus = "INACTIVE";
 bool MarketClosedExitPause = false;
 datetime MarketClosedExitPauseTickTime = 0;
 ulong MarketClosedExitPauseTicket = 0;
+bool LastBoostEligible = false;
+string LastBoostReason = "NOT_BOOST_ROLE";
+string LastBoostDirection = "NONE";
+ulong LastBoostMainTicket = 0;
+ulong LastBoostMainIdentifier = 0;
+datetime LastBoostMainOpened = 0;
+double LastBoostMainProfitUnits = 0.0;
 
-// v0.50 improvement pack: telemetry only. These values MUST NOT be used by execution gates.
+// v0.51 improvement pack: telemetry only. These values MUST NOT be used by execution gates.
 bool ShadowBuyCaution = false;
 bool ShadowSellCaution = false;
 double ShadowRiskMultiplier = 1.0;
@@ -231,6 +244,26 @@ bool ShadowDeadTrade = false;
 double ShadowDeadTradePeakR = 0.0;
 double ShadowDeadTradeCurrentR = 0.0;
 string ShadowReason = "NONE";
+
+string CurrentRoleText()
+{
+   if(BoostOnlyMode) return "BOOST";
+   if(SmallOnlyMode) return "SMALL";
+   return "MAIN";
+}
+
+bool MicroRiskRole()
+{
+   return (SmallOnlyMode || BoostOnlyMode);
+}
+
+double MicroRiskCapUnits()
+{
+   if(MoneyUnitsPerUSD<=0.0) return 0.0;
+   if(BoostOnlyMode)
+      return MathMin(BoostMaxLossUnits,BoostMaxRiskUSD*MoneyUnitsPerUSD);
+   return SmallProfitRiskCapUnits();
+}
 
 bool IsAllowedModelUrl(const string url)
 {
@@ -322,17 +355,46 @@ bool IsSmallProfitPosition(const ulong ticket)
       && (ulong)PositionGetInteger(POSITION_MAGIC)==SmallProfitMagicNumber;
 }
 
-bool OtherPositionOnSymbol()
+bool IsBoostPosition(const ulong ticket)
 {
-   ulong peer_magic=(SmallOnlyMode ? PrimaryMagicNumber : SmallProfitMagicNumber);
+   if(ticket==0 || !PositionSelectByTicket(ticket)) return false;
+   return BoostOnlyMode
+      && (ulong)PositionGetInteger(POSITION_MAGIC)==BoostMagicNumber;
+}
+
+bool FindPositionByMagic(const ulong magic,ulong &ticket,datetime &opened)
+{
+   ticket=0;
+   opened=0;
    for(int i=PositionsTotal()-1;i>=0;i--)
    {
       ulong candidate=PositionGetTicket(i);
       if(candidate==0 || !PositionSelectByTicket(candidate))
          continue;
+      if(PositionGetString(POSITION_SYMBOL)!=_Symbol)
+         continue;
+      if((ulong)PositionGetInteger(POSITION_MAGIC)!=magic)
+         continue;
+      ticket=candidate;
+      opened=(datetime)PositionGetInteger(POSITION_TIME);
+      return true;
+   }
+   return false;
+}
+
+bool OtherPositionOnSymbol()
+{
+   for(int i=PositionsTotal()-1;i>=0;i--)
+   {
+      ulong candidate=PositionGetTicket(i);
+      if(candidate==0 || !PositionSelectByTicket(candidate))
+         continue;
+      if(PositionGetString(POSITION_SYMBOL)!=_Symbol)
+         continue;
       ulong position_magic=(ulong)PositionGetInteger(POSITION_MAGIC);
-      if(PositionGetString(POSITION_SYMBOL)==_Symbol
-         && position_magic!=MagicNumber && position_magic!=peer_magic)
+      if(position_magic!=PrimaryMagicNumber
+         && position_magic!=SmallProfitMagicNumber
+         && position_magic!=BoostMagicNumber)
          return true;
    }
    return false;
@@ -340,16 +402,19 @@ bool OtherPositionOnSymbol()
 
 string EffectiveDiagnosticFileName()
 {
+   if(BoostOnlyMode) return "Ramon_Boost_Diagnostic.txt";
    return (SmallOnlyMode ? "Ramon_Small_Diagnostic.txt" : DiagnosticFileName);
 }
 
 string EffectiveSignalCsvFileName()
 {
+   if(BoostOnlyMode) return "Ramon_Boost_Signals.csv";
    return (SmallOnlyMode ? "Ramon_Small_Signals.csv" : SignalCsvFileName);
 }
 
 string EffectiveTradeCsvFileName()
 {
+   if(BoostOnlyMode) return "Ramon_Boost_Trades.csv";
    return (SmallOnlyMode ? "Ramon_Small_Trades.csv" : TradeCsvFileName);
 }
 
@@ -357,6 +422,7 @@ string EffectiveShadowCsvFileName()
 {
    if(!EnableImprovementShadowPack)
       return "";
+   if(BoostOnlyMode) return "Ramon_Boost_Shadow_Improvements.csv";
    return (SmallOnlyMode ? "Ramon_Small_Shadow_Improvements.csv" : ShadowCsvFileName);
 }
 
@@ -485,8 +551,8 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.50\n"
-      +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
+      +"EA version: 0.51\n"
+      +"EA role: "+(BoostOnlyMode ? "BOOST 2c" : (SmallOnlyMode ? "SMALL 2c" : "PRIMARY"))
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
       +"Symbol: "+_Symbol+"  Timeframe: M15\n"
@@ -564,7 +630,7 @@ string BuildDiagnosticText()
       +" / "+DoubleToString(LastTargetTP3,_Digits)
       +"  LegacyTP: "+DoubleToString(LastLegacyTargetPrice,_Digits)+"\n"
       +"ExecutionTargetMode: LEGACY_TP_UNCHANGED\n\n"
-      +"=== V0.50 IMPROVEMENT SHADOWS (OBSERVE ONLY) ===\n"
+      +"=== V0.51 IMPROVEMENT SHADOWS (OBSERVE ONLY) ===\n"
       +"ShadowPack: "+BoolText(EnableImprovementShadowPack)
       +"  Reason: "+ShadowReason+"\n"
       +"DirectionCaution: BUY="+BoolText(ShadowBuyCaution)
@@ -631,7 +697,7 @@ string BuildDiagnosticText()
       +"  weak="+IntegerToString(EarlyAdverseWeakSnapshots)+"/"+IntegerToString(EarlyAdverseWeakSnapshotsRequired)
       +"  riskFraction="+DoubleToString(
          (EarlyAdverseAppliedRiskFraction>0.0 ? EarlyAdverseAppliedRiskFraction
-            : (SmallOnlyMode ? SmallEarlyAdverseRiskFraction : EarlyAdverseRiskFraction)),2)
+            : (MicroRiskRole() ? SmallEarlyAdverseRiskFraction : EarlyAdverseRiskFraction)),2)
       +"  minAgeSec="+IntegerToString(EarlyAdverseMinAgeSeconds)+"\n"
       +"Trades today: "+(today<0 ? "history unavailable" : IntegerToString(today))
       +"/"+(SmallOnlyMode ? "unlimited" : IntegerToString(MaxTradesPerDay))+"\n"
@@ -642,7 +708,14 @@ string BuildDiagnosticText()
       +"  Today: "+(today<0 ? "history unavailable" : IntegerToString(today))
       +"/unlimited\n"
       +"Small entries per signal bar: "+IntegerToString(SmallProfitMaxEntriesPerSignalBar)
-      +" max; second blocked after same-bar loss\n"
+      +" max; second blocked after same-bar loss\n"      +"Boost: "+(BoostOnlyMode ? "ACTIVE" : "OFF")
+      +"  Eligible: "+BoolText(LastBoostEligible)
+      +"  Reason: "+LastBoostReason
+      +"  MainTicket: "+IntegerToString((long)LastBoostMainTicket)
+      +"  MainProfit: "+DoubleToString(LastBoostMainProfitUnits,2)
+      +"  Direction: "+LastBoostDirection
+      +"  TargetUnits: "+DoubleToString(BoostTargetUnits,2)
+      +"  RiskCapUnits: "+DoubleToString(BoostMaxLossUnits,2)+"\n"
       +"RiskPerTradeUSD: "+DoubleToString(RiskPerTradeUSD,2)
       +"  EffectiveRiskUSD: "+DoubleToString(EffectiveRiskPerTradeUSD(),3)
       +"  RiskMultiplier: "+DoubleToString(LastRiskMultiplier,2)+"x"
@@ -1057,6 +1130,51 @@ bool QueryModel(const string payload,string &reply)
    return true;
 }
 
+void UpdateBoostState()
+{
+   LastBoostEligible=false;
+   LastBoostReason=(BoostOnlyMode ? "NO_MAIN" : "NOT_BOOST_ROLE");
+   LastBoostDirection="NONE";
+   LastBoostMainTicket=0;
+   LastBoostMainIdentifier=0;
+   LastBoostMainOpened=0;
+   LastBoostMainProfitUnits=0.0;
+   if(!BoostOnlyMode) return;
+
+   ulong main_ticket=0;
+   datetime main_opened=0;
+   if(!FindPositionByMagic(PrimaryMagicNumber,main_ticket,main_opened)
+      || !PositionSelectByTicket(main_ticket))
+      return;
+
+   LastBoostMainTicket=main_ticket;
+   LastBoostMainOpened=main_opened;
+   LastBoostMainIdentifier=(ulong)PositionGetInteger(POSITION_IDENTIFIER);
+   LastBoostMainProfitUnits=PositionGetDouble(POSITION_PROFIT);
+   long type=PositionGetInteger(POSITION_TYPE);
+   LastBoostDirection=(type==POSITION_TYPE_BUY ? "BUY" : "SELL");
+
+   datetime current_bar=iTime(_Symbol,PERIOD_M15,0);
+   if(current_bar<=0 || main_opened<current_bar)
+   { LastBoostReason="MAIN_NOT_OPENED_THIS_M15"; return; }
+   if(LastBoostMainProfitUnits<=0.0)
+   { LastBoostReason="MAIN_NOT_PROFITABLE"; return; }
+
+   bool intrabar_support=(LastIntrabarConfirmed && LastIntrabarDirection==LastBoostDirection);
+   bool trend_support=(LastAiTrendConfirmed && LastAiTrendDirection==LastBoostDirection);
+   double directional_edge=(LastBoostDirection=="BUY" ? LastBuyEdge : LastSellEdge);
+   bool edge_support=(LastMinimumEdge>0.0 && directional_edge>=LastMinimumEdge);
+   bool strength_support=(LastMinimumStrength>0.0 && LastSignalStrength>=LastMinimumStrength);
+
+   if(!intrabar_support) { LastBoostReason="BOOST_INTRABAR_FAIL"; return; }
+   if(!trend_support) { LastBoostReason="BOOST_TREND_FAIL"; return; }
+   if(!edge_support) { LastBoostReason="BOOST_EDGE_FAIL"; return; }
+   if(!strength_support) { LastBoostReason="BOOST_STRENGTH_FAIL"; return; }
+
+   LastBoostEligible=true;
+   LastBoostReason="BOOST_READY";
+}
+
 int TradesToday()
 {
    datetime now=TimeCurrent();
@@ -1198,8 +1316,8 @@ bool SmallProfitCandidate(const string decision,const string reason,
    return (direction!="");
 }
 
-bool SmallProfitTarget(const ENUM_ORDER_TYPE side,const double entry,
-   const double volume,const MqlTick &quote,double &target)
+bool MicroTarget(const ENUM_ORDER_TYPE side,const double entry,
+   const double volume,const MqlTick &quote,const double target_units,double &target)
 {
    double point=SymbolInfoDouble(_Symbol,SYMBOL_POINT);
    double tick_size=SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_SIZE);
@@ -1212,7 +1330,7 @@ bool SmallProfitTarget(const ENUM_ORDER_TYPE side,const double entry,
       return false;
    double min_stop=(double)SymbolInfoInteger(_Symbol,SYMBOL_TRADE_STOPS_LEVEL)*point;
    double required_from_quote=(side==ORDER_TYPE_BUY ? quote.bid : quote.ask);
-   double distance=MathMax(SmallProfitTargetUnits/unit_gain,
+   double distance=MathMax(target_units/unit_gain,
       MathAbs(required_from_quote-entry)+min_stop+2*point);
    double steps=MathCeil(distance/tick_size-0.00000001);
    for(int attempt=0;attempt<32;attempt++)
@@ -1220,10 +1338,22 @@ bool SmallProfitTarget(const ENUM_ORDER_TYPE side,const double entry,
       target=NormalizeDouble(entry+sign*(steps+attempt)*tick_size,_Digits);
       double gain=0.0;
       if(!OrderCalcProfit(side,_Symbol,volume,entry,target,gain)) return false;
-      if(gain+0.00001>=SmallProfitTargetUnits)
-         return gain<=SmallProfitTargetUnits+0.25;
+      if(gain+0.00001>=target_units)
+         return gain<=target_units+0.25;
    }
    return false;
+}
+
+bool SmallProfitTarget(const ENUM_ORDER_TYPE side,const double entry,
+   const double volume,const MqlTick &quote,double &target)
+{
+   return MicroTarget(side,entry,volume,quote,SmallProfitTargetUnits,target);
+}
+
+bool BoostTarget(const ENUM_ORDER_TYPE side,const double entry,
+   const double volume,const MqlTick &quote,double &target)
+{
+   return MicroTarget(side,entry,volume,quote,BoostTargetUnits,target);
 }
 
 bool SmallProfitStop(const ENUM_ORDER_TYPE side,const double entry,
@@ -1238,7 +1368,7 @@ bool SmallProfitStop(const ENUM_ORDER_TYPE side,const double entry,
    if(!OrderCalcProfit(side,_Symbol,volume,entry,entry+sign,unit_loss)
       || unit_loss>=0.0)
       return false;
-   double risk_cap=SmallProfitRiskCapUnits();
+   double risk_cap=MicroRiskCapUnits();
    if(risk_cap<=0.0) return false;
    double max_distance=risk_cap/(-unit_loss);
    double model_distance=MathAbs(model_stop-entry);
@@ -1322,9 +1452,9 @@ bool StageEntrySizing(
    if(!ValidSampleKey(sample_key) || minimum<=0.0 || volume<=0.0
       || !OrderCalcProfit(side,_Symbol,minimum,entry,stop,min_loss) || min_loss>=0.0)
       return false;
-   double budget=(SmallOnlyMode ? SmallProfitRiskCapUnits()
+   double budget=(MicroRiskRole() ? MicroRiskCapUnits()
       : EffectiveRiskPerTradeUSD()*MoneyUnitsPerUSD);
-   double hard_cap=(SmallOnlyMode ? SmallProfitRiskCapUnits()
+   double hard_cap=(MicroRiskRole() ? MicroRiskCapUnits()
       : MaxExecutableRiskUSD*MoneyUnitsPerUSD);
    if(budget<=0.0 || hard_cap<=0.0 || MoneyUnitsPerUSD<=0.0)
       return false;
@@ -1334,24 +1464,28 @@ bool StageEntrySizing(
    PendingSizingPlannedVolume=volume;
    PendingSizingMinLotSLUnits=min_risk;
    PendingSizingOverrideUsed=(
-      !SmallOnlyMode
+      !MicroRiskRole()
       && AllowMinLotRiskOverride
       && min_risk>budget+0.00001
       && volume<=minimum+0.00000001
       && min_risk<=hard_cap+0.00001
    );
-   PendingSizingMaxExecutableRiskUSD=(SmallOnlyMode ? SmallProfitMaxRiskUSD : MaxExecutableRiskUSD);
+   PendingSizingMaxExecutableRiskUSD=(MicroRiskRole()
+      ? (BoostOnlyMode ? BoostMaxRiskUSD : SmallProfitMaxRiskUSD)
+      : MaxExecutableRiskUSD);
    PendingSizingMoneyUnitsPerUSD=MoneyUnitsPerUSD;
    return true;
 }
 
 void UpdateSizingPreview()
 {
-   LastRiskBudgetUnits=(SmallOnlyMode ? SmallProfitRiskCapUnits()
+   LastRiskBudgetUnits=(MicroRiskRole() ? MicroRiskCapUnits()
       : EffectiveRiskPerTradeUSD()*MoneyUnitsPerUSD);
-   LastSizingSide=(LastModelDecision=="BUY" || LastModelDecision=="SELL"
-      ? LastModelDecision
-      : (LastBuyEdge>=LastSellEdge ? "BUY" : "SELL"));
+   LastSizingSide=(BoostOnlyMode && LastBoostDirection!="NONE"
+      ? LastBoostDirection
+      : (LastModelDecision=="BUY" || LastModelDecision=="SELL"
+         ? LastModelDecision
+         : (LastBuyEdge>=LastSellEdge ? "BUY" : "SELL")));
    LastPlannedVolume=0.0;
    LastEstimatedStopLossUnits=0.0;
    LastMinimumLotStopLossUnits=0.0;
@@ -1369,7 +1503,7 @@ void UpdateSizingPreview()
    double minimum=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN);
    double money=0.0;
 
-   if(SmallOnlyMode)
+   if(MicroRiskRole())
    {
       MqlTick quote;
       if(minimum<=0.0 || !SymbolInfoTick(_Symbol,quote)) return;
@@ -1948,7 +2082,7 @@ bool ClosedTradePayload(const ulong identifier,string &payload)
       +",\"swap_units\":"+DoubleToString(swap,8)
       +",\"fee_units\":"+DoubleToString(fee,8)
       +",\"exit_reason\":\""+exit_reason+"\""
-      +",\"trade_role\":\""+(SmallOnlyMode ? "SMALL" : "MAIN")+"\""
+      +",\"trade_role\":\""+CurrentRoleText()+"\""
       +",\"entry_magic\":"+IntegerToString((long)MagicNumber);
    int offset=0;
    string version="",detail="";
@@ -2492,36 +2626,37 @@ double ManagedPositionInitialRiskUnits(const ulong ticket)
 
 bool EnforceSmallPositionRiskCap(const ulong ticket)
 {
-   if(!IsSmallProfitPosition(ticket) || !PositionSelectByTicket(ticket))
+   if((!IsSmallProfitPosition(ticket) && !IsBoostPosition(ticket))
+      || !PositionSelectByTicket(ticket))
       return false;
 
-   double cap=SmallProfitRiskCapUnits();
+   double cap=MicroRiskCapUnits();
    double risk=ManagedPositionInitialRiskUnits(ticket);
    if(cap<=0.0 || risk<=cap+0.00001)
       return false;
 
-   Print("Ramon SMALL RISK GUARD ticket=",ticket,
+   Print("Ramon ",CurrentRoleText()," RISK GUARD ticket=",ticket,
       " broker_sl_risk=",DoubleToString(risk,2),
       " cap=",DoubleToString(cap,2));
 
    if(ManagedExitPausedForMarketClosed(ticket))
    {
-      StatusLine="SMALL RISK GUARD PAUSED: MARKET CLOSED";
+      StatusLine=CurrentRoleText()+" RISK GUARD PAUSED: MARKET CLOSED";
       return true;
    }
 
    if(Trade.PositionClose(ticket,MaxDeviationPoints))
    {
       ResetMarketClosedExitPause();
-      RecordDealTelemetry(Trade.ResultDeal(),"small_risk_guard");
-      StatusLine="SMALL RISK GUARD EXIT risk="
+      RecordDealTelemetry(Trade.ResultDeal(),(BoostOnlyMode ? "boost_risk_guard" : "small_risk_guard"));
+      StatusLine=CurrentRoleText()+" RISK GUARD EXIT risk="
          +DoubleToString(risk,2)
          +" cap="+DoubleToString(cap,2);
       Print("Ramon execution: ",StatusLine);
       return true;
    }
 
-   HandleManagedExitFailure(ticket,"SMALL RISK GUARD EXIT");
+   HandleManagedExitFailure(ticket,CurrentRoleText()+" RISK GUARD EXIT");
    return true;
 }
 
@@ -2546,11 +2681,11 @@ bool ManageEarlyAdverseExit(const ulong ticket,const datetime opened)
       ResetEarlyAdverseState();
       EarlyAdverseTicket=ticket;
       EarlyAdverseInitialRiskUnits=ManagedPositionInitialRiskUnits(ticket);
-      if(IsSmallProfitPosition(ticket))
+      if(IsSmallProfitPosition(ticket) || IsBoostPosition(ticket))
          EarlyAdverseInitialRiskUnits=MathMin(
-            EarlyAdverseInitialRiskUnits,SmallProfitRiskCapUnits()
+            EarlyAdverseInitialRiskUnits,MicroRiskCapUnits()
          );
-      EarlyAdverseAppliedRiskFraction=(IsSmallProfitPosition(ticket)
+      EarlyAdverseAppliedRiskFraction=((IsSmallProfitPosition(ticket) || IsBoostPosition(ticket))
          ? SmallEarlyAdverseRiskFraction : EarlyAdverseRiskFraction);
       if(EarlyAdverseInitialRiskUnits>0.0)
          EarlyAdverseTriggerLossUnits=EarlyAdverseInitialRiskUnits*EarlyAdverseAppliedRiskFraction;
@@ -2635,7 +2770,7 @@ bool ManageEarlyAdverseExit(const ulong ticket,const datetime opened)
 void SelectDynamicProfitProtectionThresholds(const ulong ticket)
 {
    ProfitProtectionInitialRiskUnits=ManagedPositionInitialRiskUnits(ticket);
-   if(IsSmallProfitPosition(ticket))
+   if(IsSmallProfitPosition(ticket) || IsBoostPosition(ticket))
    {
       ProfitProtectionActivationUnits=SmallProfitProtectionActivationUnits;
       ProfitProtectionGivebackUnits=SmallProfitProtectionGivebackUnits;
@@ -2755,7 +2890,8 @@ void ManageOpenPosition()
       return;
    }
    int age=iBarShift(_Symbol,PERIOD_M15,opened,false);
-   int hold_bars=(IsSmallProfitPosition(ticket) ? SmallProfitMaximumHoldBars : MaximumHoldBars);
+   int hold_bars=(IsBoostPosition(ticket) ? BoostMaximumHoldBars
+      : (IsSmallProfitPosition(ticket) ? SmallProfitMaximumHoldBars : MaximumHoldBars));
    if(age<hold_bars) { StatusLine="Managed position OPEN"; return; }
    if(ManagedExitPausedForMarketClosed(ticket))
    {
@@ -2972,6 +3108,7 @@ void OnTimer()
    LastTargetTP3=target_tp3;
    LastLegacyTargetPrice=legacy_target_price;
    StatusLine=reason;
+   UpdateBoostState();
    UpdateSizingPreview();
    UpdateImprovementShadows();
    AppendSignalCsv();
@@ -2991,10 +3128,22 @@ void OnTimer()
    string small_direction="";
    bool small_profit=SmallProfitCandidate(decision,reason,buy_edge,sell_edge,
       signal_strength,small_direction);
-   if((decision=="WAIT" && !small_profit) || !EnableLiveTrading)
+   bool boost_trade=(BoostOnlyMode && LastBoostEligible);
+   if(BoostOnlyMode)
+   {
+      if(!boost_trade)
+      { StatusLine=LastBoostReason; ShowStatus(); return; }
+      decision=LastBoostDirection;
+   }
+   else
+   {
+      if((decision=="WAIT" && !small_profit) || !EnableLiveTrading)
+      { ShowStatus(); return; }
+      if(small_profit)
+         decision=small_direction;
+   }
+   if(!EnableLiveTrading)
    { ShowStatus(); return; }
-   if(small_profit)
-      decision=small_direction;
    int small_entries_on_bar=0;
    if(SmallOnlyMode)
    {
@@ -3013,7 +3162,7 @@ void OnTimer()
       { StatusLine="Two small entries already used for this M15 signal bar"; ShowStatus(); return; }
    }
    else if(LastEntrySignalBar==bar_time)
-   { StatusLine="Entry already used for this M15 signal bar"; ShowStatus(); return; }
+   { StatusLine=(BoostOnlyMode ? "BOOST already used for this MAIN M15 entry" : "Entry already used for this M15 signal bar"); ShowStatus(); return; }
    string live_block_reason="";
    if(!LiveExecutionReady(live_block_reason))
    { StatusLine=live_block_reason; ShowStatus(); return; }
@@ -3026,8 +3175,8 @@ void OnTimer()
    string cooldown_reason="";
    if(LocalLossCooldownBlocked(decision,cooldown_reason))
    { StatusLine=cooldown_reason; ShowStatus(); return; }
-   int today=(SmallOnlyMode ? 0 : TradesToday());
-   if(!SmallOnlyMode && (today<0 || today>=MaxTradesPerDay))
+   int today=(MicroRiskRole() ? 0 : TradesToday());
+   if(!MicroRiskRole() && (today<0 || today>=MaxTradesPerDay))
    { StatusLine="Daily trade limit/history unavailable"; ShowStatus(); return; }
    MqlTick tick;
    if(!SymbolInfoTick(_Symbol,tick) || TimeCurrent()-tick.time>30
@@ -3043,24 +3192,26 @@ void OnTimer()
    target_distance=MathMax(target_distance,min_stop+2*point);
    double stop=NormalizeDouble(entry+(decision=="BUY" ? -stop_distance : stop_distance),_Digits);
    double target=NormalizeDouble(entry+(decision=="BUY" ? target_distance : -target_distance),_Digits);
-   double volume=(small_profit ? SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN)
+   double volume=((small_profit || boost_trade) ? SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN)
       : SelectVolume(side,entry,stop));
    if(volume<=0.0)
    { StatusLine="TRADE BLOCKED: min lot > hard risk cap"; ShowStatus(); return; }
-   if(small_profit)
+   if(small_profit || boost_trade)
    {
-      // Small-profit trades never scale above the broker minimum volume.
       if(!SmallProfitStop(side,entry,stop,volume,tick,stop))
-      { StatusLine="Broker cannot place 4-cent small stop"; ShowStatus(); return; }
+      { StatusLine="Broker cannot place 4-cent "+CurrentRoleText()+" stop"; ShowStatus(); return; }
       double stop_loss_units=0.0;
-      double small_risk_cap=SmallProfitRiskCapUnits();
-      if(volume<=0.0 || small_risk_cap<=0.0
+      double micro_risk_cap=MicroRiskCapUnits();
+      if(volume<=0.0 || micro_risk_cap<=0.0
          || !OrderCalcProfit(side,_Symbol,volume,entry,stop,stop_loss_units)
          || stop_loss_units>=0.0
-         || -stop_loss_units>small_risk_cap+0.00001)
-      { StatusLine="Small profit risk > 4 cents"; ShowStatus(); return; }
-      if(!SmallProfitTarget(side,entry,volume,tick,target))
-      { StatusLine="Broker cannot place 2-cent target"; ShowStatus(); return; }
+         || -stop_loss_units>micro_risk_cap+0.00001)
+      { StatusLine=CurrentRoleText()+" risk > 4 cents"; ShowStatus(); return; }
+      bool target_ok=(boost_trade
+         ? BoostTarget(side,entry,volume,tick,target)
+         : SmallProfitTarget(side,entry,volume,tick,target));
+      if(!target_ok)
+      { StatusLine="Broker cannot place 2-cent "+CurrentRoleText()+" target"; ShowStatus(); return; }
    }
    double margin=0.0;
    if(!OrderCalcMargin(side,_Symbol,volume,entry,margin)
@@ -3069,10 +3220,11 @@ void OnTimer()
 
    // Telemetry/management staging must never block an otherwise valid entry.
    StageEntrySizing(LastSampleKey,side,entry,stop,volume);
-   if(!small_profit)
+   if(!small_profit && !boost_trade)
       PersistTPPlan(LastSampleKey,decision,entry,LastTargetTP1,LastTargetTP2,LastTargetTP3);
    // The broker owns SL/TP immediately. No position is opened when the model is unavailable.
-   string trade_comment="Ramon:"+LastSampleKey+(small_profit ? ":S" : "");
+   string trade_comment="Ramon:"+LastSampleKey
+      +(small_profit ? ":S" : (boost_trade ? ":B" : ""));
    bool submitted=(
       decision=="BUY"
       ? Trade.Buy(volume,_Symbol,0.0,stop,target,trade_comment)
@@ -3089,7 +3241,8 @@ void OnTimer()
       LastEntrySignalBar=bar_time;
       if(SmallOnlyMode)
          LastSmallEntriesOnSignalBar=small_entries_on_bar+1;
-      StatusLine="Order sent "+(small_profit ? "SMALL 2c " : "")
+      StatusLine="Order sent "
+         +(small_profit ? "SMALL 2c " : (boost_trade ? "BOOST 2c " : ""))
          +decision+" "+DoubleToString(volume,2);
    }
    Print("Ramon execution: ",StatusLine);
@@ -3124,15 +3277,22 @@ int OnInit()
 {
    if(_Symbol!=TradeSymbol || _Period!=PERIOD_M15 || StringFind(_Symbol,"XAUUSD")!=0)
    { Print("Attach only to ",TradeSymbol," M15"); return INIT_FAILED; }
+   if(SmallOnlyMode && BoostOnlyMode)
+   { Print("SMALL and BOOST modes are mutually exclusive"); return INIT_FAILED; }
    if(SmallOnlyMode && (MagicNumber!=SmallProfitMagicNumber
       || AccountInfoInteger(ACCOUNT_MARGIN_MODE)!=ACCOUNT_MARGIN_MODE_RETAIL_HEDGING))
    { Print("Small mode requires magic 26092213 and a hedging account"); return INIT_FAILED; }
-   if(!SmallOnlyMode && MagicNumber==SmallProfitMagicNumber)
-   { Print("Primary mode cannot use the small-trade magic number"); return INIT_FAILED; }
+   if(BoostOnlyMode && (MagicNumber!=BoostMagicNumber
+      || AccountInfoInteger(ACCOUNT_MARGIN_MODE)!=ACCOUNT_MARGIN_MODE_RETAIL_HEDGING))
+   { Print("Boost mode requires magic 26092214 and a hedging account"); return INIT_FAILED; }
+   if(!SmallOnlyMode && !BoostOnlyMode
+      && (MagicNumber==SmallProfitMagicNumber || MagicNumber==BoostMagicNumber))
+   { Print("Primary mode cannot use a reserved SMALL/BOOST magic number"); return INIT_FAILED; }
    if(MoneyUnitsPerUSD<=0.0 || RiskPerTradeUSD<=0.0 || RiskPerTradeUSD>0.50
       || MaxExecutableRiskUSD<=0.0 || MaxExecutableRiskUSD>0.50
       || MaxExecutableRiskUSD<EffectiveRiskPerTradeUSD()
-      || MaxSpreadPoints<=0 || (!SmallOnlyMode && MaxTradesPerDay<1) || MaximumHoldBars<1
+      || MaxSpreadPoints<=0 || (!MicroRiskRole() && MaxTradesPerDay<1) || MaximumHoldBars<1
+      || BoostMaximumHoldBars<1 || BoostTargetUnits<=0.0 || BoostMaxLossUnits<=0.0 || BoostMaxRiskUSD<=0.0
       || ProfitProtectionFallbackActivationUnits<=0.0
       || ProfitProtectionActivationMinUnits<=0.0
       || ProfitProtectionActivationMaxUnits<ProfitProtectionActivationMinUnits
@@ -3189,9 +3349,11 @@ int OnInit()
    Trade.SetDeviationInPoints(MaxDeviationPoints);
    Trade.SetTypeFillingBySymbol(_Symbol);
    EventSetTimer(5);
-   // Stagger the second chart's WebRequest cadence from the primary chart.
+   // Stagger role charts so local model requests do not bunch together.
    if(SmallOnlyMode)
       LastDecisionRequestTime=TimeCurrent()-SnapshotIntervalSeconds+15;
+   else if(BoostOnlyMode)
+      LastDecisionRequestTime=TimeCurrent()-SnapshotIntervalSeconds+25;
    ObjectsDeleteAll(0,UiPrefix);
    ShowStatus();
    return INIT_SUCCEEDED;
