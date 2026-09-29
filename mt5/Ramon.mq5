@@ -1,5 +1,5 @@
 #property strict
-#property version "0.47"
+#property version "0.48"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -212,7 +212,7 @@ bool MarketClosedExitPause = false;
 datetime MarketClosedExitPauseTickTime = 0;
 ulong MarketClosedExitPauseTicket = 0;
 
-// v0.47 improvement pack: telemetry only. These values MUST NOT be used by execution gates.
+// v0.48 improvement pack: telemetry only. These values MUST NOT be used by execution gates.
 bool ShadowBuyCaution = false;
 bool ShadowSellCaution = false;
 double ShadowRiskMultiplier = 1.0;
@@ -475,7 +475,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.47\n"
+      +"EA version: 0.48\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -554,7 +554,7 @@ string BuildDiagnosticText()
       +" / "+DoubleToString(LastTargetTP3,_Digits)
       +"  LegacyTP: "+DoubleToString(LastLegacyTargetPrice,_Digits)+"\n"
       +"ExecutionTargetMode: LEGACY_TP_UNCHANGED\n\n"
-      +"=== V0.47 IMPROVEMENT SHADOWS (OBSERVE ONLY) ===\n"
+      +"=== V0.48 IMPROVEMENT SHADOWS (OBSERVE ONLY) ===\n"
       +"ShadowPack: "+BoolText(EnableImprovementShadowPack)
       +"  Reason: "+ShadowReason+"\n"
       +"DirectionCaution: BUY="+BoolText(ShadowBuyCaution)
@@ -767,7 +767,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.47 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.48 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
@@ -1680,7 +1680,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.47";
+      version="0.48";
    }
    if(close_detail!="") detail=close_detail;
 
@@ -1805,7 +1805,9 @@ bool ClosedTradePayload(const ulong identifier,string &payload)
       +",\"commission_units\":"+DoubleToString(commission,8)
       +",\"swap_units\":"+DoubleToString(swap,8)
       +",\"fee_units\":"+DoubleToString(fee,8)
-      +",\"exit_reason\":\""+exit_reason+"\"";
+      +",\"exit_reason\":\""+exit_reason+"\""
+      +",\"trade_role\":\""+(SmallOnlyMode ? "SMALL" : "MAIN")+"\""
+      +",\"entry_magic\":"+IntegerToString((long)MagicNumber);
    int offset=0;
    string version="",detail="";
    if(ReadDealTelemetry(opening_deal,offset,version,detail))
