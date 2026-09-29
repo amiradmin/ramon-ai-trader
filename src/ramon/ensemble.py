@@ -371,6 +371,11 @@ class EnsembleCoordinator:
         r_features = regime_features(market.bars)
         e_features = entry_features(market, decision)
         n_features = dict(news_features or neutral_news_features())
+        direction = dominant_direction(decision)
+        n_features["surprise_aligned_with_candidate"] = (
+            n_features.get("signed_surprise", 0.0)
+            * (1.0 if direction == "BUY" else -1.0 if direction == "SELL" else 0.0)
+        )
         m_base = meta_base_features(market, decision)
         regime_probability = self.regime.predict_proba(r_features) if self.regime else -1.0
         entry_probability = self.entry.predict_proba(e_features) if self.entry else -1.0

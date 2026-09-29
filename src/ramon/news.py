@@ -5,13 +5,13 @@ from datetime import datetime
 import json
 from math import exp, isfinite
 import time
-from typing import Any
+from typing import Mapping
 from urllib.request import Request, urlopen
 
 
 DEFAULT_FOREX_FACTORY_JSON = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 
-NEWS_FEATURES = (
+LEGACY_NEWS_FEATURES = (
     "source_available",
     "high_impact_near",
     "medium_impact_near",
@@ -23,6 +23,12 @@ NEWS_FEATURES = (
     "actual_available",
     "surprise_abs",
 )
+NEWS_FEATURES = LEGACY_NEWS_FEATURES + (
+    "post_high_30m", "release_age_30m", "actual_seen_age_30m",
+    "signed_surprise", "surprise_aligned_with_candidate",
+    "event_inflation", "event_labor", "event_fed", "event_growth",
+)
+EventKey = tuple[str, str, int]
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +54,9 @@ class NewsSnapshot:
     event_time: int
     event_delta_minutes: float
     error: str = ""
+    phase: str = "NONE"
+    signed_surprise: float = 0.0
+    actual_seen_age_seconds: int = -1
 
     def payload(self) -> dict[str, object]:
         return {
@@ -59,6 +68,9 @@ class NewsSnapshot:
             "news_event_impact": self.event_impact,
             "news_event_time": self.event_time,
             "news_event_delta_minutes": self.event_delta_minutes,
+            "news_phase": self.phase,
+            "news_signed_surprise": self.signed_surprise,
+            "news_actual_seen_age_seconds": self.actual_seen_age_seconds,
         }
 
 
@@ -94,6 +106,34 @@ def _surprise_abs(event: NewsEvent) -> tuple[float, float]:
         return 0.0, 0.0
     scale = max(abs(forecast), abs(previous) if previous is not None else 0.0, 1.0)
     return 1.0, min(abs(actual - forecast) / scale, 5.0) / 5.0
+
+
+def _signed_surprise(event: NewsEvent) -> float:
+    actual, forecast, previous = (_numeric(item) for item in
+                                  (event.actual, event.forecast, event.previous))
+    if actual is None or forecast is None:
+        return 0.0
+    scale = max(abs(forecast), abs(previous) if previous is not None else 0.0, 1.0)
+    return max(-1.0, min(1.0, (actual - forecast) / (5.0 * scale)))
+
+
+def _event_category(event: NewsEvent | None) -> str:
+    if event is None:
+        return "none"
+    title = event.title.casefold()
+    if any(term in title for term in ("cpi", "pce", "ppi", "inflation")):
+        return "inflation"
+    if any(term in title for term in ("payroll", "employment", "unemployment", "jobless")):
+        return "labor"
+    if any(term in title for term in ("fomc", "fed ", "federal funds", "interest rate")):
+        return "fed"
+    if any(term in title for term in ("gdp", "retail sales", "ism ")):
+        return "growth"
+    return "other"
+
+
+def _event_key(event: NewsEvent) -> EventKey:
+    return event.country, event.title, event.timestamp
 
 
 def parse_forex_factory_events(payload: bytes | str) -> tuple[NewsEvent, ...]:
@@ -138,6 +178,7 @@ def build_news_snapshot(
     source_age_seconds: int,
     countries: frozenset[str] = frozenset({"USD", "All"}),
     error: str = "",
+    actual_first_seen: Mapping[EventKey, int] | None = None,
 ) -> NewsSnapshot:
     relevant = tuple(event for event in events if event.country in countries)
     if not source_ready:
@@ -162,8 +203,35 @@ def build_news_snapshot(
         high_scaled = max(-1.0, min(1.0, (nearest_high.timestamp - now) / (180.0 * 60.0)))
 
     actual_available = surprise_abs = 0.0
-    if nearest is not None and nearest.timestamp <= now:
+    if nearest is not None and nearest.timestamp <= now and (
+        actual_first_seen is None or _event_key(nearest) in actual_first_seen
+    ):
         actual_available, surprise_abs = _surprise_abs(nearest)
+
+    # A future event can be closer than the most recently released one. The
+    # post-release signal must be tied to a *past* high-impact release only.
+    released = min((event for event in high if 0 <= now - event.timestamp <= 1800
+                    and (actual_first_seen is None or _event_key(event) in actual_first_seen)),
+                   key=lambda event: now - event.timestamp, default=None)
+    observed_age = -1
+    if released is not None:
+        available, _ = _surprise_abs(released)
+        if not available:
+            released = None
+        elif actual_first_seen is not None:
+            observed_age = now - actual_first_seen[_event_key(released)]
+            if observed_age < 0:
+                released = None
+        else:
+            observed_age = now - released.timestamp
+    phase = ("UNAVAILABLE" if not source_ready else
+             "POST_RELEASE" if released is not None else
+             "PRE_RELEASE" if nearest_high is not None and 0 < nearest_high.timestamp-now <= 1800
+             else "RELEASE_UNCONFIRMED" if nearest_high is not None
+                  and 0 <= now-nearest_high.timestamp <= 1800
+             else "NORMAL")
+    category = _event_category(released or nearest_high)
+    signed = _signed_surprise(released) if released is not None else 0.0
 
     features = {
         "source_available": float(source_ready),
@@ -176,6 +244,15 @@ def build_news_snapshot(
         "nearest_event_impact": _impact_value(nearest.impact) if nearest else 0.0,
         "actual_available": actual_available,
         "surprise_abs": surprise_abs,
+        "post_high_30m": float(released is not None),
+        "release_age_30m": (min(1.0, (now-released.timestamp)/1800.0)
+                            if released is not None else 0.0),
+        "actual_seen_age_30m": (min(1.0, observed_age/1800.0)
+                                if released is not None else 0.0),
+        "signed_surprise": signed,
+        "surprise_aligned_with_candidate": 0.0,  # Set from the candidate direction in the ensemble.
+        **{f"event_{name}": float(category == name)
+           for name in ("inflation", "labor", "fed", "growth")},
     }
     return NewsSnapshot(
         features=features,
@@ -188,6 +265,9 @@ def build_news_snapshot(
         event_time=nearest.timestamp if nearest else 0,
         event_delta_minutes=((nearest.timestamp - now) / 60.0) if nearest else 0.0,
         error=error,
+        phase=phase,
+        signed_surprise=signed,
+        actual_seen_age_seconds=observed_age,
     )
 
 
@@ -218,6 +298,7 @@ class ForexFactoryNewsProvider:
         self._last_attempt = 0
         self._fetched_at = 0
         self._error = ""
+        self._actual_first_seen: dict[EventKey, int] = {}
 
     def _refresh(self, now: int) -> None:
         self._last_attempt = now
@@ -233,6 +314,13 @@ class ForexFactoryNewsProvider:
             self._events = events
             self._fetched_at = now
             self._error = ""
+            for event in events:
+                if event.timestamp <= now and _surprise_abs(event)[0]:
+                    self._actual_first_seen.setdefault(_event_key(event), now)
+            self._actual_first_seen = {
+                key: seen for key, seen in self._actual_first_seen.items()
+                if now-key[2] <= 7*86400
+            }
         except Exception as exc:
             self._error = f"{type(exc).__name__}: {exc}"[:240]
 
@@ -247,7 +335,10 @@ class ForexFactoryNewsProvider:
                 countries=self.countries,
                 error="disabled",
             )
-        if self._last_attempt == 0 or timestamp - self._last_attempt >= self.refresh_seconds:
+        near_high = any(event.impact == "High" and event.country in self.countries
+                        and abs(event.timestamp-timestamp) <= 1800 for event in self._events)
+        interval = min(self.refresh_seconds, 60) if near_high else self.refresh_seconds
+        if self._last_attempt == 0 or timestamp - self._last_attempt >= interval:
             self._refresh(timestamp)
         age = timestamp - self._fetched_at if self._fetched_at else self.max_stale_seconds + 1
         ready = bool(self._events) and age <= self.max_stale_seconds
@@ -258,6 +349,7 @@ class ForexFactoryNewsProvider:
             source_age_seconds=age,
             countries=self.countries,
             error=self._error,
+            actual_first_seen=self._actual_first_seen,
         )
 
     def status(self, now: int | None = None) -> dict[str, object]:

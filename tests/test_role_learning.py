@@ -8,15 +8,15 @@ import sqlite3
 
 import pytest
 
-from ramon.bundles import activate_bundle, load_active_bundle, stage_bundle
+from ramon.bundles import V4_FEATURES, activate_bundle, load_active_bundle, stage_bundle
 from ramon.ensemble import (
     BinaryLogisticModel, EnsembleCoordinator, ENTRY_FEATURES, META_FEATURES,
     META_BASE_FEATURES, REGIME_FEATURES, RISK_FEATURES, probability_to_risk_multiplier,
 )
-from ramon.news import NEWS_FEATURES
+from ramon.news import NEWS_FEATURES, neutral_news_features
 from ramon.history import ensure_history_db, persist_trade_outcome
 from ramon.train_roles import (
-    Example, load_trade_examples, promotion_gate, temporal_windows, train_bundle,
+    Example, complete_news_examples, load_trade_examples, promotion_gate, temporal_windows, train_bundle,
     _regime_dataset,
 )
 from ramon.core import Bar
@@ -94,6 +94,36 @@ def test_legacy_loose_models_are_never_mixed_into_new_bundle(tmp_path):
     coordinator = EnsembleCoordinator(tmp_path)
     assert not coordinator.ready
     assert coordinator.status()["ensemble_mode"] == "bootstrap_chronos"
+
+
+def test_existing_v4_bundle_still_loads_with_new_news_snapshot(tmp_path):
+    import hashlib
+    version = "legacy-v4"
+    folder = tmp_path / "versions" / version
+    folder.mkdir(parents=True)
+    hashes = {}
+    for role, names in V4_FEATURES.items():
+        path = folder / f"{role}.json"
+        constant_model(names, 0.7).save(path)
+        hashes[role] = hashlib.sha256(path.read_bytes()).hexdigest()
+    (folder / "manifest.json").write_text(json.dumps({
+        "schema_version": 4, "bundle_id": version, "chronos_model": "test/model",
+        "symbol": "XAUUSD_l", "trade_threshold": 0.65,
+        "promotion_gate_passed": True, "sha256": hashes,
+    }))
+    activate_bundle(tmp_path, version, "test/model")
+    coordinator = EnsembleCoordinator(tmp_path, "test/model")
+    assert coordinator.ready and coordinator.news_ready
+    news = {**neutral_news_features(), "signed_surprise": 0.5, "post_high_30m": 1.0}
+    response, features = coordinator.assess(_market(), _decision(), news)
+    assert response["ensemble_active"] == 1
+    assert features["news"]["surprise_aligned_with_candidate"] == 0.5
+
+
+def test_v5_training_excludes_old_missing_news_measurements():
+    complete = Example(100, 200, {"news": {name: 0.0 for name in NEWS_FEATURES}}, 1)
+    old = Example(300, 400, {"news": {"source_available": 1.0}}, 0)
+    assert complete_news_examples([old, complete]) == [complete]
 
 
 def test_temporal_windows_purge_future_labels_and_duplicate_times():
