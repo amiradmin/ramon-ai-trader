@@ -1,5 +1,5 @@
 #property strict
-#property version "0.46"
+#property version "0.47"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -81,6 +81,8 @@ input bool EnableClipboardButton = true;
 input bool WriteCsvLogs = true;
 input string SignalCsvFileName = "Ramon_Signals.csv";
 input string TradeCsvFileName = "Ramon_Trades.csv";
+input bool EnableImprovementShadowPack = true; // Observe-only: never blocks/opens/closes/resizes trades.
+input string ShadowCsvFileName = "Ramon_Shadow_Improvements.csv";
 
 CTrade Trade;
 datetime LastDecisionRequestTime = 0;
@@ -210,6 +212,16 @@ bool MarketClosedExitPause = false;
 datetime MarketClosedExitPauseTickTime = 0;
 ulong MarketClosedExitPauseTicket = 0;
 
+// v0.47 improvement pack: telemetry only. These values MUST NOT be used by execution gates.
+bool ShadowBuyCaution = false;
+bool ShadowSellCaution = false;
+double ShadowRiskMultiplier = 1.0;
+double ShadowSmallTargetUnits = SmallProfitTargetUnits;
+bool ShadowDeadTrade = false;
+double ShadowDeadTradePeakR = 0.0;
+double ShadowDeadTradeCurrentR = 0.0;
+string ShadowReason = "NONE";
+
 bool IsAllowedModelUrl(const string url)
 {
    return (
@@ -329,6 +341,13 @@ string EffectiveSignalCsvFileName()
 string EffectiveTradeCsvFileName()
 {
    return (SmallOnlyMode ? "Ramon_Small_Trades.csv" : TradeCsvFileName);
+}
+
+string EffectiveShadowCsvFileName()
+{
+   if(!EnableImprovementShadowPack)
+      return "";
+   return (SmallOnlyMode ? "Ramon_Small_Shadow_Improvements.csv" : ShadowCsvFileName);
 }
 
 string BoolText(const bool value)
@@ -456,7 +475,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.46\n"
+      +"EA version: 0.47\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -535,6 +554,19 @@ string BuildDiagnosticText()
       +" / "+DoubleToString(LastTargetTP3,_Digits)
       +"  LegacyTP: "+DoubleToString(LastLegacyTargetPrice,_Digits)+"\n"
       +"ExecutionTargetMode: LEGACY_TP_UNCHANGED\n\n"
+      +"=== V0.47 IMPROVEMENT SHADOWS (OBSERVE ONLY) ===\n"
+      +"ShadowPack: "+BoolText(EnableImprovementShadowPack)
+      +"  Reason: "+ShadowReason+"\n"
+      +"DirectionCaution: BUY="+BoolText(ShadowBuyCaution)
+      +" SELL="+BoolText(ShadowSellCaution)+"\n"
+      +"ShadowRiskMultiplier: "+DoubleToString(ShadowRiskMultiplier,2)+"x"
+      +"  ActualRiskMultiplier: "+DoubleToString(LastRiskMultiplier,2)+"x\n"
+      +"ShadowSmallTargetUnits: "+DoubleToString(ShadowSmallTargetUnits,2)
+      +"  ActualTargetUnits: "+DoubleToString(SmallProfitTargetUnits,2)+"\n"
+      +"DeadTradeShadow: "+BoolText(ShadowDeadTrade)
+      +"  PeakR="+DoubleToString(ShadowDeadTradePeakR,3)
+      +"  CurrentR="+DoubleToString(ShadowDeadTradeCurrentR,3)+"\n"
+      +"ShadowExecutionEffect: NONE\n\n"
       +"=== ACCOUNT / EXECUTION ===\n"
       +"Live: "+LiveStateText()
       +"  AccountLock: "+(AccountLockHealthy() ? "OK" : "FAIL")
@@ -735,7 +767,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.46 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.47 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
@@ -1265,6 +1297,136 @@ void UpdateSizingPreview()
    }
 }
 
+void UpdateImprovementShadows()
+{
+   ShadowBuyCaution=false;
+   ShadowSellCaution=false;
+   ShadowRiskMultiplier=1.0;
+   ShadowSmallTargetUnits=SmallProfitTargetUnits;
+   ShadowDeadTrade=false;
+   ShadowDeadTradePeakR=0.0;
+   ShadowDeadTradeCurrentR=0.0;
+   ShadowReason="NONE";
+
+   if(!EnableImprovementShadowPack)
+      return;
+
+   string direction=(LastModelDecision=="BUY" || LastModelDecision=="SELL"
+      ? LastModelDecision
+      : (LastBuyEdge>=LastSellEdge ? "BUY" : "SELL"));
+   bool intrabar_support=(LastIntrabarConfirmed && LastIntrabarDirection==direction);
+   bool trend_support=(LastAiTrendConfirmed && LastAiTrendDirection==direction);
+   bool edge_support=(LastMinimumEdge>0.0
+      && (direction=="BUY" ? LastBuyEdge : LastSellEdge)>=LastMinimumEdge);
+   bool strength_support=(LastMinimumStrength>0.0
+      && LastSignalStrength>=LastMinimumStrength);
+
+   int support_count=0;
+   if(intrabar_support) support_count++;
+   if(trend_support) support_count++;
+   if(edge_support) support_count++;
+   if(strength_support) support_count++;
+
+   // Direction-specific shadow: BUY has historically underperformed SELL in the current report.
+   // Observe only whether requiring at least one short-horizon confirmation would have filtered it.
+   ShadowBuyCaution=(direction=="BUY" && !intrabar_support && !trend_support);
+   ShadowSellCaution=(direction=="SELL" && !intrabar_support && !trend_support);
+
+   // Proposed future sizing policy, telemetry only.
+   if(support_count<=1) ShadowRiskMultiplier=0.50;
+   else if(support_count==2) ShadowRiskMultiplier=0.75;
+   else ShadowRiskMultiplier=1.00;
+
+   // Proposed SMALL target extension, telemetry only. Actual broker TP remains unchanged.
+   if(SmallOnlyMode && support_count>=3)
+      ShadowSmallTargetUnits=3.0;
+
+   ulong ticket=0;
+   datetime opened=0;
+   if(ManagedPosition(ticket,opened) && PositionSelectByTicket(ticket))
+   {
+      double risk=ManagedPositionInitialRiskUnits(ticket);
+      double current=PositionGetDouble(POSITION_PROFIT);
+      double peak=ProfitProtectionPeakUnits;
+      if(risk>0.0)
+      {
+         ShadowDeadTradePeakR=peak/risk;
+         ShadowDeadTradeCurrentR=current/risk;
+         int age_sec=(opened>0 ? (int)(TimeCurrent()-opened) : 0);
+
+         // "Dead-trade" candidate: after two minutes, little favorable excursion,
+         // already materially adverse, and no fresh directional confirmation.
+         ShadowDeadTrade=(
+            age_sec>=120
+            && ShadowDeadTradePeakR<0.25
+            && ShadowDeadTradeCurrentR<=-0.35
+            && !intrabar_support
+            && !trend_support
+         );
+      }
+   }
+
+   if(ShadowDeadTrade) ShadowReason="dead_trade_candidate";
+   else if(ShadowBuyCaution) ShadowReason="buy_confirmation_caution";
+   else if(ShadowSellCaution) ShadowReason="sell_confirmation_caution";
+   else if(ShadowRiskMultiplier<1.0) ShadowReason="reduced_risk_candidate";
+   else if(ShadowSmallTargetUnits>SmallProfitTargetUnits) ShadowReason="small_tp_extension_candidate";
+   else ShadowReason="no_shadow_action";
+}
+
+void AppendImprovementShadowCsv()
+{
+   if(!WriteCsvLogs || !EnableImprovementShadowPack
+      || StringLen(EffectiveShadowCsvFileName())==0)
+      return;
+
+   int handle=FileOpen(
+      EffectiveShadowCsvFileName(),
+      FILE_READ|FILE_WRITE|FILE_CSV|FILE_ANSI|FILE_COMMON,
+      ','
+   );
+   if(handle==INVALID_HANDLE)
+   {
+      Print("Ramon shadow CSV open failed err=",GetLastError());
+      return;
+   }
+
+   bool empty=(FileSize(handle)==0);
+   FileSeek(handle,0,SEEK_END);
+   if(empty)
+   {
+      FileWrite(handle,
+         "captured","signal_bar_time","symbol","role","sample_key",
+         "decision","reason","buy_caution","sell_caution",
+         "shadow_risk_multiplier","actual_risk_multiplier",
+         "shadow_small_target_units","actual_small_target_units",
+         "dead_trade_candidate","dead_trade_peak_r","dead_trade_current_r",
+         "intrabar_confirmed","intrabar_direction",
+         "ai_trend_confirmed","ai_trend_direction",
+         "buy_edge","sell_edge","minimum_edge",
+         "signal_strength","minimum_strength","shadow_reason");
+   }
+
+   FileWrite(handle,
+      TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS),
+      TimeToString(LastSignalBarTime,TIME_DATE|TIME_MINUTES),
+      _Symbol,(SmallOnlyMode ? "SMALL" : "MAIN"),LastSampleKey,
+      LastModelDecision,LastModelReason,
+      BoolText(ShadowBuyCaution),BoolText(ShadowSellCaution),
+      DoubleToString(ShadowRiskMultiplier,2),DoubleToString(LastRiskMultiplier,2),
+      DoubleToString(ShadowSmallTargetUnits,2),DoubleToString(SmallProfitTargetUnits,2),
+      BoolText(ShadowDeadTrade),DoubleToString(ShadowDeadTradePeakR,4),
+      DoubleToString(ShadowDeadTradeCurrentR,4),
+      BoolText(LastIntrabarConfirmed),LastIntrabarDirection,
+      BoolText(LastAiTrendConfirmed),LastAiTrendDirection,
+      DoubleToString(LastBuyEdge,6),DoubleToString(LastSellEdge,6),
+      DoubleToString(LastMinimumEdge,6),DoubleToString(LastSignalStrength,6),
+      DoubleToString(LastMinimumStrength,6),ShadowReason);
+
+   FileFlush(handle);
+   FileClose(handle);
+}
+
 void AppendSignalCsv()
 {
    if(!WriteCsvLogs || StringLen(EffectiveSignalCsvFileName())==0)
@@ -1518,7 +1680,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.46";
+      version="0.47";
    }
    if(close_detail!="") detail=close_detail;
 
@@ -2664,7 +2826,9 @@ void OnTimer()
    LastLegacyTargetPrice=legacy_target_price;
    StatusLine=reason;
    UpdateSizingPreview();
+   UpdateImprovementShadows();
    AppendSignalCsv();
+   AppendImprovementShadowCsv();
    Print("Ramon ",UTCText(bar_time,TIME_DATE|TIME_SECONDS)," ",decision," ",reason,
       " median=",DoubleToString(median,_Digits));
 
@@ -2833,6 +2997,7 @@ int OnInit()
       || SnapshotIntervalSeconds<10
       || (WriteDiagnosticFile && StringLen(DiagnosticFileName)==0)
       || (WriteCsvLogs && (StringLen(SignalCsvFileName)==0 || StringLen(TradeCsvFileName)==0))
+      || (EnableImprovementShadowPack && WriteCsvLogs && StringLen(ShadowCsvFileName)==0)
       || !IsAllowedModelUrl(ModelUrl))
    { Print("Invalid risk or local server settings"); return INIT_FAILED; }
    long current_login=AccountInfoInteger(ACCOUNT_LOGIN);
