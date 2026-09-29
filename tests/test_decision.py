@@ -9,6 +9,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from ramon.core import Bar, Forecast, Market, Settings, evaluate
+from ramon.core import forecast_direction_support
 from ramon.replay import replay
 from ramon.server import CachedForecaster, persist_market_safely, serve
 from ramon.model import ChronosForecaster
@@ -76,6 +77,32 @@ class DecisionTests(unittest.TestCase):
         self.assertAlmostEqual(result.minimum_strength, 0.20)
         self.assertEqual(result.signal_bar_time, self.market.bars[-1].time)
         self.assertEqual(self.model.last_close, 100.0)
+
+    def test_quantile_support_vetoes_weak_tail_without_loosening_edge(self) -> None:
+        self.model.value = Forecast(98.8, 101.2, 101.3)
+        legacy = evaluate(self.market, self.model)
+        guarded = evaluate(self.market, self.model, Settings(minimum_forecast_support=0.65))
+        self.assertEqual(legacy.decision, "BUY")
+        self.assertEqual(guarded.decision, "WAIT")
+        self.assertEqual(guarded.reason, "insufficient_forecast_support")
+        self.assertLess(guarded.forecast_support, 0.65)
+        self.assertEqual(guarded.edge, 0.0)
+
+    def test_quantile_support_is_spread_aware_for_sell(self) -> None:
+        forecast = Forecast(98.0, 98.9, 100.2)
+        support = forecast_direction_support(forecast, self.market, "SELL")
+        # A short closes at future Ask; bid minus today's spread is its
+        # conservative break-even future Bid threshold.
+        self.assertAlmostEqual(support, 0.5 + 0.4 * (99.6 - 98.9) / (100.2 - 98.9))
+        self.assertEqual(evaluate(self.market, FixedModel(forecast),
+                                  Settings(minimum_forecast_support=0.65)).decision, "SELL")
+
+    def test_quantile_support_vetoes_wait_candidate_before_small_lane(self) -> None:
+        forecast = Forecast(98.0, 101.1, 107.0)
+        result = evaluate(self.market, FixedModel(forecast),
+                          Settings(minimum_forecast_support=0.70))
+        self.assertEqual(result.decision, "WAIT")
+        self.assertEqual(result.reason, "insufficient_forecast_support")
 
     def test_sell_and_wait(self) -> None:
         self.model.value = Forecast(95.0, 97.0, 101.0)

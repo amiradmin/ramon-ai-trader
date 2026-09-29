@@ -78,6 +78,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     "model": model.model_id,
                     "forecast_context": "completed_m15_cached",
                     "live_quote_decisions": True,
+                    "minimum_forecast_support": settings.minimum_forecast_support,
                     "history_enabled": bool(history_db),
                     "history_last_error": str(history_status["last_error"]),
                     "history_last_persisted_bar": int(history_status["last_persisted_bar"]),
@@ -263,7 +264,10 @@ def main() -> None:
 
     checkpoint = model_name(requested_model)
     model = ChronosForecaster(checkpoint, args.device)
-    serve(args.host, args.port, model, Settings())
+    # Keep the gate observational by default: the first executed-trade audit
+    # did not show a benefit from the proposed 0.65 threshold.
+    support = float(os.getenv("RAMON_MIN_FORECAST_SUPPORT", "0"))
+    serve(args.host, args.port, model, Settings(minimum_forecast_support=support))
 
 
 if __name__ == "__main__":

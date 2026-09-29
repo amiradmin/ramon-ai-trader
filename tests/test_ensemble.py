@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from dataclasses import replace
 
 from ramon.core import Bar, Decision, Market
 from ramon.ensemble import (
@@ -100,6 +101,25 @@ def test_ensemble_stays_inactive_until_all_roles_exist(tmp_path: Path) -> None:
     assert payload["risk_probability"] == -1.0
     assert payload["risk_multiplier"] == 1.0
     assert set(features) == {"regime", "entry", "news", "meta_base"}
+
+
+def test_promoted_meta_cannot_override_forecast_support_veto(tmp_path: Path) -> None:
+    class HighProbability:
+        def predict_proba(self, features):
+            return 0.99
+
+    coordinator = EnsembleCoordinator(tmp_path)
+    coordinator.regime = HighProbability()
+    coordinator.entry = HighProbability()
+    coordinator.meta = HighProbability()
+    coordinator.symbol = "XAUUSD_l"
+    decision = replace(_decision(), reason="insufficient_forecast_support")
+
+    result, _ = coordinator.assess(_market(), decision)
+
+    assert result["ensemble_active"] == 1
+    assert result["decision"] == "WAIT"
+    assert result["reason"] == "insufficient_forecast_support"
 
 
 def test_risk_multiplier_is_bounded_and_neutral_at_half_probability() -> None:

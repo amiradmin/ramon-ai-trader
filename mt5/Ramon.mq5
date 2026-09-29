@@ -1,5 +1,5 @@
 #property strict
-#property version "1.530"
+#property version "1.540"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -144,6 +144,8 @@ double LastSellEdge = 0.0;
 double LastMinimumEdge = 0.0;
 double LastUncertainty = 0.0;
 double LastSignalStrength = 0.0;
+double LastForecastSupport = -1.0;
+double LastMinimumForecastSupport = 0.0;
 double LastMinimumStrength = 0.20;
 bool LastIntrabarConfirmed = false;
 string LastIntrabarDirection = "NONE";
@@ -499,7 +501,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.53\n"
+      +"EA version: 0.54\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -551,6 +553,8 @@ string BuildDiagnosticText()
       +"Uncertainty: "+DoubleToString(LastUncertainty,_Digits)
       +"  SignalStrength: "+DoubleToString(LastSignalStrength,3)
       +"  MinimumStrength: "+DoubleToString(LastMinimumStrength,3)+"\n"
+      +"ForecastSupport (quantile score): "+DoubleToString(LastForecastSupport,3)
+      +"  Minimum: "+DoubleToString(LastMinimumForecastSupport,3)+"\n"
       +"EdgeCondition: "+((MathMax(LastBuyEdge,LastSellEdge)>=LastMinimumEdge && LastMinimumEdge>0.0) ? "PASS" : "FAIL")
       +"  StrengthCondition: "+((LastSignalStrength>=LastMinimumStrength && LastMinimumStrength>0.0) ? "PASS" : "FAIL")+"\n"      +"DirectionConsensus: "+(EnableMainDirectionConsensus && !SmallOnlyMode ? "ACTIVE" : "OFF")
       +"  Status: "+LastDirectionConsensusStatus
@@ -808,7 +812,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.53 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.54 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
@@ -1908,7 +1912,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.53";
+      version="0.54";
    }
    if(close_detail!="") detail=close_detail;
 
@@ -3027,6 +3031,7 @@ void OnTimer()
    double target_tp1=0.0,target_tp2=0.0,target_tp3=0.0,legacy_target_price=0.0;
    double forecast_low=0.0,forecast_high=0.0,edge=0.0,model_spread=0.0;
    double buy_edge=0.0,sell_edge=0.0,minimum_edge=0.0,uncertainty=0.0,signal_strength=0.0,minimum_strength=0.0;
+   double forecast_support=-1.0,minimum_forecast_support=0.0;
    double intrabar_confirmed=0.0,intrabar_move_atr=0.0,intrabar_rebound_atr=0.0;
    double intrabar_min_strength=0.0,intrabar_min_move_atr=0.0,intrabar_min_rebound_atr=0.0;
    string ai_trend_direction="";
@@ -3072,6 +3077,8 @@ void OnTimer()
       || !JsonNumber(reply,"uncertainty",uncertainty)
       || !JsonNumber(reply,"signal_strength",signal_strength)
       || !JsonNumber(reply,"minimum_strength",minimum_strength)
+      || !JsonNumber(reply,"forecast_support",forecast_support)
+      || !JsonNumber(reply,"minimum_forecast_support",minimum_forecast_support)
       || !JsonNumber(reply,"intrabar_confirmed",intrabar_confirmed)
       || !JsonText(reply,"intrabar_direction",intrabar_direction)
       || !JsonNumber(reply,"intrabar_move_atr",intrabar_move_atr)
@@ -3106,6 +3113,8 @@ void OnTimer()
       || risk_model_ready<0.0 || risk_model_ready>1.0
       || risk_probability<-1.0 || risk_probability>1.0
       || risk_multiplier<0.50 || risk_multiplier>1.50
+      || forecast_support<-1.0 || forecast_support>1.0
+      || minimum_forecast_support<0.0 || minimum_forecast_support>0.9
       || (risk_model_ready>=0.5 && risk_probability<0.0)
       || (risk_model_ready<0.5 && (MathAbs(risk_multiplier-1.0)>0.000001 || risk_probability!=-1.0))
       || (datetime)signal_time!=bar_time
@@ -3150,6 +3159,8 @@ void OnTimer()
    LastUncertainty=uncertainty;
    LastSignalStrength=signal_strength;
    LastMinimumStrength=minimum_strength;
+   LastForecastSupport=forecast_support;
+   LastMinimumForecastSupport=minimum_forecast_support;
    LastIntrabarConfirmed=(intrabar_confirmed>=0.5);
    LastIntrabarDirection=intrabar_direction;
    LastIntrabarMoveAtr=intrabar_move_atr;

@@ -13,10 +13,10 @@ def source() -> str:
 
 def test_ea_038_keeps_sizing_telemetry_observational():
     text = source()
-    assert '#property version "1.530"' in text
-    assert 'EA version: 0.53' in text
-    assert 'RAMON AI TRADER  v0.53' in text
-    assert 'version="0.53";' in text
+    assert '#property version "1.540"' in text
+    assert 'EA version: 0.54' in text
+    assert 'RAMON AI TRADER  v0.54' in text
+    assert 'version="0.54";' in text
     # Telemetry staging is deliberately not a trade gate.
     assert 'if(!StageEntrySizing' not in text
     assert re.search(

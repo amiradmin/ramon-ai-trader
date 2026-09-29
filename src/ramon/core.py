@@ -119,6 +119,9 @@ class Settings:
     trend_conflict_atr: float = 3.0
     stop_atr: float = 1.5
     target_atr: float = 3.0
+    # An optional conservative entry veto. The score interpolates forecast
+    # quantiles; it is not a calibrated probability of a profitable trade.
+    minimum_forecast_support: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,9 +173,32 @@ class Decision:
     forecast_high: float
     stop_distance: float
     target_distance: float
+    forecast_support: float = -1.0
+    minimum_forecast_support: float = 0.0
 
     def to_dict(self) -> dict[str, str | int | float]:
         return asdict(self)
+
+
+def forecast_direction_support(forecast: Forecast, market: Market, side: str) -> float:
+    """Interpolated endpoint support after entry and exit spread, in [0.1, 0.9].
+
+    The three forecast values are the 10th, 50th and 90th percentiles of
+    future broker Bid. This is a ranking score, not a calibrated win rate.
+    """
+    # BUY enters at Ask and exits at future Bid. SELL enters at Bid and
+    # exits at future Ask; use today's spread as a conservative approximation.
+    price = market.ask if side == "BUY" else market.bid - (market.ask - market.bid)
+    low, median, high = forecast.low, forecast.median, forecast.high
+    if price <= low:
+        below = 0.1
+    elif price <= median:
+        below = 0.1 + 0.4 * (price - low) / max(median - low, market.point)
+    elif price < high:
+        below = 0.5 + 0.4 * (price - median) / max(high - median, market.point)
+    else:
+        below = 0.9
+    return (1.0 - below) if side == "BUY" else below
 
 
 def atr14(bars: Sequence[Bar]) -> float:
@@ -252,6 +278,8 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
     market.validate()
     if settings.horizon < 1 or settings.context < 128:
         raise ValueError("invalid horizon/context")
+    if not 0.0 <= settings.minimum_forecast_support <= 0.9:
+        raise ValueError("invalid forecast support threshold")
     if not (
         0 <= settings.intrabar_min_strength <= settings.minimum_strength
         and settings.intrabar_min_move_atr >= 0
@@ -286,6 +314,7 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
     ai_trend_score = 0.0
     ai_trend_move_atr = 0.0
     ai_trend_consistency = 0.0
+    forecast_support = -1.0
 
     if atr <= market.point or spread_points > settings.max_spread_points:
         reason = "spread_or_atr"
@@ -386,6 +415,13 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
             else:
                 reason = "insufficient_model_edge"
 
+        forecast_support = forecast_direction_support(forecast, market, intrabar_direction)
+        # Apply before either execution lane or the learned meta role can
+        # promote a weak WAIT into a live order.
+        if (dominant_edge > 0 and reason != "trend_conflict"
+                and forecast_support < settings.minimum_forecast_support):
+            side, edge, reason = "WAIT", 0.0, "insufficient_forecast_support"
+
     return Decision(
         decision=side,
         reason=reason,
@@ -422,4 +458,6 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
         forecast_high=forecast.high,
         stop_distance=settings.stop_atr * atr,
         target_distance=settings.target_atr * atr,
+        forecast_support=forecast_support,
+        minimum_forecast_support=settings.minimum_forecast_support,
     )
