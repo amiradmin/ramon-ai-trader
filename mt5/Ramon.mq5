@@ -1,5 +1,5 @@
 #property strict
-#property version "0.48"
+#property version "0.490"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -67,7 +67,8 @@ input double EarlyReversalMinPeakUnits = 2.0; // Require at least this much favo
 input double EarlyReversalGivebackUnits = 6.0; // Require this much giveback from peak.
 input double EarlyReversalMaxCurrentUnits = 0.0; // Trigger only after the trade has returned to breakeven/loss.
 const bool EnableEarlyAdverseExit = true; // Active loss reduction: exit only after material loss plus repeated signal failure.
-const double EarlyAdverseRiskFraction = 0.60; // Arm at 60% of reconstructed initial SL risk.
+const double EarlyAdverseRiskFraction = 0.60; // MAIN: arm at 60% of reconstructed initial SL risk.
+const double SmallEarlyAdverseRiskFraction = 0.50; // SMALL: evaluate earlier at 50% of risk (~2c on a 4c stop).
 const int EarlyAdverseWeakSnapshotsRequired = 2; // Require two distinct model snapshots with no support.
 const int EarlyAdverseMinAgeSeconds = 120; // Give a new trade two minutes before adverse-exit evaluation.
 input int RequestTimeoutMs = 4000;
@@ -194,6 +195,7 @@ datetime EarlyReversalShadowTriggerTime = 0;
 ulong EarlyAdverseTicket = 0;
 double EarlyAdverseInitialRiskUnits = 0.0;
 double EarlyAdverseTriggerLossUnits = 0.0;
+double EarlyAdverseAppliedRiskFraction = 0.0;
 int EarlyAdverseWeakSnapshots = 0;
 datetime EarlyAdverseLastDecisionTime = 0;
 bool EarlyAdverseTriggered = false;
@@ -212,7 +214,7 @@ bool MarketClosedExitPause = false;
 datetime MarketClosedExitPauseTickTime = 0;
 ulong MarketClosedExitPauseTicket = 0;
 
-// v0.48 improvement pack: telemetry only. These values MUST NOT be used by execution gates.
+// v0.49 improvement pack: telemetry only. These values MUST NOT be used by execution gates.
 bool ShadowBuyCaution = false;
 bool ShadowSellCaution = false;
 double ShadowRiskMultiplier = 1.0;
@@ -475,7 +477,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.48\n"
+      +"EA version: 0.49\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -554,7 +556,7 @@ string BuildDiagnosticText()
       +" / "+DoubleToString(LastTargetTP3,_Digits)
       +"  LegacyTP: "+DoubleToString(LastLegacyTargetPrice,_Digits)+"\n"
       +"ExecutionTargetMode: LEGACY_TP_UNCHANGED\n\n"
-      +"=== V0.48 IMPROVEMENT SHADOWS (OBSERVE ONLY) ===\n"
+      +"=== V0.49 IMPROVEMENT SHADOWS (OBSERVE ONLY) ===\n"
       +"ShadowPack: "+BoolText(EnableImprovementShadowPack)
       +"  Reason: "+ShadowReason+"\n"
       +"DirectionCaution: BUY="+BoolText(ShadowBuyCaution)
@@ -615,7 +617,9 @@ string BuildDiagnosticText()
       +"  triggered="+BoolText(EarlyAdverseTriggered)
       +"  lossTrigger="+DoubleToString(EarlyAdverseTriggerLossUnits,2)
       +"  weak="+IntegerToString(EarlyAdverseWeakSnapshots)+"/"+IntegerToString(EarlyAdverseWeakSnapshotsRequired)
-      +"  riskFraction="+DoubleToString(EarlyAdverseRiskFraction,2)
+      +"  riskFraction="+DoubleToString(
+         (EarlyAdverseAppliedRiskFraction>0.0 ? EarlyAdverseAppliedRiskFraction
+            : (SmallOnlyMode ? SmallEarlyAdverseRiskFraction : EarlyAdverseRiskFraction)),2)
       +"  minAgeSec="+IntegerToString(EarlyAdverseMinAgeSeconds)+"\n"
       +"Trades today: "+(today<0 ? "history unavailable" : IntegerToString(today))
       +"/"+(SmallOnlyMode ? "unlimited" : IntegerToString(MaxTradesPerDay))+"\n"
@@ -625,7 +629,8 @@ string BuildDiagnosticText()
       +"  BrokerSLMaxUnits: "+DoubleToString(SmallProfitMaxLossUnits,2)
       +"  Today: "+(today<0 ? "history unavailable" : IntegerToString(today))
       +"/unlimited\n"
-      +"Small entries per signal bar: "+IntegerToString(SmallProfitMaxEntriesPerSignalBar)+" max\n"
+      +"Small entries per signal bar: "+IntegerToString(SmallProfitMaxEntriesPerSignalBar)
+      +" max; second blocked after same-bar loss\n"
       +"RiskPerTradeUSD: "+DoubleToString(RiskPerTradeUSD,2)
       +"  EffectiveRiskUSD: "+DoubleToString(EffectiveRiskPerTradeUSD(),3)
       +"  RiskMultiplier: "+DoubleToString(LastRiskMultiplier,2)+"x"
@@ -767,7 +772,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.48 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.49 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
@@ -1078,6 +1083,93 @@ int SmallEntriesThisSignalBar(const datetime bar_time)
       if(LastSmallEntriesOnSignalBar>count)
          count=LastSmallEntriesOnSignalBar;
    return count;
+}
+
+// Result: -1 history unreadable, 0 no closed SMALL loss in this execution bar, 1 loss found.
+// This blocks a second attempt after the first SMALL trade on the same M15 idea has already failed.
+int SmallLossClosedThisSignalBar(const datetime bar_time)
+{
+   if(!SmallOnlyMode)
+      return 0;
+
+   datetime current=iTime(_Symbol,PERIOD_M15,0);
+   datetime now=TimeCurrent();
+   if(current<=bar_time || current-bar_time>1800 || now<current
+      || !HistorySelect(current,now))
+      return -1;
+
+   ulong identifiers[];
+   for(int i=0;i<HistoryDealsTotal();i++)
+   {
+      ulong deal=HistoryDealGetTicket(i);
+      if(deal==0)
+         return -1;
+      if(HistoryDealGetString(deal,DEAL_SYMBOL)!=_Symbol
+         || (ulong)HistoryDealGetInteger(deal,DEAL_MAGIC)!=MagicNumber
+         || HistoryDealGetInteger(deal,DEAL_ENTRY)!=DEAL_ENTRY_IN)
+         continue;
+
+      ulong identifier=(ulong)HistoryDealGetInteger(deal,DEAL_POSITION_ID);
+      if(identifier==0)
+         return -1;
+
+      bool seen=false;
+      for(int j=0;j<ArraySize(identifiers);j++)
+         if(identifiers[j]==identifier) { seen=true; break; }
+      if(!seen)
+      {
+         int n=ArraySize(identifiers);
+         ArrayResize(identifiers,n+1);
+         identifiers[n]=identifier;
+      }
+   }
+
+   for(int i=0;i<ArraySize(identifiers);i++)
+   {
+      ulong identifier=identifiers[i];
+      if(PositionIdOpen(identifier))
+         continue;
+      if(!HistorySelectByPosition(identifier))
+         return -1;
+
+      bool ours=false;
+      double in_volume=0.0,out_volume=0.0,net=0.0;
+      for(int j=0;j<HistoryDealsTotal();j++)
+      {
+         ulong deal=HistoryDealGetTicket(j);
+         if(deal==0)
+            return -1;
+         if(HistoryDealGetString(deal,DEAL_SYMBOL)!=_Symbol)
+            continue;
+
+         net+=HistoryDealGetDouble(deal,DEAL_PROFIT)
+            +HistoryDealGetDouble(deal,DEAL_COMMISSION)
+            +HistoryDealGetDouble(deal,DEAL_SWAP)
+            +HistoryDealGetDouble(deal,DEAL_FEE);
+
+         long type=HistoryDealGetInteger(deal,DEAL_TYPE);
+         if(type!=DEAL_TYPE_BUY && type!=DEAL_TYPE_SELL)
+            continue;
+
+         long entry=HistoryDealGetInteger(deal,DEAL_ENTRY);
+         double volume=HistoryDealGetDouble(deal,DEAL_VOLUME);
+         if(entry==DEAL_ENTRY_IN)
+         {
+            if((ulong)HistoryDealGetInteger(deal,DEAL_MAGIC)!=MagicNumber)
+               return -1;
+            ours=true;
+            in_volume+=volume;
+         }
+         else if(entry==DEAL_ENTRY_OUT || entry==DEAL_ENTRY_OUT_BY)
+            out_volume+=volume;
+      }
+
+      if(ours && in_volume>0.0
+         && MathAbs(in_volume-out_volume)<=0.000001
+         && net<0.0)
+         return 1;
+   }
+   return 0;
 }
 
 bool SmallProfitCandidate(const string decision,const string reason,
@@ -1680,7 +1772,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.48";
+      version="0.49";
    }
    if(close_detail!="") detail=close_detail;
 
@@ -2388,6 +2480,7 @@ void ResetEarlyAdverseState()
    EarlyAdverseTicket=0;
    EarlyAdverseInitialRiskUnits=0.0;
    EarlyAdverseTriggerLossUnits=0.0;
+   EarlyAdverseAppliedRiskFraction=0.0;
    EarlyAdverseWeakSnapshots=0;
    EarlyAdverseLastDecisionTime=0;
    EarlyAdverseTriggered=false;
@@ -2407,12 +2500,14 @@ bool ManageEarlyAdverseExit(const ulong ticket,const datetime opened)
          EarlyAdverseInitialRiskUnits=MathMin(
             EarlyAdverseInitialRiskUnits,SmallProfitRiskCapUnits()
          );
+      EarlyAdverseAppliedRiskFraction=(IsSmallProfitPosition(ticket)
+         ? SmallEarlyAdverseRiskFraction : EarlyAdverseRiskFraction);
       if(EarlyAdverseInitialRiskUnits>0.0)
-         EarlyAdverseTriggerLossUnits=EarlyAdverseInitialRiskUnits*EarlyAdverseRiskFraction;
+         EarlyAdverseTriggerLossUnits=EarlyAdverseInitialRiskUnits*EarlyAdverseAppliedRiskFraction;
       Print("Ramon EARLY ADVERSE init ticket=",ticket,
          " initial_risk=",DoubleToString(EarlyAdverseInitialRiskUnits,2),
          " trigger_loss=",DoubleToString(EarlyAdverseTriggerLossUnits,2),
-         " fraction=",DoubleToString(EarlyAdverseRiskFraction,2));
+         " fraction=",DoubleToString(EarlyAdverseAppliedRiskFraction,2));
    }
 
    if(EarlyAdverseInitialRiskUnits<=0.0 || EarlyAdverseTriggerLossUnits<=0.0)
@@ -2856,6 +2951,14 @@ void OnTimer()
       small_entries_on_bar=SmallEntriesThisSignalBar(bar_time);
       if(small_entries_on_bar<0)
       { StatusLine="Small entry history unavailable"; ShowStatus(); return; }
+      if(small_entries_on_bar>0)
+      {
+         int small_loss_on_bar=SmallLossClosedThisSignalBar(bar_time);
+         if(small_loss_on_bar<0)
+         { StatusLine="Small loss-gate history unavailable"; ShowStatus(); return; }
+         if(small_loss_on_bar>0)
+         { StatusLine="Second SMALL blocked: first attempt lost this M15 bar"; ShowStatus(); return; }
+      }
       if(small_entries_on_bar>=SmallProfitMaxEntriesPerSignalBar)
       { StatusLine="Two small entries already used for this M15 signal bar"; ShowStatus(); return; }
    }
@@ -2995,6 +3098,7 @@ int OnInit()
       || EarlyReversalMinPeakUnits<=0.0 || EarlyReversalGivebackUnits<=0.0
       || EarlyReversalMaxCurrentUnits>0.0
       || EarlyAdverseRiskFraction<=0.0 || EarlyAdverseRiskFraction>=1.0
+      || SmallEarlyAdverseRiskFraction<=0.0 || SmallEarlyAdverseRiskFraction>=1.0
       || EarlyAdverseWeakSnapshotsRequired<1 || EarlyAdverseMinAgeSeconds<0
       || SnapshotIntervalSeconds<10
       || (WriteDiagnosticFile && StringLen(DiagnosticFileName)==0)
