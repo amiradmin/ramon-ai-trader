@@ -1,5 +1,5 @@
 #property strict
-#property version "1.520"
+#property version "1.530"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -39,6 +39,8 @@ const double MaxExecutableRiskUSD = 0.20; // Hard fixed cap; MT5 chart inputs ca
 input int MaxSpreadPoints = 50;
 input int MaxTradesPerDay = 400;
 input int MaximumHoldBars = 4;
+input bool EnableMainDirectionConsensus = true; // MAIN entry requires model + at least one same-direction confirmation.
+const int MainDirectionConsensusMinVotes = 2; // 2 of 3: model decision, Intrabar, AI Trend.
 input bool EnableMainFastProfit = false; // Optional MAIN-only early profit exit; off by default until explicitly enabled.
 const int MainFastProfitMinAgeBars = 2; // Evaluate only after at least 2 M15 bars (~30 min).
 const double MainFastProfitMinProfitUnits = 0.20; // Never close a losing MAIN trade through this feature.
@@ -99,6 +101,8 @@ datetime LastDecisionRequestTime = 0;
 datetime LastEntrySignalBar = 0;
 int LastSmallEntriesOnSignalBar = 0;
 string StatusLine = "Starting";
+int LastDirectionConsensusVotes = 0;
+string LastDirectionConsensusStatus = "NOT_EVALUATED";
 string LastModelDecision = "NONE";
 string LastModelReason = "NONE";
 string LastSampleKey = "";
@@ -495,7 +499,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.52\n"
+      +"EA version: 0.53\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -548,7 +552,10 @@ string BuildDiagnosticText()
       +"  SignalStrength: "+DoubleToString(LastSignalStrength,3)
       +"  MinimumStrength: "+DoubleToString(LastMinimumStrength,3)+"\n"
       +"EdgeCondition: "+((MathMax(LastBuyEdge,LastSellEdge)>=LastMinimumEdge && LastMinimumEdge>0.0) ? "PASS" : "FAIL")
-      +"  StrengthCondition: "+((LastSignalStrength>=LastMinimumStrength && LastMinimumStrength>0.0) ? "PASS" : "FAIL")+"\n"
+      +"  StrengthCondition: "+((LastSignalStrength>=LastMinimumStrength && LastMinimumStrength>0.0) ? "PASS" : "FAIL")+"\n"      +"DirectionConsensus: "+(EnableMainDirectionConsensus && !SmallOnlyMode ? "ACTIVE" : "OFF")
+      +"  Status: "+LastDirectionConsensusStatus
+      +"  Votes: "+IntegerToString(LastDirectionConsensusVotes)+"/3"
+      +"  Required: "+IntegerToString(MainDirectionConsensusMinVotes)+"\n"
       +"IntrabarConfirm: "+(LastIntrabarConfirmed ? "PASS" : "FAIL")
       +"  Direction: "+LastIntrabarDirection
       +"  MoveATR: "+DoubleToString(LastIntrabarMoveAtr,3)+"/"+DoubleToString(LastIntrabarMinMoveAtr,3)
@@ -801,7 +808,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.52 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.53 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
@@ -1199,6 +1206,36 @@ int SmallLossClosedThisSignalBar(const datetime bar_time)
          return 1;
    }
    return 0;
+}
+
+bool MainDirectionConsensusPass(const string decision,string &status)
+{
+   LastDirectionConsensusVotes=0;
+   LastDirectionConsensusStatus="NOT_APPLICABLE";
+   status="";
+
+   if(SmallOnlyMode || !EnableMainDirectionConsensus || (decision!="BUY" && decision!="SELL"))
+      return true;
+
+   int votes=1; // The primary model decision is vote #1.
+   bool intrabar_same=(LastIntrabarConfirmed && LastIntrabarDirection==decision);
+   bool trend_same=(LastAiTrendConfirmed && LastAiTrendDirection==decision);
+   if(intrabar_same) votes++;
+   if(trend_same) votes++;
+
+   LastDirectionConsensusVotes=votes;
+   if(votes>=MainDirectionConsensusMinVotes)
+   {
+      LastDirectionConsensusStatus="PASS";
+      return true;
+   }
+
+   LastDirectionConsensusStatus="BLOCK";
+   status="DIRECTION CONSENSUS BLOCK: "
+      +decision+" votes="+IntegerToString(votes)+"/3"
+      +" intrabar="+(intrabar_same ? "YES" : "NO")
+      +" trend="+(trend_same ? "YES" : "NO");
+   return false;
 }
 
 bool SmallProfitCandidate(const string decision,const string reason,
@@ -1871,7 +1908,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.52";
+      version="0.53";
    }
    if(close_detail!="") detail=close_detail;
 
@@ -3144,6 +3181,8 @@ void OnTimer()
    LastTargetTP2=target_tp2;
    LastTargetTP3=target_tp3;
    LastLegacyTargetPrice=legacy_target_price;
+   LastDirectionConsensusVotes=0;
+   LastDirectionConsensusStatus="NOT_EVALUATED";
    StatusLine=reason;
    UpdateSizingPreview();
    UpdateImprovementShadows();
@@ -3161,6 +3200,15 @@ void OnTimer()
    { StatusLine="Unknown model decision"; ShowStatus(); return; }
    if(SmallOnlyMode && decision!="WAIT")
    { StatusLine="Primary signal; small EA stands aside"; ShowStatus(); return; }
+
+   string consensus_status="";
+   if(!MainDirectionConsensusPass(decision,consensus_status))
+   {
+      StatusLine=consensus_status;
+      ShowStatus();
+      return;
+   }
+
    string small_direction="",small_filter_reason="";
    bool small_profit=SmallProfitCandidate(decision,reason,buy_edge,sell_edge,
       signal_strength,small_direction,small_filter_reason);
@@ -3324,6 +3372,7 @@ int OnInit()
       || TPStageWeakSnapshotsRequired<1 || TP1GraceSeconds<0 || TP2GraceSeconds<0
       || MainFastProfitMinAgeBars<1 || MainFastProfitMinProfitUnits<=0.0
       || MainFastProfitMinProgressToTP1<=0.0 || MainFastProfitMinProgressToTP1>=1.0
+      || MainDirectionConsensusMinVotes<2 || MainDirectionConsensusMinVotes>3
       || MainFastProfitWeakSnapshotsRequired<1
       || TP1HealthyProgressFraction<=0.0 || TP1HealthyProgressFraction>=1.0
       || TP1RetraceFraction<=0.0 || TP1RetraceFraction>=1.0
