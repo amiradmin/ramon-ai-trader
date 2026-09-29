@@ -15,6 +15,7 @@ from ramon.report import (
     generate_report,
     loss_streak_metrics,
     print_active_bundle_performance,
+    print_profit_since_small_mode,
     print_stored_sizing,
     rolling_trade_metrics,
     trade_time,
@@ -73,6 +74,62 @@ def test_invalid_telemetry_cannot_overwrite_outcome(tmp_path, extra):
         persist_trade_outcome(db, outcome(**extra), 124)
     with sqlite3.connect(db) as con:
         assert con.execute("SELECT received,profit_units FROM trade_outcomes").fetchone() == (123, None)
+
+
+def test_trade_role_and_entry_magic_are_persisted_and_validated(tmp_path):
+    db = tmp_path / "history.sqlite3"
+    payload = outcome(**telemetry(), trade_role="SMALL", entry_magic=26092213)
+    persist_trade_outcome(db, payload, 123)
+    # Replay without role metadata must preserve exact entry provenance.
+    persist_trade_outcome(db, outcome(**telemetry()), 124)
+    with sqlite3.connect(db) as con:
+        assert con.execute(
+            "SELECT trade_role,entry_magic FROM trade_outcomes"
+        ).fetchone() == ("SMALL", 26092213)
+
+    with pytest.raises(ValueError):
+        persist_trade_outcome(
+            db,
+            outcome(
+                trade_key="server:1:bad", sample_key="d" * 16,
+                **telemetry(), trade_role="OTHER", entry_magic=1,
+            ),
+            125,
+        )
+
+
+def test_profit_since_small_mode_uses_legacy_boundary_and_exact_roles(capsys):
+    rows = [
+        {
+            **outcome(trade_key="a", sample_key="1" * 16, opened=100, closed=110,
+                      net_units=-5, entry_ea_version="0.41"),
+            "trade_role": None,
+        },
+        {
+            **outcome(trade_key="b", sample_key="2" * 16, opened=200, closed=210,
+                      net_units=2, entry_ea_version="0.42"),
+            "trade_role": None,
+        },
+        {
+            **outcome(trade_key="c", sample_key="3" * 16, opened=300, closed=310,
+                      net_units=3, entry_ea_version="0.48"),
+            "trade_role": "MAIN",
+        },
+        {
+            **outcome(trade_key="d", sample_key="4" * 16, opened=400, closed=410,
+                      net_units=-1, entry_ea_version="0.48"),
+            "trade_role": "SMALL",
+        },
+    ]
+    print_profit_since_small_mode(rows)
+    output = capsys.readouterr().out
+    assert "=== PROFIT SINCE 2-CENT MODE ===" in output
+    assert "legacy fallback: first EA >= 0.42 trade" in output
+    assert "COMBINED | trades=3" in output
+    assert "net=+4.0000 account units" in output
+    assert "MAIN     | exact-role trades=1" in output
+    assert "SMALL    | exact-role trades=1" in output
+    assert "UNKNOWN  | legacy-role trades=1" in output
 
 
 def test_exact_sizing_telemetry_is_persisted_immutable_and_reported(tmp_path, capsys):
