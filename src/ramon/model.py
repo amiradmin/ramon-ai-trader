@@ -5,6 +5,7 @@ import hashlib
 from pathlib import Path
 
 from .core import Forecast
+from .time_context import forecast_clock_inputs
 
 
 class ChronosForecaster:
@@ -24,6 +25,34 @@ class ChronosForecaster:
         quantiles, _ = self.pipeline.predict_quantiles(
             [values], prediction_length=horizon, quantile_levels=[0.1, 0.5, 0.9]
         )
+        return self._decode_quantiles(quantiles, horizon)
+
+    def forecast_with_hour(
+        self, closes: Sequence[float], timestamps: Sequence[int], horizon: int
+    ) -> Forecast:
+        """Research-only paired forecast with known Tehran clock covariates.
+
+        Live decisions continue to call forecast() until an independent
+        historical evaluation shows that the covariates help.
+        """
+        if len(closes) != len(timestamps) or not closes:
+            raise ValueError("one timestamp required per close")
+        past, future = forecast_clock_inputs(timestamps, horizon)
+        values = self._np.asarray(closes, dtype=self._np.float32)
+        inputs = [{
+            "target": values,
+            "past_covariates": {key: self._np.asarray(value, dtype=self._np.float32)
+                                for key, value in past.items()},
+            "future_covariates": {key: self._np.asarray(value, dtype=self._np.float32)
+                                  for key, value in future.items()},
+        }]
+        quantiles, _ = self.pipeline.predict_quantiles(
+            inputs, prediction_length=horizon, quantile_levels=[0.1, 0.5, 0.9]
+        )
+        return self._decode_quantiles(quantiles, horizon)
+
+    @staticmethod
+    def _decode_quantiles(quantiles: object, horizon: int) -> Forecast:
         rows = quantiles[0][0].tolist()
         if not isinstance(rows, list) or len(rows) != horizon:
             raise ValueError("invalid Chronos horizon output")
