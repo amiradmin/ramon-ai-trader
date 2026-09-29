@@ -84,6 +84,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     "history_last_persisted_bar": int(history_status["last_persisted_bar"]),
                     **ensemble.status(),
                     **news_provider.status(),
+                    "news_feature_schema": 5,
                 },
             )
 
@@ -210,6 +211,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                                 "ensemble_mode": ensemble.status()["ensemble_mode"],
                                 "ensemble_active": response.get("ensemble_active", 0),
                                 "role_manifest": ensemble.manifest,
+                                "news_live_context": news_snapshot.payload(),
                                 "decision_audit": {
                                     "schema_version": 2,
                                     "base": result.to_dict(),

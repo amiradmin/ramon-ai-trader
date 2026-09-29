@@ -72,6 +72,12 @@ def load_trade_examples(db: str | Path, symbol: str, chronos_model: str) -> list
         return read_trade_examples(conn, symbol, chronos_model)
 
 
+def complete_news_examples(examples: list[Example]) -> list[Example]:
+    """Avoid treating old absent news measurements as genuine zeros in v5 training."""
+    return [row for row in examples
+            if set(NEWS_FEATURES).issubset(row.features.get("news", {}))]
+
+
 def read_trade_examples(conn: sqlite3.Connection, symbol: str, chronos_model: str) -> list[Example]:
     """Shared trainer/audit selection; caller owns the transaction, no migrations."""
     rows = conn.execute("""
@@ -233,13 +239,16 @@ def train_bundle(*, db: str | Path, symbol: str, chronos_model: str, out: Path,
         raise ValueError("invalid sample limits")
     if not 0.5 <= threshold < 1 or improvement <= 0 or maximum_drawdown <= 0:
         raise ValueError("invalid promotion limits")
-    examples = load_trade_examples(db, symbol, chronos_model)
+    all_examples = load_trade_examples(db, symbol, chronos_model)
+    examples = complete_news_examples(all_examples)
     report = {"updated": False, "closed_trade_samples": len(examples), "chronos_model": chronos_model,
               "symbol": symbol, "generated_at_utc": datetime.now(timezone.utc).isoformat(),
               "minimum_samples": minimum_samples, "regime_minimum": regime_minimum,
               "minimum_trades": minimum_trades,
               "remaining_to_sample_gate": max(0, minimum_samples - len(examples)),
               "dataset_source": "clean_real_closed_positions_net_of_deal_costs",
+              "legacy_news_samples_excluded": len(all_examples) - len(examples),
+              "news_feature_schema": 5,
               "label_policy": "exclude_manual_stopout_unknown_expert"}
     if len(examples) < minimum_samples:
         return {**report, "status": "waiting_for_closed_trades", "minimum_samples": minimum_samples}

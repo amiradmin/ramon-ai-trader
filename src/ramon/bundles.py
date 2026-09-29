@@ -18,12 +18,14 @@ from .ensemble import (
     REGIME_FEATURES,
     RISK_FEATURES,
 )
-from .news import NEWS_FEATURES
+from .news import LEGACY_NEWS_FEATURES, NEWS_FEATURES
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 LEGACY_FEATURES = {"regime": REGIME_FEATURES, "entry": ENTRY_FEATURES, "meta": LEGACY_META_FEATURES}
-V3_FEATURES = {"regime": REGIME_FEATURES, "entry": ENTRY_FEATURES, "news": NEWS_FEATURES, "meta": META_FEATURES}
-FEATURES = {**V3_FEATURES, "risk": RISK_FEATURES}
+V3_FEATURES = {"regime": REGIME_FEATURES, "entry": ENTRY_FEATURES,
+               "news": LEGACY_NEWS_FEATURES, "meta": META_FEATURES}
+V4_FEATURES = {**V3_FEATURES, "risk": RISK_FEATURES}
+FEATURES = {**V4_FEATURES, "news": NEWS_FEATURES}
 
 
 def atomic_json(path: Path, value: dict[str, object]) -> None:
@@ -47,7 +49,7 @@ def load_bundle(root: Path, bundle_id: str, chronos_model: str | None = None) ->
     directory = root / "versions" / bundle_id
     manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
     schema_version = int(manifest["schema_version"])
-    if schema_version not in {2, 3, SCHEMA_VERSION} or manifest["bundle_id"] != bundle_id:
+    if schema_version not in {2, 3, 4, SCHEMA_VERSION} or manifest["bundle_id"] != bundle_id:
         raise ValueError("bundle schema/identity mismatch")
     if chronos_model is not None and manifest["chronos_model"] != chronos_model:
         raise ValueError("bundle belongs to a different Chronos checkpoint")
@@ -56,6 +58,7 @@ def load_bundle(root: Path, bundle_id: str, chronos_model: str | None = None) ->
         raise ValueError("invalid trade threshold")
     expected_features = (
         FEATURES if schema_version == SCHEMA_VERSION
+        else V4_FEATURES if schema_version == 4
         else V3_FEATURES if schema_version == 3
         else LEGACY_FEATURES
     )

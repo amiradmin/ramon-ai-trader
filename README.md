@@ -743,3 +743,44 @@ uv run --extra model python -m ramon.time_context_eval \
 Do not enable the hour-aware forecast or change the live 30-second snapshot
 cadence merely because one time bucket looks favorable; compare independent
 later windows and executed net results before promoting a challenger.
+
+## News regime learning (research branch v0.58)
+
+The existing Forex Factory calendar now records five separate live phases:
+source unavailable, normal, before a high-impact release, released without a
+confirmed actual, and after the first observed actual. The model retains the **signed**
+actual-minus-forecast surprise and an event family (inflation, labor, Fed,
+growth), alongside the old volatility/context measurements. A future actual
+present prematurely in the weekly feed is ignored until a *fresh fetch after
+the scheduled release*. Calendar polling is at most once per minute within
+30 minutes of a high-impact event; the normal five-minute refresh remains.
+This public calendar is not a low-latency newswire and cannot be used to claim
+first-second execution around a release.
+
+The new model bundle schema is v5. Old v4 bundles continue to load; candidate
+v5 training excludes old trades whose saved snapshot lacks the new measurements
+instead of inventing their missing signed surprises. The established 500 clean
+trade gate, temporal holdout and promotion checks still apply. The existing
+EA response fields and broker SL/TP are unchanged; no new live news entry or
+automatic "trade the spike" rule is enabled by this branch.
+
+The observational audit separates the five news phases and reports the
+executed net-R for each. A WAIT snapshot has no hypothetical profit assigned.
+
+```bash
+docker compose --profile tools run --rm --no-deps tools \
+  -m ramon.news_event_audit --db /data/ramon_history.sqlite3 --symbol XAUUSD_l
+```
+
+No historical calendar value should be backfilled into earlier live snapshots.
+Only future post-release observations can tell whether a candidate outperforms
+the current strategy after spreads, slippage and broker execution.
+
+After checking out this branch, rebuild the Docker model service and check its
+health response (`news_feature_schema: 5`). The installed v0.57 EA can remain
+attached because the old decision fields are preserved:
+
+```bash
+docker compose up -d --build model
+curl -sS http://127.0.0.1:8012/health
+```
