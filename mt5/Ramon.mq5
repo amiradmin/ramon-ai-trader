@@ -1,5 +1,5 @@
 #property strict
-#property version "1.500"
+#property version "1.510"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -485,7 +485,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.50\n"
+      +"EA version: 0.51\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -642,7 +642,8 @@ string BuildDiagnosticText()
       +"  Today: "+(today<0 ? "history unavailable" : IntegerToString(today))
       +"/unlimited\n"
       +"Small entries per signal bar: "+IntegerToString(SmallProfitMaxEntriesPerSignalBar)
-      +" max; second blocked after same-bar loss\n"
+      +" max; second blocked after same-bar loss\n"      +"SmallEntryQualityFilter: ACTIVE"
+      +"  Rule: edge>=minimum AND (intrabar OR ai_trend) same direction\n"
       +"RiskPerTradeUSD: "+DoubleToString(RiskPerTradeUSD,2)
       +"  EffectiveRiskUSD: "+DoubleToString(EffectiveRiskPerTradeUSD(),3)
       +"  RiskMultiplier: "+DoubleToString(LastRiskMultiplier,2)+"x"
@@ -784,7 +785,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.50 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.51 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
@@ -1186,16 +1187,48 @@ int SmallLossClosedThisSignalBar(const datetime bar_time)
 
 bool SmallProfitCandidate(const string decision,const string reason,
    const double buy_edge,const double sell_edge,const double strength,
-   string &direction)
+   string &direction,string &filter_reason)
 {
    direction="";
+   filter_reason="NOT_CANDIDATE";
    if(!SmallOnlyMode || !EnableSmallProfitTrades || decision!="WAIT"
       || (reason!="insufficient_model_edge" && reason!="insufficient_model_strength")
       || strength<=0.0)
       return false;
+
    if(buy_edge>sell_edge && buy_edge>0.0) direction="BUY";
    else if(sell_edge>buy_edge && sell_edge>0.0) direction="SELL";
-   return (direction!="");
+   if(direction=="")
+   {
+      filter_reason="SMALL_FILTER_NO_DIRECTION";
+      return false;
+   }
+
+   double directional_edge=(direction=="BUY" ? buy_edge : sell_edge);
+   if(LastMinimumEdge<=0.0 || directional_edge<LastMinimumEdge)
+   {
+      filter_reason="SMALL_FILTER_EDGE_FAIL";
+      return false;
+   }
+
+   bool intrabar_support=(
+      LastIntrabarConfirmed
+      && LastIntrabarDirection==direction
+   );
+   bool trend_support=(
+      LastAiTrendConfirmed
+      && LastAiTrendDirection==direction
+   );
+   if(!intrabar_support && !trend_support)
+   {
+      filter_reason="SMALL_FILTER_CONFIRM_FAIL";
+      return false;
+   }
+
+   filter_reason=(intrabar_support && trend_support
+      ? "SMALL_FILTER_PASS_BOTH"
+      : (intrabar_support ? "SMALL_FILTER_PASS_INTRABAR" : "SMALL_FILTER_PASS_TREND"));
+   return true;
 }
 
 bool SmallProfitTarget(const ENUM_ORDER_TYPE side,const double entry,
@@ -2988,10 +3021,17 @@ void OnTimer()
    { StatusLine="Unknown model decision"; ShowStatus(); return; }
    if(SmallOnlyMode && decision!="WAIT")
    { StatusLine="Primary signal; small EA stands aside"; ShowStatus(); return; }
-   string small_direction="";
+   string small_direction="",small_filter_reason="";
    bool small_profit=SmallProfitCandidate(decision,reason,buy_edge,sell_edge,
-      signal_strength,small_direction);
-   if((decision=="WAIT" && !small_profit) || !EnableLiveTrading)
+      signal_strength,small_direction,small_filter_reason);
+   if(decision=="WAIT" && !small_profit)
+   {
+      if(SmallOnlyMode && StringFind(small_filter_reason,"SMALL_FILTER_")==0)
+         StatusLine=small_filter_reason;
+      ShowStatus();
+      return;
+   }
+   if(!EnableLiveTrading)
    { ShowStatus(); return; }
    if(small_profit)
       decision=small_direction;
