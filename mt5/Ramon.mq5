@@ -41,7 +41,10 @@ input int MaxTradesPerDay = 400;
 input int MaximumHoldBars = 4;
 input bool EnableSmallProfitTrades = true; // Optional live 2-cent entries when main model says WAIT.
 const double SmallProfitTargetUnits = 2.0; // CENT account units = USD 0.02 when MoneyUnitsPerUSD=100.
-const double ShadowSmallStrongTargetUnits = 2.5; // Observe-only candidate target for strongly confirmed SMALL entries.
+const double ShadowSmallTP1Units = 2.0; // Observe-only SMALL stage 1.
+const double ShadowSmallTP2Units = 2.5; // Observe-only SMALL stage 2.
+const double ShadowSmallTP3Units = 3.0; // Observe-only SMALL stage 3.
+const double ShadowSmallStrongTargetUnits = ShadowSmallTP2Units; // Current strong-entry candidate.
 const double SmallProfitMaxLossUnits = 4.0; // Broker SL for new small entries: at most USD 0.04 on a 100-units/USD account.
 const double SmallProfitProtectionActivationUnits = 1.0;
 const double SmallProfitProtectionGivebackUnits = 0.5;
@@ -221,6 +224,9 @@ bool ShadowSellCaution = false;
 double ShadowRiskMultiplier = 1.0;
 double ShadowSmallTargetUnits = SmallProfitTargetUnits;
 bool ShadowSmallStrongTargetCandidate = false;
+int ShadowSmallTPStage = 0;
+string ShadowSmallTPPlan = "TP1=2.00 TP2=2.50 TP3=3.00";
+string ShadowSmallTPNextAction = "NONE";
 bool ShadowDeadTrade = false;
 double ShadowDeadTradePeakR = 0.0;
 double ShadowDeadTradeCurrentR = 0.0;
@@ -568,6 +574,9 @@ string BuildDiagnosticText()
       +"ShadowSmallTargetUnits: "+DoubleToString(ShadowSmallTargetUnits,2)
       +"  ActualTargetUnits: "+DoubleToString(SmallProfitTargetUnits,2)
       +"  StrongTargetCandidate: "+BoolText(ShadowSmallStrongTargetCandidate)+"\n"
+      +"ShadowSmallTPPlan: "+ShadowSmallTPPlan
+      +"  Stage: "+IntegerToString(ShadowSmallTPStage)
+      +"  Next: "+ShadowSmallTPNextAction+"\n"
       +"DeadTradeShadow: "+BoolText(ShadowDeadTrade)
       +"  PeakR="+DoubleToString(ShadowDeadTradePeakR,3)
       +"  CurrentR="+DoubleToString(ShadowDeadTradeCurrentR,3)+"\n"
@@ -1399,6 +1408,8 @@ void UpdateImprovementShadows()
    ShadowRiskMultiplier=1.0;
    ShadowSmallTargetUnits=SmallProfitTargetUnits;
    ShadowSmallStrongTargetCandidate=false;
+   ShadowSmallTPStage=0;
+   ShadowSmallTPNextAction="NONE";
    ShadowDeadTrade=false;
    ShadowDeadTradePeakR=0.0;
    ShadowDeadTradeCurrentR=0.0;
@@ -1449,8 +1460,31 @@ void UpdateImprovementShadows()
    datetime opened=0;
    if(ManagedPosition(ticket,opened) && PositionSelectByTicket(ticket))
    {
-      double risk=ManagedPositionInitialRiskUnits(ticket);
       double current=PositionGetDouble(POSITION_PROFIT);
+      if(SmallOnlyMode)
+      {
+         if(current>=ShadowSmallTP3Units)
+         {
+            ShadowSmallTPStage=3;
+            ShadowSmallTPNextAction="WOULD_CLOSE_AT_TP3";
+         }
+         else if(current>=ShadowSmallTP2Units)
+         {
+            ShadowSmallTPStage=2;
+            ShadowSmallTPNextAction=(intrabar_support && trend_support && edge_support
+               ? "WOULD_HOLD_FOR_TP3" : "WOULD_CLOSE_AT_TP2");
+         }
+         else if(current>=ShadowSmallTP1Units)
+         {
+            ShadowSmallTPStage=1;
+            ShadowSmallTPNextAction=(intrabar_support && trend_support && edge_support
+               ? "WOULD_HOLD_FOR_TP2" : "WOULD_CLOSE_AT_TP1");
+         }
+         else
+            ShadowSmallTPNextAction="WAITING_FOR_TP1";
+      }
+
+      double risk=ManagedPositionInitialRiskUnits(ticket);
       double peak=ProfitProtectionPeakUnits;
       if(risk>0.0)
       {
@@ -1504,7 +1538,8 @@ void AppendImprovementShadowCsv()
          "decision","reason","buy_caution","sell_caution",
          "shadow_risk_multiplier","actual_risk_multiplier",
          "shadow_small_target_units","actual_small_target_units",
-         "shadow_small_strong_target_candidate",
+         "shadow_small_strong_target_candidate","shadow_small_tp_stage",
+         "shadow_small_tp_next_action",
          "dead_trade_candidate","dead_trade_peak_r","dead_trade_current_r",
          "intrabar_confirmed","intrabar_direction",
          "ai_trend_confirmed","ai_trend_direction",
@@ -1520,7 +1555,8 @@ void AppendImprovementShadowCsv()
       BoolText(ShadowBuyCaution),BoolText(ShadowSellCaution),
       DoubleToString(ShadowRiskMultiplier,2),DoubleToString(LastRiskMultiplier,2),
       DoubleToString(ShadowSmallTargetUnits,2),DoubleToString(SmallProfitTargetUnits,2),
-      BoolText(ShadowSmallStrongTargetCandidate),
+      BoolText(ShadowSmallStrongTargetCandidate),IntegerToString(ShadowSmallTPStage),
+      ShadowSmallTPNextAction,
       BoolText(ShadowDeadTrade),DoubleToString(ShadowDeadTradePeakR,4),
       DoubleToString(ShadowDeadTradeCurrentR,4),
       BoolText(LastIntrabarConfirmed),LastIntrabarDirection,
