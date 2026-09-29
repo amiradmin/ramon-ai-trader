@@ -3098,6 +3098,7 @@ int OnInit()
       || EarlyReversalMinPeakUnits<=0.0 || EarlyReversalGivebackUnits<=0.0
       || EarlyReversalMaxCurrentUnits>0.0
       || EarlyAdverseRiskFraction<=0.0 || EarlyAdverseRiskFraction>=1.0
+      || SmallEarlyAdverseRiskFraction<=0.0 || SmallEarlyAdverseRiskFraction>=1.0
       || EarlyAdverseWeakSnapshotsRequired<1 || EarlyAdverseMinAgeSeconds<0
       || SnapshotIntervalSeconds<10
       || (WriteDiagnosticFile && StringLen(DiagnosticFileName)==0)
