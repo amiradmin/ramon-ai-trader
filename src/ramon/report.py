@@ -33,6 +33,110 @@ def safe_json(value: str | None) -> dict:
         return {}
 
 
+def version_tuple(value: object) -> tuple[int, ...] | None:
+    """Parse simple dotted EA versions without treating them as floats."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    parts = text.split(".")
+    if not all(part.isdigit() for part in parts):
+        return None
+    return tuple(int(part) for part in parts)
+
+
+def version_at_least(value: object, minimum: tuple[int, ...]) -> bool:
+    parsed = version_tuple(value)
+    if parsed is None:
+        return False
+    width = max(len(parsed), len(minimum))
+    return parsed + (0,) * (width - len(parsed)) >= minimum + (0,) * (width - len(minimum))
+
+
+def detect_small_mode_start(trades: list[dict]) -> tuple[dict | None, str]:
+    """Find the 2-cent-mode deployment boundary without guessing individual legacy roles.
+
+    Exact SMALL role telemetry wins. For older rows created before role telemetry
+    existed, EA 0.42 is the first known 2-cent deployment generation in this repo.
+    """
+    exact = [row for row in trades if str(row.get("trade_role") or "").upper() == "SMALL"]
+    if exact:
+        return min(exact, key=lambda row: int(row["opened"])), "first exact SMALL role telemetry"
+    legacy = [row for row in trades if version_at_least(row.get("entry_ea_version"), (0, 42))]
+    if legacy:
+        return min(legacy, key=lambda row: int(row["opened"])), "legacy fallback: first EA >= 0.42 trade"
+    return None, "not detected"
+
+
+def profit_factor(rows: list[dict]) -> float:
+    gains = sum(max(float(row["net_units"]), 0.0) for row in rows)
+    losses = abs(sum(min(float(row["net_units"]), 0.0) for row in rows))
+    return gains / losses if losses > 0 else float("inf")
+
+
+def print_profit_since_small_mode(trades: list[dict]) -> None:
+    """Show combined P/L since 2-cent mode plus exact MAIN/SMALL splits when known."""
+    print("=== PROFIT SINCE 2-CENT MODE ===")
+    start_row, source = detect_small_mode_start(trades)
+    if start_row is None:
+        print("Start: NOT DETECTED")
+        print("No exact SMALL role telemetry or EA >= 0.42 closed trade was found.")
+        print()
+        return
+
+    start_opened = int(start_row["opened"])
+    rows = [row for row in trades if int(row["opened"]) >= start_opened]
+    main_rows = [row for row in rows if str(row.get("trade_role") or "").upper() == "MAIN"]
+    small_rows = [row for row in rows if str(row.get("trade_role") or "").upper() == "SMALL"]
+    unknown_rows = [
+        row for row in rows
+        if str(row.get("trade_role") or "").upper() not in {"MAIN", "SMALL"}
+    ]
+
+    net = sum(float(row["net_units"]) for row in rows)
+    wins = sum(float(row["net_units"]) > 0 for row in rows)
+    pf = profit_factor(rows)
+    pf_text = f"{pf:.3f}" if math.isfinite(pf) else "inf"
+
+    print(f"Start: {trade_time(start_row, 'opened')}")
+    print(f"Detection: {source}")
+    print(
+        f"COMBINED | trades={len(rows)} | wins={wins} "
+        f"| WR={pct(wins, len(rows)):.2f}% | PF={pf_text} "
+        f"| net={net:+.4f} account units "
+        f"| approx={net:+.2f} cents (${net / 100.0:+.4f})"
+    )
+
+    def exact_role_line(label: str, role_rows: list[dict]) -> None:
+        if not role_rows:
+            print(f"{label:8} | exact-role trades=0")
+            return
+        role_net = sum(float(row["net_units"]) for row in role_rows)
+        role_wins = sum(float(row["net_units"]) > 0 for row in role_rows)
+        role_pf = profit_factor(role_rows)
+        role_pf_text = f"{role_pf:.3f}" if math.isfinite(role_pf) else "inf"
+        print(
+            f"{label:8} | exact-role trades={len(role_rows)} "
+            f"| WR={pct(role_wins, len(role_rows)):.2f}% | PF={role_pf_text} "
+            f"| net={role_net:+.4f} units (~{role_net:+.2f} cents)"
+        )
+
+    exact_role_line("MAIN", main_rows)
+    exact_role_line("SMALL", small_rows)
+    if unknown_rows:
+        legacy_net = sum(float(row["net_units"]) for row in unknown_rows)
+        print(
+            f"UNKNOWN  | legacy-role trades={len(unknown_rows)} "
+            f"| net={legacy_net:+.4f} units (~{legacy_net:+.2f} cents)"
+        )
+        print(
+            "Legacy MAIN/SMALL attribution is intentionally not guessed; "
+            "COMBINED still includes every closed Ramon trade since the detected start."
+        )
+    print()
+
+
 def mean(values: list[float]) -> float:
     return statistics.mean(values) if values else float("nan")
 
@@ -535,6 +639,8 @@ def generate_report(DB: str, SYMBOL: str = "XAUUSD_l", LIMIT: int = 20) -> None:
         print(f"Best R / Worst R    : {best_r:+.4f}R / {worst_r:+.4f}R")
         print("* USD approximation assumes the current CENT convention: 100 account units = 1 USD.")
         print()
+
+        print_profit_since_small_mode(trades)
 
         excursions = load_bar_excursions(con, trades, SYMBOL)
         print_path_risk(trades)
