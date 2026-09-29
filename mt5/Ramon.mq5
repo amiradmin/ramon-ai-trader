@@ -1,5 +1,5 @@
 #property strict
-#property version "0.41"
+#property version "0.45"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -25,6 +25,9 @@ input string RequiredServerText = "LiteFinance";
 input bool AutoLockCurrentAccount = true; // Bind this EA session to the account active at OnInit.
 input long AllowedAccountLogin = 0; // Used only when AutoLockCurrentAccount=false.
 input bool EnableLiveTrading = false;
+input bool SmallOnlyMode = false; // Attach second EA instance on another M15 chart for parallel 2-cent trades.
+const ulong PrimaryMagicNumber = 26092212;
+const ulong SmallProfitMagicNumber = 26092213;
 input string ModelUrl = "http://127.0.0.1:8012/decision";
 input double MoneyUnitsPerUSD = 100.0; // CENT account: 100 account units = 1 USD.
 input bool AccountIsCent = true; // Configured account mode; MT5 ACCOUNT_CURRENCY alone cannot identify CENT.
@@ -36,6 +39,14 @@ const double MaxExecutableRiskUSD = 0.20; // Hard fixed cap; MT5 chart inputs ca
 input int MaxSpreadPoints = 50;
 input int MaxTradesPerDay = 400;
 input int MaximumHoldBars = 4;
+input bool EnableSmallProfitTrades = true; // Optional live 2-cent entries when main model says WAIT.
+const double SmallProfitTargetUnits = 2.0; // CENT account units = USD 0.02 when MoneyUnitsPerUSD=100.
+const double SmallProfitMaxLossUnits = 4.0; // Broker SL for new small entries: at most USD 0.04 on a 100-units/USD account.
+const double SmallProfitProtectionActivationUnits = 1.0;
+const double SmallProfitProtectionGivebackUnits = 0.5;
+const double SmallProfitMaxRiskUSD = 0.04; // Independent ceiling for new small entries.
+const int SmallProfitMaxEntriesPerSignalBar = 2; // Sequential entries only; an open position still blocks another entry.
+const int SmallProfitMaximumHoldBars = 3;
 input bool EnableProfitProtection = true; // Close a managed position after an armed profit giveback.
 const double ProfitProtectionFallbackActivationUnits = 7.0; // Used only if live position risk cannot be reconstructed.
 const double ProfitProtectionActivationMinUnits = 5.0;
@@ -74,6 +85,7 @@ input string TradeCsvFileName = "Ramon_Trades.csv";
 CTrade Trade;
 datetime LastDecisionRequestTime = 0;
 datetime LastEntrySignalBar = 0;
+int LastSmallEntriesOnSignalBar = 0;
 string StatusLine = "Starting";
 string LastModelDecision = "NONE";
 string LastModelReason = "NONE";
@@ -281,18 +293,42 @@ bool ManagedPosition(ulong &ticket,datetime &opened)
    return false;
 }
 
+bool IsSmallProfitPosition(const ulong ticket)
+{
+   if(ticket==0 || !PositionSelectByTicket(ticket)) return false;
+   return SmallOnlyMode
+      && (ulong)PositionGetInteger(POSITION_MAGIC)==SmallProfitMagicNumber;
+}
+
 bool OtherPositionOnSymbol()
 {
+   ulong peer_magic=(SmallOnlyMode ? PrimaryMagicNumber : SmallProfitMagicNumber);
    for(int i=PositionsTotal()-1;i>=0;i--)
    {
       ulong candidate=PositionGetTicket(i);
       if(candidate==0 || !PositionSelectByTicket(candidate))
          continue;
+      ulong position_magic=(ulong)PositionGetInteger(POSITION_MAGIC);
       if(PositionGetString(POSITION_SYMBOL)==_Symbol
-         && (ulong)PositionGetInteger(POSITION_MAGIC)!=MagicNumber)
+         && position_magic!=MagicNumber && position_magic!=peer_magic)
          return true;
    }
    return false;
+}
+
+string EffectiveDiagnosticFileName()
+{
+   return (SmallOnlyMode ? "Ramon_Small_Diagnostic.txt" : DiagnosticFileName);
+}
+
+string EffectiveSignalCsvFileName()
+{
+   return (SmallOnlyMode ? "Ramon_Small_Signals.csv" : SignalCsvFileName);
+}
+
+string EffectiveTradeCsvFileName()
+{
+   return (SmallOnlyMode ? "Ramon_Small_Trades.csv" : TradeCsvFileName);
 }
 
 string BoolText(const bool value)
@@ -413,7 +449,9 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.41\n"
+      +"EA version: 0.45\n"
+      +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
+      +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
       +"Symbol: "+_Symbol+"  Timeframe: M15\n"
       +"Bid: "+(tick_ok ? DoubleToString(tick.bid,_Digits) : "NA")
@@ -540,7 +578,15 @@ string BuildDiagnosticText()
       +"  weak="+IntegerToString(EarlyAdverseWeakSnapshots)+"/"+IntegerToString(EarlyAdverseWeakSnapshotsRequired)
       +"  riskFraction="+DoubleToString(EarlyAdverseRiskFraction,2)
       +"  minAgeSec="+IntegerToString(EarlyAdverseMinAgeSeconds)+"\n"
-      +"Trades today: "+IntegerToString(today)+"/"+IntegerToString(MaxTradesPerDay)+"\n"
+      +"Trades today: "+(today<0 ? "history unavailable" : IntegerToString(today))
+      +"/"+(SmallOnlyMode ? "unlimited" : IntegerToString(MaxTradesPerDay))+"\n"
+      +"SmallProfit: "+(SmallOnlyMode && EnableSmallProfitTrades ? "ACTIVE" : "OFF")
+      +"  TargetUnits: "+DoubleToString(SmallProfitTargetUnits,2)
+      +"  MaxRiskUSD: "+DoubleToString(SmallProfitMaxRiskUSD,2)
+      +"  BrokerSLMaxUnits: "+DoubleToString(SmallProfitMaxLossUnits,2)
+      +"  Today: "+(today<0 ? "history unavailable" : IntegerToString(today))
+      +"/unlimited\n"
+      +"Small entries per signal bar: "+IntegerToString(SmallProfitMaxEntriesPerSignalBar)+" max\n"
       +"RiskPerTradeUSD: "+DoubleToString(RiskPerTradeUSD,2)
       +"  EffectiveRiskUSD: "+DoubleToString(EffectiveRiskPerTradeUSD(),3)
       +"  RiskMultiplier: "+DoubleToString(LastRiskMultiplier,2)+"x"
@@ -564,10 +610,10 @@ string BuildDiagnosticText()
 
 void WriteDiagnostic()
 {
-   if(!WriteDiagnosticFile || StringLen(DiagnosticFileName)==0)
+   if(!WriteDiagnosticFile || StringLen(EffectiveDiagnosticFileName())==0)
       return;
    int handle=FileOpen(
-      DiagnosticFileName,
+      EffectiveDiagnosticFileName(),
       FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON
    );
    if(handle==INVALID_HANDLE)
@@ -682,7 +728,8 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.41",28,36,clrWhite,12);
+   UiLabel("TITLE","RAMON AI TRADER  v0.45 "
+      +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
 
@@ -754,7 +801,8 @@ void DrawDashboard()
 
    UiLabel("ACCOUNT","Account: "+AccountTypeText()+" (configured)"
       +"   Currency: "+AccountInfoString(ACCOUNT_CURRENCY)
-      +"   Trades: "+IntegerToString(today)+"/"+IntegerToString(MaxTradesPerDay),28,376,C'203,213,225',9);
+      +"   Trades: "+(today<0 ? "?" : IntegerToString(today))
+      +"/"+(SmallOnlyMode ? "unlimited" : IntegerToString(MaxTradesPerDay)),28,376,C'203,213,225',9);
 
    UiLabel("BALANCE_USD","Balance: "+DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),2)+" units"
       +"   ~= $"+DoubleToString(AccountUnitsToUSD(AccountInfoDouble(ACCOUNT_BALANCE)),2),28,398,C'203,213,225',9);
@@ -970,6 +1018,104 @@ int TradesToday()
    return count;
 }
 
+int SmallEntriesThisSignalBar(const datetime bar_time)
+{
+   datetime current=iTime(_Symbol,PERIOD_M15,0);
+   datetime now=TimeCurrent();
+   if(current<=bar_time || current-bar_time>1800 || now<current
+      || !HistorySelect(current,now))
+      return -1;
+   int count=0;
+   for(int i=0;i<HistoryDealsTotal();i++)
+   {
+      ulong deal=HistoryDealGetTicket(i);
+      if(deal==0 || HistoryDealGetString(deal,DEAL_SYMBOL)!=_Symbol
+         || (ulong)HistoryDealGetInteger(deal,DEAL_MAGIC)!=MagicNumber
+         || HistoryDealGetInteger(deal,DEAL_ENTRY)!=DEAL_ENTRY_IN)
+         continue;
+      count++;
+   }
+   if(LastEntrySignalBar==bar_time)
+      if(LastSmallEntriesOnSignalBar>count)
+         count=LastSmallEntriesOnSignalBar;
+   return count;
+}
+
+bool SmallProfitCandidate(const string decision,const string reason,
+   const double buy_edge,const double sell_edge,const double strength,
+   string &direction)
+{
+   direction="";
+   if(!SmallOnlyMode || !EnableSmallProfitTrades || decision!="WAIT"
+      || (reason!="insufficient_model_edge" && reason!="insufficient_model_strength")
+      || strength<=0.0)
+      return false;
+   if(buy_edge>sell_edge && buy_edge>0.0) direction="BUY";
+   else if(sell_edge>buy_edge && sell_edge>0.0) direction="SELL";
+   return (direction!="");
+}
+
+bool SmallProfitTarget(const ENUM_ORDER_TYPE side,const double entry,
+   const double volume,const MqlTick &quote,double &target)
+{
+   double point=SymbolInfoDouble(_Symbol,SYMBOL_POINT);
+   double tick_size=SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_SIZE);
+   if(tick_size<=0.0) tick_size=point;
+   if(tick_size<=0.0 || volume<=0.0) return false;
+   double sign=(side==ORDER_TYPE_BUY ? 1.0 : -1.0);
+   double unit_gain=0.0;
+   if(!OrderCalcProfit(side,_Symbol,volume,entry,entry+sign,unit_gain)
+      || unit_gain<=0.0)
+      return false;
+   double min_stop=(double)SymbolInfoInteger(_Symbol,SYMBOL_TRADE_STOPS_LEVEL)*point;
+   double required_from_quote=(side==ORDER_TYPE_BUY ? quote.bid : quote.ask);
+   double distance=MathMax(SmallProfitTargetUnits/unit_gain,
+      MathAbs(required_from_quote-entry)+min_stop+2*point);
+   double steps=MathCeil(distance/tick_size-0.00000001);
+   for(int attempt=0;attempt<32;attempt++)
+   {
+      target=NormalizeDouble(entry+sign*(steps+attempt)*tick_size,_Digits);
+      double gain=0.0;
+      if(!OrderCalcProfit(side,_Symbol,volume,entry,target,gain)) return false;
+      if(gain+0.00001>=SmallProfitTargetUnits)
+         return gain<=SmallProfitTargetUnits+0.25;
+   }
+   return false;
+}
+
+bool SmallProfitStop(const ENUM_ORDER_TYPE side,const double entry,
+   const double model_stop,const double volume,const MqlTick &quote,double &stop)
+{
+   double point=SymbolInfoDouble(_Symbol,SYMBOL_POINT);
+   double tick_size=SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_SIZE);
+   if(tick_size<=0.0) tick_size=point;
+   if(tick_size<=0.0 || volume<=0.0) return false;
+   double sign=(side==ORDER_TYPE_BUY ? -1.0 : 1.0);
+   double unit_loss=0.0;
+   if(!OrderCalcProfit(side,_Symbol,volume,entry,entry+sign,unit_loss)
+      || unit_loss>=0.0)
+      return false;
+   double max_distance=SmallProfitMaxLossUnits/(-unit_loss);
+   double model_distance=MathAbs(model_stop-entry);
+   int steps=(int)MathMax(1.0,MathFloor(MathMin(max_distance,model_distance)/tick_size+0.00000001)-1.0);
+   if(steps<1) return false;
+   double min_stop=(double)SymbolInfoInteger(_Symbol,SYMBOL_TRADE_STOPS_LEVEL)*point;
+   double required_from_quote=(side==ORDER_TYPE_BUY ? quote.bid : quote.ask);
+   for(int attempt=0;attempt<64 && steps+attempt<=max_distance/tick_size+0.00000001;attempt++)
+   {
+      double candidate=NormalizeDouble(entry+sign*(steps+attempt)*tick_size,_Digits);
+      if(side==ORDER_TYPE_BUY && candidate>required_from_quote-min_stop-2*point)
+         continue;
+      if(side==ORDER_TYPE_SELL && candidate<required_from_quote+min_stop+2*point)
+         continue;
+      double loss=0.0;
+      if(!OrderCalcProfit(side,_Symbol,volume,entry,candidate,loss)) return false;
+      if(loss<0.0 && -loss<=SmallProfitMaxLossUnits+0.00001)
+      { stop=candidate; return true; }
+   }
+   return false;
+}
+
 double SelectVolume(ENUM_ORDER_TYPE direction,double entry,double stop)
 {
    double minimum=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN);
@@ -1074,6 +1220,22 @@ void UpdateSizingPreview()
    double minimum=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN);
    double money=0.0;
 
+   if(SmallOnlyMode)
+   {
+      MqlTick quote;
+      if(minimum<=0.0 || !SymbolInfoTick(_Symbol,quote)) return;
+      entry=(side==ORDER_TYPE_BUY ? quote.ask : quote.bid);
+      stop=NormalizeDouble(entry+(side==ORDER_TYPE_BUY ? -distance : distance),_Digits);
+      if(!SmallProfitStop(side,entry,stop,minimum,quote,stop)
+         || !OrderCalcProfit(side,_Symbol,minimum,entry,stop,money) || money>=0.0)
+         return;
+      LastMinimumLotStopLossUnits=-money;
+      LastEstimatedStopLossUnits=-money;
+      LastPlannedVolume=minimum;
+      LastMinLotOverrideUsed=(-money>LastRiskBudgetUnits+0.00001);
+      return;
+   }
+
    if(minimum>0.0 && OrderCalcProfit(side,_Symbol,minimum,entry,stop,money) && money<0.0)
       LastMinimumLotStopLossUnits=-money;
 
@@ -1092,10 +1254,10 @@ void UpdateSizingPreview()
 
 void AppendSignalCsv()
 {
-   if(!WriteCsvLogs || StringLen(SignalCsvFileName)==0)
+   if(!WriteCsvLogs || StringLen(EffectiveSignalCsvFileName())==0)
       return;
    int handle=FileOpen(
-      SignalCsvFileName,
+      EffectiveSignalCsvFileName(),
       FILE_READ|FILE_WRITE|FILE_CSV|FILE_ANSI|FILE_COMMON,
       ','
    );
@@ -1173,7 +1335,7 @@ void AppendSignalCsv()
 
 void AppendTradeCsv(const ulong deal)
 {
-   if(!WriteCsvLogs || StringLen(TradeCsvFileName)==0 || deal==0 || !HistoryDealSelect(deal))
+   if(!WriteCsvLogs || StringLen(EffectiveTradeCsvFileName())==0 || deal==0 || !HistoryDealSelect(deal))
       return;
    if(HistoryDealGetString(deal,DEAL_SYMBOL)!=_Symbol)
       return;
@@ -1181,7 +1343,7 @@ void AppendTradeCsv(const ulong deal)
       return;
 
    int handle=FileOpen(
-      TradeCsvFileName,
+      EffectiveTradeCsvFileName(),
       FILE_READ|FILE_WRITE|FILE_CSV|FILE_ANSI|FILE_COMMON,
       ','
    );
@@ -1343,7 +1505,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.41";
+      version="0.45";
    }
    if(close_detail!="") detail=close_detail;
 
@@ -2112,6 +2274,12 @@ bool ManageEarlyAdverseExit(const ulong ticket,const datetime opened)
 void SelectDynamicProfitProtectionThresholds(const ulong ticket)
 {
    ProfitProtectionInitialRiskUnits=ManagedPositionInitialRiskUnits(ticket);
+   if(IsSmallProfitPosition(ticket))
+   {
+      ProfitProtectionActivationUnits=SmallProfitProtectionActivationUnits;
+      ProfitProtectionGivebackUnits=SmallProfitProtectionGivebackUnits;
+      return;
+   }
    double activation=ProfitProtectionFallbackActivationUnits;
    if(ProfitProtectionInitialRiskUnits>0.0)
       activation=ProfitProtectionInitialRiskUnits*ProfitProtectionActivationRiskFraction;
@@ -2224,7 +2392,8 @@ void ManageOpenPosition()
       return;
    }
    int age=iBarShift(_Symbol,PERIOD_M15,opened,false);
-   if(age<MaximumHoldBars) { StatusLine="Managed position OPEN"; return; }
+   int hold_bars=(IsSmallProfitPosition(ticket) ? SmallProfitMaximumHoldBars : MaximumHoldBars);
+   if(age<hold_bars) { StatusLine="Managed position OPEN"; return; }
    if(ManagedExitPausedForMarketClosed(ticket))
    {
       StatusLine="EXIT PAUSED: MARKET CLOSED";
@@ -2452,9 +2621,25 @@ void OnTimer()
    { StatusLine="Another robot has a position on this symbol"; ShowStatus(); return; }
    if(decision!="BUY" && decision!="SELL" && decision!="WAIT")
    { StatusLine="Unknown model decision"; ShowStatus(); return; }
-   if(decision=="WAIT" || !EnableLiveTrading)
+   if(SmallOnlyMode && decision!="WAIT")
+   { StatusLine="Primary signal; small EA stands aside"; ShowStatus(); return; }
+   string small_direction="";
+   bool small_profit=SmallProfitCandidate(decision,reason,buy_edge,sell_edge,
+      signal_strength,small_direction);
+   if((decision=="WAIT" && !small_profit) || !EnableLiveTrading)
    { ShowStatus(); return; }
-   if(LastEntrySignalBar==bar_time)
+   if(small_profit)
+      decision=small_direction;
+   int small_entries_on_bar=0;
+   if(SmallOnlyMode)
+   {
+      small_entries_on_bar=SmallEntriesThisSignalBar(bar_time);
+      if(small_entries_on_bar<0)
+      { StatusLine="Small entry history unavailable"; ShowStatus(); return; }
+      if(small_entries_on_bar>=SmallProfitMaxEntriesPerSignalBar)
+      { StatusLine="Two small entries already used for this M15 signal bar"; ShowStatus(); return; }
+   }
+   else if(LastEntrySignalBar==bar_time)
    { StatusLine="Entry already used for this M15 signal bar"; ShowStatus(); return; }
    string live_block_reason="";
    if(!LiveExecutionReady(live_block_reason))
@@ -2468,8 +2653,8 @@ void OnTimer()
    string cooldown_reason="";
    if(LocalLossCooldownBlocked(decision,cooldown_reason))
    { StatusLine=cooldown_reason; ShowStatus(); return; }
-   int today=TradesToday();
-   if(today<0 || today>=MaxTradesPerDay)
+   int today=(SmallOnlyMode ? 0 : TradesToday());
+   if(!SmallOnlyMode && (today<0 || today>=MaxTradesPerDay))
    { StatusLine="Daily trade limit/history unavailable"; ShowStatus(); return; }
    MqlTick tick;
    if(!SymbolInfoTick(_Symbol,tick) || TimeCurrent()-tick.time>30
@@ -2485,9 +2670,23 @@ void OnTimer()
    target_distance=MathMax(target_distance,min_stop+2*point);
    double stop=NormalizeDouble(entry+(decision=="BUY" ? -stop_distance : stop_distance),_Digits);
    double target=NormalizeDouble(entry+(decision=="BUY" ? target_distance : -target_distance),_Digits);
-   double volume=SelectVolume(side,entry,stop);
+   double volume=(small_profit ? SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN)
+      : SelectVolume(side,entry,stop));
    if(volume<=0.0)
    { StatusLine="TRADE BLOCKED: min lot > hard risk cap"; ShowStatus(); return; }
+   if(small_profit)
+   {
+      // Small-profit trades never scale above the broker minimum volume.
+      if(!SmallProfitStop(side,entry,stop,volume,tick,stop))
+      { StatusLine="Broker cannot place 4-cent small stop"; ShowStatus(); return; }
+      double stop_loss_units=0.0;
+      if(volume<=0.0 || !OrderCalcProfit(side,_Symbol,volume,entry,stop,stop_loss_units)
+         || stop_loss_units>=0.0
+         || -stop_loss_units>SmallProfitMaxRiskUSD*MoneyUnitsPerUSD+0.00001)
+      { StatusLine="Small profit risk > 4 cents"; ShowStatus(); return; }
+      if(!SmallProfitTarget(side,entry,volume,tick,target))
+      { StatusLine="Broker cannot place 2-cent target"; ShowStatus(); return; }
+   }
    double margin=0.0;
    if(!OrderCalcMargin(side,_Symbol,volume,entry,margin)
       || margin>AccountInfoDouble(ACCOUNT_MARGIN_FREE)*0.8)
@@ -2495,12 +2694,14 @@ void OnTimer()
 
    // Telemetry/management staging must never block an otherwise valid entry.
    StageEntrySizing(LastSampleKey,side,entry,stop,volume);
-   PersistTPPlan(LastSampleKey,decision,entry,LastTargetTP1,LastTargetTP2,LastTargetTP3);
+   if(!small_profit)
+      PersistTPPlan(LastSampleKey,decision,entry,LastTargetTP1,LastTargetTP2,LastTargetTP3);
    // The broker owns SL/TP immediately. No position is opened when the model is unavailable.
+   string trade_comment="Ramon:"+LastSampleKey+(small_profit ? ":S" : "");
    bool submitted=(
       decision=="BUY"
-      ? Trade.Buy(volume,_Symbol,0.0,stop,target,"Ramon:"+LastSampleKey)
-      : Trade.Sell(volume,_Symbol,0.0,stop,target,"Ramon:"+LastSampleKey)
+      ? Trade.Buy(volume,_Symbol,0.0,stop,target,trade_comment)
+      : Trade.Sell(volume,_Symbol,0.0,stop,target,trade_comment)
    );
    uint retcode=Trade.ResultRetcode();
    if(!submitted || (retcode!=TRADE_RETCODE_DONE && retcode!=TRADE_RETCODE_PLACED))
@@ -2511,7 +2712,10 @@ void OnTimer()
    else
    {
       LastEntrySignalBar=bar_time;
-      StatusLine="Order sent "+decision+" "+DoubleToString(volume,2);
+      if(SmallOnlyMode)
+         LastSmallEntriesOnSignalBar=small_entries_on_bar+1;
+      StatusLine="Order sent "+(small_profit ? "SMALL 2c " : "")
+         +decision+" "+DoubleToString(volume,2);
    }
    Print("Ramon execution: ",StatusLine);
    ShowStatus();
@@ -2545,10 +2749,15 @@ int OnInit()
 {
    if(_Symbol!=TradeSymbol || _Period!=PERIOD_M15 || StringFind(_Symbol,"XAUUSD")!=0)
    { Print("Attach only to ",TradeSymbol," M15"); return INIT_FAILED; }
+   if(SmallOnlyMode && (MagicNumber!=SmallProfitMagicNumber
+      || AccountInfoInteger(ACCOUNT_MARGIN_MODE)!=ACCOUNT_MARGIN_MODE_RETAIL_HEDGING))
+   { Print("Small mode requires magic 26092213 and a hedging account"); return INIT_FAILED; }
+   if(!SmallOnlyMode && MagicNumber==SmallProfitMagicNumber)
+   { Print("Primary mode cannot use the small-trade magic number"); return INIT_FAILED; }
    if(MoneyUnitsPerUSD<=0.0 || RiskPerTradeUSD<=0.0 || RiskPerTradeUSD>0.50
       || MaxExecutableRiskUSD<=0.0 || MaxExecutableRiskUSD>0.50
       || MaxExecutableRiskUSD<EffectiveRiskPerTradeUSD()
-      || MaxSpreadPoints<=0 || MaxTradesPerDay<1 || MaximumHoldBars<1
+      || MaxSpreadPoints<=0 || (!SmallOnlyMode && MaxTradesPerDay<1) || MaximumHoldBars<1
       || ProfitProtectionFallbackActivationUnits<=0.0
       || ProfitProtectionActivationMinUnits<=0.0
       || ProfitProtectionActivationMaxUnits<ProfitProtectionActivationMinUnits
@@ -2603,6 +2812,9 @@ int OnInit()
    Trade.SetDeviationInPoints(MaxDeviationPoints);
    Trade.SetTypeFillingBySymbol(_Symbol);
    EventSetTimer(5);
+   // Stagger the second chart's WebRequest cadence from the primary chart.
+   if(SmallOnlyMode)
+      LastDecisionRequestTime=TimeCurrent()-SnapshotIntervalSeconds+15;
    ObjectsDeleteAll(0,UiPrefix);
    ShowStatus();
    return INIT_SUCCEEDED;
