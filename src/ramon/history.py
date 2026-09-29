@@ -22,6 +22,7 @@ TRADE_TELEMETRY_COLUMNS = {
     "profit_units": "REAL", "commission_units": "REAL", "swap_units": "REAL", "fee_units": "REAL",
     "opened_utc_offset_seconds": "INTEGER", "closed_utc_offset_seconds": "INTEGER",
     "exit_detail": "TEXT", "entry_ea_version": "TEXT",
+    "trade_role": "TEXT", "entry_magic": "INTEGER",
     **SIZING_TELEMETRY_COLUMNS,
 }
 
@@ -408,6 +409,17 @@ def validate_trade_telemetry(payload: dict[str, object], net: float) -> dict[str
             if len(value) > 128 or any(ord(c) < 32 for c in value):
                 raise ValueError("invalid trade telemetry text")
             extra[name] = value
+
+    if payload.get("trade_role") is not None:
+        role = str(payload["trade_role"]).upper()
+        if role not in {"MAIN", "SMALL"}:
+            raise ValueError("invalid trade_role")
+        extra["trade_role"] = role
+    if payload.get("entry_magic") is not None:
+        magic = float(payload["entry_magic"])
+        if not isfinite(magic) or not magic.is_integer() or int(magic) <= 0:
+            raise ValueError("invalid entry_magic")
+        extra["entry_magic"] = int(magic)
 
     sizing_names = tuple(SIZING_TELEMETRY_COLUMNS)
     sizing_present = [name for name in sizing_names if payload.get(name) is not None]

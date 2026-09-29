@@ -33,6 +33,46 @@ def safe_json(value: str | None) -> dict:
         return {}
 
 
+SMALL_MODE_START_UTC = datetime(2026, 9, 29, 4, 45, tzinfo=timezone.utc)
+SMALL_MODE_START_EPOCH = int(SMALL_MODE_START_UTC.timestamp())
+
+
+def profit_factor(rows: list[dict]) -> float:
+    gains = sum(max(float(row["net_units"]), 0.0) for row in rows)
+    losses = abs(sum(min(float(row["net_units"]), 0.0) for row in rows))
+    return gains / losses if losses > 0 else float("inf")
+
+
+def print_profit_since_small_mode(trades: list[dict]) -> None:
+    """Report total closed-trade P/L for trades opened at/after the fixed 2-cent start."""
+    rows = [row for row in trades if int(row["opened"]) >= SMALL_MODE_START_EPOCH]
+    print("=== TOTAL PROFIT SINCE 2-CENT MODE START ===")
+    print("Start (UTC): 2026-09-29 04:45:00 UTC")
+    if not rows:
+        print("Trades      : 0")
+        print("Net units   : +0.0000")
+        print("Net cents   : +0.00")
+        print("Net USD     : $+0.0000")
+        print()
+        return
+
+    net = sum(float(row["net_units"]) for row in rows)
+    wins = sum(float(row["net_units"]) > 0 for row in rows)
+    losses = sum(float(row["net_units"]) < 0 for row in rows)
+    pf = profit_factor(rows)
+    pf_text = f"{pf:.3f}" if math.isfinite(pf) else "inf"
+
+    print(f"Trades      : {len(rows)}")
+    print(f"Wins/Losses : {wins}/{losses}")
+    print(f"Win rate    : {pct(wins, len(rows)):.2f}%")
+    print(f"Profit factor: {pf_text}")
+    print(f"Net units   : {net:+.4f}")
+    print(f"Net cents   : {net:+.2f}")
+    print(f"Net USD     : ${net / 100.0:+.4f}")
+    print("Scope       : all Ramon trades opened at or after the fixed start time; MAIN + SMALL combined.")
+    print()
+
+
 def mean(values: list[float]) -> float:
     return statistics.mean(values) if values else float("nan")
 
@@ -535,6 +575,8 @@ def generate_report(DB: str, SYMBOL: str = "XAUUSD_l", LIMIT: int = 20) -> None:
         print(f"Best R / Worst R    : {best_r:+.4f}R / {worst_r:+.4f}R")
         print("* USD approximation assumes the current CENT convention: 100 account units = 1 USD.")
         print()
+
+        print_profit_since_small_mode(trades)
 
         excursions = load_bar_excursions(con, trades, SYMBOL)
         print_path_risk(trades)
