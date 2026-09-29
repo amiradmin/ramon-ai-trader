@@ -1,5 +1,5 @@
 #property strict
-#property version "0.49"
+#property version "0.490"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
