@@ -345,3 +345,22 @@ def test_v050_small_dynamic_target_is_shadow_only() -> None:
     target_fn = source.split("bool SmallProfitTarget(", 1)[1].split("bool SmallProfitStop(", 1)[0]
     assert "SmallProfitTargetUnits/unit_gain" in target_fn
     assert "ShadowSmallTargetUnits" not in target_fn
+
+
+def test_v050_small_three_stage_tp_shadow_is_observational() -> None:
+    source = EA.read_text(encoding="utf-8")
+
+    assert "const double ShadowSmallTP1Units = 2.0" in source
+    assert "const double ShadowSmallTP2Units = 2.5" in source
+    assert "const double ShadowSmallTP3Units = 3.0" in source
+    assert 'ShadowSmallTPPlan = "TP1=2.00 TP2=2.50 TP3=3.00"' in source
+    assert "WOULD_HOLD_FOR_TP2" in source
+    assert "WOULD_CLOSE_AT_TP1" in source
+    assert "WOULD_HOLD_FOR_TP3" in source
+    assert "WOULD_CLOSE_AT_TP2" in source
+    assert "WOULD_CLOSE_AT_TP3" in source
+    # The experiment must not alter live order submission or broker target.
+    assert '"ShadowExecutionEffect: NONE\\n\\n"' in source
+    target_fn = source.split("bool SmallProfitTarget(", 1)[1].split("bool SmallProfitStop(", 1)[0]
+    assert "SmallProfitTargetUnits" in target_fn
+    assert "ShadowSmallTP" not in target_fn
