@@ -1,5 +1,5 @@
 #property strict
-#property version "0.490"
+#property version "1.500"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -41,6 +41,10 @@ input int MaxTradesPerDay = 400;
 input int MaximumHoldBars = 4;
 input bool EnableSmallProfitTrades = true; // Optional live 2-cent entries when main model says WAIT.
 const double SmallProfitTargetUnits = 2.0; // CENT account units = USD 0.02 when MoneyUnitsPerUSD=100.
+const double ShadowSmallTP1Units = 2.0; // Observe-only SMALL stage 1.
+const double ShadowSmallTP2Units = 2.5; // Observe-only SMALL stage 2.
+const double ShadowSmallTP3Units = 3.0; // Observe-only SMALL stage 3.
+const double ShadowSmallStrongTargetUnits = ShadowSmallTP2Units; // Current strong-entry candidate.
 const double SmallProfitMaxLossUnits = 4.0; // Broker SL for new small entries: at most USD 0.04 on a 100-units/USD account.
 const double SmallProfitProtectionActivationUnits = 1.0;
 const double SmallProfitProtectionGivebackUnits = 0.5;
@@ -214,11 +218,15 @@ bool MarketClosedExitPause = false;
 datetime MarketClosedExitPauseTickTime = 0;
 ulong MarketClosedExitPauseTicket = 0;
 
-// v0.49 improvement pack: telemetry only. These values MUST NOT be used by execution gates.
+// v0.50 improvement pack: telemetry only. These values MUST NOT be used by execution gates.
 bool ShadowBuyCaution = false;
 bool ShadowSellCaution = false;
 double ShadowRiskMultiplier = 1.0;
 double ShadowSmallTargetUnits = SmallProfitTargetUnits;
+bool ShadowSmallStrongTargetCandidate = false;
+int ShadowSmallTPStage = 0;
+string ShadowSmallTPPlan = "TP1=2.00 TP2=2.50 TP3=3.00";
+string ShadowSmallTPNextAction = "NONE";
 bool ShadowDeadTrade = false;
 double ShadowDeadTradePeakR = 0.0;
 double ShadowDeadTradeCurrentR = 0.0;
@@ -477,7 +485,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.49\n"
+      +"EA version: 0.50\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -556,7 +564,7 @@ string BuildDiagnosticText()
       +" / "+DoubleToString(LastTargetTP3,_Digits)
       +"  LegacyTP: "+DoubleToString(LastLegacyTargetPrice,_Digits)+"\n"
       +"ExecutionTargetMode: LEGACY_TP_UNCHANGED\n\n"
-      +"=== V0.49 IMPROVEMENT SHADOWS (OBSERVE ONLY) ===\n"
+      +"=== V0.50 IMPROVEMENT SHADOWS (OBSERVE ONLY) ===\n"
       +"ShadowPack: "+BoolText(EnableImprovementShadowPack)
       +"  Reason: "+ShadowReason+"\n"
       +"DirectionCaution: BUY="+BoolText(ShadowBuyCaution)
@@ -564,7 +572,11 @@ string BuildDiagnosticText()
       +"ShadowRiskMultiplier: "+DoubleToString(ShadowRiskMultiplier,2)+"x"
       +"  ActualRiskMultiplier: "+DoubleToString(LastRiskMultiplier,2)+"x\n"
       +"ShadowSmallTargetUnits: "+DoubleToString(ShadowSmallTargetUnits,2)
-      +"  ActualTargetUnits: "+DoubleToString(SmallProfitTargetUnits,2)+"\n"
+      +"  ActualTargetUnits: "+DoubleToString(SmallProfitTargetUnits,2)
+      +"  StrongTargetCandidate: "+BoolText(ShadowSmallStrongTargetCandidate)+"\n"
+      +"ShadowSmallTPPlan: "+ShadowSmallTPPlan
+      +"  Stage: "+IntegerToString(ShadowSmallTPStage)
+      +"  Next: "+ShadowSmallTPNextAction+"\n"
       +"DeadTradeShadow: "+BoolText(ShadowDeadTrade)
       +"  PeakR="+DoubleToString(ShadowDeadTradePeakR,3)
       +"  CurrentR="+DoubleToString(ShadowDeadTradeCurrentR,3)+"\n"
@@ -772,7 +784,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.49 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.50 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
@@ -1395,6 +1407,9 @@ void UpdateImprovementShadows()
    ShadowSellCaution=false;
    ShadowRiskMultiplier=1.0;
    ShadowSmallTargetUnits=SmallProfitTargetUnits;
+   ShadowSmallStrongTargetCandidate=false;
+   ShadowSmallTPStage=0;
+   ShadowSmallTPNextAction="NONE";
    ShadowDeadTrade=false;
    ShadowDeadTradePeakR=0.0;
    ShadowDeadTradeCurrentR=0.0;
@@ -1430,15 +1445,46 @@ void UpdateImprovementShadows()
    else ShadowRiskMultiplier=1.00;
 
    // Proposed SMALL target extension, telemetry only. Actual broker TP remains unchanged.
-   if(SmallOnlyMode && support_count>=3)
-      ShadowSmallTargetUnits=3.0;
+   // Require all three short-horizon confirmations so the normal 2-cent target
+   // remains untouched for ordinary SMALL entries.
+   ShadowSmallStrongTargetCandidate=(
+      SmallOnlyMode
+      && intrabar_support
+      && trend_support
+      && edge_support
+   );
+   if(ShadowSmallStrongTargetCandidate)
+      ShadowSmallTargetUnits=ShadowSmallStrongTargetUnits;
 
    ulong ticket=0;
    datetime opened=0;
    if(ManagedPosition(ticket,opened) && PositionSelectByTicket(ticket))
    {
-      double risk=ManagedPositionInitialRiskUnits(ticket);
       double current=PositionGetDouble(POSITION_PROFIT);
+      if(SmallOnlyMode)
+      {
+         if(current>=ShadowSmallTP3Units)
+         {
+            ShadowSmallTPStage=3;
+            ShadowSmallTPNextAction="WOULD_CLOSE_AT_TP3";
+         }
+         else if(current>=ShadowSmallTP2Units)
+         {
+            ShadowSmallTPStage=2;
+            ShadowSmallTPNextAction=(intrabar_support && trend_support && edge_support
+               ? "WOULD_HOLD_FOR_TP3" : "WOULD_CLOSE_AT_TP2");
+         }
+         else if(current>=ShadowSmallTP1Units)
+         {
+            ShadowSmallTPStage=1;
+            ShadowSmallTPNextAction=(intrabar_support && trend_support && edge_support
+               ? "WOULD_HOLD_FOR_TP2" : "WOULD_CLOSE_AT_TP1");
+         }
+         else
+            ShadowSmallTPNextAction="WAITING_FOR_TP1";
+      }
+
+      double risk=ManagedPositionInitialRiskUnits(ticket);
       double peak=ProfitProtectionPeakUnits;
       if(risk>0.0)
       {
@@ -1492,6 +1538,8 @@ void AppendImprovementShadowCsv()
          "decision","reason","buy_caution","sell_caution",
          "shadow_risk_multiplier","actual_risk_multiplier",
          "shadow_small_target_units","actual_small_target_units",
+         "shadow_small_strong_target_candidate","shadow_small_tp_stage",
+         "shadow_small_tp_next_action",
          "dead_trade_candidate","dead_trade_peak_r","dead_trade_current_r",
          "intrabar_confirmed","intrabar_direction",
          "ai_trend_confirmed","ai_trend_direction",
@@ -1507,6 +1555,8 @@ void AppendImprovementShadowCsv()
       BoolText(ShadowBuyCaution),BoolText(ShadowSellCaution),
       DoubleToString(ShadowRiskMultiplier,2),DoubleToString(LastRiskMultiplier,2),
       DoubleToString(ShadowSmallTargetUnits,2),DoubleToString(SmallProfitTargetUnits,2),
+      BoolText(ShadowSmallStrongTargetCandidate),IntegerToString(ShadowSmallTPStage),
+      ShadowSmallTPNextAction,
       BoolText(ShadowDeadTrade),DoubleToString(ShadowDeadTradePeakR,4),
       DoubleToString(ShadowDeadTradeCurrentR,4),
       BoolText(LastIntrabarConfirmed),LastIntrabarDirection,
@@ -1772,7 +1822,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.49";
+      version="0.50";
    }
    if(close_detail!="") detail=close_detail;
 
