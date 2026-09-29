@@ -1,5 +1,5 @@
 #property strict
-#property version "0.45"
+#property version "0.46"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -370,6 +370,13 @@ double AccountUnitsToUSD(const double units)
    return units/MoneyUnitsPerUSD;
 }
 
+double SmallProfitRiskCapUnits()
+{
+   if(MoneyUnitsPerUSD<=0.0 || SmallProfitMaxRiskUSD<=0.0 || SmallProfitMaxLossUnits<=0.0)
+      return 0.0;
+   return MathMin(SmallProfitMaxLossUnits,SmallProfitMaxRiskUSD*MoneyUnitsPerUSD);
+}
+
 double EffectiveRiskPerTradeUSD()
 {
    double multiplier=(LastRiskModelReady ? LastRiskMultiplier : 1.0);
@@ -449,7 +456,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.45\n"
+      +"EA version: 0.46\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -728,7 +735,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.45 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.46 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
@@ -1095,7 +1102,9 @@ bool SmallProfitStop(const ENUM_ORDER_TYPE side,const double entry,
    if(!OrderCalcProfit(side,_Symbol,volume,entry,entry+sign,unit_loss)
       || unit_loss>=0.0)
       return false;
-   double max_distance=SmallProfitMaxLossUnits/(-unit_loss);
+   double risk_cap=SmallProfitRiskCapUnits();
+   if(risk_cap<=0.0) return false;
+   double max_distance=risk_cap/(-unit_loss);
    double model_distance=MathAbs(model_stop-entry);
    int steps=(int)MathMax(1.0,MathFloor(MathMin(max_distance,model_distance)/tick_size+0.00000001)-1.0);
    if(steps<1) return false;
@@ -1110,7 +1119,7 @@ bool SmallProfitStop(const ENUM_ORDER_TYPE side,const double entry,
          continue;
       double loss=0.0;
       if(!OrderCalcProfit(side,_Symbol,volume,entry,candidate,loss)) return false;
-      if(loss<0.0 && -loss<=SmallProfitMaxLossUnits+0.00001)
+      if(loss<0.0 && -loss<=risk_cap+0.00001)
       { stop=candidate; return true; }
    }
    return false;
@@ -1177,8 +1186,10 @@ bool StageEntrySizing(
    if(!ValidSampleKey(sample_key) || minimum<=0.0 || volume<=0.0
       || !OrderCalcProfit(side,_Symbol,minimum,entry,stop,min_loss) || min_loss>=0.0)
       return false;
-   double budget=EffectiveRiskPerTradeUSD()*MoneyUnitsPerUSD;
-   double hard_cap=MaxExecutableRiskUSD*MoneyUnitsPerUSD;
+   double budget=(SmallOnlyMode ? SmallProfitRiskCapUnits()
+      : EffectiveRiskPerTradeUSD()*MoneyUnitsPerUSD);
+   double hard_cap=(SmallOnlyMode ? SmallProfitRiskCapUnits()
+      : MaxExecutableRiskUSD*MoneyUnitsPerUSD);
    if(budget<=0.0 || hard_cap<=0.0 || MoneyUnitsPerUSD<=0.0)
       return false;
    double min_risk=MathAbs(min_loss);
@@ -1187,19 +1198,21 @@ bool StageEntrySizing(
    PendingSizingPlannedVolume=volume;
    PendingSizingMinLotSLUnits=min_risk;
    PendingSizingOverrideUsed=(
-      AllowMinLotRiskOverride
+      !SmallOnlyMode
+      && AllowMinLotRiskOverride
       && min_risk>budget+0.00001
       && volume<=minimum+0.00000001
       && min_risk<=hard_cap+0.00001
    );
-   PendingSizingMaxExecutableRiskUSD=MaxExecutableRiskUSD;
+   PendingSizingMaxExecutableRiskUSD=(SmallOnlyMode ? SmallProfitMaxRiskUSD : MaxExecutableRiskUSD);
    PendingSizingMoneyUnitsPerUSD=MoneyUnitsPerUSD;
    return true;
 }
 
 void UpdateSizingPreview()
 {
-   LastRiskBudgetUnits=EffectiveRiskPerTradeUSD()*MoneyUnitsPerUSD;
+   LastRiskBudgetUnits=(SmallOnlyMode ? SmallProfitRiskCapUnits()
+      : EffectiveRiskPerTradeUSD()*MoneyUnitsPerUSD);
    LastSizingSide=(LastModelDecision=="BUY" || LastModelDecision=="SELL"
       ? LastModelDecision
       : (LastBuyEdge>=LastSellEdge ? "BUY" : "SELL"));
@@ -1505,7 +1518,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.45";
+      version="0.46";
    }
    if(close_detail!="") detail=close_detail;
 
@@ -2171,6 +2184,41 @@ double ManagedPositionInitialRiskUnits(const ulong ticket)
    return MathAbs(money);
 }
 
+bool EnforceSmallPositionRiskCap(const ulong ticket)
+{
+   if(!IsSmallProfitPosition(ticket) || !PositionSelectByTicket(ticket))
+      return false;
+
+   double cap=SmallProfitRiskCapUnits();
+   double risk=ManagedPositionInitialRiskUnits(ticket);
+   if(cap<=0.0 || risk<=cap+0.00001)
+      return false;
+
+   Print("Ramon SMALL RISK GUARD ticket=",ticket,
+      " broker_sl_risk=",DoubleToString(risk,2),
+      " cap=",DoubleToString(cap,2));
+
+   if(ManagedExitPausedForMarketClosed(ticket))
+   {
+      StatusLine="SMALL RISK GUARD PAUSED: MARKET CLOSED";
+      return true;
+   }
+
+   if(Trade.PositionClose(ticket,MaxDeviationPoints))
+   {
+      ResetMarketClosedExitPause();
+      RecordDealTelemetry(Trade.ResultDeal(),"small_risk_guard");
+      StatusLine="SMALL RISK GUARD EXIT risk="
+         +DoubleToString(risk,2)
+         +" cap="+DoubleToString(cap,2);
+      Print("Ramon execution: ",StatusLine);
+      return true;
+   }
+
+   HandleManagedExitFailure(ticket,"SMALL RISK GUARD EXIT");
+   return true;
+}
+
 void ResetEarlyAdverseState()
 {
    EarlyAdverseTicket=0;
@@ -2191,6 +2239,10 @@ bool ManageEarlyAdverseExit(const ulong ticket,const datetime opened)
       ResetEarlyAdverseState();
       EarlyAdverseTicket=ticket;
       EarlyAdverseInitialRiskUnits=ManagedPositionInitialRiskUnits(ticket);
+      if(IsSmallProfitPosition(ticket))
+         EarlyAdverseInitialRiskUnits=MathMin(
+            EarlyAdverseInitialRiskUnits,SmallProfitRiskCapUnits()
+         );
       if(EarlyAdverseInitialRiskUnits>0.0)
          EarlyAdverseTriggerLossUnits=EarlyAdverseInitialRiskUnits*EarlyAdverseRiskFraction;
       Print("Ramon EARLY ADVERSE init ticket=",ticket,
@@ -2366,6 +2418,8 @@ void ManageOpenPosition()
       ResetMarketClosedExitPause();
       return;
    }
+   if(EnforceSmallPositionRiskCap(ticket))
+      return;
    if(ManageTPStages(ticket))
       return;
    ObserveOpenPositionProfit(ticket);
@@ -2680,9 +2734,11 @@ void OnTimer()
       if(!SmallProfitStop(side,entry,stop,volume,tick,stop))
       { StatusLine="Broker cannot place 4-cent small stop"; ShowStatus(); return; }
       double stop_loss_units=0.0;
-      if(volume<=0.0 || !OrderCalcProfit(side,_Symbol,volume,entry,stop,stop_loss_units)
+      double small_risk_cap=SmallProfitRiskCapUnits();
+      if(volume<=0.0 || small_risk_cap<=0.0
+         || !OrderCalcProfit(side,_Symbol,volume,entry,stop,stop_loss_units)
          || stop_loss_units>=0.0
-         || -stop_loss_units>SmallProfitMaxRiskUSD*MoneyUnitsPerUSD+0.00001)
+         || -stop_loss_units>small_risk_cap+0.00001)
       { StatusLine="Small profit risk > 4 cents"; ShowStatus(); return; }
       if(!SmallProfitTarget(side,entry,volume,tick,target))
       { StatusLine="Broker cannot place 2-cent target"; ShowStatus(); return; }
