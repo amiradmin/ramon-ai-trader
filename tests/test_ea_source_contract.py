@@ -13,10 +13,10 @@ def source() -> str:
 
 def test_ea_038_keeps_sizing_telemetry_observational():
     text = source()
-    assert '#property version "1.500"' in text
-    assert 'EA version: 0.50' in text
-    assert 'RAMON AI TRADER  v0.50' in text
-    assert 'version="0.50";' in text
+    assert '#property version "1.510"' in text
+    assert 'EA version: 0.51' in text
+    assert 'RAMON AI TRADER  v0.51' in text
+    assert 'version="0.51";' in text
     # Telemetry staging is deliberately not a trade gate.
     assert 'if(!StageEntrySizing' not in text
     assert re.search(
@@ -46,7 +46,8 @@ def test_ea_persists_sizing_by_exact_sample_key_before_closed_trade_upload():
 
 def test_ea_execution_invariants_remain_model_and_hard_cap_guarded():
     text = source()
-    assert 'if((decision=="WAIT" && !small_profit) || !EnableLiveTrading)' in text
+    assert 'if(decision=="WAIT" && !small_profit)' in text
+    assert 'if(!EnableLiveTrading)' in text
     assert 'else if(LastEntrySignalBar==bar_time)' in text
     assert 'if(!SmallOnlyMode && (today<0 || today>=MaxTradesPerDay))' in text
     assert 'if(volume<=0.0)' in text
