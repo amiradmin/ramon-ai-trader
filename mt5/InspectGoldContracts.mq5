@@ -9,6 +9,10 @@ void OnStart()
 {
    if(StopPriceDistance<=0.0 || PreferredRiskUSD<=0.0 || MoneyUnitsPerUSD<=0.0)
    { Print("Invalid positive input"); return; }
+   long margin_mode=AccountInfoInteger(ACCOUNT_MARGIN_MODE);
+   Print("Account position mode: ",
+         (margin_mode==ACCOUNT_MARGIN_MODE_RETAIL_HEDGING ? "HEDGING (separate tickets)" :
+          "NETTING/EXCHANGE (one net position per symbol)"));
    Print("GOLD CONTRACT AUDIT | symbol | min lot | step | spread points | "
          "stops points | trade mode | USD loss per 1.00 price move | "
          "risk USD at given stop | within preferred risk");
