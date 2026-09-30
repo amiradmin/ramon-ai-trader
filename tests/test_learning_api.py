@@ -109,7 +109,7 @@ def test_decision_metadata_and_enriched_outcome_round_trip(learning_server):
     with sqlite3.connect(db) as con:
         model_id, raw = con.execute('SELECT chronos_model,model_metadata FROM decision_samples').fetchone()
         assert model_id == 'test/fake'
-        assert json.loads(raw)['ensemble_mode'] == 'bootstrap_chronos'
+        assert json.loads(raw)['ensemble_mode'] == 'shadow'
         audit = json.loads(raw)['decision_audit']
         assert audit['base']['reason'] == decision['base_reason']
         assert audit['final']['reason'] == decision['reason']

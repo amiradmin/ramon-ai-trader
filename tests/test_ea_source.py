@@ -9,7 +9,7 @@ EA = Path(__file__).resolve().parents[1] / "mt5" / "Ramon.mq5"
 def test_model_url_allows_host_and_compose_service_only() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "1.530"' in source
+    assert '#property version "1.535"' in source
     assert 'url=="http://127.0.0.1:8012/decision"' in source
     assert 'url=="http://model:8012/decision"' in source
     assert "!IsAllowedModelUrl(ModelUrl)" in source
@@ -19,7 +19,7 @@ def test_model_url_allows_host_and_compose_service_only() -> None:
 def test_live_account_session_lock() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "1.530"' in source
+    assert '#property version "1.535"' in source
     assert "input bool AutoLockCurrentAccount = true" in source
     assert "input bool EnableLiveTrading = false" in source
     assert "LockedAccountLogin=current_login" in source
@@ -46,7 +46,7 @@ def test_diagnostic_export_contains_operational_state() -> None:
 def test_chart_dashboard_and_copy_button() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert 'RAMON AI TRADER  v0.53.0' in source
+    assert 'RAMON AI TRADER  v0.53.5' in source
     assert 'UiButton("COPY","COPY DIAGNOSTIC"' in source
     assert 'UiButton("CLOSE","CLOSE TRADE"' in source
     assert "color DirectionColor(const string direction)" in source
@@ -56,11 +56,11 @@ def test_chart_dashboard_and_copy_button() -> None:
     assert "int AttributionVoteCount(const string direction)" in source
     assert '+" | BUY "+IntegerToString(AttributionVoteCount("BUY"))' in source
     assert '+" SELL "+IntegerToString(AttributionVoteCount("SELL"))' in source
-    assert '"attribution_buy_votes,attribution_sell_votes,"' in source
+    assert 'attribution_buy_votes,attribution_sell_votes,' in source
     assert 'UiLabel("SIGNAL"' in source and '28,154,clrWhite,9' in source
-    assert 'UiLabel("FORECAST"' in source and '28,198,forecast_color,9' in source
-    assert 'UiLabel("EDGE"' in source and '28,222,dominant_color,9' in source
-    assert 'UiLabel("RISK_GATE",RiskGateText(),28,508' in source
+    assert 'cvals[0]=LastModelDecision' in source
+    assert 'ccolors[3]=(edge_pass ? DirectionColor(dominant) : clrGold)' in source
+    assert 'UiLabel("RISK_GATE",RiskGateText(),28,354' in source
     assert "AttributionAgreementCount" in source
     assert "AttributionConflictCount" in source
     assert 'UiLabel("ATTRIBUTION",AttributionSummary()' in source
@@ -68,17 +68,17 @@ def test_chart_dashboard_and_copy_button() -> None:
     assert "string CsvField(const string value)" in source
     assert "FileWriteString(handle,header);" in source
     assert "FileWriteString(handle,row);" in source
-    assert '"attribution_agree","attribution_conflict"' in source
+    assert 'attribution_agree,attribution_conflict,' in source
     assert '"sample_key","deal","position_id"' in source
     assert 'if(direction=="BUY")' in source
     assert "return clrLime;" in source
     assert 'if(direction=="SELL")' in source
     assert "return clrDeepSkyBlue;" in source
-    assert '"Bias: "+forecast_direction' in source
-    assert "dominant_color=DirectionColor(dominant)" in source
+    assert 'cvals[3]=dominant+" "+DoubleToString(dominant_edge,2)' in source
+    assert 'ccolors[3]=(edge_pass ? DirectionColor(dominant) : clrGold)' in source
     assert "sizing_color=DirectionColor(LastSizingSide)" in source
-    assert "LastIntrabarConfirmed ? DirectionColor(LastIntrabarDirection) : clrTomato" in source
-    assert "LastAiTrendConfirmed ? DirectionColor(LastAiTrendDirection) : clrTomato" in source
+    assert "LastIntrabarConfirmed ? DirectionColor(LastIntrabarDirection) : clrGold" in source
+    assert "LastAiTrendConfirmed ? DirectionColor(LastAiTrendDirection) : clrGold" in source
     assert "input bool ShowTPLevelsOnChart = true" in source
     assert 'const string TpUiPrefix = "RAMON_TP_"' in source
     assert "void DrawTPStageLevel(" in source
@@ -99,8 +99,8 @@ def test_chart_dashboard_and_copy_button() -> None:
     assert 'JsonNumber(reply,"buy_edge",buy_edge)' in source
     assert 'JsonNumber(reply,"sell_edge",sell_edge)' in source
     assert 'JsonNumber(reply,"signal_strength",signal_strength)' in source
-    assert '"EDGE "+PassFail(edge_pass)' in source
-    assert '"STRENGTH "+PassFail(strength_pass)' in source
+    assert 'cstats[3]=PassFail(edge_pass)' in source
+    assert 'cstats[2]=PassFail(strength_pass)' in source
 
 
 def test_risk_verification_and_csv_learning_logs() -> None:
@@ -128,7 +128,7 @@ def test_risk_verification_and_csv_learning_logs() -> None:
 def test_live_block_does_not_detach_ea() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "1.530"' in source
+    assert '#property version "1.535"' in source
     assert "bool LiveExecutionReady(string &reason)" in source
     assert 'return (LiveExecutionReady(reason) ? "ARMED" : "BLOCKED")' in source
     assert 'if(!LiveExecutionReady(live_block_reason))' in source
@@ -140,7 +140,7 @@ def test_live_block_does_not_detach_ea() -> None:
 def test_cent_account_dashboard_converts_units_to_usd() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "1.530"' in source
+    assert '#property version "1.535"' in source
     assert "input bool AccountIsCent = true" in source
     assert "string AccountTypeText()" in source
     assert "double AccountUnitsToUSD(const double units)" in source
@@ -150,14 +150,14 @@ def test_cent_account_dashboard_converts_units_to_usd() -> None:
     assert '"  MinExecutableRiskUSD: "+DoubleToString(AccountUnitsToUSD(LastMinimumLotStopLossUnits),4)' in source
     assert '"TRADE BLOCKED: min lot > hard cap"' in source
     assert '"Min executable risk: $"' in source
-    assert '"balance_usd_approx"' in source
-    assert '"min_executable_risk_usd"' in source
+    assert 'balance_usd_approx,' in source
+    assert 'min_executable_risk_usd,' in source
 
 
 def test_wait_display_distinguishes_strength_and_future_risk_block() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "1.530"' in source
+    assert '#property version "1.535"' in source
     assert "string RiskGateText()" in source
     assert '"WOULD BLOCK IF SIGNAL: min lot > hard cap"' in source
     assert '+"RiskGate: "+RiskGateText()+"\\n"' in source
@@ -167,7 +167,7 @@ def test_wait_display_distinguishes_strength_and_future_risk_block() -> None:
 def test_live_snapshots_re_evaluate_inside_same_m15_bar() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "1.530"' in source
+    assert '#property version "1.535"' in source
     assert "input int SnapshotIntervalSeconds = 30" in source
     assert "datetime LastDecisionRequestTime = 0" in source
     assert "datetime LastEntrySignalBar = 0" in source
@@ -182,12 +182,12 @@ def test_live_snapshots_re_evaluate_inside_same_m15_bar() -> None:
 def test_intrabar_reversal_payload_and_dashboard() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "1.530"' in source
+    assert '#property version "1.535"' in source
     assert "CopyRates(_Symbol,PERIOD_M1,0,4,micro)" in source
     assert '\\"micro_bars\\":[' in source
     assert 'JsonNumber(reply,"intrabar_confirmed",intrabar_confirmed)' in source
     assert 'JsonText(reply,"intrabar_direction",intrabar_direction)' in source
-    assert 'UiLabel("MICRO","INTRABAR "+PassFail(LastIntrabarConfirmed)' in source
+    assert 'cstats[4]=PassFail(LastIntrabarConfirmed)' in source
     assert "LastIntrabarConfirmed=(intrabar_confirmed>=0.5)" in source
     assert '"intrabar_reversal_up"' not in source  # decision reason belongs to Python core
 
@@ -195,10 +195,10 @@ def test_intrabar_reversal_payload_and_dashboard() -> None:
 def test_ai_trend_continuation_is_model_path_led() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "1.530"' in source
+    assert '#property version "1.535"' in source
     assert 'JsonNumber(reply,"ai_trend_confirmed",ai_trend_confirmed)' in source
     assert 'JsonText(reply,"ai_trend_direction",ai_trend_direction)' in source
-    assert 'UiLabel("AI_TREND","AI TREND "+PassFail(LastAiTrendConfirmed)' in source
+    assert 'cstats[5]=PassFail(LastAiTrendConfirmed)' in source
     assert "LastAiTrendConfirmed=(ai_trend_confirmed>=0.5)" in source
     assert "iMA(" not in source
     assert "iRSI(" not in source
@@ -207,7 +207,7 @@ def test_ai_trend_continuation_is_model_path_led() -> None:
 def test_minimum_lot_override_has_hard_cap() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "1.530"' in source
+    assert '#property version "1.535"' in source
     assert "input double RiskPerTradeUSD = 0.06" in source
     assert "input bool AllowMinLotRiskOverride = true" in source
     assert "const double MaxExecutableRiskUSD = 0.20" in source
@@ -219,35 +219,27 @@ def test_minimum_lot_override_has_hard_cap() -> None:
     assert "return minimum;" in source
     assert "MaxExecutableRiskUSD>0.50" in source
     assert "MaxExecutableRiskUSD<EffectiveRiskPerTradeUSD()" in source
-    assert '"max_executable_risk_usd"' in source
-    assert '"min_lot_override_used"' in source
+    assert 'max_executable_risk_usd,' in source
+    assert 'min_lot_override_used,' in source
 
 
-def test_v026_dashboard_rows_are_not_overlapped() -> None:
+def test_dashboard_rows_are_not_overlapped() -> None:
     source = EA.read_text(encoding="utf-8")
-
-    assert 'UiLabel("AI_TREND"' in source
-    assert '),28,288,' in source
-    assert 'UiLabel("ROLE_MODELS"' in source
-    assert '),28,310,' in source
-    assert 'UiLabel("NEWS"' in source
-    assert '28,332,news_color,9' in source
-    assert 'UiLabel("RISK","ATR: "' in source
-    assert '),28,354,' in source
-    assert 'UiLabel("ACCOUNT","Account: "' in source
-    assert '),28,376,' in source
-    assert 'UiLabel("BALANCE_USD","Balance: "' in source
-    assert '),28,398,' in source
-    assert 'UiLabel("LIVE_PNL"' in source
-    assert '28,420,pnl_color,10' in source
-    assert 'UiButton("COPY","COPY DIAGNOSTIC",28,536,176,30)' in source
-    assert 'UiButton("CLOSE","CLOSE TRADE",218,536,110,30)' in source
+    assert '28,200,clrWhite,9' in source  # role predictions
+    assert '28,222,news_color,9' in source
+    assert '28,244,clrWhite,9' in source  # account
+    assert '28,266,clrWhite,9' in source  # balance
+    assert '28,288,clrWhite,10' in source  # live P/L
+    assert 'UiLabel("RISK_GATE",RiskGateText(),28,354' in source
+    assert 'int tx=24, ty=410, tw=520, th=366, row_h=28;' in source
+    assert 'UiButton("COPY","COPY DIAGNOSTIC",28,812,176,30)' in source
+    assert 'UiButton("CLOSE","CLOSE TRADE",218,812,110,30)' in source
 
 
 def test_role_model_dashboard_and_response_fields() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "1.530"' in source
+    assert '#property version "1.535"' in source
     assert 'JsonText(reply,"base_decision",base_decision)' in source
     assert 'JsonNumber(reply,"ensemble_ready",ensemble_ready)' in source
     assert 'JsonNumber(reply,"regime_probability",regime_probability)' in source
@@ -260,10 +252,10 @@ def test_role_model_dashboard_and_response_fields() -> None:
     assert "double EffectiveRiskPerTradeUSD()" in source
     assert 'JsonText(reply,"news_source",news_source)' in source
     assert 'JsonText(reply,"news_event_title",news_event_title)' in source
-    assert 'UiLabel("ROLE_MODELS","ROLE MODELS "' in source
+    assert 'UiLabel("ROLE_MODELS",(LastRoleShadow ? "SHADOW | "' in source
     assert 'UiLabel("NEWS","NEWS "' in source
     assert "LastEnsembleReady=(ensemble_ready>=0.5)" in source
-    assert '"base_decision","base_reason","ensemble_ready","ensemble_active"' in source
+    assert 'base_decision,base_reason,ensemble_ready,ensemble_active,' in source
 
 
 def test_daily_trade_cap_is_400_by_default() -> None:
@@ -302,7 +294,7 @@ def test_event_time_telemetry_is_durable_and_does_not_invent_historical_offsets(
 def test_v038_tp_stage_management_is_live_but_broker_tp_stays_legacy() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "1.530"' in source
+    assert '#property version "1.535"' in source
     assert 'JsonNumber(reply,"target_learning_active",target_learning_active)' in source
     assert 'JsonNumber(reply,"target_tp1",target_tp1)' in source
     assert 'JsonNumber(reply,"target_tp2",target_tp2)' in source
@@ -327,7 +319,7 @@ def test_v038_tp_stage_management_is_live_but_broker_tp_stays_legacy() -> None:
 def test_v035_profit_protection_is_active_and_auditable() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "1.530"' in source
+    assert '#property version "1.535"' in source
     assert "input bool EnableProfitProtection = true" in source
     assert "const double ProfitProtectionFallbackActivationUnits = 7.0" in source
     assert "const double ProfitProtectionActivationMinUnits = 5.0" in source
@@ -366,7 +358,7 @@ def test_early_reversal_exit_is_shadow_only() -> None:
 def test_v049_small_loss_reduction_is_small_only() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "1.530"' in source
+    assert '#property version "1.535"' in source
     assert "const double EarlyAdverseRiskFraction = 0.60" in source
     assert "const double SmallEarlyAdverseRiskFraction = 0.50" in source
     assert "? SmallEarlyAdverseRiskFraction : EarlyAdverseRiskFraction" in source
@@ -380,7 +372,7 @@ def test_v049_small_loss_reduction_is_small_only() -> None:
 def test_v050_small_dynamic_target_is_shadow_only() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "1.530"' in source
+    assert '#property version "1.535"' in source
     assert "const double SmallProfitTargetUnits = 4.0" in source
     assert "const double ShadowSmallStrongTargetUnits = ShadowSmallTP2Units" in source
     assert "ShadowSmallStrongTargetCandidate=(" in source
@@ -417,7 +409,7 @@ def test_v050_small_three_stage_tp_shadow_is_observational() -> None:
 def test_v051_small_entry_quality_filter_requires_edge_and_directional_confirmation() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "1.530"' in source
+    assert '#property version "1.535"' in source
     fn = source.split("bool SmallProfitCandidate(", 1)[1].split("bool SmallProfitTarget(", 1)[0]
     assert 'directional_edge<LastMinimumEdge' in fn
     assert 'LastIntrabarConfirmed' in fn
@@ -446,7 +438,7 @@ def test_v051_small_filter_does_not_change_main_risk_or_small_targets() -> None:
 def test_v052_main_fast_profit_is_main_only_and_conservative() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "1.530"' in source
+    assert '#property version "1.535"' in source
     assert "input bool EnableMainFastProfit = false" in source
     assert "const int MainFastProfitMinAgeBars = 2" in source
     assert "const double MainFastProfitMinProfitUnits = 0.20" in source

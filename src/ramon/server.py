@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from .core import Forecast, Market, Settings, evaluate
 from .ensemble import EnsembleCoordinator, dominant_direction
+from .shadow_roles import ShadowCoordinator
 from .history import persist_decision_sample, persist_market, persist_trade_outcome
 from .model import ChronosForecaster, model_name
 from .news import DEFAULT_FOREX_FACTORY_JSON, ForexFactoryNewsProvider
@@ -51,7 +52,12 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
     cached_model = CachedForecaster(model)
     history_db = os.getenv("RAMON_HISTORY_DB", "").strip()
     ensemble_dir = os.getenv("RAMON_ENSEMBLE_DIR", "/checkpoints/ensemble").strip()
-    ensemble = EnsembleCoordinator(ensemble_dir, model.model_id)
+    # Preview is the default; enabling the live ensemble requires an explicit mode.
+    role_mode = os.getenv("RAMON_ROLE_MODE", "shadow").strip().lower()
+    if role_mode not in {"shadow", "live"}:
+        raise ValueError("RAMON_ROLE_MODE must be shadow or live")
+    coordinator = ShadowCoordinator if role_mode == "shadow" else EnsembleCoordinator
+    ensemble = coordinator(ensemble_dir, model.model_id)
     news_enabled = os.getenv("RAMON_NEWS_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
     news_provider = ForexFactoryNewsProvider(
         enabled=news_enabled,

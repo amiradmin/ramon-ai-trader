@@ -1,5 +1,5 @@
 #property strict
-#property version "1.533"
+#property version "1.535"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -113,6 +113,9 @@ string LastBaseReason = "NONE";
 bool LastEnsembleReady = false;
 bool LastEnsembleActive = false;
 double LastRegimeProbability = -1.0;
+bool LastRoleShadow = false;
+string LastShadowRegimeLabel = "UNAVAILABLE";
+double LastShadowRiskProbability = -1.0;
 double LastEntryProbability = -1.0;
 double LastNewsProbability = -1.0;
 double LastMetaProbability = -1.0;
@@ -519,12 +522,14 @@ string BuildDiagnosticText()
       +"TradeLearning: "+TradeLearningStatus+"\n"
       +"LossCooldown: MT5_HISTORY | 2 consecutive same-direction net-loss SL closes | 30min\n"
       +"BaseDecision: "+LastBaseDecision+"  BaseReason: "+LastBaseReason+"\n"
-      +"RoleModels: "+(LastEnsembleReady ? "READY" : "LEARNING")
+      +"RoleModels: "+(LastRoleShadow ? "SHADOW (display only)" : (LastEnsembleReady ? "READY" : "LEARNING"))
       +"  Active: "+BoolText(LastEnsembleActive)
       +"  RegimeP: "+DoubleToString(LastRegimeProbability,3)
       +"  EntryP: "+DoubleToString(LastEntryProbability,3)
       +"  NewsP: "+DoubleToString(LastNewsProbability,3)
       +"  MetaP: "+DoubleToString(LastMetaProbability,3)
+      +"  ShadowRegime: "+LastShadowRegimeLabel
+      +"  ShadowRiskP: "+DoubleToString(LastShadowRiskProbability,3)
       +"  RiskReady: "+BoolText(LastRiskModelReady)
       +"  RiskP: "+DoubleToString(LastRiskProbability,3)
       +"  RiskMult: "+DoubleToString(LastRiskMultiplier,2)+"x\n"
@@ -900,6 +905,11 @@ void UpdateTPStageObjects()
    DrawTPStageLevel("TP3",TPStageTP3,tp3_color,STYLE_SOLID,2,TPStage>=3);
 }
 
+string RoleProbabilityText(const double probability)
+{
+   return (probability<0.0 ? "N/A" : DoubleToString(probability*100.0,0)+"%");
+}
+
 void DrawDashboard()
 {
    if(!ShowDashboard)
@@ -971,7 +981,7 @@ void DrawDashboard()
    // Tall/narrow panel: summary text first, checklist directly underneath.
    UiRect("PANEL",12,24,560,955,C'15,23,42',C'71,85,105');
 
-   UiLabel("TITLE","RAMON AI TRADER  v0.53.3 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.53.5 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,clrWhite,9);
@@ -993,14 +1003,19 @@ void DrawDashboard()
    // The old Forecast / Edge / Strength / Intrabar / AI Trend rows were removed here
    // because the same live values now appear once in the checklist below.
 
-   UiLabel("ROLE_MODELS","ROLE MODELS "+(LastEnsembleReady ? "READY" : "LEARNING")
-      +"   regime "+DoubleToString(LastRegimeProbability,2)
-      +"   entry "+DoubleToString(LastEntryProbability,2)
-      +"   news "+DoubleToString(LastNewsProbability,2)
-      +"   meta "+DoubleToString(LastMetaProbability,2)
-      +"   risk "+DoubleToString(LastRiskProbability,2)
-      +" x"+DoubleToString(LastRiskMultiplier,2),
+   UiLabel("ROLE_MODELS",(LastRoleShadow ? "SHADOW | "+LastShadowRegimeLabel : "ROLE MODELS "+(LastEnsembleReady ? "READY" : "LEARNING"))
+      +" R:"+RoleProbabilityText(LastRegimeProbability)
+      +" E:"+RoleProbabilityText(LastEntryProbability)
+      +" N:"+RoleProbabilityText(LastNewsProbability)
+      +" M:"+RoleProbabilityText(LastMetaProbability)
+      +" SL:"+RoleProbabilityText(LastRoleShadow ? LastShadowRiskProbability : LastRiskProbability),
       28,200,clrWhite,9);
+   ObjectSetString(0,UiPrefix+"ROLE_MODELS",OBJPROP_TOOLTIP,
+      "حالت سایه: فقط نمایش؛ بدون دخالت در معامله\n"
+      "R: احتمال رونددار بودن، نه صعودی یا نزولی\n"
+      "E: احتمال نتیجه مثبت ورود | N: برآورد مدل خبر\n"
+      "M: برآورد ترکیبی | SL: احتمال برخورد به حد ضرر\n"
+      "N/A: پیش‌بینی معتبر موجود نیست. درصدها دقت مدل نیستند.");
 
    string news_title=(StringLen(LastNewsEventTitle)>28
       ? StringSubstr(LastNewsEventTitle,0,28)+"..." : LastNewsEventTitle);
@@ -3400,6 +3415,15 @@ void OnTimer()
    LastRiskModelReady=(risk_model_ready>=0.5);
    LastRiskProbability=risk_probability;
    LastRiskMultiplier=risk_multiplier;
+   // Optional telemetry only: these values are never read by entry/exit/sizing.
+   double role_shadow=0.0,shadow_risk_probability=-1.0;
+   string shadow_regime_label="UNAVAILABLE";
+   JsonNumber(reply,"role_shadow",role_shadow);
+   JsonNumber(reply,"shadow_risk_probability",shadow_risk_probability);
+   JsonText(reply,"shadow_regime_label",shadow_regime_label);
+   LastRoleShadow=(role_shadow>=0.5);
+   LastShadowRegimeLabel=shadow_regime_label;
+   LastShadowRiskProbability=shadow_risk_probability;
    LastNewsSource=news_source;
    LastNewsSourceReady=(news_source_ready>=0.5);
    LastNewsModelReady=(news_model_ready>=0.5);
