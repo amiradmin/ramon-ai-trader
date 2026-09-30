@@ -32,7 +32,7 @@ def test_false_block_is_measured_without_changing_decision(tmp_path):
         con.execute("INSERT INTO decision_samples VALUES (?,?,?,?,?,?,?,?,?,?)",
                     ("s1","XAUUSD_l",1000,1000,100.0,10.0,"BUY","WAIT","WAIT",
                      json.dumps(meta)))
-        con.execute("INSERT INTO history_bars VALUES (?,?,?,?,?,?,?,?,?)",
+        con.execute("INSERT INTO history_bars VALUES (?,?,?,?,?,?,?,?)",
                     ("XAUUSD_l","M1",1240,102,103.5,101.5,103.0,0))
     assert backfill_signal_outcomes(db, horizons=(300,), now=2000) == 1
     report = build_signal_outcome_report(db, horizon_seconds=300)
