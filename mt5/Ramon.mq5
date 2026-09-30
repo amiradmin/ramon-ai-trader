@@ -1,5 +1,5 @@
 #property strict
-#property version "1.521"
+#property version "1.522"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -188,6 +188,7 @@ int LastModelSpreadPoints = 0;
 long LockedAccountLogin = 0;
 string LockedAccountServer = "";
 string LastCopyStatus = "Ready";
+string LastCloseStatus = "Ready";
 const string UiPrefix = "RAMON_UI_";
 ulong ProfitProtectionTicket = 0;
 double ProfitProtectionPeakUnits = 0.0;
@@ -495,7 +496,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.52.1\n"
+      +"EA version: 0.52.2\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -801,7 +802,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.52.1 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.52.2 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
@@ -907,7 +908,14 @@ void DrawDashboard()
       (live_ready || !EnableLiveTrading ? clrLime : clrOrange),9);
 
    UiButton("COPY","COPY DIAGNOSTIC",28,536,176,30);
-   UiLabel("COPY_STATUS",LastCopyStatus,218,544,C'148,163,184',8);
+   UiButton("CLOSE","CLOSE TRADE",218,536,110,30);
+   ObjectSetInteger(0,UiPrefix+"CLOSE",OBJPROP_BGCOLOR,
+      has_managed_position ? C'153,27,27' : C'55,65,81');
+   ObjectSetInteger(0,UiPrefix+"CLOSE",OBJPROP_BORDER_COLOR,
+      has_managed_position ? C'248,113,113' : C'75,85,99');
+   UiLabel("COPY_STATUS",LastCopyStatus,340,536,C'148,163,184',8);
+   UiLabel("CLOSE_STATUS",LastCloseStatus,340,552,
+      (StringFind(LastCloseStatus,"FAILED")>=0 ? clrTomato : C'148,163,184'),8);
    ChartRedraw();
 }
 
@@ -3290,14 +3298,80 @@ void OnTradeTransaction(
    }
 }
 
+bool CloseManagedPositionFromDashboard()
+{
+   if(!AccountLockHealthy())
+   {
+      LastCloseStatus="FAILED: account lock";
+      StatusLine="MANUAL CLOSE BLOCKED: account/server lock mismatch";
+      Print("Ramon execution: ",StatusLine);
+      return false;
+   }
+
+   bool permissions=(bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED)
+      && (bool)MQLInfoInteger(MQL_TRADE_ALLOWED)
+      && (bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED);
+   if(!permissions)
+   {
+      LastCloseStatus="FAILED: permissions";
+      StatusLine="MANUAL CLOSE BLOCKED: trading permissions";
+      Print("Ramon execution: ",StatusLine);
+      return false;
+   }
+
+   ulong ticket=0;
+   datetime opened=0;
+   if(!ManagedPosition(ticket,opened))
+   {
+      LastCloseStatus="NO RAMON POSITION";
+      StatusLine="Manual close: no Ramon position";
+      return false;
+   }
+
+   if(!PositionSelectByTicket(ticket))
+   {
+      LastCloseStatus="FAILED: position gone";
+      StatusLine="Manual close failed: position unavailable";
+      return false;
+   }
+
+   double profit_units=PositionGetDouble(POSITION_PROFIT);
+   if(Trade.PositionClose(ticket,MaxDeviationPoints))
+   {
+      RecordDealTelemetry(Trade.ResultDeal(),"manual_dashboard_close");
+      LastCloseStatus="CLOSED #"+IntegerToString((long)ticket);
+      StatusLine="MANUAL CLOSE #"+IntegerToString((long)ticket)
+         +" P/L "+DoubleToString(profit_units,2)+" units";
+      Print("Ramon execution: ",StatusLine);
+      return true;
+   }
+
+   uint retcode=Trade.ResultRetcode();
+   LastCloseStatus="FAILED "+IntegerToString((int)retcode);
+   StatusLine="MANUAL CLOSE FAILED "+IntegerToString((int)retcode);
+   Print("Ramon execution: ",StatusLine);
+   return false;
+}
+
 void OnChartEvent(const int id,const long &lparam,const double &dparam,const string &sparam)
 {
-   if(id!=CHARTEVENT_OBJECT_CLICK || sparam!=UiPrefix+"COPY")
+   if(id!=CHARTEVENT_OBJECT_CLICK)
       return;
 
-   ObjectSetInteger(0,sparam,OBJPROP_STATE,false);
-   CopyDiagnosticToClipboard();
-   DrawDashboard();
+   if(sparam==UiPrefix+"COPY")
+   {
+      ObjectSetInteger(0,sparam,OBJPROP_STATE,false);
+      CopyDiagnosticToClipboard();
+      DrawDashboard();
+      return;
+   }
+
+   if(sparam==UiPrefix+"CLOSE")
+   {
+      ObjectSetInteger(0,sparam,OBJPROP_STATE,false);
+      CloseManagedPositionFromDashboard();
+      DrawDashboard();
+   }
 }
 
 int OnInit()
