@@ -1,5 +1,5 @@
 #property strict
-#property version "1.529"
+#property version "1.530"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -498,7 +498,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.52.9\n"
+      +"EA version: 0.53.0\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -816,14 +816,24 @@ int AttributionConflictCount(const string decision)
    return count;
 }
 
+int AttributionVoteCount(const string direction)
+{
+   int count=0;
+   if(ForecastDirection()==direction) count++;
+   if(EdgeDirection()==direction) count++;
+   if(LastIntrabarConfirmed && LastIntrabarDirection==direction) count++;
+   if(LastAiTrendConfirmed && LastAiTrendDirection==direction) count++;
+   return count;
+}
+
 string AttributionSummary()
 {
    return "VOTES F:"+ForecastDirection()
       +" E:"+EdgeDirection()
       +" I:"+ConfirmedDirection(LastIntrabarConfirmed,LastIntrabarDirection)
       +" T:"+ConfirmedDirection(LastAiTrendConfirmed,LastAiTrendDirection)
-      +" | agree "+IntegerToString(AttributionAgreementCount(LastModelDecision))
-      +" conflict "+IntegerToString(AttributionConflictCount(LastModelDecision));
+      +" | BUY "+IntegerToString(AttributionVoteCount("BUY"))
+      +" SELL "+IntegerToString(AttributionVoteCount("SELL"));
 }
 
 void DeleteTPStageObjects()
@@ -909,22 +919,13 @@ void DrawDashboard()
    bool strength_pass=LastMinimumStrength>0.0 && LastSignalStrength>=LastMinimumStrength;
    string dominant=(LastBuyEdge>=LastSellEdge ? "BUY" : "SELL");
    color state_color=DirectionColor(LastModelDecision);
+
    string live_reason="";
    bool live_ready=LiveExecutionReady(live_reason);
    color live_color=(live_ready && permissions && lock_ok ? clrWhite : clrTomato);
    color risk_gate_color=(RiskGateBlocked() ? clrTomato : clrWhite);
 
-   double signal_mid=0.0;
-   if(LastSignalBid>0.0 && LastSignalAsk>0.0)
-      signal_mid=(LastSignalBid+LastSignalAsk)/2.0;
-   string forecast_direction="NONE";
-   if(signal_mid>0.0 && LastForecast>0.0)
-   {
-      if(LastForecast>signal_mid)
-         forecast_direction="BUY";
-      else if(LastForecast<signal_mid)
-         forecast_direction="SELL";
-   }
+   string forecast_direction=ForecastDirection();
    color forecast_color=DirectionColor(forecast_direction);
    color dominant_color=DirectionColor(dominant);
    color sizing_color=DirectionColor(LastSizingSide);
@@ -939,7 +940,7 @@ void DrawDashboard()
       live_profit_units=PositionGetDouble(POSITION_PROFIT);
       live_profit_usd=AccountUnitsToUSD(live_profit_units);
    }
-   color pnl_color=clrWhite;
+
    string pnl_units=(live_profit_units>0.00001 ? "+" : "")
       +DoubleToString(live_profit_units,2);
    string pnl_usd=(live_profit_usd>0.00001 ? "+$" :
@@ -947,7 +948,8 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,596,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.52.9 "
+
+   UiLabel("TITLE","RAMON AI TRADER  v0.53.0 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,clrWhite,9);
@@ -956,43 +958,52 @@ void DrawDashboard()
       +"   LOCK: "+(lock_ok ? "OK" : "FAIL")
       +"   PERMS: "+(permissions ? "OK" : "FAIL"),28,82,live_color,10);
 
-   UiLabel("DECISION","DECISION: "+LastModelDecision+"   "+LastModelReason,28,108,state_color,11);
+   UiLabel("DECISION","DECISION: "+LastModelDecision+"   "+LastModelReason,
+      28,108,state_color,11);
+
    UiLabel("ATTRIBUTION",AttributionSummary(),28,130,clrWhite,9);
+
    UiLabel("SIGNAL","Signal: "+UTCText(LastSignalBarTime,TIME_DATE|TIME_MINUTES)
-      +"   Spread: "+IntegerToString(spread_points)+"/"+IntegerToString(MaxSpreadPoints),28,198,clrWhite,9);
+      +"   Spread: "+IntegerToString(spread_points)+"/"+IntegerToString(MaxSpreadPoints),
+      28,154,clrWhite,9);
+
    UiLabel("SIGNAL_PRICE","Signal Bid/Ask: "+DoubleToString(LastSignalBid,_Digits)
-      +" / "+DoubleToString(LastSignalAsk,_Digits),28,198,clrWhite,9);
+      +" / "+DoubleToString(LastSignalAsk,_Digits),
+      28,176,clrWhite,9);
 
    UiLabel("FORECAST","Forecast L/M/H: "
       +DoubleToString(LastForecastLow,_Digits)+" / "
       +DoubleToString(LastForecast,_Digits)+" / "
       +DoubleToString(LastForecastHigh,_Digits)
-      +"   Bias: "+forecast_direction,28,198,forecast_color,9);
+      +"   Bias: "+forecast_direction,
+      28,198,forecast_color,9);
 
    UiLabel("EDGE","Dominant: "+dominant
       +"   BuyEdge: "+DoubleToString(LastBuyEdge,2)
-      +"   SellEdge: "+DoubleToString(LastSellEdge,2),28,508,dominant_color,9);
+      +"   SellEdge: "+DoubleToString(LastSellEdge,2),
+      28,222,dominant_color,9);
+
    UiLabel("EDGE_PASS","EDGE "+PassFail(edge_pass)
-      +"   "+DoubleToString(dominant_edge,2)+" >= "+DoubleToString(LastMinimumEdge,2),28,508,
-      (edge_pass ? dominant_color : clrTomato),9);
+      +"   "+DoubleToString(dominant_edge,2)+" >= "+DoubleToString(LastMinimumEdge,2),
+      28,244,(edge_pass ? dominant_color : clrTomato),9);
 
    UiLabel("STRENGTH","STRENGTH "+PassFail(strength_pass)
       +"   "+DoubleToString(LastSignalStrength,3)+" >= "+DoubleToString(LastMinimumStrength,3)
-      +"   Unc: "+DoubleToString(LastUncertainty,2),28,508,
-      (strength_pass ? clrWhite : clrTomato),9);
+      +"   Unc: "+DoubleToString(LastUncertainty,2),
+      28,266,(strength_pass ? clrWhite : clrTomato),9);
 
    UiLabel("MICRO","INTRABAR "+PassFail(LastIntrabarConfirmed)
       +" "+LastIntrabarDirection
       +"   move "+DoubleToString(LastIntrabarMoveAtr,3)+"/"+DoubleToString(LastIntrabarMinMoveAtr,3)
-      +"   rebound "+DoubleToString(LastIntrabarReboundAtr,3)+"/"+DoubleToString(LastIntrabarMinReboundAtr,3),28,508,
-      (LastIntrabarConfirmed ? DirectionColor(LastIntrabarDirection) : clrTomato),9);
+      +"   rebound "+DoubleToString(LastIntrabarReboundAtr,3)+"/"+DoubleToString(LastIntrabarMinReboundAtr,3),
+      28,288,(LastIntrabarConfirmed ? DirectionColor(LastIntrabarDirection) : clrTomato),9);
 
    UiLabel("AI_TREND","AI TREND "+PassFail(LastAiTrendConfirmed)
       +" "+LastAiTrendDirection
       +"   score "+DoubleToString(LastAiTrendScore,3)
       +"   path "+DoubleToString(LastAiTrendMoveAtr,3)+" ATR"
-      +"   consistency "+DoubleToString(LastAiTrendConsistency,2),28,508,
-      (LastAiTrendConfirmed ? DirectionColor(LastAiTrendDirection) : clrTomato),9);
+      +"   consistency "+DoubleToString(LastAiTrendConsistency,2),
+      28,310,(LastAiTrendConfirmed ? DirectionColor(LastAiTrendDirection) : clrTomato),9);
 
    UiLabel("ROLE_MODELS","ROLE MODELS "+(LastEnsembleReady ? "READY" : "LEARNING")
       +"   regime "+DoubleToString(LastRegimeProbability,2)
@@ -1000,58 +1011,63 @@ void DrawDashboard()
       +"   news "+DoubleToString(LastNewsProbability,2)
       +"   meta "+DoubleToString(LastMetaProbability,2)
       +"   risk "+DoubleToString(LastRiskProbability,2)
-      +" x"+DoubleToString(LastRiskMultiplier,2),28,508,
-      clrWhite,9);
+      +" x"+DoubleToString(LastRiskMultiplier,2),
+      28,332,clrWhite,9);
 
-   string news_title=(StringLen(LastNewsEventTitle)>28 ? StringSubstr(LastNewsEventTitle,0,28)+"..." : LastNewsEventTitle);
+   string news_title=(StringLen(LastNewsEventTitle)>28
+      ? StringSubstr(LastNewsEventTitle,0,28)+"..." : LastNewsEventTitle);
    string news_delta=(LastNewsEventTime>0
       ? (LastNewsEventDeltaMinutes>=0.0 ? " in " : " ")
          +DoubleToString(MathAbs(LastNewsEventDeltaMinutes),0)+"m"
       : "");
    color news_color=(!LastNewsSourceReady ? clrTomato : clrWhite);
+
    UiLabel("NEWS","NEWS "+LastNewsSource
       +" "+(LastNewsSourceReady ? "READY" : "OFFLINE")
       +" | model "+(LastNewsModelReady ? "READY" : "LEARNING")
       +" | "+LastNewsEventImpact+" "+LastNewsEventCountry+" "+news_title+news_delta,
-      28,508,news_color,9);
+      28,354,news_color,9);
 
    UiLabel("RISK","ATR: "+DoubleToString(LastAtr,2)
       +"   SL dist: "+DoubleToString(LastStopDistance,2)
-      +"   TP dist: "+DoubleToString(LastTargetDistance,2),28,508,clrWhite,9);
+      +"   TP dist: "+DoubleToString(LastTargetDistance,2),
+      28,376,clrWhite,9);
 
    UiLabel("ACCOUNT","Account: "+AccountTypeText()+" (configured)"
       +"   Currency: "+AccountInfoString(ACCOUNT_CURRENCY)
       +"   Trades: "+(today<0 ? "?" : IntegerToString(today))
-      +"/"+(SmallOnlyMode ? "unlimited" : IntegerToString(MaxTradesPerDay)),28,508,clrWhite,9);
+      +"/"+(SmallOnlyMode ? "unlimited" : IntegerToString(MaxTradesPerDay)),
+      28,398,clrWhite,9);
 
    UiLabel("BALANCE_USD","Balance: "+DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),2)+" units"
-      +"   ~= $"+DoubleToString(AccountUnitsToUSD(AccountInfoDouble(ACCOUNT_BALANCE)),2),28,508,clrWhite,9);
+      +"   ~= $"+DoubleToString(AccountUnitsToUSD(AccountInfoDouble(ACCOUNT_BALANCE)),2),
+      28,420,clrWhite,9);
 
    UiLabel("LIVE_PNL",
       has_managed_position
          ? "LIVE P/L: "+pnl_units+" units   ~= "+pnl_usd
          : "LIVE P/L: --   (no Ramon position)",
-      28,508,pnl_color,10);
+      28,442,clrWhite,10);
 
    UiLabel("SIZING","Sizing: "+LastSizingSide
       +"   Vol: "+DoubleToString(LastPlannedVolume,2)
       +"   Base: $"+DoubleToString(RiskPerTradeUSD,2)
       +" x"+DoubleToString(LastRiskMultiplier,2)
       +" = $"+DoubleToString(EffectiveRiskPerTradeUSD(),3)
-      +"   Cap: $"+DoubleToString(MaxExecutableRiskUSD,2),28,508,
-      sizing_color,9);
+      +"   Cap: $"+DoubleToString(MaxExecutableRiskUSD,2),
+      28,464,sizing_color,9);
 
    UiLabel("MIN_RISK","Min executable risk: $"
       +DoubleToString(AccountUnitsToUSD(LastMinimumLotStopLossUnits),4)
-      +" ("+DoubleToString(LastMinimumLotStopLossUnits,2)+" units)",28,508,
-      risk_gate_color,9);
+      +" ("+DoubleToString(LastMinimumLotStopLossUnits,2)+" units)",
+      28,486,risk_gate_color,9);
 
    UiLabel("RISK_GATE",RiskGateText(),28,508,risk_gate_color,10);
 
    UiLabel("MONEY_CONFIRM","MoneyUnits/USD: "+DoubleToString(MoneyUnitsPerUSD,2)
       +"   Confirmed: "+BoolText(ConfirmMoneyUnitsPerUSD)
-      +(EnableLiveTrading && !live_ready ? "   "+live_reason : ""),28,532,
-      (live_ready || !EnableLiveTrading ? clrWhite : clrTomato),9);
+      +(EnableLiveTrading && !live_ready ? "   "+live_reason : ""),
+      28,532,(live_ready || !EnableLiveTrading ? clrWhite : clrTomato),9);
 
    UiButton("COPY","COPY DIAGNOSTIC",28,558,176,30);
    UiButton("CLOSE","CLOSE TRADE",218,558,110,30);
@@ -1059,11 +1075,13 @@ void DrawDashboard()
       has_managed_position ? C'153,27,27' : C'55,65,81');
    ObjectSetInteger(0,UiPrefix+"CLOSE",OBJPROP_BORDER_COLOR,
       has_managed_position ? C'248,113,113' : C'75,85,99');
+
    UiLabel("COPY_STATUS",LastCopyStatus,340,558,
       (StringFind(LastCopyStatus,"failed")>=0 || StringFind(LastCopyStatus,"disabled")>=0
          ? clrTomato : clrWhite),8);
    UiLabel("CLOSE_STATUS",LastCloseStatus,340,574,
       (StringFind(LastCloseStatus,"FAILED")>=0 ? clrTomato : clrWhite),8);
+
    ChartRedraw();
 }
 
@@ -1805,7 +1823,7 @@ void AppendSignalCsv()
       string header=
          "captured,signal_bar_time,symbol,decision,reason,"
          "forecast_direction,edge_direction,intrabar_vote,trend_vote,"
-         "attribution_agree,attribution_conflict,"
+         "attribution_agree,attribution_conflict,attribution_buy_votes,attribution_sell_votes,"
          "base_decision,base_reason,ensemble_ready,ensemble_active,"
          "regime_probability,entry_probability,meta_probability,risk_multiplier,"
          "signal_bid,signal_ask,spread_points,"
@@ -1839,6 +1857,8 @@ void AppendSignalCsv()
    row+=CsvField(ConfirmedDirection(LastAiTrendConfirmed,LastAiTrendDirection))+",";
    row+=IntegerToString(AttributionAgreementCount(LastModelDecision))+",";
    row+=IntegerToString(AttributionConflictCount(LastModelDecision))+",";
+   row+=IntegerToString(AttributionVoteCount("BUY"))+",";
+   row+=IntegerToString(AttributionVoteCount("SELL"))+",";
    row+=CsvField(LastBaseDecision)+",";
    row+=CsvField(LastBaseReason)+",";
    row+=CsvField(BoolText(LastEnsembleReady))+",";
