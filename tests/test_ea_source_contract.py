@@ -13,10 +13,10 @@ def source() -> str:
 
 def test_ea_038_keeps_sizing_telemetry_observational():
     text = source()
-    assert '#property version "1.580"' in text
-    assert 'EA version: 0.58' in text
-    assert 'RAMON AI TRADER  v0.58' in text
-    assert 'version="0.57";' in text
+    assert '#property version "1.600"' in text
+    assert 'EA version: 0.60' in text
+    assert 'RAMON AI TRADER  v0.60' in text
+    assert 'version="0.60";' in text
     # Telemetry staging is deliberately not a trade gate.
     assert 'if(!StageEntrySizing' not in text
     assert re.search(
@@ -101,3 +101,4 @@ def test_peak_recovery_is_per_position_and_saved_before_giveback_trigger() -> No
     assert "POSITION_IDENTIFIER" in observe
     assert observe.index("GlobalVariableGet(key)") < observe.index("ProfitProtectionCurrentUnits=PositionGetDouble")
     assert observe.index("GlobalVariablesFlush()") < observe.index("ProfitProtectionArmed=")
+

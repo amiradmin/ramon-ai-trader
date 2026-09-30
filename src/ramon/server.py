@@ -4,12 +4,14 @@ import argparse
 from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
+import hashlib
 import os
 from pathlib import Path
 from threading import Lock
 import time
 from uuid import uuid4
 
+from .exit_research import persist_observation
 from .core import Forecast, Market, Settings, evaluate
 from .ensemble import EnsembleCoordinator, dominant_direction
 from .history import persist_decision_sample, persist_market, persist_trade_outcome
@@ -47,6 +49,9 @@ class CachedForecaster:
 
 def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) -> None:
     """Serve Chronos plus learned regime/entry/news/meta roles."""
+    strategy_fingerprint = hashlib.sha256(b"".join(
+        path.read_bytes() for path in sorted(Path(__file__).parent.glob("*.py"))
+    )).hexdigest()
     guard = Lock()
     cached_model = CachedForecaster(model)
     history_db = os.getenv("RAMON_HISTORY_DB", "").strip()
@@ -85,6 +90,9 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     **ensemble.status(),
                     **news_provider.status(),
                     "news_feature_schema": 5,
+                    "strategy_code_fingerprint": strategy_fingerprint,
+                    "position_observation_mode": "sampled_quote_marks",
+                    "automatic_account_promotion": False,
                 },
             )
 
@@ -139,6 +147,14 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                                     flush=True,
                                 )
 
+                if history_db:
+                    try:
+                        persist_observation(history_db, payload, int(time.time()))
+                    except Exception as exc:
+                        print(f"Ramon observation warning: {type(exc).__name__}: {exc}", flush=True)
+                execution_profile = payload.get("execution_profile")
+                if not isinstance(execution_profile, dict) or len(json.dumps(execution_profile)) > 4096:
+                    execution_profile = None
                 news_snapshot = news_provider.snapshot()
                 with guard:
                     result = evaluate(market, cached_model, settings)
@@ -208,6 +224,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                             target_structure=target_payload,
                             model_metadata={
                                 "chronos_revision": getattr(model, "revision", None),
+                                "strategy_code_fingerprint": strategy_fingerprint,
+                                "execution_profile": execution_profile,
                                 "ensemble_mode": ensemble.status()["ensemble_mode"],
                                 "ensemble_active": response.get("ensemble_active", 0),
                                 "role_manifest": ensemble.manifest,
@@ -274,3 +292,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
