@@ -1,5 +1,5 @@
 #property strict
-#property version "1.528"
+#property version "1.529"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -498,7 +498,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.52.8\n"
+      +"EA version: 0.52.9\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -947,7 +947,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,596,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.52.8 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.52.9 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,clrWhite,9);
@@ -1775,13 +1775,20 @@ void AppendImprovementShadowCsv()
    FileClose(handle);
 }
 
+string CsvField(const string value)
+{
+   string escaped=value;
+   StringReplace(escaped,"\"","\"\"");
+   return "\""+escaped+"\"";
+}
+
 void AppendSignalCsv()
 {
    if(!WriteCsvLogs || StringLen(EffectiveSignalCsvFileName())==0)
       return;
    int handle=FileOpen(
       EffectiveSignalCsvFileName(),
-      FILE_READ|FILE_WRITE|FILE_CSV|FILE_ANSI|FILE_COMMON,
+      FILE_READ|FILE_WRITE|FILE_ANSI|FILE_COMMON,
       ','
    );
    if(handle==INVALID_HANDLE)
@@ -1789,76 +1796,109 @@ void AppendSignalCsv()
       Print("Ramon signal CSV open failed err=",GetLastError());
       return;
    }
+
    bool empty=(FileSize(handle)==0);
    FileSeek(handle,0,SEEK_END);
+
    if(empty)
    {
-      FileWrite(handle,
-         "captured","signal_bar_time","symbol","decision","reason",
-         "forecast_direction","edge_direction","intrabar_vote","trend_vote",
-         "attribution_agree","attribution_conflict",
-         "base_decision","base_reason","ensemble_ready","ensemble_active",
-         "regime_probability","entry_probability","meta_probability",
-         "risk_multiplier",
-         "signal_bid","signal_ask","spread_points",
-         "forecast_low","forecast_median","forecast_high","atr",
-         "buy_edge","sell_edge","minimum_edge","uncertainty",
-         "signal_strength","minimum_strength",
-         "intrabar_confirmed","intrabar_direction","intrabar_move_atr","intrabar_rebound_atr",
-         "intrabar_min_strength","intrabar_min_move_atr","intrabar_min_rebound_atr",
-         "ai_trend_confirmed","ai_trend_direction","ai_trend_score",
-         "ai_trend_move_atr","ai_trend_consistency",
-         "trend_min_path_atr","trend_min_consistency","trend_min_edge_fraction","trend_min_micro_move_atr",
-         "stop_distance","target_distance",
-         "live_armed","account_lock","account_type","account_currency",
-         "balance_units","balance_usd_approx",
-         "risk_usd","money_units_per_usd","risk_budget_units",
-         "allow_min_lot_override","max_executable_risk_usd","min_lot_override_used",
-         "sizing_side","planned_volume","estimated_sl_units","estimated_sl_usd",
-         "min_lot_sl_units","min_executable_risk_usd","min_lot_blocked");
+      string header=
+         "captured,signal_bar_time,symbol,decision,reason,"
+         "forecast_direction,edge_direction,intrabar_vote,trend_vote,"
+         "attribution_agree,attribution_conflict,"
+         "base_decision,base_reason,ensemble_ready,ensemble_active,"
+         "regime_probability,entry_probability,meta_probability,risk_multiplier,"
+         "signal_bid,signal_ask,spread_points,"
+         "forecast_low,forecast_median,forecast_high,atr,"
+         "buy_edge,sell_edge,minimum_edge,uncertainty,"
+         "signal_strength,minimum_strength,"
+         "intrabar_confirmed,intrabar_direction,intrabar_move_atr,intrabar_rebound_atr,"
+         "intrabar_min_strength,intrabar_min_move_atr,intrabar_min_rebound_atr,"
+         "ai_trend_confirmed,ai_trend_direction,ai_trend_score,"
+         "ai_trend_move_atr,ai_trend_consistency,"
+         "trend_min_path_atr,trend_min_consistency,trend_min_edge_fraction,trend_min_micro_move_atr,"
+         "stop_distance,target_distance,"
+         "live_armed,account_lock,account_type,account_currency,"
+         "balance_units,balance_usd_approx,"
+         "risk_usd,money_units_per_usd,risk_budget_units,"
+         "allow_min_lot_override,max_executable_risk_usd,min_lot_override_used,"
+         "sizing_side,planned_volume,estimated_sl_units,estimated_sl_usd,"
+         "min_lot_sl_units,min_executable_risk_usd,min_lot_blocked\r\n";
+      FileWriteString(handle,header);
    }
-   FileWrite(handle,
-      TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS),
-      TimeToString(LastSignalBarTime,TIME_DATE|TIME_MINUTES),
-      _Symbol,LastModelDecision,LastModelReason,
-      ForecastDirection(),EdgeDirection(),
-      ConfirmedDirection(LastIntrabarConfirmed,LastIntrabarDirection),
-      ConfirmedDirection(LastAiTrendConfirmed,LastAiTrendDirection),
-      IntegerToString(AttributionAgreementCount(LastModelDecision)),
-      IntegerToString(AttributionConflictCount(LastModelDecision)),
-      LastBaseDecision,LastBaseReason,BoolText(LastEnsembleReady),BoolText(LastEnsembleActive),
-      DoubleToString(LastRegimeProbability,6),DoubleToString(LastEntryProbability,6),
-      DoubleToString(LastMetaProbability,6),
-      DoubleToString(LastRiskMultiplier,6),
-      DoubleToString(LastSignalBid,_Digits),DoubleToString(LastSignalAsk,_Digits),
-      IntegerToString(LastModelSpreadPoints),
-      DoubleToString(LastForecastLow,_Digits),DoubleToString(LastForecast,_Digits),
-      DoubleToString(LastForecastHigh,_Digits),DoubleToString(LastAtr,4),
-      DoubleToString(LastBuyEdge,_Digits),DoubleToString(LastSellEdge,_Digits),
-      DoubleToString(LastMinimumEdge,_Digits),DoubleToString(LastUncertainty,_Digits),
-      DoubleToString(LastSignalStrength,6),DoubleToString(LastMinimumStrength,6),
-      BoolText(LastIntrabarConfirmed),LastIntrabarDirection,
-      DoubleToString(LastIntrabarMoveAtr,6),DoubleToString(LastIntrabarReboundAtr,6),
-      DoubleToString(LastIntrabarMinStrength,6),DoubleToString(LastIntrabarMinMoveAtr,6),
-      DoubleToString(LastIntrabarMinReboundAtr,6),
-      BoolText(LastAiTrendConfirmed),LastAiTrendDirection,DoubleToString(LastAiTrendScore,6),
-      DoubleToString(LastAiTrendMoveAtr,6),DoubleToString(LastAiTrendConsistency,6),
-      DoubleToString(LastTrendMinPathAtr,6),DoubleToString(LastTrendMinConsistency,6),
-      DoubleToString(LastTrendMinEdgeFraction,6),DoubleToString(LastTrendMinMicroMoveAtr,6),
-      DoubleToString(LastStopDistance,_Digits),DoubleToString(LastTargetDistance,_Digits),
-      BoolText(EnableLiveTrading),BoolText(AccountLockHealthy()),
-      AccountTypeText(),AccountInfoString(ACCOUNT_CURRENCY),
-      DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),2),
-      DoubleToString(AccountUnitsToUSD(AccountInfoDouble(ACCOUNT_BALANCE)),4),
-      DoubleToString(RiskPerTradeUSD,4),DoubleToString(MoneyUnitsPerUSD,4),
-      DoubleToString(LastRiskBudgetUnits,4),
-      BoolText(AllowMinLotRiskOverride),DoubleToString(MaxExecutableRiskUSD,4),
-      BoolText(LastMinLotOverrideUsed),LastSizingSide,
-      DoubleToString(LastPlannedVolume,4),DoubleToString(LastEstimatedStopLossUnits,4),
-      DoubleToString(AccountUnitsToUSD(LastEstimatedStopLossUnits),4),
-      DoubleToString(LastMinimumLotStopLossUnits,4),
-      DoubleToString(AccountUnitsToUSD(LastMinimumLotStopLossUnits),4),
-      BoolText(MinimumLotExceedsRiskBudget()));
+
+   string row="";
+   row+=CsvField(TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS))+",";
+   row+=CsvField(TimeToString(LastSignalBarTime,TIME_DATE|TIME_MINUTES))+",";
+   row+=CsvField(_Symbol)+",";
+   row+=CsvField(LastModelDecision)+",";
+   row+=CsvField(LastModelReason)+",";
+   row+=CsvField(ForecastDirection())+",";
+   row+=CsvField(EdgeDirection())+",";
+   row+=CsvField(ConfirmedDirection(LastIntrabarConfirmed,LastIntrabarDirection))+",";
+   row+=CsvField(ConfirmedDirection(LastAiTrendConfirmed,LastAiTrendDirection))+",";
+   row+=IntegerToString(AttributionAgreementCount(LastModelDecision))+",";
+   row+=IntegerToString(AttributionConflictCount(LastModelDecision))+",";
+   row+=CsvField(LastBaseDecision)+",";
+   row+=CsvField(LastBaseReason)+",";
+   row+=CsvField(BoolText(LastEnsembleReady))+",";
+   row+=CsvField(BoolText(LastEnsembleActive))+",";
+   row+=DoubleToString(LastRegimeProbability,6)+",";
+   row+=DoubleToString(LastEntryProbability,6)+",";
+   row+=DoubleToString(LastMetaProbability,6)+",";
+   row+=DoubleToString(LastRiskMultiplier,6)+",";
+   row+=DoubleToString(LastSignalBid,_Digits)+",";
+   row+=DoubleToString(LastSignalAsk,_Digits)+",";
+   row+=IntegerToString(LastModelSpreadPoints)+",";
+   row+=DoubleToString(LastForecastLow,_Digits)+",";
+   row+=DoubleToString(LastForecast,_Digits)+",";
+   row+=DoubleToString(LastForecastHigh,_Digits)+",";
+   row+=DoubleToString(LastAtr,4)+",";
+   row+=DoubleToString(LastBuyEdge,_Digits)+",";
+   row+=DoubleToString(LastSellEdge,_Digits)+",";
+   row+=DoubleToString(LastMinimumEdge,_Digits)+",";
+   row+=DoubleToString(LastUncertainty,_Digits)+",";
+   row+=DoubleToString(LastSignalStrength,6)+",";
+   row+=DoubleToString(LastMinimumStrength,6)+",";
+   row+=CsvField(BoolText(LastIntrabarConfirmed))+",";
+   row+=CsvField(LastIntrabarDirection)+",";
+   row+=DoubleToString(LastIntrabarMoveAtr,6)+",";
+   row+=DoubleToString(LastIntrabarReboundAtr,6)+",";
+   row+=DoubleToString(LastIntrabarMinStrength,6)+",";
+   row+=DoubleToString(LastIntrabarMinMoveAtr,6)+",";
+   row+=DoubleToString(LastIntrabarMinReboundAtr,6)+",";
+   row+=CsvField(BoolText(LastAiTrendConfirmed))+",";
+   row+=CsvField(LastAiTrendDirection)+",";
+   row+=DoubleToString(LastAiTrendScore,6)+",";
+   row+=DoubleToString(LastAiTrendMoveAtr,6)+",";
+   row+=DoubleToString(LastAiTrendConsistency,6)+",";
+   row+=DoubleToString(LastTrendMinPathAtr,6)+",";
+   row+=DoubleToString(LastTrendMinConsistency,6)+",";
+   row+=DoubleToString(LastTrendMinEdgeFraction,6)+",";
+   row+=DoubleToString(LastTrendMinMicroMoveAtr,6)+",";
+   row+=DoubleToString(LastStopDistance,_Digits)+",";
+   row+=DoubleToString(LastTargetDistance,_Digits)+",";
+   row+=CsvField(BoolText(EnableLiveTrading))+",";
+   row+=CsvField(BoolText(AccountLockHealthy()))+",";
+   row+=CsvField(AccountTypeText())+",";
+   row+=CsvField(AccountInfoString(ACCOUNT_CURRENCY))+",";
+   row+=DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),2)+",";
+   row+=DoubleToString(AccountUnitsToUSD(AccountInfoDouble(ACCOUNT_BALANCE)),4)+",";
+   row+=DoubleToString(RiskPerTradeUSD,4)+",";
+   row+=DoubleToString(MoneyUnitsPerUSD,4)+",";
+   row+=DoubleToString(LastRiskBudgetUnits,4)+",";
+   row+=CsvField(BoolText(AllowMinLotRiskOverride))+",";
+   row+=DoubleToString(MaxExecutableRiskUSD,4)+",";
+   row+=CsvField(BoolText(LastMinLotOverrideUsed))+",";
+   row+=CsvField(LastSizingSide)+",";
+   row+=DoubleToString(LastPlannedVolume,4)+",";
+   row+=DoubleToString(LastEstimatedStopLossUnits,4)+",";
+   row+=DoubleToString(AccountUnitsToUSD(LastEstimatedStopLossUnits),4)+",";
+   row+=DoubleToString(LastMinimumLotStopLossUnits,4)+",";
+   row+=DoubleToString(AccountUnitsToUSD(LastMinimumLotStopLossUnits),4)+",";
+   row+=CsvField(BoolText(MinimumLotExceedsRiskBudget()))+"\r\n";
+
+   FileWriteString(handle,row);
    FileFlush(handle);
    FileClose(handle);
 }
