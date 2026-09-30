@@ -1,5 +1,5 @@
 #property strict
-#property version "1.521"
+#property version "1.522"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -96,6 +96,8 @@ input string ShadowCsvFileName = "Ramon_Shadow_Improvements.csv";
 
 CTrade Trade;
 datetime LastDecisionRequestTime = 0;
+datetime LastForecastReceivedLocal = 0; // Display freshness only; never an execution gate.
+datetime LastForecastReceivedUTC = 0;
 datetime LastEntrySignalBar = 0;
 int LastSmallEntriesOnSignalBar = 0;
 string StatusLine = "Starting";
@@ -495,8 +497,8 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.52.1\n"
-      +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
+      +"EA version: 0.52.2\n"
+      +"EA role: "+(SmallOnlyMode ? "SMALL TP4c SL2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
       +"Symbol: "+_Symbol+"  Timeframe: M15\n"
@@ -773,7 +775,8 @@ void DrawDashboard()
    double dominant_edge=MathMax(LastBuyEdge,LastSellEdge);
    bool edge_pass=LastMinimumEdge>0.0 && dominant_edge>=LastMinimumEdge;
    bool strength_pass=LastMinimumStrength>0.0 && LastSignalStrength>=LastMinimumStrength;
-   string dominant=(LastBuyEdge>=LastSellEdge ? "BUY" : "SELL");
+   string dominant=(LastBuyEdge>LastSellEdge ? "BUY" :
+      (LastSellEdge>LastBuyEdge ? "SELL" : "NEUTRAL"));
    color state_color=(LastModelDecision=="BUY" ? clrLime :
       (LastModelDecision=="SELL" ? clrTomato : clrGold));
    string live_reason="";
@@ -801,7 +804,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.52.1 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.52.2 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
@@ -908,7 +911,60 @@ void DrawDashboard()
 
    UiButton("COPY","COPY DIAGNOSTIC",28,536,176,30);
    UiLabel("COPY_STATUS",LastCopyStatus,218,544,C'148,163,184',8);
+   DrawLiveModelPanel();
    ChartRedraw();
+}
+
+// Read-only model monitor. Forecast direction is median versus response Bid/Ask midpoint.
+// Model bias, forecast-path trend and the executable decision have different meanings.
+void DrawLiveModelPanel()
+{
+   bool available=LastForecastReceivedLocal>0 && LastForecast>0.0
+      && LastSignalBid>0.0 && LastSignalAsk>0.0;
+   long age=(LastForecastReceivedLocal>0
+      ? (long)MathMax(0,(long)(TimeLocal()-LastForecastReceivedLocal)) : 0);
+   bool fresh=available && age<=MathMax(60,2*SnapshotIntervalSeconds)
+      && (bool)TerminalInfoInteger(TERMINAL_CONNECTED);
+   string freshness=(!available ? "WAITING FOR MODEL" : (fresh ? "LIVE" : "STALE - LAST SNAPSHOT"));
+   color muted=C'148,163,184';
+   double reference=(LastSignalBid+LastSignalAsk)/2.0;
+   double delta=LastForecast-reference;
+   string direction=(!available ? "UNKNOWN" :
+      (delta>_Point/2.0 ? "UP / BUY BIAS" :
+      (delta<-_Point/2.0 ? "DOWN / SELL BIAS" : "FLAT / NEUTRAL")));
+   color forecast_color=(!fresh ? muted :
+      (delta>_Point/2.0 ? clrLime : (delta<-_Point/2.0 ? clrTomato : clrGold)));
+   color trend_color=(!fresh ? muted :
+      (LastAiTrendDirection=="BUY" ? clrLime :
+      (LastAiTrendDirection=="SELL" ? clrTomato : clrGold)));
+   int chart_width=(int)ChartGetInteger(0,CHART_WIDTH_IN_PIXELS);
+   bool stacked=chart_width<1020;
+   int x=(stacked ? 12 : 550), y=(stacked ? 606 : 24);
+   UiRect("MODEL_PANEL",x,y,450,224,C'15,23,42',C'71,85,105');
+   UiLabel("MODEL_TITLE","CHRONOS-2  |  "+freshness,x+16,y+12,
+      (fresh ? clrLime : clrOrange),11);
+   UiLabel("MODEL_DIRECTION","FORECAST: "+direction,x+16,y+40,forecast_color,12);
+   UiLabel("MODEL_DELTA",available
+      ? "Median "+DoubleToString(LastForecast,_Digits)
+         +"  |  delta "+(delta>=0.0 ? "+" : "")+DoubleToString(delta,_Digits)
+      : "Median / delta: waiting",x+16,y+65,muted,9);
+   UiLabel("MODEL_REFERENCE",available
+      ? "Reference: snapshot midpoint "+DoubleToString(reference,_Digits)
+      : "Reference: waiting",x+16,y+85,muted,9);
+   UiLabel("MODEL_TREND","FORECAST PATH TREND: "
+      +(available ? LastAiTrendDirection : "UNKNOWN")+"  "
+      +(available ? (LastAiTrendConfirmed ? "CONFIRMED" : "UNCONFIRMED") : ""),
+      x+16,y+110,trend_color,10);
+   UiLabel("MODEL_ACTION","TRADE SIGNAL: "+(available ? LastModelDecision : "NONE")
+      +"  |  "+(available ? LastModelReason : "waiting"),x+16,y+136,
+      (!fresh ? muted : (LastModelDecision=="BUY" ? clrLime :
+      (LastModelDecision=="SELL" ? clrTomato : clrGold))),9);
+   UiLabel("MODEL_UPDATED","Last valid: "+(available
+      ? TimeToString(LastForecastReceivedUTC,TIME_SECONDS)+" UTC  |  age "+IntegerToString(age)+"s"
+      : "NONE")+"  |  refresh "+IntegerToString(SnapshotIntervalSeconds)+"s",
+      x+16,y+163,muted,9);
+   UiLabel("MODEL_NOTE","Forecast bias is not an order; trend is forecast-derived.",
+      x+16,y+190,muted,8);
 }
 
 bool CopyDiagnosticToClipboard()
@@ -1871,7 +1927,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.52.1";
+      version="0.52.2";
    }
    if(close_detail!="") detail=close_detail;
 
@@ -3144,6 +3200,8 @@ void OnTimer()
    LastTargetTP2=target_tp2;
    LastTargetTP3=target_tp3;
    LastLegacyTargetPrice=legacy_target_price;
+   LastForecastReceivedLocal=TimeLocal();
+   LastForecastReceivedUTC=TimeGMT();
    StatusLine=reason;
    UpdateSizingPreview();
    UpdateImprovementShadows();
