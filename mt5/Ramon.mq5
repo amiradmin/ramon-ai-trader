@@ -1,5 +1,5 @@
 #property strict
-#property version "1.522"
+#property version "1.523"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -496,7 +496,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.52.2\n"
+      +"EA version: 0.52.3\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -574,7 +574,7 @@ string BuildDiagnosticText()
       +" / "+DoubleToString(LastTargetTP2,_Digits)
       +" / "+DoubleToString(LastTargetTP3,_Digits)
       +"  LegacyTP: "+DoubleToString(LastLegacyTargetPrice,_Digits)+"\n"
-      +"ExecutionTargetMode: LEGACY_TP_UNCHANGED\n\n"
+      +"ExecutionTargetMode: LEGACY_TP_UNCHANGED\n"\n      +"MainExitMode: TP1_TP2_TP3_ONLY (broker SL + manual close remain)\n\n"
       +"=== V0.50 IMPROVEMENT SHADOWS (OBSERVE ONLY) ===\n"
       +"ShadowPack: "+BoolText(EnableImprovementShadowPack)
       +"  Reason: "+ShadowReason+"\n"
@@ -802,7 +802,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.52.2 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.52.3 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
@@ -2906,11 +2906,21 @@ void ManageOpenPosition()
       ResetMarketClosedExitPause();
       return;
    }
+
+   // MAIN exit policy: TP1/TP2/TP3 stage management only.
+   // Broker SL and the dashboard CLOSE button remain independent safety/manual exits.
+   // SMALL keeps its dedicated risk, protection, adverse and time-exit behavior.
+   if(!SmallOnlyMode)
+   {
+      if(ManageTPStages(ticket))
+         return;
+      StatusLine="Managed MAIN OPEN | exit mode TP1/TP2/TP3 ONLY";
+      return;
+   }
+
    if(EnforceSmallPositionRiskCap(ticket))
       return;
    if(ManageTPStages(ticket))
-      return;
-   if(ManageMainFastProfit(ticket,opened))
       return;
    ObserveOpenPositionProfit(ticket);
    if(ManageEarlyAdverseExit(ticket,opened))
@@ -2935,9 +2945,13 @@ void ManageOpenPosition()
       HandleManagedExitFailure(ticket,"PROFIT PROTECTION EXIT");
       return;
    }
+
    int age=iBarShift(_Symbol,PERIOD_M15,opened,false);
-   int hold_bars=(IsSmallProfitPosition(ticket) ? SmallProfitMaximumHoldBars : MaximumHoldBars);
-   if(age<hold_bars) { StatusLine="Managed position OPEN"; return; }
+   if(age<SmallProfitMaximumHoldBars)
+   {
+      StatusLine="Managed SMALL position OPEN";
+      return;
+   }
    if(ManagedExitPausedForMarketClosed(ticket))
    {
       StatusLine="EXIT PAUSED: MARKET CLOSED";
@@ -2947,10 +2961,10 @@ void ManageOpenPosition()
    {
       ResetMarketClosedExitPause();
       RecordDealTelemetry(Trade.ResultDeal(),"maximum_hold_bars");
-      StatusLine="TIME EXIT "+IntegerToString(age)+" bars";
+      StatusLine="SMALL TIME EXIT "+IntegerToString(age)+" bars";
    }
    else
-      HandleManagedExitFailure(ticket,"TIME EXIT");
+      HandleManagedExitFailure(ticket,"SMALL TIME EXIT");
 }
 
 void OnTimer()
