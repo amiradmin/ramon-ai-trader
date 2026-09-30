@@ -1,5 +1,5 @@
 #property strict
-#property version "1.524"
+#property version "1.525"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -498,7 +498,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.52.4\n"
+      +"EA version: 0.52.5\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -773,46 +773,29 @@ void DrawTPStageLevel(
    const bool reached
 )
 {
-   string line=TpUiPrefix+name+"_LINE";
-   string label=TpUiPrefix+name+"_LABEL";
-
+   string line=TpUiPrefix+name;
    if(price<=0.0)
    {
       ObjectDelete(0,line);
-      ObjectDelete(0,label);
       return;
    }
 
    if(ObjectFind(0,line)<0)
-      ObjectCreate(0,line,OBJ_HLINE,0,0,price);
+   {
+      if(!ObjectCreate(0,line,OBJ_HLINE,0,0,price))
+         return;
+   }
+
    ObjectSetDouble(0,line,OBJPROP_PRICE,price);
    ObjectSetInteger(0,line,OBJPROP_COLOR,line_color);
    ObjectSetInteger(0,line,OBJPROP_STYLE,line_style);
    ObjectSetInteger(0,line,OBJPROP_WIDTH,line_width);
    ObjectSetInteger(0,line,OBJPROP_BACK,false);
    ObjectSetInteger(0,line,OBJPROP_SELECTABLE,false);
-   ObjectSetInteger(0,line,OBJPROP_HIDDEN,true);
+   ObjectSetInteger(0,line,OBJPROP_SELECTED,false);
+   ObjectSetInteger(0,line,OBJPROP_HIDDEN,false);
    ObjectSetString(0,line,OBJPROP_TOOLTIP,
       name+"  "+DoubleToString(price,_Digits)+(reached ? "  REACHED" : ""));
-
-   datetime label_time=iTime(_Symbol,PERIOD_M15,0);
-   if(label_time<=0)
-      label_time=TimeCurrent();
-   label_time+=(datetime)(2*PeriodSeconds(PERIOD_M15));
-
-   if(ObjectFind(0,label)<0)
-      ObjectCreate(0,label,OBJ_TEXT,0,label_time,price);
-   else
-      ObjectMove(0,label,0,label_time,price);
-   ObjectSetInteger(0,label,OBJPROP_COLOR,line_color);
-   ObjectSetInteger(0,label,OBJPROP_FONTSIZE,9);
-   ObjectSetInteger(0,label,OBJPROP_ANCHOR,ANCHOR_LEFT);
-   ObjectSetInteger(0,label,OBJPROP_BACK,false);
-   ObjectSetInteger(0,label,OBJPROP_SELECTABLE,false);
-   ObjectSetInteger(0,label,OBJPROP_HIDDEN,true);
-   ObjectSetString(0,label,OBJPROP_FONT,"Arial");
-   ObjectSetString(0,label,OBJPROP_TEXT,
-      name+"  "+DoubleToString(price,_Digits)+(reached ? "  ✓" : ""));
 }
 
 void UpdateTPStageObjects()
@@ -831,9 +814,9 @@ void UpdateTPStageObjects()
       return;
    }
 
-   color tp1_color=(TPStage>=1 ? clrLime : C'96,165,250');
-   color tp2_color=(TPStage>=2 ? clrLime : C'250,204,21');
-   color tp3_color=(TPStage>=3 ? clrLime : C'244,114,182');
+   color tp1_color=(TPStage>=1 ? clrLime : clrDodgerBlue);
+   color tp2_color=(TPStage>=2 ? clrLime : clrGold);
+   color tp3_color=(TPStage>=3 ? clrLime : clrMagenta);
 
    DrawTPStageLevel("TP1",TPStageTP1,tp1_color,STYLE_DASH,1,TPStage>=1);
    DrawTPStageLevel("TP2",TPStageTP2,tp2_color,STYLE_DASH,1,TPStage>=2);
@@ -885,7 +868,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.52.4 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.52.5 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
