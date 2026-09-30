@@ -105,6 +105,7 @@ def compare(db: str | Path, chronos, *, symbol: str = "XAUUSD_l",
     settings = Settings()
     kwargs = dict(point=point, settings=settings, start=start, stride=stride,
                   require_recorded_spreads=True, roundtrip_cost_r=cost_r or 0.0)
+    kwargs["symbol"] = symbol
     baseline_result = replay(bars, spreads, MomentumBaseline(), **kwargs)
     chronos_result = replay(bars, spreads, chronos, **kwargs)
     results = {"momentum_baseline": asdict(baseline_result), "chronos": asdict(chronos_result)}

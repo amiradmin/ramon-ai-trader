@@ -72,7 +72,8 @@ def load_trade_examples(db: str | Path, symbol: str, chronos_model: str) -> list
         return read_trade_examples(conn, symbol, chronos_model)
 
 
-def read_trade_examples(conn: sqlite3.Connection, symbol: str, chronos_model: str) -> list[Example]:
+def read_trade_examples(conn: sqlite3.Connection, symbol: str, chronos_model: str,
+                        *, exclude_manual_expert: bool = False) -> list[Example]:
     """Shared trainer/audit selection; caller owns the transaction, no migrations."""
     rows = conn.execute("""
             SELECT s.quote_time,t.closed,s.regime_features,s.entry_features,
@@ -83,8 +84,9 @@ def read_trade_examples(conn: sqlite3.Connection, symbol: str, chronos_model: st
               AND s.final_decision=t.direction AND t.training_status='LEARNABLE'
               AND t.opened>=s.quote_time
               AND t.opened<=s.quote_time+90 AND t.closed>=t.opened
+              AND (?=0 OR COALESCE(t.exit_detail,'') NOT IN ('manual_close','manual_dashboard_close'))
             ORDER BY s.quote_time,s.sample_key
-        """, (symbol, chronos_model)).fetchall()
+        """, (symbol, chronos_model, int(exclude_manual_expert))).fetchall()
     return [Example(int(t), int(end), {"regime": json.loads(r), "entry": json.loads(e),
                                      "news": json.loads(n), "meta_base": json.loads(m)}, int(float(pnl) > 0),
                     float(pnl), base in {"BUY", "SELL"}, direction, exit_reason)

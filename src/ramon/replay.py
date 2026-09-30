@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import asdict, dataclass
-from typing import Sequence
+from typing import Callable, Sequence
 
 from .core import Bar, Forecaster, Market, Settings, evaluate
 from .history import load_bars
@@ -35,6 +35,8 @@ def replay(
     fallback_spread_points: int = 42,
     require_recorded_spreads: bool = False,
     roundtrip_cost_r: float = 0.0,
+    model_for_market: Callable[[Market], Forecaster] | None = None,
+    symbol: str = "XAUUSD_l",
 ) -> ReplayResult:
     """One-position historical replay with next-bar entry and conservative fills."""
     if (len(bars) != len(spreads) or stride < 1 or point <= 0
@@ -54,14 +56,14 @@ def replay(
             continue
         spread = (spreads[i] if spreads[i] > 0 else fallback_spread_points) * point
         market = Market(
-            symbol="XAUUSD_l",
+            symbol=symbol,
             timeframe="M15",
             bid=bars[i].close,
             ask=bars[i].close + spread,
             point=point,
             bars=tuple(bars[max(0, i - 255) : i + 1]),
         )
-        result = evaluate(market, model, settings)
+        result = evaluate(market, model_for_market(market) if model_for_market else model, settings)
         decisions += 1
         if result.decision == "WAIT":
             i += 1
