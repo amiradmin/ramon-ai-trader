@@ -1,5 +1,5 @@
 #property strict
-#property version "1.525"
+#property version "1.526"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -498,7 +498,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.52.5\n"
+      +"EA version: 0.52.6\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -576,7 +576,7 @@ string BuildDiagnosticText()
       +" / "+DoubleToString(LastTargetTP2,_Digits)
       +" / "+DoubleToString(LastTargetTP3,_Digits)
       +"  LegacyTP: "+DoubleToString(LastLegacyTargetPrice,_Digits)+"\n"
-      +"ExecutionTargetMode: MAIN_TP3_BROKER_FAILSAFE_WHEN_VALID\n"\n      +"MainExitMode: TP1_TP2_TP3_ONLY (broker SL + manual close remain)\n\n"
+      +"ExecutionTargetMode: MAIN_TP3_BROKER_FAILSAFE_WHEN_VALID\n"      +"MainExitMode: TP1_TP2_TP3_ONLY (broker SL + manual close remain)\n\n"
       +"=== V0.50 IMPROVEMENT SHADOWS (OBSERVE ONLY) ===\n"
       +"ShadowPack: "+BoolText(EnableImprovementShadowPack)
       +"  Reason: "+ShadowReason+"\n"
@@ -868,7 +868,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.52.5 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.52.6 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
