@@ -199,6 +199,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 sample_key = uuid4().hex[:16]
                 response["sample_key"] = sample_key
                 response["sample_saved"] = 0
+                response["sample_save_status"] = "history_disabled"
 
                 if history_db:
                     try:
@@ -239,7 +240,9 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                             },
                         )
                         response["sample_saved"] = int(saved)
+                        response["sample_save_status"] = "saved" if saved else "duplicate_or_ignored"
                     except Exception as exc:
+                        response["sample_save_status"] = "storage_error:" + type(exc).__name__
                         print(
                             f"Ramon decision-sample persistence warning: {type(exc).__name__}: {exc}",
                             flush=True,

@@ -136,3 +136,22 @@ def test_decision_metadata_and_enriched_outcome_round_trip(learning_server):
         assert audit['final']['decision'] == payload['direction']
         assert con.execute('SELECT COUNT(*),fee_units,exit_detail FROM trade_outcomes').fetchone() == (1, -.1, 'maximum_hold_bars')
     assert len(load_trade_examples(db, 'XAUUSD_l', 'test/fake')) == 1
+
+
+def test_parallel_roles_in_same_second_keep_distinct_keys(learning_server, monkeypatch):
+    import ramon.server as service
+    db, post = learning_server
+    monkeypatch.setattr(service.time, 'time', lambda: 1900000000.)
+    payload = {'symbol': 'XAUUSD_l', 'timeframe': 'M15', 'bid': 100., 'ask': 100.4,
+               'point': .01, 'bars': [asdict(bar) for bar in bars()]}
+    decisions = []
+    for role in ('MAIN', 'SMALL'):
+        payload['execution_profile'] = {'role': role, 'ea_version': '0.63'}
+        decisions.append(post('/decision', payload))
+    assert all(d['sample_saved'] == 1 and d['sample_save_status'] == 'saved' for d in decisions)
+    assert decisions[0]['sample_key'] != decisions[1]['sample_key']
+    with sqlite3.connect(db) as conn:
+        rows = conn.execute('SELECT captured,sample_key,model_metadata FROM decision_samples ORDER BY id').fetchall()
+        assert len(rows) == 2
+        assert all(row[0] == 1900000000 for row in rows)
+        assert [json.loads(row[2])['execution_profile']['role'] for row in rows] == ['MAIN', 'SMALL']

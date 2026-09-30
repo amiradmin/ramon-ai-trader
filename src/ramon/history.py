@@ -75,8 +75,7 @@ CREATE TABLE IF NOT EXISTS decision_samples (
     base_decision TEXT NOT NULL,
     regime_features TEXT NOT NULL,
     entry_features TEXT NOT NULL,
-    meta_base_features TEXT NOT NULL,
-    UNIQUE(captured, symbol)
+    meta_base_features TEXT NOT NULL
 )
 """
 
@@ -86,6 +85,7 @@ def ensure_history_db(db: str | Path) -> Path:
     path = Path(db).expanduser().resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(path) as conn:
+        conn.execute("BEGIN IMMEDIATE")
         conn.execute(HISTORY_SCHEMA)
         conn.execute(DECISION_SAMPLE_SCHEMA)
         columns = {row[1] for row in conn.execute("PRAGMA table_info(decision_samples)")}
@@ -97,7 +97,28 @@ def ensure_history_db(db: str | Path) -> Path:
         }.items():
             if name not in columns:
                 conn.execute(f"ALTER TABLE decision_samples ADD COLUMN {name} {definition}")
+        # v0.63: distinct MAIN/SMALL requests can share a capture second.
+        # Preserve the full legacy schema/data and recreate custom indexes/triggers
+        # atomically, removing only the obsolete capture-second constraint.
+        schema = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='decision_samples'").fetchone()[0]
+        migrated_schema = re.sub(r",\s*UNIQUE\s*\(\s*captured\s*,\s*symbol\s*\)", "", schema, flags=re.I)
+        if migrated_schema != schema:
+            integrity = conn.execute("PRAGMA quick_check").fetchall()
+            if integrity != [("ok",)]:
+                raise sqlite3.DatabaseError("history integrity check failed before sample migration")
+            sequence = conn.execute("SELECT seq FROM sqlite_sequence WHERE name='decision_samples'").fetchone()
+            objects = conn.execute("SELECT sql FROM sqlite_master WHERE tbl_name='decision_samples' AND type IN ('index','trigger') AND sql IS NOT NULL").fetchall()
+            conn.execute(migrated_schema.replace("decision_samples", "decision_samples_v063", 1))
+            conn.execute("INSERT INTO decision_samples_v063 SELECT * FROM decision_samples")
+            conn.execute("DROP TABLE decision_samples")
+            conn.execute("ALTER TABLE decision_samples_v063 RENAME TO decision_samples")
+            if sequence is not None:
+                conn.execute("UPDATE sqlite_sequence SET seq=MAX(seq,?) WHERE name='decision_samples'", sequence)
+            for (statement,) in objects:
+                conn.execute(statement)
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_sample_key ON decision_samples(sample_key)")
+        # Retain legacy no-key deduplication without dropping keyed live samples.
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_legacy_capture ON decision_samples(captured,symbol) WHERE sample_key IS NULL")
         conn.execute("""CREATE TABLE IF NOT EXISTS trade_outcomes (
             trade_key TEXT PRIMARY KEY, sample_key TEXT NOT NULL UNIQUE, symbol TEXT NOT NULL,
             direction TEXT NOT NULL, opened INTEGER NOT NULL, closed INTEGER NOT NULL,
