@@ -1,5 +1,5 @@
 #property strict
-#property version "1.523"
+#property version "1.524"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -87,6 +87,7 @@ input ulong MagicNumber = 26092212;
 input bool WriteDiagnosticFile = true;
 input string DiagnosticFileName = "Ramon_Diagnostic.txt";
 input bool ShowDashboard = true;
+input bool ShowTPLevelsOnChart = true; // Draw active MAIN TP1/TP2/TP3 levels and stage state on the chart.
 input bool EnableClipboardButton = true;
 input bool WriteCsvLogs = true;
 input string SignalCsvFileName = "Ramon_Signals.csv";
@@ -190,6 +191,7 @@ string LockedAccountServer = "";
 string LastCopyStatus = "Ready";
 string LastCloseStatus = "Ready";
 const string UiPrefix = "RAMON_UI_";
+const string TpUiPrefix = "RAMON_TP_";
 ulong ProfitProtectionTicket = 0;
 double ProfitProtectionPeakUnits = 0.0;
 double ProfitProtectionCurrentUnits = 0.0;
@@ -496,7 +498,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.52.3\n"
+      +"EA version: 0.52.4\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -574,7 +576,7 @@ string BuildDiagnosticText()
       +" / "+DoubleToString(LastTargetTP2,_Digits)
       +" / "+DoubleToString(LastTargetTP3,_Digits)
       +"  LegacyTP: "+DoubleToString(LastLegacyTargetPrice,_Digits)+"\n"
-      +"ExecutionTargetMode: LEGACY_TP_UNCHANGED\n"\n      +"MainExitMode: TP1_TP2_TP3_ONLY (broker SL + manual close remain)\n\n"
+      +"ExecutionTargetMode: MAIN_TP3_BROKER_FAILSAFE_WHEN_VALID\n"\n      +"MainExitMode: TP1_TP2_TP3_ONLY (broker SL + manual close remain)\n\n"
       +"=== V0.50 IMPROVEMENT SHADOWS (OBSERVE ONLY) ===\n"
       +"ShadowPack: "+BoolText(EnableImprovementShadowPack)
       +"  Reason: "+ShadowReason+"\n"
@@ -757,6 +759,87 @@ string PassFail(const bool value)
    return (value ? "PASS" : "FAIL");
 }
 
+void DeleteTPStageObjects()
+{
+   ObjectsDeleteAll(0,TpUiPrefix);
+}
+
+void DrawTPStageLevel(
+   const string name,
+   const double price,
+   const color line_color,
+   const ENUM_LINE_STYLE line_style,
+   const int line_width,
+   const bool reached
+)
+{
+   string line=TpUiPrefix+name+"_LINE";
+   string label=TpUiPrefix+name+"_LABEL";
+
+   if(price<=0.0)
+   {
+      ObjectDelete(0,line);
+      ObjectDelete(0,label);
+      return;
+   }
+
+   if(ObjectFind(0,line)<0)
+      ObjectCreate(0,line,OBJ_HLINE,0,0,price);
+   ObjectSetDouble(0,line,OBJPROP_PRICE,price);
+   ObjectSetInteger(0,line,OBJPROP_COLOR,line_color);
+   ObjectSetInteger(0,line,OBJPROP_STYLE,line_style);
+   ObjectSetInteger(0,line,OBJPROP_WIDTH,line_width);
+   ObjectSetInteger(0,line,OBJPROP_BACK,false);
+   ObjectSetInteger(0,line,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,line,OBJPROP_HIDDEN,true);
+   ObjectSetString(0,line,OBJPROP_TOOLTIP,
+      name+"  "+DoubleToString(price,_Digits)+(reached ? "  REACHED" : ""));
+
+   datetime label_time=iTime(_Symbol,PERIOD_M15,0);
+   if(label_time<=0)
+      label_time=TimeCurrent();
+   label_time+=(datetime)(2*PeriodSeconds(PERIOD_M15));
+
+   if(ObjectFind(0,label)<0)
+      ObjectCreate(0,label,OBJ_TEXT,0,label_time,price);
+   else
+      ObjectMove(0,label,0,label_time,price);
+   ObjectSetInteger(0,label,OBJPROP_COLOR,line_color);
+   ObjectSetInteger(0,label,OBJPROP_FONTSIZE,9);
+   ObjectSetInteger(0,label,OBJPROP_ANCHOR,ANCHOR_LEFT);
+   ObjectSetInteger(0,label,OBJPROP_BACK,false);
+   ObjectSetInteger(0,label,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,label,OBJPROP_HIDDEN,true);
+   ObjectSetString(0,label,OBJPROP_FONT,"Arial");
+   ObjectSetString(0,label,OBJPROP_TEXT,
+      name+"  "+DoubleToString(price,_Digits)+(reached ? "  ✓" : ""));
+}
+
+void UpdateTPStageObjects()
+{
+   if(!ShowTPLevelsOnChart || SmallOnlyMode)
+   {
+      DeleteTPStageObjects();
+      return;
+   }
+
+   ulong ticket=0;
+   datetime opened=0;
+   if(!ManagedPosition(ticket,opened) || !LoadTPStagePlan(ticket))
+   {
+      DeleteTPStageObjects();
+      return;
+   }
+
+   color tp1_color=(TPStage>=1 ? clrLime : C'96,165,250');
+   color tp2_color=(TPStage>=2 ? clrLime : C'250,204,21');
+   color tp3_color=(TPStage>=3 ? clrLime : C'244,114,182');
+
+   DrawTPStageLevel("TP1",TPStageTP1,tp1_color,STYLE_DASH,1,TPStage>=1);
+   DrawTPStageLevel("TP2",TPStageTP2,tp2_color,STYLE_DASH,1,TPStage>=2);
+   DrawTPStageLevel("TP3",TPStageTP3,tp3_color,STYLE_SOLID,2,TPStage>=3);
+}
+
 void DrawDashboard()
 {
    if(!ShowDashboard)
@@ -802,7 +885,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.52.3 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.52.4 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
@@ -981,6 +1064,7 @@ bool CopyDiagnosticToClipboard()
 void ShowStatus()
 {
    WriteDiagnostic();
+   UpdateTPStageObjects();
    DrawDashboard();
 }
 bool JsonText(const string json,const string key,string &value)
@@ -3245,6 +3329,21 @@ void OnTimer()
    target_distance=MathMax(target_distance,min_stop+2*point);
    double stop=NormalizeDouble(entry+(decision=="BUY" ? -stop_distance : stop_distance),_Digits);
    double target=NormalizeDouble(entry+(decision=="BUY" ? target_distance : -target_distance),_Digits);
+
+   // MAIN three-stage plan: use TP3 as the broker-side fail-safe target whenever
+   // the model supplied a valid directional TP1/TP2/TP3 structure.
+   bool main_tp_plan_valid=(
+      !small_profit
+      && EnableTPStageManagement
+      && ValidDirectionalTargets(decision,entry,LastTargetTP1,LastTargetTP2,LastTargetTP3)
+   );
+   if(main_tp_plan_valid)
+   {
+      double broker_tp3=NormalizeDouble(LastTargetTP3,_Digits);
+      if(MathAbs(broker_tp3-entry)>=min_stop+2*point)
+         target=broker_tp3;
+   }
+
    double volume=(small_profit ? SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN)
       : SelectVolume(side,entry,stop));
    if(volume<=0.0)
@@ -3464,6 +3563,7 @@ int OnInit()
    if(SmallOnlyMode)
       LastDecisionRequestTime=TimeCurrent()-SnapshotIntervalSeconds+15;
    ObjectsDeleteAll(0,UiPrefix);
+   ObjectsDeleteAll(0,TpUiPrefix);
    ShowStatus();
    return INIT_SUCCEEDED;
 }
@@ -3472,5 +3572,6 @@ void OnDeinit(const int reason)
 {
    EventKillTimer();
    ObjectsDeleteAll(0,UiPrefix);
+   ObjectsDeleteAll(0,TpUiPrefix);
    Comment("");
 }
