@@ -1,5 +1,5 @@
 #property strict
-#property version "1.532"
+#property version "1.533"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -498,7 +498,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.53.2\n"
+      +"EA version: 0.53.3\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -969,9 +969,9 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    // Tall/narrow panel: summary text first, checklist directly underneath.
-   UiRect("PANEL",12,24,560,930,C'15,23,42',C'71,85,105');
+   UiRect("PANEL",12,24,560,955,C'15,23,42',C'71,85,105');
 
-   UiLabel("TITLE","RAMON AI TRADER  v0.53.2 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.53.3 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,clrWhite,9);
@@ -1053,7 +1053,7 @@ void DrawDashboard()
       28,378,(live_ready || !EnableLiveTrading ? clrWhite : clrTomato),9);
 
    // ---------------------- checklist ----------------------
-   int tx=24, ty=410, tw=520, th=342, row_h=28;
+   int tx=24, ty=410, tw=520, th=366, row_h=28;
    UiRect("CHECK_TABLE_BG",tx,ty,tw,th,C'17,27,46',C'71,85,105');
    UiRect("CHECK_TABLE_HEAD",tx+4,ty+4,tw-8,28,C'30,41,59',C'71,85,105');
 
@@ -1132,19 +1132,19 @@ void DrawDashboard()
    }
 
    UiLabel("CHECK_NOTE","DISPLAY ONLY - execution logic unchanged.",
-      tx+12,ty+322,clrWhite,8);
+      tx+12,ty+346,clrWhite,8);
 
-   UiButton("COPY","COPY DIAGNOSTIC",28,778,176,30);
-   UiButton("CLOSE","CLOSE TRADE",218,778,110,30);
+   UiButton("COPY","COPY DIAGNOSTIC",28,812,176,30);
+   UiButton("CLOSE","CLOSE TRADE",218,812,110,30);
    ObjectSetInteger(0,UiPrefix+"CLOSE",OBJPROP_BGCOLOR,
       has_managed_position ? C'153,27,27' : C'55,65,81');
    ObjectSetInteger(0,UiPrefix+"CLOSE",OBJPROP_BORDER_COLOR,
       has_managed_position ? C'248,113,113' : C'75,85,99');
 
-   UiLabel("COPY_STATUS",LastCopyStatus,340,778,
+   UiLabel("COPY_STATUS",LastCopyStatus,340,812,
       (StringFind(LastCopyStatus,"failed")>=0 || StringFind(LastCopyStatus,"disabled")>=0
          ? clrTomato : clrWhite),8);
-   UiLabel("CLOSE_STATUS",LastCloseStatus,340,794,
+   UiLabel("CLOSE_STATUS",LastCloseStatus,340,828,
       (StringFind(LastCloseStatus,"FAILED")>=0 ? clrTomato : clrWhite),8);
 
    ChartRedraw();
