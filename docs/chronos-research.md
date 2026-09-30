@@ -119,3 +119,79 @@ Tests use deterministic forecast fixtures to verify the official API contract,
 causal input construction, database preservation, spread requirements, temporal
 purging and isolation of test labels. Real checkpoint inference and profitability
 on the user's database must be measured by running the commands above.
+
+## Prospective paired comparison
+
+The historical replay can place trades at different times for each model.
+To test whether Chronos improves forecasts at identical opportunities, run a
+separate forward worker while the existing MT5 EA and model service are running:
+
+```bash
+git pull --ff-only origin research/chronos-covariates-entry-validation
+bash scripts/forward_research.sh watch
+```
+
+Leave this terminal running. Ctrl+C stops the research worker. There is no cron,
+automatic restart, EA recompilation, image rebuild or live-service restart.
+The wrapper reads the current source and limits the independent tools container
+to half of one CPU and one BLAS thread on the HP Mini. It shares the host's CPU
+and memory with live inference; the limit reduces CPU contention but cannot
+remove it. Actual real-checkpoint runtime must be checked on the user's machine.
+
+The worker loads one checkpoint, then freezes its resolved revision, settings,
+implementation hash and UTC start boundary in `data/research/forward-v1.sqlite3`.
+All three models forecast the same frozen 256 completed candles, once per newest
+M15 candle, for four future closes. There is no fitting, historical prediction
+backfill, order placement, model promotion or write to the source history DB.
+Resuming the same ledger retains the start boundary. Changed weights, settings
+or source implementation require a new ledger filename rather than mixing runs.
+
+Input freshness is checked against the latest live `decision_samples` row and
+its quote, both within 120 seconds. The quote must have arrived after the run
+boundary. Broker timestamps are converted using agreeing recorded deal offsets
+in the prior 24 hours; an offset is never guessed from the machine clock.
+When evidence is missing, conflicting or stale, the log reports a waiting status.
+This may pause collection when there have been no recent trades. The stored
+completed history must end at the live sample's signal candle. Both machines'
+clocks must be synchronized. Forecasts must all finish at least 30 seconds before
+the first target candle closes; slow forecasts save no partial comparison.
+
+Each pair preserves its entire OHLC context, quote/spread provenance, context
+hash, checkpoint revision in the manifest and all forecasts. Future bars are
+read only for evaluation after all four target candles have closed. Missing
+target timestamps (including weekend/session gaps) exclude the entire pair from
+every model rather than compressing time. Outcomes are frozen at first maturity;
+later history revisions cannot overwrite saved labels. Historical spread gaps
+do not prevent price forecast scoring: this is not a trade replay, and no future
+spread or fee is imputed.
+
+`data/research/forward-v1.json` updates with recorded, pending, mature and excluded
+pair counts; path and endpoint MAE; ATR-normalized path error; endpoint quantile
+pinball loss and 80% interval coverage; direction accuracy; and a descriptive
+direction subset where predicted movement exceeds the observed quote spread.
+Direction compares the endpoint to the last completed close, with flat targets
+excluded and denominator counts shown. The subset does not measure net returns.
+A no-change forecast supplies an additional error reference: relative MAE below
+1 beats that reference on this sample. All models are scored on identical mature
+pairs. No winner, confidence interval, profitability or promotion is asserted.
+Four-bar horizons overlap, so sample counts are not independent trade counts.
+
+To refresh the report without loading model weights:
+
+```bash
+bash scripts/forward_research.sh evaluate
+```
+
+To start a distinct experiment after a checkpoint/code change:
+
+```bash
+bash scripts/forward_research.sh watch \
+  --ledger /data/research/forward-v2.sqlite3 \
+  --out /data/research/forward-v2.json
+```
+
+The `record` action attempts one fresh pair and reports its status; `watch` is
+the normal way to collect new samples. The worker writes only its separate ledger
+and report. Forecast errors and direction accuracy must be followed by a separate
+execution-policy validation with realistic costs and the real EA exits before
+they can support a trading change.
