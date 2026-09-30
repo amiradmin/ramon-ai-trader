@@ -85,6 +85,14 @@ SIGNAL_COLUMNS_030 = (
 )
 
 
+SIGNAL_COLUMNS_053 = (
+    *SIGNAL_COLUMNS_030[:5],
+    "forecast_direction", "edge_direction", "intrabar_vote", "trend_vote",
+    "attribution_agree", "attribution_conflict", "attribution_buy_votes", "attribution_sell_votes",
+    *SIGNAL_COLUMNS_030[5:],
+)
+
+
 def _valid_signal_layout(row: dict[str, str], columns: tuple[str, ...]) -> bool:
     """Check a source-defined layout before exposing reconstructed numeric fields."""
     flags = {"ensemble_ready", "ensemble_active", "intrabar_confirmed", "ai_trend_confirmed",
@@ -94,7 +102,8 @@ def _valid_signal_layout(row: dict[str, str], columns: tuple[str, ...]) -> bool:
         flags.add("risk_model_ready")
     text_fields = {"captured", "signal_bar_time", "symbol", "decision", "reason", "base_decision",
                    "base_reason", "intrabar_direction", "ai_trend_direction", "account_type",
-                   "account_currency", "sizing_side"}
+                   "account_currency", "sizing_side", "forecast_direction", "edge_direction",
+                   "intrabar_vote", "trend_vote"}
     if any(row[key] not in {"YES", "NO"} for key in flags):
         return False
     if any(row[key] not in {"BUY", "SELL", "WAIT"} for key in ("decision", "base_decision")):
@@ -139,6 +148,8 @@ def decode_signal_row(header: list[str], raw: list[str]) -> tuple[dict, dict]:
             valid = valid_signal_028(row)
         elif tuple(header) == SIGNAL_COLUMNS_030:
             valid = valid_signal_030(row)
+        elif tuple(header) == SIGNAL_COLUMNS_053:
+            valid = _valid_signal_layout(row, SIGNAL_COLUMNS_053)
         else:
             valid = True
         if valid:
@@ -148,6 +159,7 @@ def decode_signal_row(header: list[str], raw: list[str]) -> tuple[dict, dict]:
     known_layouts = (
         (SIGNAL_COLUMNS_028, valid_signal_028, "EA 0.28/0.29 layout"),
         (SIGNAL_COLUMNS_030, valid_signal_030, "EA 0.30 risk-multiplier layout"),
+        (SIGNAL_COLUMNS_053, lambda row: _valid_signal_layout(row, SIGNAL_COLUMNS_053), "EA 0.53 attribution layout"),
     )
     for columns, validator, label in known_layouts:
         if stable and len(raw) == len(columns):
