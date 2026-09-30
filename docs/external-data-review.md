@@ -108,6 +108,47 @@ or horizons. It is a discovery filter, not a validation result.
 
 ## Application to Ramon
 
+### Follow-up: code audit of the supplied Jonus repositories
+
+https://github.com/JonusNattapong/Ai-XAUUSD-Trading was inspected at commit
+`f25a703b2009157ed908636f91cb5265836bf71e`. `data_fetch.py` downloads daily
+`GC=F` gold futures, rather than Ramon's broker XAUUSD M15. In `trading_env.py`,
+`_calculate_indicators` contains a self-call; regime initialization also reads
+`current_step` before reset initializes it. Several full-exit paths zero position
+and entry state before `step` computes exit profit, while partial exits alter
+size before profit accounting and are followed by the unconditional full reset.
+These source-level findings prevent treating the simulator as a validated
+execution benchmark. Third-party trading code and weights were not executed.
+
+The actual published artifact
+https://huggingface.co/JonusNattapong/AI-XAUUSD-Trading/raw/main/data/ensemble_backtest_metrics.json
+reports 183 trades, net P/L −13,074.99, profit factor 0.8557 and negative final
+capital. These are one artifact's reported results, not a reproduction, and
+differ from the card's performance highlights. Negative equity also requires
+investigation of margin/liquidation modeling.
+
+https://huggingface.co/JonusNattapong/xauusd-trading-ai explicitly describes
+synthetic daily training data and a reported −62.26% return for its three-month
+variant. It is not a ready M15 replacement.
+
+https://huggingface.co/JonusNattapong/xauusd-scalping-models supplies model files,
+but its card uses H1/MA(5,20), a placeholder GitHub installation URL, and an
+unreproduced high-return claim. Short targets of 10 points cannot be copied
+without comparing the broker's actual point size and spread. Prefer the simple
+MA baseline as a hypothesis, not its weight files or claimed return.
+
+https://github.com/JonusNattapong/Reinforcement-Learning-for-Gold-Trading was
+inspected at commit `f6b47b3b5f68c0a73a10352fe2814bcfa90419bc`. Its readable M15
+pipeline separates years, freezes training normalizer statistics for evaluation,
+uses causal OHLC features, charges a fixed per-ounce transaction cost, and
+penalizes drawdown/overtrading. These are useful research design examples.
+Its environment trades at observed closes and resets equity each day, without
+Ramon's recorded spreads, min-lot cent sizing, tick stops or actual EA exits.
+Its reported `win_rate` measures profitable days, not winning trades, and the
+drawdown summary uses daily endpoints. Use the concepts, not its default sizing,
+profit targets or reported metric names as trading evidence. No explicit license
+file was found in the inspected tree.
+
 First use the inspected XAUUSD M15 file as a separate historical price benchmark,
 after verifying clock and point metadata. It adds older market regimes and
 tick-volume inputs, not Ramon's executed outcomes. Retain current broker data
