@@ -1,5 +1,5 @@
 #property strict
-#property version "1.520"
+#property version "1.521"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -25,7 +25,7 @@ input string RequiredServerText = "LiteFinance";
 input bool AutoLockCurrentAccount = true; // Bind this EA session to the account active at OnInit.
 input long AllowedAccountLogin = 0; // Used only when AutoLockCurrentAccount=false.
 input bool EnableLiveTrading = false;
-input bool SmallOnlyMode = false; // Attach second EA instance on another M15 chart for parallel 2-cent trades.
+input bool SmallOnlyMode = false; // Attach second EA instance on another M15 chart for parallel SMALL trades.
 const ulong PrimaryMagicNumber = 26092212;
 const ulong SmallProfitMagicNumber = 26092213;
 input string ModelUrl = "http://127.0.0.1:8012/decision";
@@ -44,16 +44,16 @@ const int MainFastProfitMinAgeBars = 2; // Evaluate only after at least 2 M15 ba
 const double MainFastProfitMinProfitUnits = 0.20; // Never close a losing MAIN trade through this feature.
 const double MainFastProfitMinProgressToTP1 = 0.35; // Below 35% of entry->TP1 after 2 bars is considered slow.
 const int MainFastProfitWeakSnapshotsRequired = 2; // Require repeated weak 30s snapshots.
-input bool EnableSmallProfitTrades = true; // Optional live 2-cent entries when main model says WAIT.
-const double SmallProfitTargetUnits = 2.0; // CENT account units = USD 0.02 when MoneyUnitsPerUSD=100.
+input bool EnableSmallProfitTrades = true; // Optional live SMALL entries when main model says WAIT.
+const double SmallProfitTargetUnits = 4.0; // CENT account units = USD 0.04 when MoneyUnitsPerUSD=100.
 const double ShadowSmallTP1Units = 2.0; // Observe-only SMALL stage 1.
 const double ShadowSmallTP2Units = 2.5; // Observe-only SMALL stage 2.
 const double ShadowSmallTP3Units = 3.0; // Observe-only SMALL stage 3.
 const double ShadowSmallStrongTargetUnits = ShadowSmallTP2Units; // Current strong-entry candidate.
-const double SmallProfitMaxLossUnits = 4.0; // Broker SL for new small entries: at most USD 0.04 on a 100-units/USD account.
+const double SmallProfitMaxLossUnits = 2.0; // Broker SL for new small entries: at most USD 0.02 on a 100-units/USD account.
 const double SmallProfitProtectionActivationUnits = 1.0;
 const double SmallProfitProtectionGivebackUnits = 0.5;
-const double SmallProfitMaxRiskUSD = 0.04; // Independent ceiling for new small entries.
+const double SmallProfitMaxRiskUSD = 0.02; // Independent ceiling for new small entries.
 const int SmallProfitMaxEntriesPerSignalBar = 2; // Sequential entries only; an open position still blocks another entry.
 const int SmallProfitMaximumHoldBars = 3;
 input bool EnableProfitProtection = true; // Close a managed position after an armed profit giveback.
@@ -77,7 +77,7 @@ input double EarlyReversalGivebackUnits = 6.0; // Require this much giveback fro
 input double EarlyReversalMaxCurrentUnits = 0.0; // Trigger only after the trade has returned to breakeven/loss.
 const bool EnableEarlyAdverseExit = true; // Active loss reduction: exit only after material loss plus repeated signal failure.
 const double EarlyAdverseRiskFraction = 0.60; // MAIN: arm at 60% of reconstructed initial SL risk.
-const double SmallEarlyAdverseRiskFraction = 0.50; // SMALL: evaluate earlier at 50% of risk (~2c on a 4c stop).
+const double SmallEarlyAdverseRiskFraction = 0.50; // SMALL: evaluate earlier at 50% of risk (~1c on a 2c stop).
 const int EarlyAdverseWeakSnapshotsRequired = 2; // Require two distinct model snapshots with no support.
 const int EarlyAdverseMinAgeSeconds = 120; // Give a new trade two minutes before adverse-exit evaluation.
 input int RequestTimeoutMs = 4000;
@@ -495,7 +495,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.52\n"
+      +"EA version: 0.52.1\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -801,7 +801,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.52 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.52.1 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
@@ -1871,7 +1871,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.52";
+      version="0.52.1";
    }
    if(close_detail!="") detail=close_detail;
 
