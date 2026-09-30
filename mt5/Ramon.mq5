@@ -1,5 +1,5 @@
 #property strict
-#property version "1.620"
+#property version "1.630"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -117,6 +117,7 @@ string LastModelDecision = "NONE";
 string LastModelReason = "NONE";
 string LastSampleKey = "";
 bool LastSampleSaved = false;
+string LastSampleSaveStatus = "not_requested";
 string LastBundleId = "";
 string TradeLearningStatus = "COLLECTING REAL TRADES";
 datetime LastTradeSync = 0;
@@ -604,8 +605,8 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.62\n"
-      +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
+      +"EA version: 0.63\n"
+      +"EA role: "+(SmallOnlyMode ? "PULLBACK (experimental)" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
       +"Symbol: "+_Symbol+"  Timeframe: M15\n"
@@ -620,7 +621,7 @@ string BuildDiagnosticText()
       +"  Last request: "+(LastDecisionRequestTime>0
          ? UTCText(LastDecisionRequestTime,TIME_DATE|TIME_SECONDS) : "NONE")+"\n"
       +"Decision: "+LastModelDecision+"  Reason: "+LastModelReason+"\n"
-      +"DecisionID: "+LastSampleKey+"  Saved: "+BoolText(LastSampleSaved)+"  Bundle: "+LastBundleId+"\n"
+      +"DecisionID: "+LastSampleKey+"  Saved: "+BoolText(LastSampleSaved)+"  SaveStatus: "+LastSampleSaveStatus+"  Bundle: "+LastBundleId+"\n"
       +"TradeLearning: "+TradeLearningStatus+"\n"
       +"LossCooldown: MT5_HISTORY | 2 consecutive same-direction net-loss SL closes | 30min\n"
       +"BaseDecision: "+LastBaseDecision+"  BaseReason: "+LastBaseReason+"\n"
@@ -687,7 +688,7 @@ string BuildDiagnosticText()
       +" / "+DoubleToString(LastTargetTP2,_Digits)
       +" / "+DoubleToString(LastTargetTP3,_Digits)
       +"  LegacyTP: "+DoubleToString(LastLegacyTargetPrice,_Digits)+"\n"
-      +"ExecutionTargetMode: LEGACY_TP_UNCHANGED\n\n"
+      +"ExecutionTargetMode: "+(SmallOnlyMode ? "PULLBACK_1.5R" : "LEGACY_TP_UNCHANGED")+"\n\n"
       +"=== V0.50 IMPROVEMENT SHADOWS (OBSERVE ONLY) ===\n"
       +"ShadowPack: "+BoolText(EnableImprovementShadowPack)
       +"  Reason: "+ShadowReason+"\n"
@@ -714,7 +715,7 @@ string BuildDiagnosticText()
       +"  ExpectedCurrency: "+(StringLen(ExpectedAccountCurrency)>0 ? ExpectedAccountCurrency : "NOT_SET")+"\n"
       +"MoneyUnitsConfirmed: "+BoolText(ConfirmMoneyUnitsPerUSD)
       +"  MoneyUnitsPerUSD: "+DoubleToString(MoneyUnitsPerUSD,2)+"\n"
-      +"BoundedEntryCapUSD: "+DoubleToString(MainEntryRiskCapUSD(),3)
+      +"EntryPriceRiskCapUSD: "+DoubleToString((SmallOnlyMode ? SmallProfitMaxRiskUSD : MainEntryRiskCapUSD()),3)
       +"  MinLotBudgetMultiple: "+DoubleToString(MaxMinLotBudgetMultiple,2)+"x\n"
       +"SharedRamonRiskCapUSD: "+DoubleToString(MaxCombinedOpenRiskUSD,2)
       +"  Includes PRIMARY and SMALL on this MT5 terminal\n"
@@ -734,6 +735,7 @@ string BuildDiagnosticText()
       +"ProfitProtection: "+(EnableProfitProtection ? "ACTIVE" : "OFF")
       +"  Armed: "+BoolText(ProfitProtectionArmed)
       +"  ShadowTrigger: "+BoolText(ProfitProtectionShadowTriggered)+"\n"
+      +"NewPullbackProtection: activation=1R, giveback=0.25R; current/idle thresholds below\n"
       +"ProfitProtectionUnits: current="+DoubleToString(ProfitProtectionCurrentUnits,2)
       +"  peak="+DoubleToString(ProfitProtectionPeakUnits,2)
       +"  PeakSaved="+BoolText(ProfitProtectionIdentifier>0
@@ -761,7 +763,7 @@ string BuildDiagnosticText()
       +"  minPeak="+DoubleToString(EarlyReversalMinPeakUnits,2)
       +"  giveback="+DoubleToString(EarlyReversalGivebackUnits,2)
       +"  maxCurrent="+DoubleToString(EarlyReversalMaxCurrentUnits,2)+"\n"
-      +"EarlyAdverseExit: "+(EnableEarlyAdverseExit ? "ACTIVE" : "OFF")
+      +"EarlyAdverseExit: "+(SmallOnlyMode ? "LEGACY_POSITIONS_ONLY (pullback uses structural SL)" : (EnableEarlyAdverseExit ? "ACTIVE" : "OFF"))
       +"  triggered="+BoolText(EarlyAdverseTriggered)
       +"  lossTrigger="+DoubleToString(EarlyAdverseTriggerLossUnits,2)
       +"  weak="+IntegerToString(EarlyAdverseWeakSnapshots)+"/"+IntegerToString(EarlyAdverseWeakSnapshotsRequired)
@@ -778,19 +780,16 @@ string BuildDiagnosticText()
       +"  Today: "+(today<0 ? "history unavailable" : IntegerToString(today))
       +"/unlimited\n"
       +"SMALL entry strategy: H1/M1 pullback (experimental), target 1.5R"
-      +"  HoldSec: "+IntegerToString(SmallScalpMaxHoldSeconds)
-      +"  TargetRangeUnits: "+DoubleToString(SmallScalpMinTargetUnits,2)
-      +".."+DoubleToString(SmallScalpMaxTargetUnits,2)
-      +"  M1Lookback: "+IntegerToString(SmallScalpM1Lookback)+"\n"
-      +"Small entries per signal bar: "+IntegerToString(SmallProfitMaxEntriesPerSignalBar)
-      +" max; second blocked after same-bar loss\n"      +"SmallEntryQualityFilter: ACTIVE"
-      +"  Rule: edge>=minimum AND (intrabar OR ai_trend) same direction\n"
+      +"  MaximumHoldM15Bars: "+IntegerToString(SmallProfitMaximumHoldBars)+"\n"
+      +"Pullback entries per M15 bar: 1 maximum\n"
+      +"PullbackEntryFilter: closed H1 EMA trend + two-bar M1 pullback + breakout; opposing confirmations veto\n"
+      +"LegacyScalpSettings: existing :S positions only; no effect on new :P entries\n"
       +"RiskPerTradeUSD: "+DoubleToString(RiskPerTradeUSD,2)
       +"  EffectiveRiskUSD: "+DoubleToString(EffectiveRiskPerTradeUSD(),3)
       +"  RiskMultiplier: "+DoubleToString(LastRiskMultiplier,2)+"x"
       +"  RiskBudgetAccountUnits: "+DoubleToString(LastRiskBudgetUnits,2)
       +"  RiskBudgetUSD: "+DoubleToString(AccountUnitsToUSD(LastRiskBudgetUnits),4)+"\n"
-      +"MinLotOverride: "+(AllowMinLotRiskOverride ? "ON" : "OFF")
+      +"MinLotOverrideEffective: "+(!SmallOnlyMode && AllowMinLotRiskOverride ? "ON" : "OFF")
       +"  MaxExecutableRiskUSD: "+DoubleToString(MaxExecutableRiskUSD,2)
       +"  OverrideUsed: "+BoolText(LastMinLotOverrideUsed)+"\n"
       +"SizingSide: "+LastSizingSide
@@ -926,8 +925,8 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.62 "
-      +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
+   UiLabel("TITLE","RAMON AI TRADER  v0.63 "
+      +(SmallOnlyMode ? "PULLBACK" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
 
@@ -1013,18 +1012,19 @@ void DrawDashboard()
 
    UiLabel("SIZING","Sizing: "+LastSizingSide
       +"   Vol: "+DoubleToString(LastPlannedVolume,2)
-      +"   Base: $"+DoubleToString(RiskPerTradeUSD,2)
+      +"   Base: $"+DoubleToString((SmallOnlyMode ? SmallProfitMaxRiskUSD : RiskPerTradeUSD),2)
       +" x"+DoubleToString(LastRiskMultiplier,2)
-      +" = $"+DoubleToString(EffectiveRiskPerTradeUSD(),3)
-      +"   Cap: $"+DoubleToString(MaxExecutableRiskUSD,2),28,442,
+      +" = $"+DoubleToString((SmallOnlyMode ? SmallProfitMaxRiskUSD : EffectiveRiskPerTradeUSD()),3)
+      +"   Cap: $"+DoubleToString((SmallOnlyMode ? SmallProfitMaxRiskUSD : MainEntryRiskCapUSD()),3),28,442,
       (ConfirmMoneyUnitsPerUSD ? clrLime : clrOrange),9);
 
-   UiLabel("MIN_RISK","Min executable risk: $"
+   UiLabel("MIN_RISK",(SmallOnlyMode ? "Legacy sizing estimate (not entry approval): $" : "Min executable risk: $")
       +DoubleToString(AccountUnitsToUSD(LastMinimumLotStopLossUnits),4)
       +" ("+DoubleToString(LastMinimumLotStopLossUnits,2)+" units)",28,464,
       risk_gate_color,9);
 
-   UiLabel("RISK_GATE",RiskGateText(),28,486,risk_gate_color,10);
+   UiLabel("RISK_GATE",(SmallOnlyMode ? StatusLine : RiskGateText()),28,486,
+      (SmallOnlyMode ? clrWhite : risk_gate_color),9);
 
    UiLabel("MONEY_CONFIRM","MoneyUnits/USD: "+DoubleToString(MoneyUnitsPerUSD,2)
       +"   Confirmed: "+BoolText(ConfirmMoneyUnitsPerUSD)
@@ -1178,7 +1178,7 @@ bool BuildRequest(string &payload,datetime &bar_time)
       }
    }
    payload+="],\"quote_time\":"+IntegerToString((long)tick.time)
-      +",\"execution_profile\":{\"ea_version\":\"0.62\",\"role\":\""+(SmallOnlyMode ? "SMALL" : "MAIN")+"\""
+      +",\"execution_profile\":{\"ea_version\":\"0.63\",\"role\":\""+(SmallOnlyMode ? "SMALL" : "MAIN")+"\""
       +",\"risk_usd\":"+DoubleToString(RiskPerTradeUSD,8)
       +",\"allow_override\":"+(AllowMinLotRiskOverride ? "true" : "false")
       +",\"units_per_usd\":"+DoubleToString(MoneyUnitsPerUSD,8)
@@ -2166,7 +2166,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.62";
+      version="0.63";
    }
    if(close_detail!="") detail=close_detail;
 
@@ -2198,7 +2198,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       );
    }
 
-   if(has_sizing && entry_kind==DEAL_ENTRY_IN && (version=="0.60" || version=="0.62"))
+   if(has_sizing && entry_kind==DEAL_ENTRY_IN && (version=="0.60" || version=="0.62" || version=="0.63"))
    {
       ulong id=(ulong)HistoryDealGetInteger(deal,DEAL_POSITION_ID);
       string cap_key="RamonCap."+IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN))+"."+IntegerToString((long)id);
@@ -3485,6 +3485,8 @@ void OnTimer()
    LastDecisionSuccessTime=TimeCurrent();
    LastSampleKey=sample_key;
    LastSampleSaved=(sample_saved>=0.5);
+   LastSampleSaveStatus=(LastSampleSaved ? "saved" : "legacy_server_unspecified");
+   JsonText(reply,"sample_save_status",LastSampleSaveStatus);
    LastBundleId=bundle_id;
    LastModelDecision=decision;
    LastModelReason=reason;
