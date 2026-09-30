@@ -11,6 +11,7 @@ from pathlib import Path
 import argparse
 
 from .history import classify_training_status
+from .entry_audit import print_entry_audit
 
 
 def pct(n: int, d: int) -> float:
@@ -586,6 +587,7 @@ def generate_report(DB: str, SYMBOL: str = "XAUUSD_l", LIMIT: int = 20) -> None:
         print_telemetry(trades)
         print_active_bundle_performance(trades)
         print_stored_sizing(trades)
+        print_entry_audit(trades)
 
         print("=== BY DIRECTION ===")
         direction_rows = con.execute(

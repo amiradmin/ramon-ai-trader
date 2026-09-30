@@ -20,8 +20,9 @@ accuracy or calibrated confidence claims.
 
 ```bash
 cd ~/Documents/Presentation/ramon-ai-trader
-git fetch origin feature/role-predictions-shadow-v0535
-git switch feature/role-predictions-shadow-v0535
+git fetch origin main
+git switch main
+git pull --ff-only origin main
 docker compose build model
 docker compose --profile tools run --rm tools -m ramon.shadow_roles
 docker compose up -d --no-deps model
@@ -53,3 +54,24 @@ plus bundle loading errors. `/decision` also includes per-role inference errors.
 `ensemble_active=0`, `risk_model_ready=0` and `risk_multiplier=1.0` confirm isolation.
 Untrained, corrupted, incompatible or wrong-symbol shadow models cannot veto or
 replace a base decision. Live model artifacts are not loaded in shadow mode.
+
+## Inspect losses and sizing
+
+After rebuilding, run `bash scripts/analyze_ramon.sh --all`. The report now adds
+`MAIN / SMALL ENTRY RISK AUDIT` and `SAME-DIRECTION REENTRY AFTER SL (UTC EVIDENCE)`.
+Roles come from recorded entry role/magic; unrecorded or conflicting roles stay
+UNKNOWN. Risk is compared with each trade's stored preferred budget and cap,
+including the account-unit conversion recorded at entry. Do not compare old
+SMALL trades with today's 2-cent cap.
+
+Reentries are grouped by account and role, using recorded UTC offsets. The
+current terminal cooldown requires two consecutive same-direction net-loss SL
+positions, then waits 30 minutes from the most recent close. An entry after only
+one SL is allowed. Review candidates in the uploaded closed-trade ledger are not
+proof of an EA bug: absent outcomes or terminal history may change the streak,
+and historical EA versions can have different rules. No trades are blocked by
+this report and no avoided-loss or hypothetical-profit claims are calculated.
+
+Training must run against the user's real database; repository changes alone
+cannot train or load the models running on another machine. Health shows which
+roles trained and which still need more data. Restart `model` after training.
