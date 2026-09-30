@@ -1,5 +1,5 @@
 #property strict
-#property version "1.533"
+#property version "1.534"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -498,7 +498,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.53.3\n"
+      +"EA version: 0.53.4\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -925,6 +925,7 @@ void DrawDashboard()
    color live_color=(live_ready && permissions && lock_ok ? clrWhite : clrTomato);
    color risk_gate_color=(RiskGateBlocked() ? clrTomato : clrWhite);
    color sizing_color=DirectionColor(LastSizingSide);
+   color checklist_good_color=C'34,197,94';
 
    // v0.53.2 display-only trade checklist helpers.
    bool checklist_spread_pass=(spread_points>0 && spread_points<=MaxSpreadPoints);
@@ -971,7 +972,7 @@ void DrawDashboard()
    // Tall/narrow panel: summary text first, checklist directly underneath.
    UiRect("PANEL",12,24,560,955,C'15,23,42',C'71,85,105');
 
-   UiLabel("TITLE","RAMON AI TRADER  v0.53.3 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.53.4 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,clrWhite,9);
@@ -1061,7 +1062,7 @@ void DrawDashboard()
    UiLabel("CHECK_SUMMARY",
       "MKT "+checklist_market_trend+" | MODEL "+LastModelDecision
       +" | ENTRY "+(checklist_entry_ready ? "READY" : "NOT READY"),
-      tx+188,ty+10,(checklist_entry_ready ? state_color : clrGold),8);
+      tx+188,ty+10,(checklist_entry_ready ? checklist_good_color : clrGold),8);
 
    UiLabel("CHECK_H1","#",tx+12,ty+42,clrWhite,8);
    UiLabel("CHECK_H2","CHECK",tx+38,ty+42,clrWhite,8);
@@ -1111,16 +1112,16 @@ void DrawDashboard()
    cstats[9]=(checklist_risk_exit_ok ? "DEFINED" : "INVALID");
 
    for(int i=0;i<10;i++) ccolors[i]=clrWhite;
-   ccolors[0]=(checklist_directional ? state_color : clrWhite);
-   ccolors[1]=(LastAiTrendConfirmed ? checklist_market_color : clrGold);
-   ccolors[2]=(strength_pass ? clrWhite : clrGold);
-   ccolors[3]=(edge_pass ? DirectionColor(dominant) : clrGold);
-   ccolors[4]=(LastIntrabarConfirmed ? DirectionColor(LastIntrabarDirection) : clrGold);
-   ccolors[5]=(LastAiTrendConfirmed ? DirectionColor(LastAiTrendDirection) : clrGold);
-   ccolors[6]=(LastTargetStructureReady ? clrWhite : clrGold);
-   ccolors[7]=(checklist_volatility_ok ? clrWhite : clrTomato);
-   ccolors[8]=(checklist_spread_pass ? clrWhite : clrGold);
-   ccolors[9]=(checklist_risk_exit_ok ? clrWhite : clrTomato);
+   ccolors[0]=(checklist_directional ? checklist_good_color : clrWhite);
+   ccolors[1]=(LastAiTrendConfirmed ? checklist_good_color : clrGold);
+   ccolors[2]=(strength_pass ? checklist_good_color : clrGold);
+   ccolors[3]=(edge_pass ? checklist_good_color : clrGold);
+   ccolors[4]=(LastIntrabarConfirmed ? checklist_good_color : clrGold);
+   ccolors[5]=(LastAiTrendConfirmed ? checklist_good_color : clrGold);
+   ccolors[6]=(LastTargetStructureReady ? checklist_good_color : clrGold);
+   ccolors[7]=(checklist_volatility_ok ? checklist_good_color : clrTomato);
+   ccolors[8]=(checklist_spread_pass ? checklist_good_color : clrGold);
+   ccolors[9]=(checklist_risk_exit_ok ? checklist_good_color : clrTomato);
 
    for(int i=0;i<10;i++)
    {
