@@ -1,5 +1,5 @@
 #property strict
-#property version "1.522"
+#property version "1.523"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -190,6 +190,10 @@ int LastModelSpreadPoints = 0;
 long LockedAccountLogin = 0;
 string LockedAccountServer = "";
 string LastCopyStatus = "Ready";
+string LastManualStatus = "Manual controls ready";
+datetime LastManualClickLocal = 0;
+ulong LastManualOrder = 0;
+string LastManualAction = "";
 const string UiPrefix = "RAMON_UI_";
 ulong ProfitProtectionTicket = 0;
 double ProfitProtectionPeakUnits = 0.0;
@@ -497,7 +501,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.52.2\n"
+      +"EA version: 0.52.3\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL TP4c SL2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -515,6 +519,9 @@ string BuildDiagnosticText()
       +"Decision: "+LastModelDecision+"  Reason: "+LastModelReason+"\n"
       +"DecisionID: "+LastSampleKey+"  Saved: "+BoolText(LastSampleSaved)+"  Bundle: "+LastBundleId+"\n"
       +"TradeLearning: "+TradeLearningStatus+"\n"
+      +"Manual controls: "+LastManualStatus+"\n"
+      +"Manual audit (Common Files): "+DealTelemetryPath(0)
+         +(SmallOnlyMode ? ".small.manual.csv" : ".main.manual.csv")+"\n"
       +"LossCooldown: MT5_HISTORY | 2 consecutive same-direction net-loss SL closes | 30min\n"
       +"BaseDecision: "+LastBaseDecision+"  BaseReason: "+LastBaseReason+"\n"
       +"RoleModels: "+(LastEnsembleReady ? "READY" : "LEARNING")
@@ -803,8 +810,8 @@ void DrawDashboard()
       (live_profit_usd<-0.00001 ? "-$" : "$"))
       +DoubleToString(MathAbs(live_profit_usd),2);
 
-   UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.52.2 "
+   UiRect("PANEL",12,24,520,662,C'15,23,42',C'71,85,105');
+   UiLabel("TITLE","RAMON AI TRADER  v0.52.3 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
@@ -911,6 +918,11 @@ void DrawDashboard()
 
    UiButton("COPY","COPY DIAGNOSTIC",28,536,176,30);
    UiLabel("COPY_STATUS",LastCopyStatus,218,544,C'148,163,184',8);
+   UiButton("MANUAL_BUY","BUY (MANUAL)",28,576,146,30);
+   UiButton("MANUAL_SELL","SELL (MANUAL)",184,576,146,30);
+   UiButton("MANUAL_CLOSE","CLOSE THIS EA",340,576,164,30);
+   UiLabel("MANUAL_STATUS",StringSubstr(LastManualStatus,0,72),28,615,clrGold,9);
+   UiLabel("MANUAL_INFO","Manual entries use this EA's risk settings and automatic exits.",28,638,C'148,163,184',8);
    DrawLiveModelPanel();
    ChartRedraw();
 }
@@ -939,7 +951,7 @@ void DrawLiveModelPanel()
       (LastAiTrendDirection=="SELL" ? clrTomato : clrGold)));
    int chart_width=(int)ChartGetInteger(0,CHART_WIDTH_IN_PIXELS);
    bool stacked=chart_width<1020;
-   int x=(stacked ? 12 : 550), y=(stacked ? 606 : 24);
+   int x=(stacked ? 12 : 550), y=(stacked ? 694 : 24);
    UiRect("MODEL_PANEL",x,y,450,224,C'15,23,42',C'71,85,105');
    UiLabel("MODEL_TITLE","CHRONOS-2  |  "+freshness,x+16,y+12,
       (fresh ? clrLime : clrOrange),11);
@@ -1804,7 +1816,7 @@ void AppendTradeCsv(const ulong deal)
       DoubleToString(HistoryDealGetDouble(deal,DEAL_COMMISSION),4),
       DoubleToString(HistoryDealGetDouble(deal,DEAL_SWAP),4),
       AccountInfoString(ACCOUNT_CURRENCY),
-      HistoryDealGetString(deal,DEAL_COMMENT));
+      ManualDealComment(deal));
    FileFlush(handle);
    FileClose(handle);
 }
@@ -1927,9 +1939,11 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.52.2";
+      version="0.52.3";
    }
    if(close_detail!="") detail=close_detail;
+   string manual_detail=ManualOrderAction((ulong)HistoryDealGetInteger(deal,DEAL_ORDER));
+   if(manual_detail!="") detail=manual_detail;
 
    string sizing_sample="";
    double risk_budget_units=0.0,planned_volume=0.0,min_lot_sl_units=0.0;
@@ -2029,6 +2043,11 @@ bool ClosedTradePayload(const ulong identifier,string &payload)
       }
       else if(entry==DEAL_ENTRY_OUT || entry==DEAL_ENTRY_OUT_BY)
       {
+         int manual_offset=0;
+         string manual_version="",manual_detail="";
+         if(ManualOrderAction((ulong)HistoryDealGetInteger(deal,DEAL_ORDER))=="manual_close"
+            || (ReadDealTelemetry(deal,manual_offset,manual_version,manual_detail)
+               && manual_detail=="manual_close")) return false;
          out_volume+=volume;
          if(at>=closed)
          {
@@ -2078,6 +2097,7 @@ bool ClosedTradePayload(const ulong identifier,string &payload)
    }
    if(ReadDealTelemetry(closing_deal,offset,version,detail))
    {
+      if(detail=="manual_close") return false; // User exit is not an autonomous model outcome.
       payload+=",\"closed_utc_offset_seconds\":"+IntegerToString(offset);
       if(exit_reason=="DEAL_REASON_EXPERT" && detail!="")
          payload+=",\"exit_detail\":\""+JsonEscape(detail)+"\"";
@@ -3289,16 +3309,16 @@ void OnTimer()
    {
       // Small-profit trades never scale above the broker minimum volume.
       if(!SmallProfitStop(side,entry,stop,volume,tick,stop))
-      { StatusLine="Broker cannot place 4-cent small stop"; ShowStatus(); return; }
+      { StatusLine="Broker cannot place 2-cent small stop"; ShowStatus(); return; }
       double stop_loss_units=0.0;
       double small_risk_cap=SmallProfitRiskCapUnits();
       if(volume<=0.0 || small_risk_cap<=0.0
          || !OrderCalcProfit(side,_Symbol,volume,entry,stop,stop_loss_units)
          || stop_loss_units>=0.0
          || -stop_loss_units>small_risk_cap+0.00001)
-      { StatusLine="Small profit risk > 4 cents"; ShowStatus(); return; }
+      { StatusLine="Small profit risk > 2 cents"; ShowStatus(); return; }
       if(!SmallProfitTarget(side,entry,volume,tick,target))
-      { StatusLine="Broker cannot place 2-cent target"; ShowStatus(); return; }
+      { StatusLine="Broker cannot place 4-cent target"; ShowStatus(); return; }
    }
    double margin=0.0;
    if(!OrderCalcMargin(side,_Symbol,volume,entry,margin)
@@ -3327,7 +3347,7 @@ void OnTimer()
       LastEntrySignalBar=bar_time;
       if(SmallOnlyMode)
          LastSmallEntriesOnSignalBar=small_entries_on_bar+1;
-      StatusLine="Order sent "+(small_profit ? "SMALL 2c " : "")
+      StatusLine="Order sent "+(small_profit ? "SMALL TP4c SL2c " : "")
          +decision+" "+DoubleToString(volume,2);
    }
    Print("Ramon execution: ",StatusLine);
@@ -3348,14 +3368,195 @@ void OnTradeTransaction(
    }
 }
 
+string ManualOrderAction(const ulong order)
+{
+   if(order==0) return "";
+   if(order==LastManualOrder) return LastManualAction;
+   int file=FileOpen(DealTelemetryPath(order)+".manual",FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON);
+   if(file==INVALID_HANDLE) return "";
+   string action=FileReadString(file);
+   FileClose(file);
+   return action;
+}
+
+void MarkManualOrder(const ulong order,const string action)
+{
+   if(order==0) return;
+   LastManualOrder=order;
+   LastManualAction=action;
+   int file=FileOpen(DealTelemetryPath(order)+".manual",FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON);
+   if(file==INVALID_HANDLE)
+   { Print("Ramon MANUAL order marker failed order=",order," err=",GetLastError()); return; }
+   FileWriteString(file,action);
+   FileFlush(file);
+   FileClose(file);
+}
+
+string ManualDealComment(const ulong deal)
+{
+   string comment=HistoryDealGetString(deal,DEAL_COMMENT);
+   string action=ManualOrderAction((ulong)HistoryDealGetInteger(deal,DEAL_ORDER));
+   if(action!="") return "USER_"+action+" | "+comment;
+   if(StringFind(comment,"RamonManual:")==0) return "USER_MANUAL_ENTRY | "+comment;
+   return comment;
+}
+
+bool AuditManualAction(const string action,const string result,const ulong position=0,
+                       const ulong order=0,const ulong deal=0,const uint retcode=0)
+{
+   Print("Ramon USER_MANUAL ",action," ",result," position=",position,
+      " order=",order," deal=",deal," retcode=",retcode);
+   // Always log manual actions, independently of optional trade CSV logging.
+   string path=DealTelemetryPath(0)+(SmallOnlyMode ? ".small.manual.csv" : ".main.manual.csv");
+   int file=FileOpen(path,FILE_READ|FILE_WRITE|FILE_CSV|FILE_ANSI|FILE_COMMON,',');
+   if(file==INVALID_HANDLE) return false;
+   bool empty=FileSize(file)==0;
+   FileSeek(file,0,SEEK_END);
+   if(empty) FileWrite(file,"utc","actor","action","result","symbol","magic",
+      "position","order","deal","retcode","model_decision","model_reason");
+   uint written=FileWrite(file,TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS),"USER_MANUAL",action,result,
+      _Symbol,IntegerToString((long)MagicNumber),IntegerToString((long)position),
+      IntegerToString((long)order),IntegerToString((long)deal),IntegerToString((int)retcode),
+      LastModelDecision,LastModelReason);
+   FileFlush(file);
+   FileClose(file);
+   return written>0;
+}
+
+void ManualBlocked(const string action,const string reason)
+{
+   LastManualStatus="MANUAL "+action+" BLOCKED: "+reason;
+   AuditManualAction(action,LastManualStatus);
+}
+
+void ExecuteManualAction(const string action)
+{
+   if(action!="BUY" && action!="SELL" && action!="CLOSE") return;
+   if(!AuditManualAction(action,"REQUEST"))
+   { LastManualStatus="MANUAL BLOCKED: audit file unavailable"; return; }
+   if(LastManualClickLocal>0 && TimeLocal()-LastManualClickLocal<3)
+   { ManualBlocked(action,"wait 3 seconds between clicks"); return; }
+   LastManualClickLocal=TimeLocal();
+   string reason="";
+   if(!LiveExecutionReady(reason)) { ManualBlocked(action,reason); return; }
+   if(!(bool)TerminalInfoInteger(TERMINAL_CONNECTED)
+      || !(bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED)
+      || !(bool)MQLInfoInteger(MQL_TRADE_ALLOWED)
+      || !(bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED))
+   { ManualBlocked(action,"connection/trade permission"); return; }
+
+   ulong ticket=0;
+   datetime opened=0;
+   bool managed=ManagedPosition(ticket,opened);
+   bool submitted=false;
+   if(action=="CLOSE")
+   {
+      if(!managed || !PositionSelectByTicket(ticket)
+         || PositionGetString(POSITION_SYMBOL)!=_Symbol
+         || (ulong)PositionGetInteger(POSITION_MAGIC)!=MagicNumber)
+      { ManualBlocked(action,"no position belonging to this EA"); return; }
+      submitted=Trade.PositionClose(ticket,MaxDeviationPoints);
+   }
+   else
+   {
+      if(managed || OtherPositionOnSymbol())
+      { ManualBlocked(action,"position already open / foreign position"); return; }
+      for(int i=OrdersTotal()-1;i>=0;i--)
+      {
+         if(OrderGetTicket(i)>0 && OrderGetString(ORDER_SYMBOL)==_Symbol
+            && (ulong)OrderGetInteger(ORDER_MAGIC)==MagicNumber)
+         { ManualBlocked(action,"order already pending"); return; }
+      }
+      if(SymbolInfoInteger(_Symbol,SYMBOL_TRADE_MODE)!=SYMBOL_TRADE_MODE_FULL)
+      { ManualBlocked(action,"symbol trading disabled"); return; }
+      if(LocalLossCooldownBlocked(action,reason)) { ManualBlocked(action,reason); return; }
+      int today=(SmallOnlyMode ? 0 : TradesToday());
+      if(!SmallOnlyMode && (today<0 || today>=MaxTradesPerDay))
+      { ManualBlocked(action,"daily trade limit/history unavailable"); return; }
+      // Manual direction bypasses model BUY/SELL/WAIT and entry-strength gates only.
+      // A fresh valid snapshot is still required for MAIN stop/target distances.
+      if(!SmallOnlyMode && (LastForecastReceivedLocal<=0
+         || TimeLocal()-LastForecastReceivedLocal>MathMax(60,2*SnapshotIntervalSeconds)
+         || LastStopDistance<=0.0 || LastTargetDistance<=0.0))
+      { ManualBlocked(action,"fresh model SL/TP unavailable"); return; }
+      MqlTick tick;
+      if(!SymbolInfoTick(_Symbol,tick) || tick.bid<=0.0 || tick.ask<=tick.bid
+         || MathAbs((long)TimeCurrent()-(long)tick.time)>30
+         || (int)SymbolInfoInteger(_Symbol,SYMBOL_SPREAD)>MaxSpreadPoints)
+      { ManualBlocked(action,"quote stale / spread too high"); return; }
+      ENUM_ORDER_TYPE side=(action=="BUY" ? ORDER_TYPE_BUY : ORDER_TYPE_SELL);
+      double entry=(action=="BUY" ? tick.ask : tick.bid);
+      double point=SymbolInfoDouble(_Symbol,SYMBOL_POINT);
+      double minimum_distance=(double)SymbolInfoInteger(_Symbol,SYMBOL_TRADE_STOPS_LEVEL)*point+2*point;
+      double stop_distance=MathMax(LastStopDistance,minimum_distance);
+      double target_distance=MathMax(LastTargetDistance,minimum_distance);
+      double stop=NormalizeDouble(entry+(action=="BUY" ? -stop_distance : stop_distance),_Digits);
+      double target=NormalizeDouble(entry+(action=="BUY" ? target_distance : -target_distance),_Digits);
+      double volume=(SmallOnlyMode ? SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN) : SelectVolume(side,entry,stop));
+      if(volume<=0.0) { ManualBlocked(action,"minimum lot exceeds risk cap"); return; }
+      if(SmallOnlyMode)
+      {
+         // Let the existing broker-aware solver find a feasible stop within the fixed 2c cap.
+         double unit_loss=0.0;
+         if(!OrderCalcProfit(side,_Symbol,volume,entry,
+            entry+(action=="BUY" ? -1.0 : 1.0),unit_loss) || unit_loss>=0.0)
+         { ManualBlocked(action,"SMALL loss calculation unavailable"); return; }
+         double proposed_stop=entry+(action=="BUY" ? -1.0 : 1.0)
+            *SmallProfitRiskCapUnits()/(-unit_loss);
+         if(!SmallProfitStop(side,entry,proposed_stop,volume,tick,stop)
+            || !SmallProfitTarget(side,entry,volume,tick,target))
+         { ManualBlocked(action,"broker cannot place SMALL SL2c / TP4c"); return; }
+      }
+      double loss=0.0,margin=0.0;
+      double cap=(SmallOnlyMode ? SmallProfitRiskCapUnits() : MaxExecutableRiskUSD*MoneyUnitsPerUSD);
+      if(cap<=0.0 || !OrderCalcProfit(side,_Symbol,volume,entry,stop,loss)
+         || loss>=0.0 || -loss>cap+0.00001)
+      { ManualBlocked(action,"SL exceeds risk cap"); return; }
+      if(!OrderCalcMargin(side,_Symbol,volume,entry,margin)
+         || margin>AccountInfoDouble(ACCOUNT_MARGIN_FREE)*0.8)
+      { ManualBlocked(action,"insufficient margin"); return; }
+      ClearPendingSizing(); // Manual entries must not inherit an autonomous sample ID.
+      string comment="RamonManual:"+action;
+      submitted=(action=="BUY" ? Trade.Buy(volume,_Symbol,0.0,stop,target,comment)
+         : Trade.Sell(volume,_Symbol,0.0,stop,target,comment));
+   }
+   uint retcode=Trade.ResultRetcode();
+   bool accepted=submitted && (retcode==TRADE_RETCODE_DONE
+      || retcode==TRADE_RETCODE_DONE_PARTIAL || retcode==TRADE_RETCODE_PLACED);
+   if(accepted)
+   {
+      string detail=(action=="CLOSE" ? "manual_close" : "manual_entry_"+action);
+      ulong manual_order=Trade.ResultOrder();
+      if(manual_order==0 && Trade.ResultDeal()>0 && HistoryDealSelect(Trade.ResultDeal()))
+         manual_order=(ulong)HistoryDealGetInteger(Trade.ResultDeal(),DEAL_ORDER);
+      MarkManualOrder(manual_order,detail);
+      RecordDealTelemetry(Trade.ResultDeal(),detail);
+      if(action!="CLOSE") LastEntrySignalBar=LastSignalBarTime;
+   }
+   LastManualStatus="MANUAL "+action+" "+(accepted ? "ACCEPTED" : "REJECTED")
+      +" retcode="+IntegerToString((int)retcode);
+   if(!AuditManualAction(action,LastManualStatus,ticket,Trade.ResultOrder(),Trade.ResultDeal(),retcode))
+      LastManualStatus+=" (result audit write failed; see Experts)";
+}
+
 void OnChartEvent(const int id,const long &lparam,const double &dparam,const string &sparam)
 {
-   if(id!=CHARTEVENT_OBJECT_CLICK || sparam!=UiPrefix+"COPY")
+   if(id!=CHARTEVENT_OBJECT_CLICK)
       return;
-
-   ObjectSetInteger(0,sparam,OBJPROP_STATE,false);
-   CopyDiagnosticToClipboard();
-   DrawDashboard();
+   if(sparam==UiPrefix+"COPY")
+   {
+      ObjectSetInteger(0,sparam,OBJPROP_STATE,false);
+      CopyDiagnosticToClipboard();
+      DrawDashboard();
+   }
+   else if(sparam==UiPrefix+"MANUAL_BUY" || sparam==UiPrefix+"MANUAL_SELL"
+      || sparam==UiPrefix+"MANUAL_CLOSE")
+   {
+      ObjectSetInteger(0,sparam,OBJPROP_STATE,false);
+      ExecuteManualAction(sparam==UiPrefix+"MANUAL_BUY" ? "BUY" :
+         (sparam==UiPrefix+"MANUAL_SELL" ? "SELL" : "CLOSE"));
+      ShowStatus();
+   }
 }
 
 int OnInit()
@@ -3426,6 +3627,7 @@ int OnInit()
       Print("Ramon live BLOCKED: ConfirmMoneyUnitsPerUSD is false");
    if(EnableLiveTrading && !AccountLockHealthy())
       Print("Ramon live BLOCKED: account/server lock mismatch");
+   Trade.SetAsyncMode(false); // Manual result/order attribution uses synchronous requests.
    Trade.SetExpertMagicNumber(MagicNumber);
    Trade.SetDeviationInPoints(MaxDeviationPoints);
    Trade.SetTypeFillingBySymbol(_Symbol);
