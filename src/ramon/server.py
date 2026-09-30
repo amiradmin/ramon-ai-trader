@@ -12,11 +12,12 @@ from uuid import uuid4
 
 from .core import Forecast, Market, Settings, evaluate
 from .ensemble import EnsembleCoordinator, dominant_direction
-from .history import persist_decision_sample, persist_market, persist_trade_outcome
+from .history import persist_decision_sample, persist_market, persist_micro_market, persist_trade_outcome
 from .model import ChronosForecaster, model_name
 from .news import DEFAULT_FOREX_FACTORY_JSON, ForexFactoryNewsProvider
 from .target_learning import build_target_structure
 from .target_outcomes import backfill_target_outcomes
+from .signal_outcomes import backfill_signal_outcomes
 
 
 def persist_market_safely(db: str, market: Market) -> str:
@@ -81,6 +82,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     "history_enabled": bool(history_db),
                     "history_last_error": str(history_status["last_error"]),
                     "history_last_persisted_bar": int(history_status["last_persisted_bar"]),
+                    "signal_outcome_learning": bool(history_db),
                     **ensemble.status(),
                     **news_provider.status(),
                 },
@@ -116,6 +118,17 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     raise ValueError("quote time is inconsistent with completed M15 bars")
 
                 if history_db:
+                    # M1 telemetry is stored on every request so 1m/3m/5m signal outcomes
+                    # can mature without changing any execution gate.
+                    try:
+                        persist_micro_market(history_db, market, quote_time)
+                        backfill_signal_outcomes(history_db, symbol=market.symbol)
+                    except Exception as exc:
+                        print(
+                            f"Ramon signal-outcome learning warning: {type(exc).__name__}: {exc}",
+                            flush=True,
+                        )
+
                     key = f"{market.symbol}:{market.timeframe}"
                     newest = market.bars[-1].time
                     if last_persisted_bar.get(key) != newest:
@@ -131,9 +144,10 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                             history_status["last_persisted_bar"] = newest
                             try:
                                 backfill_target_outcomes(history_db, symbol=market.symbol)
+                                backfill_signal_outcomes(history_db, symbol=market.symbol)
                             except Exception as exc:
                                 print(
-                                    f"Ramon target-outcome backfill warning: {type(exc).__name__}: {exc}",
+                                    f"Ramon outcome backfill warning: {type(exc).__name__}: {exc}",
                                     flush=True,
                                 )
 

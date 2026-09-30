@@ -210,6 +210,44 @@ def persist_market(db: str | Path, market: Market) -> int:
     return len(rows)
 
 
+def persist_micro_market(db: str | Path, market: Market, quote_time: int | None) -> int:
+    """Upsert only completed M1 micro bars for short-horizon signal outcome learning."""
+    if not market.micro_bars or quote_time is None:
+        return 0
+    path = ensure_history_db(db)
+    spread_points = round((market.ask - market.bid) / market.point)
+    completed = [bar for bar in market.micro_bars if bar.time + 60 <= int(quote_time)]
+    if not completed:
+        return 0
+    newest = completed[-1].time
+    rows = [
+        (
+            market.symbol, "M1", bar.time, bar.open, bar.high, bar.low, bar.close,
+            spread_points if bar.time == newest else 0,
+        )
+        for bar in completed
+    ]
+    with sqlite3.connect(path, timeout=10) as conn:
+        conn.executemany(
+            """
+            INSERT INTO history_bars
+                (symbol,timeframe,time,open,high,low,close,spread_points)
+            VALUES (?,?,?,?,?,?,?,?)
+            ON CONFLICT(symbol,timeframe,time) DO UPDATE SET
+                open=excluded.open,
+                high=excluded.high,
+                low=excluded.low,
+                close=excluded.close,
+                spread_points=CASE
+                    WHEN excluded.spread_points>0 THEN excluded.spread_points
+                    ELSE history_bars.spread_points
+                END
+            """,
+            rows,
+        )
+    return len(rows)
+
+
 def persist_decision_sample(
     db: str | Path,
     *,
