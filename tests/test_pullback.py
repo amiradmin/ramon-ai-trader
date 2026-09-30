@@ -13,7 +13,7 @@ def test_actual_closed_candle_pattern(tmp_path):
     if not compiler:
         pytest.skip('g++ needed for MQL adapter')
     source=EA.read_text()
-    fn=source[source.index('bool PullbackPattern('):source.index('bool PullbackCandidate(')]
+    fn=source[source.index('bool PullbackPattern('):source.index('string AdvanceLiveEvidence(')]
     fn=fn.replace('const MqlRates &hourly[]','const std::vector<MqlRates> &hourly').replace('const MqlRates &minute[]','const std::vector<MqlRates> &minute')
     harness=r'''
 #include <string>

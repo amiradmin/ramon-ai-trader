@@ -1,5 +1,5 @@
 #property strict
-#property version "1.630"
+#property version "1.640"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -48,7 +48,7 @@ const int MainFastProfitMinAgeBars = 2; // Evaluate only after at least 2 M15 ba
 const double MainFastProfitMinProfitUnits = 0.20; // Never close a losing MAIN trade through this feature.
 const double MainFastProfitMinProgressToTP1 = 0.35; // Below 35% of entry->TP1 after 2 bars is considered slow.
 const int MainFastProfitWeakSnapshotsRequired = 2; // Require repeated weak 30s snapshots.
-input bool EnableSmallProfitTrades = true; // Experimental H1/M1 pullback entries while MAIN waits.
+input bool EnableSmallProfitTrades = true; // Experimental intrabar pullback entries when MAIN cannot execute.
 input bool EnableSmallRapidScalp = false; // Legacy SMALL positions only; replacement uses structural SL and 1.5R TP.
 input int SmallScalpMaxHoldSeconds = 300; // 60..300 seconds; a shorter window may reject more entries.
 const double SmallScalpMinTargetUnits = 1.0;
@@ -110,6 +110,24 @@ datetime LastDecisionRequestTime = 0;
 datetime LastDecisionSuccessTime = 0;
 datetime LastEntrySignalBar = 0;
 int LastSmallEntriesOnSignalBar = 0;
+// Local tick monitoring is independent of model-request cadence.
+struct LiveEvidence
+{
+   string candidate;
+   int count;
+   datetime last_sample;
+   long last_quote_msc;
+   datetime bucket;
+};
+LiveEvidence TrendEvidence,SetupEvidence;
+string LiveTrendRaw="NONE",LiveTrendDirection="NONE",LiveSetupDirection="NONE";
+string LiveMonitorStatus="WARMUP";
+double LiveSetupAnchor=0.0,LiveM5Open=0.0,LiveM15Open=0.0,LiveM1Trigger=0.0;
+datetime LiveMonitorQuoteTime=0,LiveMonitorLogTime=0;
+ulong LiveMonitorLastClock=0,MonitorLastQuoteClock=0;
+long MonitorLastQuoteMsc=0;
+bool LastModelSnapshotValid=false,MainEntryEligible=false;
+
 string StatusLine = "Starting";
 int LastDirectionConsensusVotes = 0;
 string LastDirectionConsensusStatus = "NOT_EVALUATED";
@@ -605,7 +623,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.63\n"
+      +"EA version: 0.64\n"
       +"EA role: "+(SmallOnlyMode ? "PULLBACK (experimental)" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -728,6 +746,9 @@ string BuildDiagnosticText()
       +" ea="+BoolText((bool)MQLInfoInteger(MQL_TRADE_ALLOWED))
       +" account="+BoolText((bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED))+"\n"
       +"Status: "+StatusLine+"\n"
+      +"LivePriceMonitor: "+LiveMonitorStatus+"  Raw="+LiveTrendRaw+"  Confirmed="+LiveTrendDirection
+      +"  TrendSamples="+IntegerToString(TrendEvidence.count)+"/3  Setup="+LiveSetupDirection
+      +"  SetupSamples="+IntegerToString(SetupEvidence.count)+"/2  Anchor="+DoubleToString(LiveSetupAnchor,_Digits)+"\n"
       +"Managed position: "+position_line+"\n"
       +"MarketClosedExitPause: "+BoolText(MarketClosedExitPause)
       +"  PauseTicket: "+IntegerToString((long)MarketClosedExitPauseTicket)
@@ -779,11 +800,11 @@ string BuildDiagnosticText()
       +"  BrokerSLMaxUnits: "+DoubleToString(SmallProfitMaxLossUnits,2)
       +"  Today: "+(today<0 ? "history unavailable" : IntegerToString(today))
       +"/unlimited\n"
-      +"SMALL entry strategy: H1/M1 pullback (experimental), target 1.5R"
+      +"SMALL entry strategy: intrabar trend/pullback (experimental), target 1.5R"
       +"  MaximumHoldM15Bars: "+IntegerToString(SmallProfitMaximumHoldBars)+"\n"
       +"Pullback entries per M15 bar: 1 maximum\n"
-      +"PullbackEntryFilter: closed H1 EMA trend + two-bar M1 pullback + breakout; opposing confirmations veto\n"
-      +"LegacyScalpSettings: existing :S positions only; no effect on new :P entries\n"
+      +"PullbackEntryFilter: live M5/M15 price direction + forming M1 breakout; 3 trend / 2 setup samples; opposing confirmations veto\n"
+      +"LegacyScalpSettings: existing :S positions only; no effect on new :P/:I entries\n"
       +"RiskPerTradeUSD: "+DoubleToString(RiskPerTradeUSD,2)
       +"  EffectiveRiskUSD: "+DoubleToString(EffectiveRiskPerTradeUSD(),3)
       +"  RiskMultiplier: "+DoubleToString(LastRiskMultiplier,2)+"x"
@@ -925,9 +946,9 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.63 "
-      +(SmallOnlyMode ? "PULLBACK" : "MAIN"),28,36,clrWhite,12);
-   UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
+   UiLabel("TITLE","RAMON AI TRADER  v0.64 "
+      +(SmallOnlyMode ? "INTRABAR" : "MAIN"),28,36,clrWhite,12);
+   UiLabel("SUB",_Symbol+" M15 | price ~1s "+LiveTrendDirection+" | model "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
 
    UiLabel("LIVE","LIVE: "+LiveStateText()
@@ -1178,7 +1199,7 @@ bool BuildRequest(string &payload,datetime &bar_time)
       }
    }
    payload+="],\"quote_time\":"+IntegerToString((long)tick.time)
-      +",\"execution_profile\":{\"ea_version\":\"0.63\",\"role\":\""+(SmallOnlyMode ? "SMALL" : "MAIN")+"\""
+      +",\"execution_profile\":{\"ea_version\":\"0.64\",\"role\":\""+(SmallOnlyMode ? "SMALL" : "MAIN")+"\""
       +",\"risk_usd\":"+DoubleToString(RiskPerTradeUSD,8)
       +",\"allow_override\":"+(AllowMinLotRiskOverride ? "true" : "false")
       +",\"units_per_usd\":"+DoubleToString(MoneyUnitsPerUSD,8)
@@ -1190,8 +1211,11 @@ bool BuildRequest(string &payload,datetime &bar_time)
       +",\"main_consensus\":"+(EnableMainDirectionConsensus ? "true" : "false")
       +",\"main_fast_profit\":"+(EnableMainFastProfit ? "true" : "false")
       +",\"small_enabled\":"+(EnableSmallProfitTrades ? "true" : "false")
-      +",\"entry_strategy\":\""+(SmallOnlyMode ? "h1_m1_pullback" : "chronos")+"\""
+      +",\"entry_strategy\":\""+(SmallOnlyMode ? "intrabar_trend_pullback" : "chronos")+"\""
       +",\"rapid_scalp\":"+(EnableSmallRapidScalp ? "true" : "false")
+      +",\"live_trend_direction\":\""+LiveTrendDirection+"\""
+      +",\"live_setup_direction\":\""+LiveSetupDirection+"\""
+      +",\"live_monitor_status\":\""+LiveMonitorStatus+"\""
       +",\"scalp_seconds\":"+IntegerToString(SmallScalpMaxHoldSeconds)+"},\"position_observation\":";
    ulong held=0; datetime held_open=0;
    if(ManagedPosition(held,held_open) && PositionSelectByTicket(held))
@@ -1410,28 +1434,190 @@ bool PullbackPattern(const MqlRates &hourly[],const MqlRates &minute[],
    return direction!="" && anchor>0.0;
 }
 
+
+// A repeated quote is not independent evidence. Require samples >=5s apart,
+// reset on reversal, bar change, missing evidence or a >10s quote gap.
+string AdvanceLiveEvidence(LiveEvidence &state,const string raw,const long quote_msc,
+   const datetime now,const datetime bucket,const int required)
+{
+   if(raw=="NONE" || now<state.last_sample || now-state.last_sample>10
+      || state.bucket!=bucket || state.candidate!=raw)
+   { state.candidate=raw; state.count=0; state.last_sample=0; state.last_quote_msc=0; state.bucket=bucket; }
+   if(raw=="NONE") return "NONE";
+   if(quote_msc!=state.last_quote_msc && (state.count==0 || now-state.last_sample>=5))
+   { state.count++; state.last_sample=now; state.last_quote_msc=quote_msc; }
+   return state.count>=required ? raw : "NONE";
+}
+
+bool LiveBarsValid(const MqlRates &bars[],const int seconds,const datetime now)
+{
+   if(ArraySize(bars)<3 || now<bars[0].time || now-bars[0].time>=seconds) return false;
+   for(int i=0;i<3;i++)
+   {
+      if(!MathIsValidNumber(bars[i].open) || !MathIsValidNumber(bars[i].close)
+         || !MathIsValidNumber(bars[i].high) || !MathIsValidNumber(bars[i].low)
+         || bars[i].low<=0.0 || bars[i].high<bars[i].low
+         || bars[i].open<bars[i].low || bars[i].open>bars[i].high
+         || bars[i].close<bars[i].low || bars[i].close>bars[i].high) return false;
+      if(i<2 && bars[i].time-bars[i+1].time!=seconds) return false;
+   }
+   return true;
+}
+
+// Live quote vs current M5/M15 opens and previous structure; no closing-bar wait.
+string LivePriceDirection(const MqlRates &five[],const MqlRates &fifteen[],
+   const MqlTick &quote,const datetime now,const double atr)
+{
+   if(!LiveBarsValid(five,300,now) || !LiveBarsValid(fifteen,900,now)
+      || !MathIsValidNumber(atr) || atr<=0.0 || !MathIsValidNumber(quote.bid)
+      || !MathIsValidNumber(quote.ask) || quote.bid<=0.0 || quote.ask<=quote.bid
+      || quote.time>now || now-quote.time>5) return "NONE";
+   double buffer=atr*0.05;
+   bool up=(quote.bid>five[0].open+buffer && quote.bid>fifteen[0].open+buffer);
+   bool down=(quote.ask<five[0].open-buffer && quote.ask<fifteen[0].open-buffer);
+   bool up_break=quote.bid>MathMax(five[1].high,fifteen[1].high)+buffer;
+   bool down_break=quote.ask<MathMin(five[1].low,fifteen[1].low)-buffer;
+   bool up_move=quote.bid>MathMax(five[0].open,fifteen[0].open)+atr*0.15;
+   bool down_move=quote.ask<MathMin(five[0].open,fifteen[0].open)-atr*0.15;
+   if(up && (up_break || up_move)) return "BUY";
+   if(down && (down_break || down_move)) return "SELL";
+   return "NONE";
+}
+
+bool IntrabarPullbackPattern(const MqlRates &minute[],const MqlTick &quote,
+   const datetime now,const double atr,const string trend,string &direction,double &anchor)
+{
+   direction=""; anchor=0.0;
+   if(ArraySize(minute)<4 || !LiveBarsValid(minute,60,now)
+      || minute[2].time-minute[3].time!=60 || !MathIsValidNumber(minute[3].close)
+      || minute[3].close<=0.0 || !MathIsValidNumber(atr) || atr<=0.0
+      || !MathIsValidNumber(quote.bid) || !MathIsValidNumber(quote.ask)
+      || quote.time>now || now-quote.time>5 || quote.bid<=0.0 || quote.ask<=quote.bid) return false;
+   double buffer=atr*0.03;
+   if(trend=="BUY" && minute[2].close<minute[3].close && minute[1].close<minute[2].close
+      && quote.bid>minute[0].open+buffer && quote.bid>minute[1].high+buffer
+      && quote.bid-minute[1].high<=atr*0.25)
+   { direction="BUY"; anchor=MathMin(minute[0].low,MathMin(minute[1].low,minute[2].low)); }
+   else if(trend=="SELL" && minute[2].close>minute[3].close && minute[1].close>minute[2].close
+      && quote.ask<minute[0].open-buffer && quote.ask<minute[1].low-buffer
+      && minute[1].low-quote.ask<=atr*0.25)
+   { direction="SELL"; anchor=MathMax(minute[0].high,MathMax(minute[1].high,minute[2].high)); }
+   return direction!="" && anchor>0.0;
+}
+
+string PrimaryPriorityKey(const string suffix)
+{
+   return "RamonPrimary."+IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN))+"."+_Symbol+"."+suffix;
+}
+
+void PublishPrimaryAssessment()
+{
+   if(SmallOnlyMode) return;
+   // Publish READY first, then timestamp: consumers fail closed until both exist.
+   GlobalVariableSet(PrimaryPriorityKey("READY"),MainEntryEligible ? 1.0 : 0.0);
+   GlobalVariableSet(PrimaryPriorityKey("AT"),(double)TimeCurrent());
+}
+
+bool PrimaryPriorityBlocks(string &reason)
+{
+   // A current primary position always takes precedence for new replacement entries.
+   for(int i=PositionsTotal()-1;i>=0;i--)
+   {
+      ulong ticket=PositionGetTicket(i);
+      if(ticket==0) { reason="PRIMARY inventory unavailable"; return true; }
+      if(PositionGetString(POSITION_SYMBOL)==_Symbol
+         && (ulong)PositionGetInteger(POSITION_MAGIC)==PrimaryMagicNumber)
+      { reason="PRIMARY position already open"; return true; }
+   }
+   if(!GlobalVariableCheck(PrimaryPriorityKey("READY")) || !GlobalVariableCheck(PrimaryPriorityKey("AT")))
+   { reason="PRIMARY readiness unavailable"; return true; }
+   datetime at=(datetime)GlobalVariableGet(PrimaryPriorityKey("AT"));
+   if(at<=0 || TimeCurrent()<at || TimeCurrent()-at>15)
+   { reason="PRIMARY readiness stale; keep MAIN chart running"; return true; }
+   if(GlobalVariableGet(PrimaryPriorityKey("READY"))>=0.5)
+   { reason="PRIMARY executable entry has priority"; return true; }
+   return false;
+}
+
+void AppendLiveMonitorCsv(const MqlTick &quote)
+{
+   if(!WriteCsvLogs || TimeCurrent()-LiveMonitorLogTime<5) return;
+   LiveMonitorLogTime=TimeCurrent();
+   string name="RamonLive_"+_Symbol+"_"+IntegerToString((long)MagicNumber)+".csv";
+   int file=FileOpen(name,FILE_READ|FILE_WRITE|FILE_CSV|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ,',');
+   if(file==INVALID_HANDLE) return;
+   if(FileSize(file)==0) FileWrite(file,"captured_utc","quote_utc","version","role","bid","ask",
+      "raw_direction","confirmed_direction","trend_count","setup_direction","setup_count","structural_anchor","atr","m5_current_open","m15_current_open","m1_trigger","status","entry_status","model_decision","model_sample_key");
+   FileSeek(file,0,SEEK_END);
+   FileWrite(file,UTCText(TimeCurrent(),TIME_DATE|TIME_SECONDS),UTCText(quote.time,TIME_DATE|TIME_SECONDS),"0.64",
+      SmallOnlyMode ? "INTRABAR_PULLBACK" : "MAIN",DoubleToString(quote.bid,_Digits),DoubleToString(quote.ask,_Digits),
+      LiveTrendRaw,LiveTrendDirection,TrendEvidence.count,LiveSetupDirection,SetupEvidence.count,
+      DoubleToString(LiveSetupAnchor,_Digits),DoubleToString(LastAtr,_Digits),
+      DoubleToString(LiveM5Open,_Digits),DoubleToString(LiveM15Open,_Digits),DoubleToString(LiveM1Trigger,_Digits),
+      LiveMonitorStatus,StatusLine,LastModelDecision,LastSampleKey);
+   FileClose(file);
+}
+
+void UpdateLiveMonitor()
+{
+   ulong clock=GetTickCount64();
+   if(LiveMonitorLastClock>0 && clock-LiveMonitorLastClock<1000) return;
+   LiveMonitorLastClock=clock;
+   datetime now=TimeCurrent(); MqlTick quote;
+   MqlRates five[],fifteen[],minute[];
+   ArraySetAsSeries(five,true); ArraySetAsSeries(fifteen,true); ArraySetAsSeries(minute,true);
+   ZeroMemory(quote);
+   bool quote_ok=SymbolInfoTick(_Symbol,quote);
+   if(quote_ok && quote.time_msc>0 && quote.time_msc!=MonitorLastQuoteMsc)
+   { MonitorLastQuoteMsc=quote.time_msc; MonitorLastQuoteClock=clock; }
+   bool healthy=quote_ok && MonitorLastQuoteClock>0 && clock-MonitorLastQuoteClock<=5000
+      && (bool)TerminalInfoInteger(TERMINAL_CONNECTED)
+      && quote.time<=now && now-quote.time<=5 && quote.time_msc>0
+      && LastModelSnapshotValid && LastDecisionSuccessTime>0 && now-LastDecisionSuccessTime<=75
+      && CopyRates(_Symbol,PERIOD_M5,0,3,five)==3 && CopyRates(_Symbol,PERIOD_M15,0,3,fifteen)==3;
+   LiveM5Open=(healthy ? five[0].open : 0.0);
+   LiveM15Open=(healthy ? fifteen[0].open : 0.0);
+   LiveM1Trigger=0.0;
+   LiveTrendRaw=(healthy ? LivePriceDirection(five,fifteen,quote,now,LastAtr) : "NONE");
+   datetime bucket=(healthy ? fifteen[0].time : 0);
+   LiveTrendDirection=AdvanceLiveEvidence(TrendEvidence,LiveTrendRaw,quote.time_msc,now,bucket,3);
+   string setup=""; double anchor=0.0;
+   bool pattern=healthy && CopyRates(_Symbol,PERIOD_M1,0,4,minute)==4
+      && IntrabarPullbackPattern(minute,quote,now,LastAtr,LiveTrendDirection,setup,anchor);
+   if(pattern) LiveM1Trigger=(setup=="BUY" ? minute[1].high+LastAtr*0.03 : minute[1].low-LastAtr*0.03);
+   LiveSetupDirection=AdvanceLiveEvidence(SetupEvidence,(pattern ? setup : "NONE"),quote.time_msc,now,
+      (pattern ? minute[0].time : 0),2);
+   LiveSetupAnchor=(pattern ? anchor : 0.0);
+   LiveMonitorQuoteTime=(healthy ? quote.time : 0);
+   LiveMonitorStatus=(!healthy ? "STALE_OR_MISSING_CONTEXT" : (LiveTrendDirection=="NONE" ? "TREND_UNCONFIRMED"
+      : (LiveSetupDirection=="NONE" ? "WAIT_INTRABAR_PULLBACK" : "INTRABAR_SETUP_CONFIRMED")));
+   AppendLiveMonitorCsv(quote);
+}
+
 bool PullbackCandidate(const string decision,const string reason,
    string &direction,string &filter_reason,double &anchor)
 {
-   filter_reason="PULLBACK: waiting for closed-candle setup";
-   if(!SmallOnlyMode || !EnableSmallProfitTrades || decision!="WAIT"
-      || (reason!="insufficient_model_edge" && reason!="insufficient_model_strength"))
-      return false; // Keep news, spread, missing-model and MAIN-priority vetoes.
-   MqlRates hourly[],minute[];
-   ArraySetAsSeries(hourly,true); ArraySetAsSeries(minute,true);
-   if(CopyRates(_Symbol,PERIOD_H1,1,32,hourly)!=32
-      || CopyRates(_Symbol,PERIOD_M1,1,4,minute)!=4) return false;
-   if(!PullbackPattern(hourly,minute,TimeCurrent(),direction,anchor)) return false;
+   direction=""; anchor=0.0; filter_reason="INTRABAR: "+LiveMonitorStatus;
+   bool allowed_wait=decision=="WAIT" && (reason=="insufficient_model_edge" || reason=="insufficient_model_strength");
+   bool allowed_signal=(decision=="BUY" && reason=="forecast_up") || (decision=="SELL" && reason=="forecast_down");
+   if(!SmallOnlyMode || !EnableSmallProfitTrades || (!allowed_wait && !allowed_signal))
+   { filter_reason="INTRABAR: model/news/spread veto"; return false; }
+   if(PrimaryPriorityBlocks(filter_reason)) return false;
+   if(LiveSetupDirection=="NONE" || LiveSetupAnchor<=0.0 || LiveMonitorQuoteTime<=0
+      || TimeCurrent()-LiveMonitorQuoteTime>5) return false;
+   direction=LiveSetupDirection; anchor=LiveSetupAnchor;
+   // Do not defeat a separately confirmed opposing model signal.
    if((LastIntrabarConfirmed && LastIntrabarDirection!=direction)
       || (LastAiTrendConfirmed && LastAiTrendDirection!=direction))
-   { filter_reason="PULLBACK: opposing model confirmation"; return false; }
-   filter_reason="PULLBACK: setup confirmed"; return true;
+   { filter_reason="INTRABAR: opposing model confirmation"; return false; }
+   filter_reason="INTRABAR: setup confirmed; PRIMARY blocked"; return true;
 }
 
 bool IsPullbackPosition(const ulong ticket)
 {
    return PositionSelectByTicket(ticket) && IsSmallProfitPosition(ticket)
-      && StringFind(PositionGetString(POSITION_COMMENT),":P")>=0;
+      && (StringFind(PositionGetString(POSITION_COMMENT),":P")>=0
+         || StringFind(PositionGetString(POSITION_COMMENT),":I")>=0);
 }
 
 bool SmallProfitCandidate(const string decision,const string reason,
@@ -2166,7 +2352,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.63";
+      version="0.64";
    }
    if(close_detail!="") detail=close_detail;
 
@@ -2198,7 +2384,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       );
    }
 
-   if(has_sizing && entry_kind==DEAL_ENTRY_IN && (version=="0.60" || version=="0.62" || version=="0.63"))
+   if(has_sizing && entry_kind==DEAL_ENTRY_IN && (version=="0.60" || version=="0.62" || version=="0.63" || version=="0.64"))
    {
       ulong id=(ulong)HistoryDealGetInteger(deal,DEAL_POSITION_ID);
       string cap_key="RamonCap."+IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN))+"."+IntegerToString((long)id);
@@ -2260,6 +2446,7 @@ bool ClosedTradePayload(const ulong identifier,string &payload)
          string comment=HistoryDealGetString(deal,DEAL_COMMENT);
          if(StringFind(comment,"Ramon:")!=0) return false;
          if(StringFind(comment,":P")>=0) entry_strategy="h1_m1_pullback";
+         if(StringFind(comment,":I")>=0) entry_strategy="intrabar_trend_pullback";
          string key=StringSubstr(comment,6,16);
          string side=(type==DEAL_TYPE_BUY ? "BUY" : "SELL");
          if(!ValidSampleKey(key) || (sample!="" && sample!=key)
@@ -3348,8 +3535,14 @@ void ManageOpenPosition()
       HandleManagedExitFailure(ticket,"TIME EXIT");
 }
 
+void OnTick()
+{
+   UpdateLiveMonitor(); // No network request, order submission or position exit on tick.
+}
+
 void OnTimer()
 {
+   UpdateLiveMonitor();
    ShowStatus();
    if(!(bool)TerminalInfoInteger(TERMINAL_CONNECTED))
    { StatusLine="Terminal disconnected"; ShowStatus(); return; }
@@ -3368,6 +3561,8 @@ void OnTimer()
       // Never issue trade telemetry immediately before a live model decision.
       // On Wine/MT5, back-to-back WebRequest calls can fail locally with 1003/5203.
       // Use idle timer cycles for learning telemetry and always prioritize /decision.
+      TryLiveEntry();
+      PublishPrimaryAssessment();
       SyncClosedTrades();
       return;
    }
@@ -3376,7 +3571,8 @@ void OnTimer()
    string payload,reply;
    datetime bar_time=0;
    if(!BuildRequest(payload,bar_time) || !QueryModel(payload,reply))
-   { ShowStatus(); return; }
+   { LastModelSnapshotValid=false; MainEntryEligible=false; PublishPrimaryAssessment(); ShowStatus(); return; }
+   LastModelSnapshotValid=false;
    string decision="",reason="",base_decision="",base_reason="",intrabar_direction="";
    double ensemble_ready=0.0,ensemble_active=0.0;
    string sample_key="",bundle_id="";
@@ -3482,6 +3678,7 @@ void OnTimer()
       || (datetime)signal_time!=bar_time
       || (decision!="BUY" && decision!="SELL" && decision!="WAIT"))
    { StatusLine="Invalid/stale model response"; ShowStatus(); return; }
+   LastModelSnapshotValid=true;
    LastDecisionSuccessTime=TimeCurrent();
    LastSampleKey=sample_key;
    LastSampleSaved=(sample_saved>=0.5);
@@ -3567,6 +3764,27 @@ void OnTimer()
    Print("Ramon ",UTCText(bar_time,TIME_DATE|TIME_SECONDS)," ",decision," ",reason,
       " median=",DoubleToString(median,_Digits));
 
+   LiveMonitorLastClock=0;
+   UpdateLiveMonitor();
+   TryLiveEntry();
+   PublishPrimaryAssessment();
+   ShowStatus();
+}
+
+void TryLiveEntry()
+{
+   MainEntryEligible=false;
+   datetime now=TimeCurrent();
+   datetime bar_time=iTime(_Symbol,PERIOD_M15,1);
+   if(!LastModelSnapshotValid || !ValidSampleKey(LastSampleKey) || LastDecisionSuccessTime<=0
+      || now<LastDecisionSuccessTime || now-LastDecisionSuccessTime>75
+      || bar_time<=0 || bar_time!=LastSignalBarTime
+      || LiveMonitorQuoteTime<=0 || MonitorLastQuoteClock<=0
+      || GetTickCount64()-MonitorLastQuoteClock>5000)
+   { StatusLine="Entry paused: model context stale or invalid"; return; }
+   string decision=LastModelDecision,reason=LastModelReason;
+   double atr=LastAtr,stop_distance=LastStopDistance,target_distance=LastTargetDistance;
+   ulong ticket=0; datetime opened=0;
    // Learning snapshots continue while positions exist; execution remains single-position.
    if(ManagedPosition(ticket,opened))
    { StatusLine=(LastSampleSaved ? "Managed position OPEN; learning snapshot saved" : "Managed position OPEN; snapshot storage failed"); ShowStatus(); return; }
@@ -3574,9 +3792,15 @@ void OnTimer()
    { StatusLine="Another robot has a position on this symbol"; ShowStatus(); return; }
    if(decision!="BUY" && decision!="SELL" && decision!="WAIT")
    { StatusLine="Unknown model decision"; ShowStatus(); return; }
-   if(SmallOnlyMode && decision!="WAIT")
-   { StatusLine="Primary signal; small EA stands aside"; ShowStatus(); return; }
 
+
+   if(!SmallOnlyMode && (decision=="BUY" || decision=="SELL")
+      && ((LiveTrendRaw!="NONE" && LiveTrendRaw!=decision)
+         || (LiveTrendDirection!="NONE" && LiveTrendDirection!=decision)))
+   {
+      string opposing=(LiveTrendRaw!="NONE" && LiveTrendRaw!=decision ? LiveTrendRaw : LiveTrendDirection);
+      StatusLine="LIVE TREND VETO: "+opposing+" opposes "+decision; ShowStatus(); return;
+   }
    string consensus_status="";
    if(!MainDirectionConsensusPass(decision,consensus_status))
    {
@@ -3589,7 +3813,7 @@ void OnTimer()
    double pullback_anchor=0.0;
    bool small_profit=PullbackCandidate(decision,reason,
       small_direction,small_filter_reason,pullback_anchor);
-   if(decision=="WAIT" && !small_profit)
+   if((SmallOnlyMode || decision=="WAIT") && !small_profit)
    {
       if(SmallOnlyMode)
          StatusLine=small_filter_reason;
@@ -3688,6 +3912,8 @@ void OnTimer()
    if(!AcquireSharedRiskLock(risk_lease))
    { StatusLine="Shared risk lock busy or unavailable"; ShowStatus(); return; }
    string shared_risk_reason="";
+   if(SmallOnlyMode && PrimaryPriorityBlocks(shared_risk_reason))
+   { ReleaseSharedRiskLock(risk_lease); StatusLine=shared_risk_reason; ShowStatus(); return; }
    if(!SharedRiskAllowsEntry(side,entry,stop,volume,shared_risk_reason))
    {
       ReleaseSharedRiskLock(risk_lease);
@@ -3696,12 +3922,15 @@ void OnTimer()
       return;
    }
 
+   if(GetTickCount64()-MonitorLastQuoteClock>5000)
+   { ReleaseSharedRiskLock(risk_lease); StatusLine="Entry quote expired while checking risk"; return; }
+   if(!SmallOnlyMode) MainEntryEligible=true;
    // Telemetry/management staging must never block an otherwise valid entry.
    StageEntrySizing(LastSampleKey,side,entry,stop,volume);
    if(!small_profit)
       PersistTPPlan(LastSampleKey,decision,entry,LastTargetTP1,LastTargetTP2,LastTargetTP3);
    // The broker owns SL/TP immediately. No position is opened when the model is unavailable.
-   string trade_comment="Ramon:"+LastSampleKey+(small_profit ? ":P" : "");
+   string trade_comment="Ramon:"+LastSampleKey+(small_profit ? ":I" : "");
    bool submitted=(
       decision=="BUY"
       ? Trade.Buy(volume,_Symbol,0.0,stop,target,trade_comment)
@@ -3711,6 +3940,7 @@ void OnTimer()
    ReleaseSharedRiskLock(risk_lease);
    if(!submitted || (retcode!=TRADE_RETCODE_DONE && retcode!=TRADE_RETCODE_PLACED))
    {
+      MainEntryEligible=false;
       ClearPendingSizing();
       StatusLine="Order rejected "+IntegerToString((int)retcode);
    }

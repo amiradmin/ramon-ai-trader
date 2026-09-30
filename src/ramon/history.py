@@ -353,7 +353,7 @@ def persist_trade_outcome(db: str | Path, payload: dict[str, object], received: 
     extra["training_status"] = classify_training_status(
         exit_reason, str(extra.get("exit_detail", "") or "")
     )
-    if extra.get("entry_strategy") == "h1_m1_pullback":
+    if extra.get("entry_strategy") in {"h1_m1_pullback", "intrabar_trend_pullback"}:
         extra["training_status"] = "CENSORED_ALTERNATIVE_STRATEGY"
     extra_names = [*TRADE_TELEMETRY_COLUMNS, "training_status"]
     updates = []
@@ -376,7 +376,7 @@ def persist_trade_outcome(db: str | Path, payload: dict[str, object], received: 
         elif name == "training_status":
             updates.append(
                 "training_status=CASE "
-                "WHEN COALESCE(trade_outcomes.entry_strategy,excluded.entry_strategy)='h1_m1_pullback' "
+                "WHEN COALESCE(trade_outcomes.entry_strategy,excluded.entry_strategy) IN ('h1_m1_pullback','intrabar_trend_pullback') "
                 "THEN 'CENSORED_ALTERNATIVE_STRATEGY' "
                 "WHEN excluded.exit_reason=trade_outcomes.exit_reason "
                 "AND excluded.exit_reason='DEAL_REASON_EXPERT' "
@@ -437,7 +437,7 @@ def validate_trade_telemetry(payload: dict[str, object], net: float) -> dict[str
 
     if payload.get("entry_strategy") is not None:
         strategy = str(payload["entry_strategy"])
-        if strategy not in {"chronos", "h1_m1_pullback"}:
+        if strategy not in {"chronos", "h1_m1_pullback", "intrabar_trend_pullback"}:
             raise ValueError("invalid entry_strategy")
         extra["entry_strategy"] = strategy
     if payload.get("trade_role") is not None:
