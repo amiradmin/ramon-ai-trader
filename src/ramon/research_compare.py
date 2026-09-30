@@ -16,6 +16,16 @@ from .model import ChronosForecaster, model_name
 from .replay import replay
 
 
+def data_coverage(bars, spreads):
+    start = max(256, len(bars)*4//5)
+    missing = [i for i in range(start, len(bars)) if spreads[i] <= 0]
+    return {"total_m15_bars": len(bars), "holdout_bars": max(0, len(bars)-start),
+            "missing_holdout_spreads": len(missing),
+            "missing_spread_examples": [{"mt5_time": bars[i].time, "spread_points": spreads[i]}
+                                        for i in missing[:10]],
+            "clock": "raw MT5 broker timestamps", "ready": len(bars) >= 600 and not missing}
+
+
 def research_compare(db, model, *, symbol="XAUUSD_l", point=.01, stride=4, cost_r=None):
     if cost_r is not None and (not math.isfinite(cost_r) or cost_r < 0):
         raise ValueError("cost-r must be finite and nonnegative")
@@ -54,10 +64,18 @@ def main():
     parser.add_argument("--stride", type=int, default=4)
     parser.add_argument("--cost-r", type=float)
     parser.add_argument("--out", default="/data/research/chronos-covariates.json")
+    parser.add_argument("--coverage-only", action="store_true", help="Inspect data without loading model weights")
     args = parser.parse_args()
     bars, spreads = load_bars(args.db, args.symbol)
-    if len(bars) < 600 or any(v <= 0 for v in spreads[max(256, len(bars)*4//5):]):
-        parser.error("need >=600 completed M15 bars and recorded spreads throughout the final 20%; import MT5 history first")
+    coverage = data_coverage(bars, spreads)
+    if args.coverage_only:
+        print(json.dumps(coverage, indent=2))
+        return
+    if not coverage["ready"]:
+        parser.error(f"M15 bars={coverage['total_m15_bars']} (need >=600); "
+                     f"holdout bars={coverage['holdout_bars']}; "
+                     f"missing/zero holdout spreads={coverage['missing_holdout_spreads']}. "
+                     "Use --coverage-only to inspect timestamps; importing OHLC alone cannot restore missing spreads.")
     if args.stride < 1 or (args.cost_r is not None and (not math.isfinite(args.cost_r) or args.cost_r < 0)):
         parser.error("invalid stride or cost-r")
     checkpoint = Path(args.active_model_file)

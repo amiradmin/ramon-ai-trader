@@ -4,7 +4,7 @@ import pytest
 
 from ramon.core import Bar, Market
 from ramon.covariates import CovariateForecaster, past_covariates
-from ramon.research_compare import research_compare
+from ramon.research_compare import data_coverage, research_compare
 from test_compare import RisingForecast, seed
 
 
@@ -77,3 +77,16 @@ def test_missing_spread_never_falls_back_in_experiment(tmp_path):
 def test_nonfinite_cost_is_rejected(tmp_path):
     with pytest.raises(ValueError, match="finite"):
         research_compare(tmp_path / "does-not-exist.db", model(), cost_r=float("nan"))
+
+
+def test_coverage_separates_bar_count_from_missing_holdout_spreads():
+    bars = [Bar(i+1, 100, 101, 99, 100) for i in range(1000)]
+    spreads = [42]*1000
+    spreads[850] = 0
+    report = data_coverage(bars, spreads)
+    assert report["total_m15_bars"] == 1000
+    assert report["holdout_bars"] == 200
+    assert report["missing_holdout_spreads"] == 1
+    assert report["missing_spread_examples"] == [{"mt5_time": 851, "spread_points": 0}]
+    assert not report["ready"]
+    assert not data_coverage([], [])["ready"]
