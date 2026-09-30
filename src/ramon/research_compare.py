@@ -26,17 +26,31 @@ def data_coverage(bars, spreads):
             "clock": "raw MT5 broker timestamps", "ready": len(bars) >= 600 and not missing}
 
 
-def research_compare(db, model, *, symbol="XAUUSD_l", point=.01, stride=4, cost_r=None):
+def research_compare(db, model, *, symbol="XAUUSD_l", point=.01, stride=4, cost_r=None,
+                     skip_missing_spread_windows=False):
     if cost_r is not None and (not math.isfinite(cost_r) or cost_r < 0):
         raise ValueError("cost-r must be finite and nonnegative")
-    report = compare(db, model, symbol=symbol, point=point, stride=stride, cost_r=cost_r)
+    report = compare(db, model, symbol=symbol, point=point, stride=stride, cost_r=cost_r,
+                     skip_missing_spread_windows=skip_missing_spread_windows)
     bars, spreads = load_bars(db, symbol)
     enriched = CovariateForecaster(model)
     result = replay(bars, spreads, model, symbol=symbol, point=point,
                     start=max(256, len(bars)*4//5), stride=stride, settings=Settings(),
                     require_recorded_spreads=True, roundtrip_cost_r=report["cost"]["roundtrip_r"] or 0,
+                    skip_missing_spread_windows=skip_missing_spread_windows,
                     model_for_market=enriched.for_market)
     report["results"]["chronos_past_covariates"] = asdict(result)
+    start = max(256, len(bars)*4//5)
+    opportunities = list(range(start, len(bars)-Settings().horizon, stride))
+    excluded = [i for i in opportunities if any(v <= 0 for v in spreads[i:i+Settings().horizon+1])]
+    report["data_coverage"] = {**data_coverage(bars, spreads),
+                               "exclusion_enabled": skip_missing_spread_windows,
+                               "scheduled_opportunities": len(opportunities),
+                               "excluded_scheduled_windows": len(excluded),
+                               "eligible_scheduled_windows": len(opportunities)-len(excluded),
+                               "exclusion_is_model_independent": True}
+    if skip_missing_spread_windows:
+        report["limitations"].append("Missing-spread execution windows are excluded for every model without removing candles. This subset may be biased; results do not cover missing periods.")
     report.update(mode="offline_research", live_execution_effect="NONE", promotion_allowed=False,
                   chronos_model=model.model_id, chronos_revision=model.revision,
                   covariates=["range", "body", "return", "atr14"],
@@ -65,13 +79,15 @@ def main():
     parser.add_argument("--cost-r", type=float)
     parser.add_argument("--out", default="/data/research/chronos-covariates.json")
     parser.add_argument("--coverage-only", action="store_true", help="Inspect data without loading model weights")
+    parser.add_argument("--skip-missing-spread-windows", action="store_true",
+                        help="Explicitly exclude incomplete execution windows for all models; never impute spreads")
     args = parser.parse_args()
     bars, spreads = load_bars(args.db, args.symbol)
     coverage = data_coverage(bars, spreads)
     if args.coverage_only:
         print(json.dumps(coverage, indent=2))
         return
-    if not coverage["ready"]:
+    if len(bars) < 600 or (coverage["missing_holdout_spreads"] and not args.skip_missing_spread_windows):
         parser.error(f"M15 bars={coverage['total_m15_bars']} (need >=600); "
                      f"holdout bars={coverage['holdout_bars']}; "
                      f"missing/zero holdout spreads={coverage['missing_holdout_spreads']}. "
@@ -81,7 +97,8 @@ def main():
     checkpoint = Path(args.active_model_file)
     model_id = checkpoint.read_text().strip() if checkpoint.exists() else args.model
     model = ChronosForecaster(model_name(model_id), args.device)
-    report = research_compare(args.db, model, symbol=args.symbol, stride=args.stride, cost_r=args.cost_r)
+    report = research_compare(args.db, model, symbol=args.symbol, stride=args.stride, cost_r=args.cost_r,
+                              skip_missing_spread_windows=args.skip_missing_spread_windows)
     atomic_json(Path(args.out), report)
     print(json.dumps(report, indent=2))
 

@@ -90,3 +90,38 @@ def test_coverage_separates_bar_count_from_missing_holdout_spreads():
     assert report["missing_spread_examples"] == [{"mt5_time": 851, "spread_points": 0}]
     assert not report["ready"]
     assert not data_coverage([], [])["ready"]
+
+
+def test_explicit_exclusion_uses_same_fixed_mask_and_keeps_timeline(tmp_path):
+    from ramon.history import load_bars
+    from ramon.replay import replay
+    db = tmp_path / "data.db"
+    seed(db, missing=True)
+    bars, spreads = load_bars(db, "XAUUSD_l")
+    seen = []
+    def bind(market):
+        seen.append(market)
+        return model()
+    replay(bars, spreads, model(), start=496, stride=4, require_recorded_spreads=True,
+           skip_missing_spread_windows=True, model_for_market=bind)
+    forbidden_times = {bars[i].time for i in range(596, 601)}
+    assert not any(m.bars[-1].time in forbidden_times for m in seen)
+    assert any(m.bars[-1].time > bars[600].time and bars[600] in m.bars for m in seen)
+    report = research_compare(db, model(), cost_r=0, skip_missing_spread_windows=True)
+    assert report["data_coverage"]["excluded_scheduled_windows"] == 2
+    assert report["data_coverage"]["exclusion_is_model_independent"]
+    assert report["data_coverage"]["missing_holdout_spreads"] == 1
+    assert report["promotion_allowed"] is False
+
+
+def test_all_missing_windows_produce_zero_trades_without_model_calls(tmp_path):
+    import sqlite3
+    db = tmp_path / "data.db"
+    seed(db)
+    with sqlite3.connect(db) as con:
+        con.execute("UPDATE history_bars SET spread_points=0")
+    base = model()
+    report = research_compare(db, base, cost_r=0, skip_missing_spread_windows=True)
+    assert report["data_coverage"]["eligible_scheduled_windows"] == 0
+    assert not base.pipeline.tasks
+    assert all(r["buys"]+r["sells"] == 0 for r in report["results"].values())

@@ -19,6 +19,10 @@ bash scripts/research_ramon.sh
 The running model container stays on its current image. Do not restart it to
 run this offline experiment. MT5 does not need to be recompiled.
 
+The runner bind-mounts the current checkout's `src` into its isolated tools
+containers. If the existing tools image already has the required dependencies,
+a rebuild is unnecessary (including when a Docker registry mirror is unavailable).
+
 Reports:
 
 - `data/research/entry-validation.json`
@@ -35,6 +39,22 @@ spread fills the gap. Import actual MT5 history if needed. Historical broker fee
 are inferred when present; missing fee telemetry remains explicitly unavailable.
 An explicit fee estimate may be supplied using `--cost-r VALUE` (initial R per
 round trip). Spread is already accounted for; do not include it in that estimate.
+
+If a few recorded spreads are missing, an explicit subset experiment is available:
+
+```bash
+bash scripts/research_ramon.sh --skip-missing-spread-windows
+```
+
+All models use the same eligibility mask: a scheduled opportunity is excluded
+if its decision candle or any candle in its complete possible execution horizon
+has a missing spread. Candles stay in chronological context; no spread is
+imputed and no time axis is compressed. The report records missing bars,
+excluded scheduled windows and remaining eligible windows. Model-specific
+position occupancy still determines actual traded opportunities. Missingness
+can be systematic, so this result describes only the available-data subset and
+does not establish performance during excluded periods. Strict mode remains
+the default. `--coverage-only` prints data diagnostics without loading weights.
 
 ## Chronos comparison
 

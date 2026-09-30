@@ -37,13 +37,16 @@ def replay(
     roundtrip_cost_r: float = 0.0,
     model_for_market: Callable[[Market], Forecaster] | None = None,
     symbol: str = "XAUUSD_l",
+    skip_missing_spread_windows: bool = False,
 ) -> ReplayResult:
     """One-position historical replay with next-bar entry and conservative fills."""
     if (len(bars) != len(spreads) or stride < 1 or point <= 0
             or fallback_spread_points <= 0 or roundtrip_cost_r < 0):
         raise ValueError("invalid replay input")
     start_at = max(256, start if start is not None else len(bars) * 4 // 5)
-    if require_recorded_spreads and any(value <= 0 for value in spreads[start_at:]):
+    if skip_missing_spread_windows and not require_recorded_spreads:
+        raise ValueError("window exclusion requires recorded-spread mode")
+    if require_recorded_spreads and not skip_missing_spread_windows and any(value <= 0 for value in spreads[start_at:]):
         raise ValueError("holdout contains missing recorded spreads; cannot price execution")
     i = start_at
     decisions = buys = sells = wins = losses = timed_out = 0
@@ -52,6 +55,12 @@ def replay(
     max_drawdown_r = 0.0
     while i + settings.horizon < len(bars):
         if (i - start_at) % stride:
+            i += 1
+            continue
+        # Fixed, model-independent eligibility mask. Keep all candles for context
+        # and exclude the entire possible execution horizon, even if a particular
+        # model might close earlier. No missing spread is ever used for pricing.
+        if skip_missing_spread_windows and any(value <= 0 for value in spreads[i:i+settings.horizon+1]):
             i += 1
             continue
         spread = (spreads[i] if spreads[i] > 0 else fallback_spread_points) * point
