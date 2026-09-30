@@ -1,5 +1,5 @@
 #property strict
-#property version "1.580"
+#property version "1.600"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -35,6 +35,7 @@ input bool ConfirmMoneyUnitsPerUSD = false; // Must be true before live trading 
 input string ExpectedAccountCurrency = ""; // Optional exact ACCOUNT_CURRENCY check when non-empty.
 input double RiskPerTradeUSD = 0.06; // Preferred sizing budget.
 input bool AllowMinLotRiskOverride = true; // Permit broker minimum lot above preferred budget.
+const double MaxMinLotBudgetMultiple = 1.25; // Bounded override: never turn a 6c budget into a 20c trade.
 const double MaxExecutableRiskUSD = 0.20; // Hard fixed cap; MT5 chart inputs cannot override this value.
 const double MaxCombinedOpenRiskUSD = 0.20; // Shared cap across the primary and small EA on this account.
 input int MaxSpreadPoints = 50;
@@ -432,6 +433,9 @@ bool SharedRiskAllowsEntry(
    double result=0.0;
    if(!OrderCalcProfit(side,_Symbol,volume,worst_entry,stop,result) || result>=0.0)
    { reason="Shared risk new stop calculation failed"; return false; }
+   double per_trade_cap=(SmallOnlyMode ? SmallProfitRiskCapUnits() : MaxExecutableRiskUnits());
+   if(per_trade_cap<=0.0 || -result>per_trade_cap+0.00001)
+   { reason="Per-trade risk including entry deviation exceeds bounded budget"; return false; }
    if(existing-result>MaxCombinedOpenRiskUSD*MoneyUnitsPerUSD+0.00001)
    {
       reason="Shared risk cap: open="+DoubleToString(existing,2)
@@ -526,9 +530,20 @@ bool MinimumLotExceedsRiskBudget()
    );
 }
 
+double BoundedEntryRiskUSD(const double budget,const bool allow_override)
+{
+   if(budget<=0.0) return 0.0;
+   return MathMin(MaxExecutableRiskUSD,budget*(allow_override ? MaxMinLotBudgetMultiple : 1.0));
+}
+
+double MainEntryRiskCapUSD()
+{
+   return BoundedEntryRiskUSD(EffectiveRiskPerTradeUSD(),AllowMinLotRiskOverride);
+}
+
 double MaxExecutableRiskUnits()
 {
-   return MaxExecutableRiskUSD*MoneyUnitsPerUSD;
+   return MainEntryRiskCapUSD()*MoneyUnitsPerUSD;
 }
 
 bool MinimumLotOverrideEligible()
@@ -554,8 +569,8 @@ string RiskGateText()
    if(MinimumLotOverrideEligible())
    {
       if(LastModelDecision=="WAIT")
-         return "WOULD ALLOW MIN LOT: override <= $"+DoubleToString(MaxExecutableRiskUSD,2);
-      return "PASS: MIN LOT OVERRIDE <= $"+DoubleToString(MaxExecutableRiskUSD,2);
+         return "WOULD ALLOW MIN LOT: override <= $"+DoubleToString(MainEntryRiskCapUSD(),3);
+      return "PASS: MIN LOT OVERRIDE <= $"+DoubleToString(MainEntryRiskCapUSD(),3);
    }
    if(LastModelDecision=="WAIT")
       return "WOULD BLOCK IF SIGNAL: min lot > hard cap";
@@ -589,7 +604,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.58\n"
+      +"EA version: 0.60\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -699,6 +714,8 @@ string BuildDiagnosticText()
       +"  ExpectedCurrency: "+(StringLen(ExpectedAccountCurrency)>0 ? ExpectedAccountCurrency : "NOT_SET")+"\n"
       +"MoneyUnitsConfirmed: "+BoolText(ConfirmMoneyUnitsPerUSD)
       +"  MoneyUnitsPerUSD: "+DoubleToString(MoneyUnitsPerUSD,2)+"\n"
+      +"BoundedEntryCapUSD: "+DoubleToString(MainEntryRiskCapUSD(),3)
+      +"  MinLotBudgetMultiple: "+DoubleToString(MaxMinLotBudgetMultiple,2)+"x\n"
       +"SharedRamonRiskCapUSD: "+DoubleToString(MaxCombinedOpenRiskUSD,2)
       +"  Includes PRIMARY and SMALL on this MT5 terminal\n"
       +"BalanceUnits: "+DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),2)
@@ -909,7 +926,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.58 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.60 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
@@ -1160,7 +1177,32 @@ bool BuildRequest(string &payload,datetime &bar_time)
             +",\"close\":"+DoubleToString(micro[j].close,_Digits)+"}";
       }
    }
-   payload+="],\"quote_time\":"+IntegerToString((long)tick.time)+"}";
+   payload+="],\"quote_time\":"+IntegerToString((long)tick.time)
+      +",\"execution_profile\":{\"ea_version\":\"0.60\",\"role\":\""+(SmallOnlyMode ? "SMALL" : "MAIN")+"\""
+      +",\"risk_usd\":"+DoubleToString(RiskPerTradeUSD,8)
+      +",\"allow_override\":"+(AllowMinLotRiskOverride ? "true" : "false")
+      +",\"units_per_usd\":"+DoubleToString(MoneyUnitsPerUSD,8)
+      +",\"hold_bars\":"+IntegerToString(MaximumHoldBars)
+      +",\"snapshot_seconds\":"+IntegerToString(SnapshotIntervalSeconds)
+      +",\"spread_limit\":"+IntegerToString(MaxSpreadPoints)
+      +",\"deviation_points\":"+IntegerToString(MaxDeviationPoints)
+      +",\"profit_protection\":"+(EnableProfitProtection ? "true" : "false")
+      +",\"main_consensus\":"+(EnableMainDirectionConsensus ? "true" : "false")
+      +",\"main_fast_profit\":"+(EnableMainFastProfit ? "true" : "false")
+      +",\"small_enabled\":"+(EnableSmallProfitTrades ? "true" : "false")
+      +",\"rapid_scalp\":"+(EnableSmallRapidScalp ? "true" : "false")
+      +",\"scalp_seconds\":"+IntegerToString(SmallScalpMaxHoldSeconds)+"},\"position_observation\":";
+   ulong held=0; datetime held_open=0;
+   if(ManagedPosition(held,held_open) && PositionSelectByTicket(held))
+   {
+      string trade_key=AccountInfoString(ACCOUNT_SERVER)+":"+IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN))
+         +":"+IntegerToString(PositionGetInteger(POSITION_IDENTIFIER));
+      payload+="{\"trade_key\":\""+JsonEscape(trade_key)+"\",\"profit_units\":"
+         +DoubleToString(PositionGetDouble(POSITION_PROFIT)+PositionGetDouble(POSITION_SWAP),8)
+         +",\"volume\":"+DoubleToString(PositionGetDouble(POSITION_VOLUME),8)+"}";
+   }
+   else payload+="null";
+   payload+="}";
    return true;
 }
 
@@ -1483,6 +1525,10 @@ bool SmallProfitStop(const ENUM_ORDER_TYPE side,const double entry,
       || unit_loss>=0.0)
       return false;
    double risk_cap=SmallProfitRiskCapUnits();
+   // Reserve permitted entry deviation inside the SMALL cap before choosing its stop.
+   double deviation_loss=0.0;
+   if(!OrderCalcProfit(side,_Symbol,volume,entry,entry+sign*MaxDeviationPoints*point,deviation_loss)) return false;
+   risk_cap-=MathMax(0.0,-deviation_loss);
    if(risk_cap<=0.0) return false;
    double max_distance=risk_cap/(-unit_loss);
    double model_distance=MathAbs(model_stop-entry);
@@ -1516,7 +1562,7 @@ double SelectVolume(ENUM_ORDER_TYPE direction,double entry,double stop)
    if(!OrderCalcProfit(direction,_Symbol,minimum,entry,stop,money) || money>=0.0)
       return 0.0;
    double budget=EffectiveRiskPerTradeUSD()*MoneyUnitsPerUSD;
-   double hard_cap=MaxExecutableRiskUSD*MoneyUnitsPerUSD;
+   double hard_cap=MaxExecutableRiskUnits();
    if(budget<=0.0 || hard_cap<=0.0)
       return 0.0;
    if(-money>budget+0.00001)
@@ -1569,7 +1615,7 @@ bool StageEntrySizing(
    double budget=(SmallOnlyMode ? SmallProfitRiskCapUnits()
       : EffectiveRiskPerTradeUSD()*MoneyUnitsPerUSD);
    double hard_cap=(SmallOnlyMode ? SmallProfitRiskCapUnits()
-      : MaxExecutableRiskUSD*MoneyUnitsPerUSD);
+      : MaxExecutableRiskUnits());
    if(budget<=0.0 || hard_cap<=0.0 || MoneyUnitsPerUSD<=0.0)
       return false;
    double min_risk=MathAbs(min_loss);
@@ -1584,7 +1630,7 @@ bool StageEntrySizing(
       && volume<=minimum+0.00000001
       && min_risk<=hard_cap+0.00001
    );
-   PendingSizingMaxExecutableRiskUSD=(SmallOnlyMode ? SmallProfitMaxRiskUSD : MaxExecutableRiskUSD);
+   PendingSizingMaxExecutableRiskUSD=(SmallOnlyMode ? AccountUnitsToUSD(SmallProfitRiskCapUnits()) : MainEntryRiskCapUSD());
    PendingSizingMoneyUnitsPerUSD=MoneyUnitsPerUSD;
    return true;
 }
@@ -2066,7 +2112,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.57";
+      version="0.60";
    }
    if(close_detail!="") detail=close_detail;
 
@@ -2098,6 +2144,16 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       );
    }
 
+   if(has_sizing && entry_kind==DEAL_ENTRY_IN && version=="0.60")
+   {
+      ulong id=(ulong)HistoryDealGetInteger(deal,DEAL_POSITION_ID);
+      string cap_key="RamonCap."+IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN))+"."+IntegerToString((long)id);
+      if(!GlobalVariableCheck(cap_key))
+      {
+         GlobalVariableSet(cap_key,max_executable_risk_usd*money_units_per_usd);
+         GlobalVariablesFlush();
+      }
+   }
    int file=FileOpen(DealTelemetryPath(deal),FILE_WRITE|FILE_CSV|FILE_ANSI|FILE_COMMON,'\t');
    if(file==INVALID_HANDLE)
    {
@@ -3057,6 +3113,25 @@ void SelectDynamicProfitProtectionThresholds(const ulong ticket)
    );
 }
 
+bool EnforceMainFilledRiskCap(const ulong ticket)
+{
+   if(!PositionSelectByTicket(ticket) || IsSmallProfitPosition(ticket)) return false;
+   ulong id=(ulong)PositionGetInteger(POSITION_IDENTIFIER);
+   string key="RamonCap."+IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN))+"."+IntegerToString((long)id);
+   if(!GlobalVariableCheck(key)) return false; // Existing pre-v60 positions keep their own management.
+   double cap=GlobalVariableGet(key),risk=ManagedPositionInitialRiskUnits(ticket);
+   if(cap<=0.0 || risk<=cap+0.00001) return false;
+   if(ManagedExitPausedForMarketClosed(ticket)) return true;
+   if(Trade.PositionClose(ticket,MaxDeviationPoints) && Trade.ResultRetcode()==TRADE_RETCODE_DONE)
+   {
+      ResetMarketClosedExitPause();
+      RecordDealTelemetry(Trade.ResultDeal(),"main_filled_risk_guard");
+      StatusLine="MAIN FILLED RISK GUARD EXIT";
+   }
+   else HandleManagedExitFailure(ticket,"MAIN FILLED RISK GUARD EXIT");
+   return true;
+}
+
 void ObserveOpenPositionProfit(const ulong ticket)
 {
    if(!EnableProfitProtection || ticket==0 || !PositionSelectByTicket(ticket))
@@ -3146,6 +3221,7 @@ void ManageOpenPosition()
       ResetMarketClosedExitPause();
       return;
    }
+   if(EnforceMainFilledRiskCap(ticket)) return;
    if(EnforceSmallPositionRiskCap(ticket))
       return;
    if(ManageTPStages(ticket))
@@ -3693,3 +3769,4 @@ void OnDeinit(const int reason)
    ObjectsDeleteAll(0,UiPrefix);
    Comment("");
 }
+

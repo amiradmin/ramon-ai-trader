@@ -103,7 +103,7 @@ def trade_time(row: dict, field: str) -> str:
 def load_report_trades(con: sqlite3.Connection, symbol: str) -> list[dict]:
     """Read old and new schemas without migrating or modifying the live database."""
     samples = {row[1] for row in con.execute("PRAGMA table_info(decision_samples)")}
-    names = ("chronos_model", "bundle_id", "model_metadata", "captured", "mid", "spread", "stop_distance")
+    names = ("chronos_model", "bundle_id", "model_metadata", "captured", "mid", "spread", "stop_distance", "news_features", "regime_features", "entry_features")
     if "sample_key" in samples:
         fields = ",".join(f"s.{n} AS {n}" if n in samples else f"NULL AS {n}" for n in names)
         query = f"SELECT t.*, {fields} FROM trade_outcomes t LEFT JOIN decision_samples s ON s.sample_key=t.sample_key AND s.symbol=t.symbol WHERE t.symbol=? ORDER BY t.closed,t.trade_key"
@@ -535,6 +535,18 @@ def generate_report(DB: str, SYMBOL: str = "XAUUSD_l", LIMIT: int = 20) -> None:
             print("No closed Ramon trades found.")
             return
 
+        # Import locally: profitability reuses our read-only schema compatibility helpers.
+        from .profitability import metrics, role
+        print("=== MAIN / SMALL / UNKNOWN EXECUTED PERFORMANCE ===")
+        for trade_role in ("MAIN", "SMALL", "UNKNOWN"):
+            group = [row for row in trades if role(row) == trade_role]
+            stats = metrics(group)
+            pf_text = f"{stats['profit_factor']:.3f}" if stats['profit_factor'] is not None else "UNKNOWN"
+            print(f"{trade_role} | trades={len(group)} PF={pf_text} "
+                  f"netUSD_covered={stats['net_usd_covered']:+.4f} "
+                  f"USDcoverage={stats['usd_coverage']}/{len(group)}")
+        print("Role requires recorded entry telemetry. USD totals cover only recorded unit conversions.")
+        print()
         total = len(trades)
         wins = [r for r in trades if r["net_units"] > 0]
         losses = [r for r in trades if r["net_units"] < 0]
@@ -832,3 +844,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

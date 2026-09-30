@@ -73,6 +73,24 @@ def test_decision_to_actual_closed_trade_round_trip(learning_server):
         assert sample == (quote_time, 1.5, 3.0)
 
 
+def test_execution_profile_and_sampled_observation_cross_http_boundary(learning_server):
+    db, post = learning_server
+    candles = bars()
+    payload = {"symbol": "XAUUSD_l", "timeframe": "M15", "bid": 100.0, "ask": 100.4,
+               "point": .01, "bars": [asdict(bar) for bar in candles],
+               "quote_time": candles[-1].time + 905,
+               "execution_profile": {"ea_version": "0.60", "role": "MAIN", "risk_usd": .06},
+               "position_observation": {"trade_key": "server:123:987", "profit_units": .8, "volume": .01}}
+    decision = post("/decision", payload)
+    assert decision["sample_saved"] == 1
+    with sqlite3.connect(db) as con:
+        metadata = json.loads(con.execute("SELECT model_metadata FROM decision_samples WHERE sample_key=?",
+                                          (decision["sample_key"],)).fetchone()[0])
+        assert metadata["execution_profile"]["risk_usd"] == .06
+        assert len(metadata["strategy_code_fingerprint"]) == 64
+        assert con.execute("SELECT profit_units,volume FROM position_observations").fetchone() == (.8,.01)
+
+
 def test_recording_failure_does_not_create_unconfirmed_learning_success(learning_server, monkeypatch):
     db, post = learning_server
     import ramon.server as service
