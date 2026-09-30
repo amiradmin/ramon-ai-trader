@@ -1,5 +1,5 @@
 #property strict
-#property version "1.530"
+#property version "1.532"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -498,7 +498,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.53.0\n"
+      +"EA version: 0.53.2\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -924,11 +924,32 @@ void DrawDashboard()
    bool live_ready=LiveExecutionReady(live_reason);
    color live_color=(live_ready && permissions && lock_ok ? clrWhite : clrTomato);
    color risk_gate_color=(RiskGateBlocked() ? clrTomato : clrWhite);
-
-   string forecast_direction=ForecastDirection();
-   color forecast_color=DirectionColor(forecast_direction);
-   color dominant_color=DirectionColor(dominant);
    color sizing_color=DirectionColor(LastSizingSide);
+
+   // v0.53.2 display-only trade checklist helpers.
+   bool checklist_spread_pass=(spread_points>0 && spread_points<=MaxSpreadPoints);
+   bool checklist_volatility_ok=(LastAtr>0.0 && LastStopDistance>0.0 && LastTargetDistance>0.0);
+   bool checklist_risk_exit_ok=(LastStopDistance>0.0 && LastTargetDistance>0.0);
+   bool checklist_directional=(LastModelDecision=="BUY" || LastModelDecision=="SELL");
+   bool checklist_entry_ready=checklist_directional
+      && edge_pass && strength_pass
+      && LastIntrabarConfirmed && LastAiTrendConfirmed
+      && checklist_spread_pass && checklist_volatility_ok;
+
+   string checklist_market_trend="UNCONFIRMED";
+   color checklist_market_color=clrGold;
+   if(LastAiTrendConfirmed && LastAiTrendDirection=="BUY")
+   {
+      checklist_market_trend="BULLISH";
+      checklist_market_color=DirectionColor("BUY");
+   }
+   else if(LastAiTrendConfirmed && LastAiTrendDirection=="SELL")
+   {
+      checklist_market_trend="BEARISH";
+      checklist_market_color=DirectionColor("SELL");
+   }
+
+   double checklist_rr=(LastStopDistance>0.0 ? LastTargetDistance/LastStopDistance : 0.0);
 
    ulong managed_ticket=0;
    datetime managed_opened=0;
@@ -947,9 +968,10 @@ void DrawDashboard()
       (live_profit_usd<-0.00001 ? "-$" : "$"))
       +DoubleToString(MathAbs(live_profit_usd),2);
 
-   UiRect("PANEL",12,24,520,596,C'15,23,42',C'71,85,105');
+   // Tall/narrow panel: summary text first, checklist directly underneath.
+   UiRect("PANEL",12,24,560,930,C'15,23,42',C'71,85,105');
 
-   UiLabel("TITLE","RAMON AI TRADER  v0.53.0 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.53.2 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,clrWhite,9);
@@ -960,50 +982,16 @@ void DrawDashboard()
 
    UiLabel("DECISION","DECISION: "+LastModelDecision+"   "+LastModelReason,
       28,108,state_color,11);
-
    UiLabel("ATTRIBUTION",AttributionSummary(),28,130,clrWhite,9);
 
-   UiLabel("SIGNAL","Signal: "+UTCText(LastSignalBarTime,TIME_DATE|TIME_MINUTES)
-      +"   Spread: "+IntegerToString(spread_points)+"/"+IntegerToString(MaxSpreadPoints),
+   UiLabel("SIGNAL","Signal: "+UTCText(LastSignalBarTime,TIME_DATE|TIME_MINUTES),
       28,154,clrWhite,9);
-
    UiLabel("SIGNAL_PRICE","Signal Bid/Ask: "+DoubleToString(LastSignalBid,_Digits)
       +" / "+DoubleToString(LastSignalAsk,_Digits),
       28,176,clrWhite,9);
 
-   UiLabel("FORECAST","Forecast L/M/H: "
-      +DoubleToString(LastForecastLow,_Digits)+" / "
-      +DoubleToString(LastForecast,_Digits)+" / "
-      +DoubleToString(LastForecastHigh,_Digits)
-      +"   Bias: "+forecast_direction,
-      28,198,forecast_color,9);
-
-   UiLabel("EDGE","Dominant: "+dominant
-      +"   BuyEdge: "+DoubleToString(LastBuyEdge,2)
-      +"   SellEdge: "+DoubleToString(LastSellEdge,2),
-      28,222,dominant_color,9);
-
-   UiLabel("EDGE_PASS","EDGE "+PassFail(edge_pass)
-      +"   "+DoubleToString(dominant_edge,2)+" >= "+DoubleToString(LastMinimumEdge,2),
-      28,244,(edge_pass ? dominant_color : clrTomato),9);
-
-   UiLabel("STRENGTH","STRENGTH "+PassFail(strength_pass)
-      +"   "+DoubleToString(LastSignalStrength,3)+" >= "+DoubleToString(LastMinimumStrength,3)
-      +"   Unc: "+DoubleToString(LastUncertainty,2),
-      28,266,(strength_pass ? clrWhite : clrTomato),9);
-
-   UiLabel("MICRO","INTRABAR "+PassFail(LastIntrabarConfirmed)
-      +" "+LastIntrabarDirection
-      +"   move "+DoubleToString(LastIntrabarMoveAtr,3)+"/"+DoubleToString(LastIntrabarMinMoveAtr,3)
-      +"   rebound "+DoubleToString(LastIntrabarReboundAtr,3)+"/"+DoubleToString(LastIntrabarMinReboundAtr,3),
-      28,288,(LastIntrabarConfirmed ? DirectionColor(LastIntrabarDirection) : clrTomato),9);
-
-   UiLabel("AI_TREND","AI TREND "+PassFail(LastAiTrendConfirmed)
-      +" "+LastAiTrendDirection
-      +"   score "+DoubleToString(LastAiTrendScore,3)
-      +"   path "+DoubleToString(LastAiTrendMoveAtr,3)+" ATR"
-      +"   consistency "+DoubleToString(LastAiTrendConsistency,2),
-      28,310,(LastAiTrendConfirmed ? DirectionColor(LastAiTrendDirection) : clrTomato),9);
+   // The old Forecast / Edge / Strength / Intrabar / AI Trend rows were removed here
+   // because the same live values now appear once in the checklist below.
 
    UiLabel("ROLE_MODELS","ROLE MODELS "+(LastEnsembleReady ? "READY" : "LEARNING")
       +"   regime "+DoubleToString(LastRegimeProbability,2)
@@ -1012,7 +1000,7 @@ void DrawDashboard()
       +"   meta "+DoubleToString(LastMetaProbability,2)
       +"   risk "+DoubleToString(LastRiskProbability,2)
       +" x"+DoubleToString(LastRiskMultiplier,2),
-      28,332,clrWhite,9);
+      28,200,clrWhite,9);
 
    string news_title=(StringLen(LastNewsEventTitle)>28
       ? StringSubstr(LastNewsEventTitle,0,28)+"..." : LastNewsEventTitle);
@@ -1026,28 +1014,23 @@ void DrawDashboard()
       +" "+(LastNewsSourceReady ? "READY" : "OFFLINE")
       +" | model "+(LastNewsModelReady ? "READY" : "LEARNING")
       +" | "+LastNewsEventImpact+" "+LastNewsEventCountry+" "+news_title+news_delta,
-      28,354,news_color,9);
-
-   UiLabel("RISK","ATR: "+DoubleToString(LastAtr,2)
-      +"   SL dist: "+DoubleToString(LastStopDistance,2)
-      +"   TP dist: "+DoubleToString(LastTargetDistance,2),
-      28,376,clrWhite,9);
+      28,222,news_color,9);
 
    UiLabel("ACCOUNT","Account: "+AccountTypeText()+" (configured)"
       +"   Currency: "+AccountInfoString(ACCOUNT_CURRENCY)
       +"   Trades: "+(today<0 ? "?" : IntegerToString(today))
       +"/"+(SmallOnlyMode ? "unlimited" : IntegerToString(MaxTradesPerDay)),
-      28,398,clrWhite,9);
+      28,244,clrWhite,9);
 
    UiLabel("BALANCE_USD","Balance: "+DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),2)+" units"
       +"   ~= $"+DoubleToString(AccountUnitsToUSD(AccountInfoDouble(ACCOUNT_BALANCE)),2),
-      28,420,clrWhite,9);
+      28,266,clrWhite,9);
 
    UiLabel("LIVE_PNL",
       has_managed_position
          ? "LIVE P/L: "+pnl_units+" units   ~= "+pnl_usd
          : "LIVE P/L: --   (no Ramon position)",
-      28,442,clrWhite,10);
+      28,288,clrWhite,10);
 
    UiLabel("SIZING","Sizing: "+LastSizingSide
       +"   Vol: "+DoubleToString(LastPlannedVolume,2)
@@ -1055,31 +1038,113 @@ void DrawDashboard()
       +" x"+DoubleToString(LastRiskMultiplier,2)
       +" = $"+DoubleToString(EffectiveRiskPerTradeUSD(),3)
       +"   Cap: $"+DoubleToString(MaxExecutableRiskUSD,2),
-      28,464,sizing_color,9);
+      28,310,sizing_color,9);
 
    UiLabel("MIN_RISK","Min executable risk: $"
       +DoubleToString(AccountUnitsToUSD(LastMinimumLotStopLossUnits),4)
       +" ("+DoubleToString(LastMinimumLotStopLossUnits,2)+" units)",
-      28,486,risk_gate_color,9);
+      28,332,risk_gate_color,9);
 
-   UiLabel("RISK_GATE",RiskGateText(),28,508,risk_gate_color,10);
+   UiLabel("RISK_GATE",RiskGateText(),28,354,risk_gate_color,10);
 
    UiLabel("MONEY_CONFIRM","MoneyUnits/USD: "+DoubleToString(MoneyUnitsPerUSD,2)
       +"   Confirmed: "+BoolText(ConfirmMoneyUnitsPerUSD)
       +(EnableLiveTrading && !live_ready ? "   "+live_reason : ""),
-      28,532,(live_ready || !EnableLiveTrading ? clrWhite : clrTomato),9);
+      28,378,(live_ready || !EnableLiveTrading ? clrWhite : clrTomato),9);
 
-   UiButton("COPY","COPY DIAGNOSTIC",28,558,176,30);
-   UiButton("CLOSE","CLOSE TRADE",218,558,110,30);
+   // ---------------------- checklist ----------------------
+   int tx=24, ty=410, tw=520, th=342, row_h=28;
+   UiRect("CHECK_TABLE_BG",tx,ty,tw,th,C'17,27,46',C'71,85,105');
+   UiRect("CHECK_TABLE_HEAD",tx+4,ty+4,tw-8,28,C'30,41,59',C'71,85,105');
+
+   UiLabel("CHECK_TITLE","10-POINT TRADE CHECK",tx+12,ty+10,clrWhite,10);
+   UiLabel("CHECK_SUMMARY",
+      "MKT "+checklist_market_trend+" | MODEL "+LastModelDecision
+      +" | ENTRY "+(checklist_entry_ready ? "READY" : "NOT READY"),
+      tx+188,ty+10,(checklist_entry_ready ? state_color : clrGold),8);
+
+   UiLabel("CHECK_H1","#",tx+12,ty+42,clrWhite,8);
+   UiLabel("CHECK_H2","CHECK",tx+38,ty+42,clrWhite,8);
+   UiLabel("CHECK_H3","LIVE VALUE",tx+184,ty+42,clrWhite,8);
+   UiLabel("CHECK_H4","STATUS",tx+442,ty+42,clrWhite,8);
+
+   int ry=ty+62;
+   for(int r=0;r<10;r++)
+      UiRect("CHECK_ROW_BG_"+IntegerToString(r+1),tx+4,ry+r*row_h,tw-8,row_h-2,
+         (r%2==0 ? C'20,31,52' : C'15,24,42'),C'38,50,68');
+
+   string cvals[10];
+   cvals[0]=LastModelDecision+" | "+LastModelReason;
+   cvals[1]=checklist_market_trend+" | AI "+LastAiTrendDirection;
+   cvals[2]=DoubleToString(LastSignalStrength,3)+" / "+DoubleToString(LastMinimumStrength,3);
+   cvals[3]=dominant+" "+DoubleToString(dominant_edge,2)+" / "+DoubleToString(LastMinimumEdge,2);
+   cvals[4]=LastIntrabarDirection+" | move "+DoubleToString(LastIntrabarMoveAtr,3)
+      +" | rb "+DoubleToString(LastIntrabarReboundAtr,3);
+   cvals[5]=LastAiTrendDirection+" | score "+DoubleToString(LastAiTrendScore,3)
+      +" | path "+DoubleToString(LastAiTrendMoveAtr,3)
+      +" | cons "+DoubleToString(LastAiTrendConsistency,2);
+   cvals[6]=(LastTargetStructureReady
+      ? LastTargetMethod+" | "+LastTargetDirection
+      : "target structure learning");
+   cvals[7]="ATR "+DoubleToString(LastAtr,2)
+      +" | SL "+DoubleToString(LastStopDistance,2)
+      +" | TP "+DoubleToString(LastTargetDistance,2);
+   cvals[8]="spread "+IntegerToString(spread_points)+" / max "+IntegerToString(MaxSpreadPoints);
+   cvals[9]="SL "+DoubleToString(LastStopDistance,2)
+      +" | TP "+DoubleToString(LastTargetDistance,2)
+      +" | RR "+DoubleToString(checklist_rr,2);
+
+   string cnames[10]={"Direction","Market trend","Trend strength","Model edge",
+      "Intrabar timing","AI trend","Market structure","Volatility","Entry cost","Risk / exit"};
+   string cstats[10];
+   color ccolors[10];
+
+   cstats[0]=(checklist_directional ? "SIGNAL" : "WAIT");
+   cstats[1]=(LastAiTrendConfirmed ? "CONFIRMED" : "NOT READY");
+   cstats[2]=PassFail(strength_pass);
+   cstats[3]=PassFail(edge_pass);
+   cstats[4]=PassFail(LastIntrabarConfirmed);
+   cstats[5]=PassFail(LastAiTrendConfirmed);
+   cstats[6]=(LastTargetStructureReady ? "READY" : "LEARNING");
+   cstats[7]=(checklist_volatility_ok ? "DATA OK" : "INVALID");
+   cstats[8]=PassFail(checklist_spread_pass);
+   cstats[9]=(checklist_risk_exit_ok ? "DEFINED" : "INVALID");
+
+   for(int i=0;i<10;i++) ccolors[i]=clrWhite;
+   ccolors[0]=(checklist_directional ? state_color : clrWhite);
+   ccolors[1]=(LastAiTrendConfirmed ? checklist_market_color : clrGold);
+   ccolors[2]=(strength_pass ? clrWhite : clrGold);
+   ccolors[3]=(edge_pass ? DirectionColor(dominant) : clrGold);
+   ccolors[4]=(LastIntrabarConfirmed ? DirectionColor(LastIntrabarDirection) : clrGold);
+   ccolors[5]=(LastAiTrendConfirmed ? DirectionColor(LastAiTrendDirection) : clrGold);
+   ccolors[6]=(LastTargetStructureReady ? clrWhite : clrGold);
+   ccolors[7]=(checklist_volatility_ok ? clrWhite : clrTomato);
+   ccolors[8]=(checklist_spread_pass ? clrWhite : clrGold);
+   ccolors[9]=(checklist_risk_exit_ok ? clrWhite : clrTomato);
+
+   for(int i=0;i<10;i++)
+   {
+      int cy=ry+7+i*row_h;
+      UiLabel("CXN_"+IntegerToString(i),IntegerToString(i+1),tx+12,cy,clrWhite,8);
+      UiLabel("CXK_"+IntegerToString(i),cnames[i],tx+38,cy,clrWhite,8);
+      UiLabel("CXV_"+IntegerToString(i),cvals[i],tx+184,cy,clrWhite,8);
+      UiLabel("CXS_"+IntegerToString(i),cstats[i],tx+442,cy,ccolors[i],8);
+   }
+
+   UiLabel("CHECK_NOTE","DISPLAY ONLY - execution logic unchanged.",
+      tx+12,ty+322,clrWhite,8);
+
+   UiButton("COPY","COPY DIAGNOSTIC",28,778,176,30);
+   UiButton("CLOSE","CLOSE TRADE",218,778,110,30);
    ObjectSetInteger(0,UiPrefix+"CLOSE",OBJPROP_BGCOLOR,
       has_managed_position ? C'153,27,27' : C'55,65,81');
    ObjectSetInteger(0,UiPrefix+"CLOSE",OBJPROP_BORDER_COLOR,
       has_managed_position ? C'248,113,113' : C'75,85,99');
 
-   UiLabel("COPY_STATUS",LastCopyStatus,340,558,
+   UiLabel("COPY_STATUS",LastCopyStatus,340,778,
       (StringFind(LastCopyStatus,"failed")>=0 || StringFind(LastCopyStatus,"disabled")>=0
          ? clrTomato : clrWhite),8);
-   UiLabel("CLOSE_STATUS",LastCloseStatus,340,574,
+   UiLabel("CLOSE_STATUS",LastCloseStatus,340,794,
       (StringFind(LastCloseStatus,"FAILED")>=0 ? clrTomato : clrWhite),8);
 
    ChartRedraw();
