@@ -1,5 +1,5 @@
 #property strict
-#property version "1.523"
+#property version "1.524"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -501,7 +501,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.52.3\n"
+      +"EA version: 0.52.4\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL TP4c SL2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -773,6 +773,22 @@ void DrawDashboard()
       return;
    }
 
+   static bool was_narrow=false;
+   bool narrow=(int)ChartGetInteger(0,CHART_WIDTH_IN_PIXELS)<1020;
+   if(narrow!=was_narrow) ObjectsDeleteAll(0,UiPrefix);
+   was_narrow=narrow;
+   if(narrow)
+   {
+      DrawLiveModelPanel();
+      UiButton("MANUAL_BUY","BUY (MANUAL)",28,638,126,30);
+      UiButton("MANUAL_SELL","SELL (MANUAL)",164,638,126,30);
+      UiButton("MANUAL_CLOSE","CLOSE THIS EA",300,638,138,30);
+      UiLabel("MANUAL_STATUS",StringSubstr(LastManualStatus,0,72),28,678,clrGold,9);
+      UiButton("COPY","COPY DIAGNOSTIC",28,700,176,30);
+      UiLabel("COPY_STATUS",LastCopyStatus,218,708,C'148,163,184',8);
+      ChartRedraw();
+      return;
+   }
    int spread_points=(int)SymbolInfoInteger(_Symbol,SYMBOL_SPREAD);
    int today=TradesToday();
    bool lock_ok=AccountLockHealthy();
@@ -811,7 +827,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,662,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.52.3 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.52.4 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
@@ -927,56 +943,115 @@ void DrawDashboard()
    ChartRedraw();
 }
 
-// Read-only model monitor. Forecast direction is median versus response Bid/Ask midpoint.
-// Model bias, forecast-path trend and the executable decision have different meanings.
+// Read-only flow monitor. The standard, micro and trend routes are alternatives.
+// This view reports backend decisions; its display checks never become trading gates.
+void FlowCard(const string name,const string title,const string detail,const string metric,
+              const int x,const int y,const int width,const int height,const color accent)
+{
+   UiRect("FLOW_"+name,x,y,width,height,C'23,34,53',accent);
+   UiLabel("FLOW_"+name+"_TITLE",title,x+10,y+8,accent,10);
+   UiLabel("FLOW_"+name+"_DETAIL",detail,x+10,y+30,C'203,213,225',8);
+   UiLabel("FLOW_"+name+"_METRIC",metric,x+10,y+48,C'148,163,184',8);
+}
+
+void FlowConnector(const string name,const int x,const int y,const int width)
+{
+   UiRect("FLOW_"+name+"_LINE",x+width/2,y,2,14,C'100,116,139',C'100,116,139');
+   UiLabel("FLOW_"+name+"_ARROW","v",x+width/2-3,y+8,C'148,163,184',9);
+}
+
 void DrawLiveModelPanel()
 {
-   bool available=LastForecastReceivedLocal>0 && LastForecast>0.0
-      && LastSignalBid>0.0 && LastSignalAsk>0.0;
+   bool snapshot_available=LastForecastReceivedLocal>0 && LastSignalBid>0.0 && LastSignalAsk>0.0;
+   bool available=snapshot_available && LastForecast>0.0;
    long age=(LastForecastReceivedLocal>0
       ? (long)MathMax(0,(long)(TimeLocal()-LastForecastReceivedLocal)) : 0);
-   bool fresh=available && age<=MathMax(60,2*SnapshotIntervalSeconds)
+   bool fresh=snapshot_available && age<=MathMax(60,2*SnapshotIntervalSeconds)
       && (bool)TerminalInfoInteger(TERMINAL_CONNECTED);
-   string freshness=(!available ? "WAITING FOR MODEL" : (fresh ? "LIVE" : "STALE - LAST SNAPSHOT"));
+   string freshness=(!snapshot_available ? "WAITING FOR MODEL" : (fresh ? "LIVE" : "STALE - LAST SNAPSHOT"));
    color muted=C'148,163,184';
    double reference=(LastSignalBid+LastSignalAsk)/2.0;
    double delta=LastForecast-reference;
    string direction=(!available ? "UNKNOWN" :
       (delta>_Point/2.0 ? "UP / BUY BIAS" :
       (delta<-_Point/2.0 ? "DOWN / SELL BIAS" : "FLAT / NEUTRAL")));
-   color forecast_color=(!fresh ? muted :
+   color forecast_color=(!fresh || !available ? muted :
       (delta>_Point/2.0 ? clrLime : (delta<-_Point/2.0 ? clrTomato : clrGold)));
-   color trend_color=(!fresh ? muted :
-      (LastAiTrendDirection=="BUY" ? clrLime :
-      (LastAiTrendDirection=="SELL" ? clrTomato : clrGold)));
    int chart_width=(int)ChartGetInteger(0,CHART_WIDTH_IN_PIXELS);
    bool stacked=chart_width<1020;
-   int x=(stacked ? 12 : 550), y=(stacked ? 694 : 24);
-   UiRect("MODEL_PANEL",x,y,450,224,C'15,23,42',C'71,85,105');
-   UiLabel("MODEL_TITLE","CHRONOS-2  |  "+freshness,x+16,y+12,
+   int x=(stacked ? 12 : 550), y=24;
+   UiRect("MODEL_PANEL",x,y,450,604,C'15,23,42',C'71,85,105');
+   UiLabel("MODEL_TITLE","DECISION FLOW  |  "+freshness,x+16,y+12,
       (fresh ? clrLime : clrOrange),11);
-   UiLabel("MODEL_DIRECTION","FORECAST: "+direction,x+16,y+40,forecast_color,12);
-   UiLabel("MODEL_DELTA",available
-      ? "Median "+DoubleToString(LastForecast,_Digits)
-         +"  |  delta "+(delta>=0.0 ? "+" : "")+DoubleToString(delta,_Digits)
-      : "Median / delta: waiting",x+16,y+65,muted,9);
-   UiLabel("MODEL_REFERENCE",available
-      ? "Reference: snapshot midpoint "+DoubleToString(reference,_Digits)
-      : "Reference: waiting",x+16,y+85,muted,9);
-   UiLabel("MODEL_TREND","FORECAST PATH TREND: "
-      +(available ? LastAiTrendDirection : "UNKNOWN")+"  "
-      +(available ? (LastAiTrendConfirmed ? "CONFIRMED" : "UNCONFIRMED") : ""),
-      x+16,y+110,trend_color,10);
-   UiLabel("MODEL_ACTION","TRADE SIGNAL: "+(available ? LastModelDecision : "NONE")
-      +"  |  "+(available ? LastModelReason : "waiting"),x+16,y+136,
-      (!fresh ? muted : (LastModelDecision=="BUY" ? clrLime :
-      (LastModelDecision=="SELL" ? clrTomato : clrGold))),9);
-   UiLabel("MODEL_UPDATED","Last valid: "+(available
-      ? TimeToString(LastForecastReceivedUTC,TIME_SECONDS)+" UTC  |  age "+IntegerToString(age)+"s"
-      : "NONE")+"  |  refresh "+IntegerToString(SnapshotIntervalSeconds)+"s",
-      x+16,y+163,muted,9);
-   UiLabel("MODEL_NOTE","Forecast bias is not an order; trend is forecast-derived.",
-      x+16,y+190,muted,8);
+   FlowCard("FORECAST","1. CHRONOS-2: "+direction,
+      available ? "Median "+DoubleToString(LastForecast,_Digits)
+         +" | delta "+(delta>=0.0 ? "+" : "")+DoubleToString(delta,_Digits) : "Waiting for forecast",
+      available ? "Snapshot midpoint: "+DoubleToString(reference,_Digits) : "No valid forecast",
+      x+12,y+42,426,70,forecast_color);
+   FlowConnector("TO_ROUTES",x+12,y+114,426);
+   bool conflict=LastBaseReason=="trend_conflict";
+   UiLabel("FLOW_VETO","2. ROUTES (OR) | trend veto: "+(!available ? "UNKNOWN" :
+      (conflict ? "BLOCKED" : "CLEAR")),x+16,y+137,
+      (!fresh ? muted : (conflict ? clrTomato : clrWhite)),9);
+   bool edge_ok=LastMinimumEdge>0.0 && MathMax(LastBuyEdge,LastSellEdge)>=LastMinimumEdge;
+   bool strength_ok=LastMinimumStrength>0.0 && LastSignalStrength>=LastMinimumStrength;
+   bool standard_ok=edge_ok && strength_ok;
+   color standard_color=(!fresh || !available ? muted : (standard_ok ? clrLime : clrTomato));
+   color micro_color=(!fresh || !available ? muted : (LastIntrabarConfirmed ? clrLime : clrOrange));
+   color route_trend_color=(!fresh || !available ? muted : (LastAiTrendConfirmed ? clrLime : clrOrange));
+   FlowCard("STANDARD","STANDARD"+(StringFind(LastBaseReason,"forecast_")==0 ? " *" : ""),
+      !available ? "UNKNOWN" : (standard_ok ? "PASS" : "NOT READY"),
+      "Edge "+(available ? PassFail(edge_ok) : "--"),x+12,y+160,138,114,standard_color);
+   UiLabel("FLOW_STANDARD_STRENGTH","Strength "+(available ? PassFail(strength_ok) : "--"),
+      x+22,y+228,standard_color,8);
+   UiLabel("FLOW_STANDARD_VALUE",available
+      ? DoubleToString(LastSignalStrength,3)+" / "+DoubleToString(LastMinimumStrength,3) : "--",
+      x+22,y+248,muted,8);
+   FlowCard("MICRO","INTRABAR"+(StringFind(LastBaseReason,"intrabar_reversal_")==0 ? " *" : ""),
+      !available ? "UNKNOWN" : (LastIntrabarConfirmed ? "PASS" : "NOT READY"),
+      available ? LastIntrabarDirection : "--",x+156,y+160,138,114,micro_color);
+   UiLabel("FLOW_MICRO_VALUE","Move "+(available ? DoubleToString(LastIntrabarMoveAtr,3) : "--"),
+      x+166,y+228,muted,8);
+   UiLabel("FLOW_MICRO_REBOUND","Rebound "+(available ? DoubleToString(LastIntrabarReboundAtr,3) : "--"),
+      x+166,y+248,muted,8);
+   FlowCard("TREND","AI TREND"+(StringFind(LastBaseReason,"ai_trend_continuation_")==0 ? " *" : ""),
+      !available ? "UNKNOWN" : (LastAiTrendConfirmed ? "PASS" : "NOT READY"),
+      available ? LastAiTrendDirection : "--",x+300,y+160,138,114,route_trend_color);
+   UiLabel("FLOW_TREND_PATH","Path "+(available ? DoubleToString(LastAiTrendMoveAtr,2)+" ATR" : "--"),
+      x+310,y+228,muted,8);
+   UiLabel("FLOW_TREND_CONSISTENCY","Cons. "+(available ? DoubleToString(LastAiTrendConsistency,2) : "--"),
+      x+310,y+248,muted,8);
+   // Join the alternative routes visually, rather than suggesting all three must pass.
+   UiRect("FLOW_JOIN",x+81,y+283,288,2,C'100,116,139',C'100,116,139');
+   for(int i=0;i<3;i++)
+      UiRect("FLOW_JOIN_"+IntegerToString(i),x+81+i*144,y+274,2,9,C'100,116,139',C'100,116,139');
+   FlowConnector("TO_BASE",x+12,y+285,426);
+   color base_color=(!fresh ? muted : (LastBaseDecision=="WAIT" ? clrGold :
+      (LastBaseDecision=="BUY" ? clrLime : clrTomato)));
+   FlowCard("BASE","3. BASE DECISION: "+(snapshot_available ? LastBaseDecision : "NONE"),
+      snapshot_available ? LastBaseReason : "Waiting for valid model snapshot",
+      LastBaseReason=="insufficient_model_strength" ? "STOP: model strength below threshold; no alternative confirmed."
+         : (LastBaseReason=="insufficient_model_edge" ? "STOP: model edge too small; no alternative confirmed."
+         : (conflict ? "STOP: recent market trend conflicts with forecast."
+         : "* marks the selected route. Routes are alternatives.")),x+12,y+309,426,70,base_color);
+   FlowConnector("TO_FINAL",x+12,y+381,426);
+   color final_color=(!fresh ? muted : (LastModelDecision=="WAIT" ? clrGold :
+      (LastModelDecision=="BUY" ? clrLime : clrTomato)));
+   FlowCard("FINAL","4. FINAL SIGNAL: "+(snapshot_available ? LastModelDecision : "NONE"),
+      snapshot_available ? LastModelReason : "Waiting",
+      "Role models: "+(!snapshot_available ? "UNKNOWN" : (LastEnsembleActive ? "ACTIVE" : "BASE ONLY")),
+      x+12,y+404,426,70,final_color);
+   FlowConnector("TO_EA",x+12,y+476,426);
+   string live_reason="";
+   bool live_ready=LiveExecutionReady(live_reason);
+   FlowCard("EXECUTION","5. EA EXECUTION: "+(SmallOnlyMode ? "SMALL" : "MAIN"),
+      StringSubstr(StatusLine,0,60),
+      "Live "+LiveStateText()+" | position, quote and risk checks apply.",
+      x+12,y+498,426,70,(live_ready ? clrWhite : clrOrange));
+   UiLabel("FLOW_UPDATED",(LastForecastReceivedLocal>0
+      ? TimeToString(LastForecastReceivedUTC,TIME_SECONDS)+" UTC | age "+IntegerToString(age)+"s"
+      : "No valid response")+" | snapshot "+IntegerToString(SnapshotIntervalSeconds)+"s",
+      x+16,y+578,muted,8);
 }
 
 bool CopyDiagnosticToClipboard()
@@ -1939,7 +2014,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.52.3";
+      version="0.52.4";
    }
    if(close_detail!="") detail=close_detail;
    string manual_detail=ManualOrderAction((ulong)HistoryDealGetInteger(deal,DEAL_ORDER));

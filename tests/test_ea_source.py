@@ -9,7 +9,7 @@ EA = Path(__file__).resolve().parents[1] / "mt5" / "Ramon.mq5"
 def test_model_url_allows_host_and_compose_service_only() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "1.523"' in source
+    assert '#property version "1.524"' in source
     assert 'url=="http://127.0.0.1:8012/decision"' in source
     assert 'url=="http://model:8012/decision"' in source
     assert "!IsAllowedModelUrl(ModelUrl)" in source
@@ -19,7 +19,7 @@ def test_model_url_allows_host_and_compose_service_only() -> None:
 def test_live_account_session_lock() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "1.523"' in source
+    assert '#property version "1.524"' in source
     assert "input bool AutoLockCurrentAccount = true" in source
     assert "input bool EnableLiveTrading = false" in source
     assert "LockedAccountLogin=current_login" in source
@@ -46,7 +46,7 @@ def test_diagnostic_export_contains_operational_state() -> None:
 def test_chart_dashboard_and_copy_button() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert 'RAMON AI TRADER  v0.52.3' in source
+    assert 'RAMON AI TRADER  v0.52.4' in source
     assert 'UiButton("COPY","COPY DIAGNOSTIC"' in source
     assert "void OnChartEvent(" in source
     assert "CopyDiagnosticToClipboard()" in source
@@ -84,7 +84,7 @@ def test_risk_verification_and_csv_learning_logs() -> None:
 def test_live_block_does_not_detach_ea() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "1.523"' in source
+    assert '#property version "1.524"' in source
     assert "bool LiveExecutionReady(string &reason)" in source
     assert 'return (LiveExecutionReady(reason) ? "ARMED" : "BLOCKED")' in source
     assert 'if(!LiveExecutionReady(live_block_reason))' in source
@@ -96,7 +96,7 @@ def test_live_block_does_not_detach_ea() -> None:
 def test_cent_account_dashboard_converts_units_to_usd() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "1.523"' in source
+    assert '#property version "1.524"' in source
     assert "input bool AccountIsCent = true" in source
     assert "string AccountTypeText()" in source
     assert "double AccountUnitsToUSD(const double units)" in source
@@ -113,7 +113,7 @@ def test_cent_account_dashboard_converts_units_to_usd() -> None:
 def test_wait_display_distinguishes_strength_and_future_risk_block() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "1.523"' in source
+    assert '#property version "1.524"' in source
     assert "string RiskGateText()" in source
     assert '"WOULD BLOCK IF SIGNAL: min lot > hard cap"' in source
     assert '+"RiskGate: "+RiskGateText()+"\\n"' in source
@@ -123,7 +123,7 @@ def test_wait_display_distinguishes_strength_and_future_risk_block() -> None:
 def test_live_snapshots_re_evaluate_inside_same_m15_bar() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "1.523"' in source
+    assert '#property version "1.524"' in source
     assert "input int SnapshotIntervalSeconds = 30" in source
     assert "datetime LastDecisionRequestTime = 0" in source
     assert "datetime LastEntrySignalBar = 0" in source
@@ -138,7 +138,7 @@ def test_live_snapshots_re_evaluate_inside_same_m15_bar() -> None:
 def test_intrabar_reversal_payload_and_dashboard() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "1.523"' in source
+    assert '#property version "1.524"' in source
     assert "CopyRates(_Symbol,PERIOD_M1,0,4,micro)" in source
     assert '\\"micro_bars\\":[' in source
     assert 'JsonNumber(reply,"intrabar_confirmed",intrabar_confirmed)' in source
@@ -151,7 +151,7 @@ def test_intrabar_reversal_payload_and_dashboard() -> None:
 def test_ai_trend_continuation_is_model_path_led() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "1.523"' in source
+    assert '#property version "1.524"' in source
     assert 'JsonNumber(reply,"ai_trend_confirmed",ai_trend_confirmed)' in source
     assert 'JsonText(reply,"ai_trend_direction",ai_trend_direction)' in source
     assert 'UiLabel("AI_TREND","AI TREND "+PassFail(LastAiTrendConfirmed)' in source
@@ -163,7 +163,7 @@ def test_ai_trend_continuation_is_model_path_led() -> None:
 def test_minimum_lot_override_has_hard_cap() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "1.523"' in source
+    assert '#property version "1.524"' in source
     assert "input double RiskPerTradeUSD = 0.06" in source
     assert "input bool AllowMinLotRiskOverride = true" in source
     assert "const double MaxExecutableRiskUSD = 0.20" in source
@@ -202,7 +202,7 @@ def test_v026_dashboard_rows_are_not_overlapped() -> None:
 def test_role_model_dashboard_and_response_fields() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "1.523"' in source
+    assert '#property version "1.524"' in source
     assert 'JsonText(reply,"base_decision",base_decision)' in source
     assert 'JsonNumber(reply,"ensemble_ready",ensemble_ready)' in source
     assert 'JsonNumber(reply,"regime_probability",regime_probability)' in source
@@ -257,7 +257,7 @@ def test_event_time_telemetry_is_durable_and_does_not_invent_historical_offsets(
 def test_v038_tp_stage_management_is_live_but_broker_tp_stays_legacy() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "1.523"' in source
+    assert '#property version "1.524"' in source
     assert 'JsonNumber(reply,"target_learning_active",target_learning_active)' in source
     assert 'JsonNumber(reply,"target_tp1",target_tp1)' in source
     assert 'JsonNumber(reply,"target_tp2",target_tp2)' in source
@@ -279,7 +279,7 @@ def test_v038_tp_stage_management_is_live_but_broker_tp_stays_legacy() -> None:
 def test_v035_profit_protection_is_active_and_auditable() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "1.523"' in source
+    assert '#property version "1.524"' in source
     assert "input bool EnableProfitProtection = true" in source
     assert "const double ProfitProtectionFallbackActivationUnits = 7.0" in source
     assert "const double ProfitProtectionActivationMinUnits = 5.0" in source
@@ -318,7 +318,7 @@ def test_early_reversal_exit_is_shadow_only() -> None:
 def test_v049_small_loss_reduction_is_small_only() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "1.523"' in source
+    assert '#property version "1.524"' in source
     assert "const double EarlyAdverseRiskFraction = 0.60" in source
     assert "const double SmallEarlyAdverseRiskFraction = 0.50" in source
     assert "? SmallEarlyAdverseRiskFraction : EarlyAdverseRiskFraction" in source
@@ -332,7 +332,7 @@ def test_v049_small_loss_reduction_is_small_only() -> None:
 def test_v050_small_dynamic_target_is_shadow_only() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "1.523"' in source
+    assert '#property version "1.524"' in source
     assert "const double SmallProfitTargetUnits = 4.0" in source
     assert "const double ShadowSmallStrongTargetUnits = ShadowSmallTP2Units" in source
     assert "ShadowSmallStrongTargetCandidate=(" in source
@@ -369,7 +369,7 @@ def test_v050_small_three_stage_tp_shadow_is_observational() -> None:
 def test_v051_small_entry_quality_filter_requires_edge_and_directional_confirmation() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "1.523"' in source
+    assert '#property version "1.524"' in source
     fn = source.split("bool SmallProfitCandidate(", 1)[1].split("bool SmallProfitTarget(", 1)[0]
     assert 'directional_edge<LastMinimumEdge' in fn
     assert 'LastIntrabarConfirmed' in fn
@@ -398,7 +398,7 @@ def test_v051_small_filter_does_not_change_main_risk_or_small_targets() -> None:
 def test_v052_main_fast_profit_is_main_only_and_conservative() -> None:
     source = EA.read_text(encoding="utf-8")
 
-    assert '#property version "1.523"' in source
+    assert '#property version "1.524"' in source
     assert "input bool EnableMainFastProfit = false" in source
     assert "const int MainFastProfitMinAgeBars = 2" in source
     assert "const double MainFastProfitMinProfitUnits = 0.20" in source
