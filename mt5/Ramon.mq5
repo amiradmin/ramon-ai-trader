@@ -1,5 +1,5 @@
 #property strict
-#property version "1.600"
+#property version "1.620"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -48,8 +48,8 @@ const int MainFastProfitMinAgeBars = 2; // Evaluate only after at least 2 M15 ba
 const double MainFastProfitMinProfitUnits = 0.20; // Never close a losing MAIN trade through this feature.
 const double MainFastProfitMinProgressToTP1 = 0.35; // Below 35% of entry->TP1 after 2 bars is considered slow.
 const int MainFastProfitWeakSnapshotsRequired = 2; // Require repeated weak 30s snapshots.
-input bool EnableSmallProfitTrades = true; // Optional live 2-cent entries when main model says WAIT.
-input bool EnableSmallRapidScalp = false; // Opt-in: variable target and 1..5 minute time exit; validate on cent account first.
+input bool EnableSmallProfitTrades = true; // Experimental H1/M1 pullback entries while MAIN waits.
+input bool EnableSmallRapidScalp = false; // Legacy SMALL positions only; replacement uses structural SL and 1.5R TP.
 input int SmallScalpMaxHoldSeconds = 300; // 60..300 seconds; a shorter window may reject more entries.
 const double SmallScalpMinTargetUnits = 1.0;
 const double SmallScalpMaxTargetUnits = 3.0;
@@ -604,7 +604,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.60\n"
+      +"EA version: 0.62\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -696,7 +696,7 @@ string BuildDiagnosticText()
       +"ShadowRiskMultiplier: "+DoubleToString(ShadowRiskMultiplier,2)+"x"
       +"  ActualRiskMultiplier: "+DoubleToString(LastRiskMultiplier,2)+"x\n"
       +"ShadowSmallTargetUnits: "+DoubleToString(ShadowSmallTargetUnits,2)
-      +"  ActualTargetUnits: "+DoubleToString(SmallProfitTargetUnits,2)
+      +"  ReplacementTarget: 1.5R (legacy shadow units only)"
       +"  StrongTargetCandidate: "+BoolText(ShadowSmallStrongTargetCandidate)+"\n"
       +"ShadowSmallTPPlan: "+ShadowSmallTPPlan
       +"  Stage: "+IntegerToString(ShadowSmallTPStage)
@@ -772,12 +772,12 @@ string BuildDiagnosticText()
       +"Trades today: "+(today<0 ? "history unavailable" : IntegerToString(today))
       +"/"+(SmallOnlyMode ? "unlimited" : IntegerToString(MaxTradesPerDay))+"\n"
       +"SmallProfit: "+(SmallOnlyMode && EnableSmallProfitTrades ? "ACTIVE" : "OFF")
-      +"  TargetUnits: "+DoubleToString(SmallProfitTargetUnits,2)
+      +"  NewEntryTarget: 1.5R (experimental pullback)"
       +"  MaxRiskUSD: "+DoubleToString(SmallProfitMaxRiskUSD,2)
       +"  BrokerSLMaxUnits: "+DoubleToString(SmallProfitMaxLossUnits,2)
       +"  Today: "+(today<0 ? "history unavailable" : IntegerToString(today))
       +"/unlimited\n"
-      +"SmallRapidScalp: "+(SmallOnlyMode && EnableSmallRapidScalp ? "ACTIVE" : "OFF")
+      +"SMALL entry strategy: H1/M1 pullback (experimental), target 1.5R"
       +"  HoldSec: "+IntegerToString(SmallScalpMaxHoldSeconds)
       +"  TargetRangeUnits: "+DoubleToString(SmallScalpMinTargetUnits,2)
       +".."+DoubleToString(SmallScalpMaxTargetUnits,2)
@@ -926,7 +926,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.60 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.62 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
@@ -1178,7 +1178,7 @@ bool BuildRequest(string &payload,datetime &bar_time)
       }
    }
    payload+="],\"quote_time\":"+IntegerToString((long)tick.time)
-      +",\"execution_profile\":{\"ea_version\":\"0.60\",\"role\":\""+(SmallOnlyMode ? "SMALL" : "MAIN")+"\""
+      +",\"execution_profile\":{\"ea_version\":\"0.62\",\"role\":\""+(SmallOnlyMode ? "SMALL" : "MAIN")+"\""
       +",\"risk_usd\":"+DoubleToString(RiskPerTradeUSD,8)
       +",\"allow_override\":"+(AllowMinLotRiskOverride ? "true" : "false")
       +",\"units_per_usd\":"+DoubleToString(MoneyUnitsPerUSD,8)
@@ -1190,6 +1190,7 @@ bool BuildRequest(string &payload,datetime &bar_time)
       +",\"main_consensus\":"+(EnableMainDirectionConsensus ? "true" : "false")
       +",\"main_fast_profit\":"+(EnableMainFastProfit ? "true" : "false")
       +",\"small_enabled\":"+(EnableSmallProfitTrades ? "true" : "false")
+      +",\"entry_strategy\":\""+(SmallOnlyMode ? "h1_m1_pullback" : "chronos")+"\""
       +",\"rapid_scalp\":"+(EnableSmallRapidScalp ? "true" : "false")
       +",\"scalp_seconds\":"+IntegerToString(SmallScalpMaxHoldSeconds)+"},\"position_observation\":";
    ulong held=0; datetime held_open=0;
@@ -1381,6 +1382,58 @@ bool MainDirectionConsensusPass(const string decision,string &status)
    return false;
 }
 
+
+// Experimental replacement: closed H1 trend, two-bar M1 pullback and breakout.
+// Input arrays are series (index 0 = latest CLOSED candle), never a forming bar.
+bool PullbackPattern(const MqlRates &hourly[],const MqlRates &minute[],
+   const datetime now,string &direction,double &anchor)
+{
+   direction=""; anchor=0.0;
+   if(ArraySize(hourly)<32 || ArraySize(minute)<4) return false;
+   if(now-hourly[0].time<3600 || now-hourly[0].time>7200
+      || now-minute[0].time<60 || now-minute[0].time>120) return false;
+   for(int i=0;i<31;i++)
+      if(hourly[i].time-hourly[i+1].time!=3600) return false;
+   for(int i=0;i<3;i++)
+      if(minute[i].time-minute[i+1].time!=60) return false;
+   double ema=hourly[31].close,previous=ema;
+   for(int i=30;i>=0;i--)
+   { previous=ema; ema+=(hourly[i].close-ema)*2.0/21.0; }
+   if(hourly[0].close>ema && ema>previous
+      && minute[2].close<minute[3].close && minute[1].close<minute[2].close
+      && minute[0].close>minute[0].open && minute[0].close>minute[1].high)
+   { direction="BUY"; anchor=MathMin(minute[1].low,minute[2].low); }
+   else if(hourly[0].close<ema && ema<previous
+      && minute[2].close>minute[3].close && minute[1].close>minute[2].close
+      && minute[0].close<minute[0].open && minute[0].close<minute[1].low)
+   { direction="SELL"; anchor=MathMax(minute[1].high,minute[2].high); }
+   return direction!="" && anchor>0.0;
+}
+
+bool PullbackCandidate(const string decision,const string reason,
+   string &direction,string &filter_reason,double &anchor)
+{
+   filter_reason="PULLBACK: waiting for closed-candle setup";
+   if(!SmallOnlyMode || !EnableSmallProfitTrades || decision!="WAIT"
+      || (reason!="insufficient_model_edge" && reason!="insufficient_model_strength"))
+      return false; // Keep news, spread, missing-model and MAIN-priority vetoes.
+   MqlRates hourly[],minute[];
+   ArraySetAsSeries(hourly,true); ArraySetAsSeries(minute,true);
+   if(CopyRates(_Symbol,PERIOD_H1,1,32,hourly)!=32
+      || CopyRates(_Symbol,PERIOD_M1,1,4,minute)!=4) return false;
+   if(!PullbackPattern(hourly,minute,TimeCurrent(),direction,anchor)) return false;
+   if((LastIntrabarConfirmed && LastIntrabarDirection!=direction)
+      || (LastAiTrendConfirmed && LastAiTrendDirection!=direction))
+   { filter_reason="PULLBACK: opposing model confirmation"; return false; }
+   filter_reason="PULLBACK: setup confirmed"; return true;
+}
+
+bool IsPullbackPosition(const ulong ticket)
+{
+   return PositionSelectByTicket(ticket) && IsSmallProfitPosition(ticket)
+      && StringFind(PositionGetString(POSITION_COMMENT),":P")>=0;
+}
+
 bool SmallProfitCandidate(const string decision,const string reason,
    const double buy_edge,const double sell_edge,const double strength,
    string &direction,string &filter_reason)
@@ -1427,6 +1480,7 @@ bool SmallProfitCandidate(const string decision,const string reason,
    return true;
 }
 
+// Legacy SMALL helpers remain for existing-position management and shadow research.
 // Closed M1 candles measure available movement, never predict its direction.
 // Fail closed on missing or stale M1 history and when costs consume the range.
 bool SmallScalpMicroConfirm(const string direction)
@@ -2112,7 +2166,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.60";
+      version="0.62";
    }
    if(close_detail!="") detail=close_detail;
 
@@ -2144,7 +2198,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       );
    }
 
-   if(has_sizing && entry_kind==DEAL_ENTRY_IN && version=="0.60")
+   if(has_sizing && entry_kind==DEAL_ENTRY_IN && (version=="0.60" || version=="0.62"))
    {
       ulong id=(ulong)HistoryDealGetInteger(deal,DEAL_POSITION_ID);
       string cap_key="RamonCap."+IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN))+"."+IntegerToString((long)id);
@@ -2180,7 +2234,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
 bool ClosedTradePayload(const ulong identifier,string &payload)
 {
    if(PositionIdOpen(identifier) || !HistorySelectByPosition(identifier)) return false;
-   string sample="",direction="",exit_reason="";
+   string sample="",direction="",exit_reason="",entry_strategy="chronos";
    datetime opened=0,closed=0;
    ulong opening_deal=0,closing_deal=0;
    double in_volume=0.0,out_volume=0.0,net=0.0,risk=0.0;
@@ -2205,6 +2259,7 @@ bool ClosedTradePayload(const ulong identifier,string &payload)
          if((ulong)HistoryDealGetInteger(deal,DEAL_MAGIC)!=MagicNumber) return false;
          string comment=HistoryDealGetString(deal,DEAL_COMMENT);
          if(StringFind(comment,"Ramon:")!=0) return false;
+         if(StringFind(comment,":P")>=0) entry_strategy="h1_m1_pullback";
          string key=StringSubstr(comment,6,16);
          string side=(type==DEAL_TYPE_BUY ? "BUY" : "SELL");
          if(!ValidSampleKey(key) || (sample!="" && sample!=key)
@@ -2249,6 +2304,7 @@ bool ClosedTradePayload(const ulong identifier,string &payload)
       +",\"fee_units\":"+DoubleToString(fee,8)
       +",\"exit_reason\":\""+exit_reason+"\""
       +",\"trade_role\":\""+(SmallOnlyMode ? "SMALL" : "MAIN")+"\""
+      +",\"entry_strategy\":\""+entry_strategy+"\""
       +",\"entry_magic\":"+IntegerToString((long)MagicNumber);
    int offset=0;
    string version="",detail="";
@@ -2987,6 +3043,7 @@ void ResetEarlyAdverseState()
 
 bool ManageEarlyAdverseExit(const ulong ticket,const datetime opened)
 {
+   if(IsPullbackPosition(ticket)) return false; // Pattern uses structural SL, not weak-model exits.
    if(!EnableEarlyAdverseExit || ticket==0 || !PositionSelectByTicket(ticket))
       return false;
 
@@ -3090,6 +3147,13 @@ bool ManageEarlyAdverseExit(const ulong ticket,const datetime opened)
 void SelectDynamicProfitProtectionThresholds(const ulong ticket)
 {
    ProfitProtectionInitialRiskUnits=ManagedPositionInitialRiskUnits(ticket);
+   if(IsPullbackPosition(ticket))
+   {
+      // Allow the replacement to develop; legacy SMALL thresholds stay intact.
+      ProfitProtectionActivationUnits=ProfitProtectionInitialRiskUnits*1.0;
+      ProfitProtectionGivebackUnits=ProfitProtectionInitialRiskUnits*0.25;
+      return;
+   }
    if(IsSmallProfitPosition(ticket))
    {
       ProfitProtectionActivationUnits=SmallProfitProtectionActivationUnits;
@@ -3251,7 +3315,7 @@ void ManageOpenPosition()
       HandleManagedExitFailure(ticket,"PROFIT PROTECTION EXIT");
       return;
    }
-   if(IsSmallProfitPosition(ticket) && EnableSmallRapidScalp
+   if(IsSmallProfitPosition(ticket) && !IsPullbackPosition(ticket) && EnableSmallRapidScalp
       && TimeCurrent()-opened>=SmallScalpMaxHoldSeconds)
    {
       if(ManagedExitPausedForMarketClosed(ticket))
@@ -3520,11 +3584,12 @@ void OnTimer()
    }
 
    string small_direction="",small_filter_reason="";
-   bool small_profit=SmallProfitCandidate(decision,reason,buy_edge,sell_edge,
-      signal_strength,small_direction,small_filter_reason);
+   double pullback_anchor=0.0;
+   bool small_profit=PullbackCandidate(decision,reason,
+      small_direction,small_filter_reason,pullback_anchor);
    if(decision=="WAIT" && !small_profit)
    {
-      if(SmallOnlyMode && StringFind(small_filter_reason,"SMALL_FILTER_")==0)
+      if(SmallOnlyMode)
          StatusLine=small_filter_reason;
       ShowStatus();
       return;
@@ -3533,8 +3598,7 @@ void OnTimer()
    { ShowStatus(); return; }
    if(small_profit)
       decision=small_direction;
-   if(small_profit && EnableSmallRapidScalp && !SmallScalpMicroConfirm(decision))
-   { StatusLine="SMALL: M1 direction not confirmed"; ShowStatus(); return; }
+
    int small_entries_on_bar=0;
    if(SmallOnlyMode)
    {
@@ -3549,8 +3613,8 @@ void OnTimer()
          if(small_loss_on_bar>0)
          { StatusLine="Second SMALL blocked: first attempt lost this M15 bar"; ShowStatus(); return; }
       }
-      if(small_entries_on_bar>=SmallProfitMaxEntriesPerSignalBar)
-      { StatusLine="Two small entries already used for this M15 signal bar"; ShowStatus(); return; }
+      if(small_entries_on_bar>=1)
+      { StatusLine="PULLBACK entry already used for this M15 bar"; ShowStatus(); return; }
    }
    else if(LastEntrySignalBar==bar_time)
    { StatusLine="Entry already used for this M15 signal bar"; ShowStatus(); return; }
@@ -3589,22 +3653,29 @@ void OnTimer()
    { StatusLine="TRADE BLOCKED: min lot > hard risk cap"; ShowStatus(); return; }
    if(small_profit)
    {
-      // Small-profit trades never scale above the broker minimum volume.
-      if(!SmallProfitStop(side,entry,stop,volume,tick,stop))
-      { StatusLine="Broker cannot place 4-cent small stop"; ShowStatus(); return; }
+      // Structural stop stays beyond the pullback; never shrink it to force an entry.
+      double tick_size=SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_SIZE);
+      if(tick_size<=0.0) tick_size=point;
+      if(tick_size<=0.0) { StatusLine="Invalid price tick"; ShowStatus(); return; }
+      double raw_stop=pullback_anchor+(decision=="BUY" ? -tick_size : tick_size);
+      stop=NormalizeDouble((decision=="BUY" ? MathFloor(raw_stop/tick_size)
+         : MathCeil(raw_stop/tick_size))*tick_size,_Digits);
+      if((decision=="BUY" && tick.bid-stop<min_stop+2*point)
+         || (decision=="SELL" && stop-tick.ask<min_stop+2*point))
+      { StatusLine="PULLBACK structural stop too close"; ShowStatus(); return; }
       double stop_loss_units=0.0;
-      double small_risk_cap=SmallProfitRiskCapUnits();
-      if(volume<=0.0 || small_risk_cap<=0.0
-         || !OrderCalcProfit(side,_Symbol,volume,entry,stop,stop_loss_units)
-         || stop_loss_units>=0.0
-         || -stop_loss_units>small_risk_cap+0.00001)
-      { StatusLine="Small profit risk > 4 cents"; ShowStatus(); return; }
-      double desired_units=SmallProfitTargetUnits;
-      if(EnableSmallRapidScalp
-         && !SmallScalpTargetUnits(side,entry,volume,tick,desired_units))
-      { StatusLine="SMALL: M1 range insufficient for spread and target"; ShowStatus(); return; }
+      double stressed_entry=entry+(decision=="BUY" ? 1.0 : -1.0)*MaxDeviationPoints*point;
+      if(!OrderCalcProfit(side,_Symbol,volume,stressed_entry,stop,stop_loss_units)
+         || stop_loss_units>=0.0 || -stop_loss_units>SmallProfitRiskCapUnits()+0.00001)
+      { StatusLine="PULLBACK structural risk exceeds 4 cents"; ShowStatus(); return; }
+      double spread_cost=0.0;
+      if(!OrderCalcProfit(side,_Symbol,volume,entry,
+         (decision=="BUY" ? tick.bid : tick.ask),spread_cost)
+         || MathAbs(spread_cost)>-stop_loss_units*0.25)
+      { StatusLine="PULLBACK spread exceeds 25% of risk"; ShowStatus(); return; }
+      double desired_units=-stop_loss_units*1.5;
       if(!SmallProfitTarget(side,entry,volume,tick,desired_units,target))
-      { StatusLine="Broker cannot place SMALL target"; ShowStatus(); return; }
+      { StatusLine="Broker cannot place PULLBACK target"; ShowStatus(); return; }
    }
    double margin=0.0;
    if(!OrderCalcMargin(side,_Symbol,volume,entry,margin)
@@ -3628,7 +3699,7 @@ void OnTimer()
    if(!small_profit)
       PersistTPPlan(LastSampleKey,decision,entry,LastTargetTP1,LastTargetTP2,LastTargetTP3);
    // The broker owns SL/TP immediately. No position is opened when the model is unavailable.
-   string trade_comment="Ramon:"+LastSampleKey+(small_profit ? ":S" : "");
+   string trade_comment="Ramon:"+LastSampleKey+(small_profit ? ":P" : "");
    bool submitted=(
       decision=="BUY"
       ? Trade.Buy(volume,_Symbol,0.0,stop,target,trade_comment)
@@ -3646,7 +3717,7 @@ void OnTimer()
       LastEntrySignalBar=bar_time;
       if(SmallOnlyMode)
          LastSmallEntriesOnSignalBar=small_entries_on_bar+1;
-      StatusLine="Order sent "+(small_profit ? "SMALL 2c " : "")
+      StatusLine="Order sent "+(small_profit ? "PULLBACK 1.5R " : "")
          +decision+" "+DoubleToString(volume,2);
    }
    Print("Ramon execution: ",StatusLine);
