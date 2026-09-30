@@ -1,0 +1,540 @@
+{
+  "source_sha256": "2794c0ca17c2c510a49316443e35e3e00fa0cd270a20602671acf41dfeaf9e4e",
+  "bars": 30576,
+  "first": "2026-08-31T01:06:00",
+  "last": "2026-09-30T09:14:00",
+  "timezone": "broker_wall_time",
+  "live_ready": false,
+  "classification": "M1_PROXY_ONLY_NOT_EA_BACKTEST",
+  "limitations": [
+    "No real ticks; two fictional OHLC paths, not guaranteed execution bounds",
+    "No model/news/priority gates; no independent quote confirmations",
+    "Unknown historical stops level/margin; assumes 1 account unit per price at minimum lot",
+    "Protection assumes instantaneous crossing fills, not the EA timer",
+    "Per-minute spread is constant; commission defaults to unknown/unpriced zero"
+  ],
+  "assumptions": {
+    "point": 0.01,
+    "max_spread": 0.5,
+    "risk_cap_price_units": 4,
+    "deviation_reserve": 0.3,
+    "tp_r": 1.5,
+    "protection_activation_r": 1,
+    "protection_giveback_r": 0.25,
+    "commission_price_units": 0.0
+  },
+  "holdout_start": "2026-09-23T00:00:00",
+  "holdout_end": "2026-09-30T00:00:00",
+  "results": {
+    "two_bar_pullback/high_first/protection=False/slippage=0.02": {
+      "train": {
+        "trades": 102,
+        "wins": 31,
+        "pnl_price_units": -46.31,
+        "profit_factor": 0.7611,
+        "drawdown_price_units": 60.505,
+        "exits": {
+          "tp": 30,
+          "sl": 70,
+          "gap_or_time": 2
+        }
+      },
+      "holdout": {
+        "trades": 37,
+        "wins": 7,
+        "pnl_price_units": -53.72,
+        "profit_factor": 0.34,
+        "drawdown_price_units": 66.79,
+        "exits": {
+          "sl": 29,
+          "tp": 7,
+          "gap_or_time": 1
+        }
+      },
+      "blocked": {
+        "structural_risk": 99,
+        "already_entered_this_m15": 8
+      }
+    },
+    "two_bar_pullback/high_first/protection=False/slippage=0.1": {
+      "train": {
+        "trades": 100,
+        "wins": 28,
+        "pnl_price_units": -68.64,
+        "profit_factor": 0.6678,
+        "drawdown_price_units": 80.445,
+        "exits": {
+          "tp": 28,
+          "sl": 70,
+          "gap_or_time": 2
+        }
+      },
+      "holdout": {
+        "trades": 34,
+        "wins": 6,
+        "pnl_price_units": -53.45,
+        "profit_factor": 0.3196,
+        "drawdown_price_units": 63.68,
+        "exits": {
+          "sl": 27,
+          "tp": 6,
+          "gap_or_time": 1
+        }
+      },
+      "blocked": {
+        "structural_risk": 105,
+        "already_entered_this_m15": 7
+      }
+    },
+    "two_bar_pullback/high_first/protection=True/slippage=0.02": {
+      "train": {
+        "trades": 105,
+        "wins": 41,
+        "pnl_price_units": -34.5,
+        "profit_factor": 0.7987,
+        "drawdown_price_units": 58.3725,
+        "exits": {
+          "tp": 8,
+          "protection": 33,
+          "sl": 62,
+          "gap_or_time": 2
+        }
+      },
+      "holdout": {
+        "trades": 37,
+        "wins": 9,
+        "pnl_price_units": -54.7075,
+        "profit_factor": 0.2762,
+        "drawdown_price_units": 61.0475,
+        "exits": {
+          "sl": 27,
+          "protection": 9,
+          "gap_or_time": 1
+        }
+      },
+      "blocked": {
+        "structural_risk": 99,
+        "already_entered_this_m15": 8
+      }
+    },
+    "two_bar_pullback/high_first/protection=True/slippage=0.1": {
+      "train": {
+        "trades": 103,
+        "wins": 38,
+        "pnl_price_units": -61.87,
+        "profit_factor": 0.6648,
+        "drawdown_price_units": 84.1225,
+        "exits": {
+          "tp": 7,
+          "protection": 31,
+          "sl": 63,
+          "gap_or_time": 2
+        }
+      },
+      "holdout": {
+        "trades": 35,
+        "wins": 7,
+        "pnl_price_units": -61.925,
+        "profit_factor": 0.2117,
+        "drawdown_price_units": 69.345,
+        "exits": {
+          "sl": 27,
+          "protection": 7,
+          "gap_or_time": 1
+        }
+      },
+      "blocked": {
+        "structural_risk": 105,
+        "already_entered_this_m15": 7
+      }
+    },
+    "two_bar_pullback/low_first/protection=False/slippage=0.02": {
+      "train": {
+        "trades": 102,
+        "wins": 31,
+        "pnl_price_units": -46.31,
+        "profit_factor": 0.7611,
+        "drawdown_price_units": 60.505,
+        "exits": {
+          "tp": 30,
+          "sl": 70,
+          "gap_or_time": 2
+        }
+      },
+      "holdout": {
+        "trades": 37,
+        "wins": 7,
+        "pnl_price_units": -53.72,
+        "profit_factor": 0.34,
+        "drawdown_price_units": 66.79,
+        "exits": {
+          "sl": 29,
+          "tp": 7,
+          "gap_or_time": 1
+        }
+      },
+      "blocked": {
+        "structural_risk": 99,
+        "already_entered_this_m15": 8
+      }
+    },
+    "two_bar_pullback/low_first/protection=False/slippage=0.1": {
+      "train": {
+        "trades": 100,
+        "wins": 28,
+        "pnl_price_units": -68.64,
+        "profit_factor": 0.6678,
+        "drawdown_price_units": 80.445,
+        "exits": {
+          "tp": 28,
+          "sl": 70,
+          "gap_or_time": 2
+        }
+      },
+      "holdout": {
+        "trades": 34,
+        "wins": 6,
+        "pnl_price_units": -53.45,
+        "profit_factor": 0.3196,
+        "drawdown_price_units": 63.68,
+        "exits": {
+          "sl": 27,
+          "tp": 6,
+          "gap_or_time": 1
+        }
+      },
+      "blocked": {
+        "structural_risk": 105,
+        "already_entered_this_m15": 7
+      }
+    },
+    "two_bar_pullback/low_first/protection=True/slippage=0.02": {
+      "train": {
+        "trades": 105,
+        "wins": 41,
+        "pnl_price_units": -24.095,
+        "profit_factor": 0.8594,
+        "drawdown_price_units": 50.1325,
+        "exits": {
+          "tp": 12,
+          "sl": 62,
+          "protection": 29,
+          "gap_or_time": 2
+        }
+      },
+      "holdout": {
+        "trades": 37,
+        "wins": 9,
+        "pnl_price_units": -52.0075,
+        "profit_factor": 0.3119,
+        "drawdown_price_units": 59.0475,
+        "exits": {
+          "sl": 27,
+          "protection": 8,
+          "gap_or_time": 1,
+          "tp": 1
+        }
+      },
+      "blocked": {
+        "structural_risk": 99,
+        "already_entered_this_m15": 8
+      }
+    },
+    "two_bar_pullback/low_first/protection=True/slippage=0.1": {
+      "train": {
+        "trades": 103,
+        "wins": 38,
+        "pnl_price_units": -55.61,
+        "profit_factor": 0.6987,
+        "drawdown_price_units": 80.2475,
+        "exits": {
+          "tp": 7,
+          "sl": 63,
+          "protection": 31,
+          "gap_or_time": 2
+        }
+      },
+      "holdout": {
+        "trades": 35,
+        "wins": 7,
+        "pnl_price_units": -59.525,
+        "profit_factor": 0.2423,
+        "drawdown_price_units": 67.125,
+        "exits": {
+          "sl": 27,
+          "protection": 6,
+          "gap_or_time": 1,
+          "tp": 1
+        }
+      },
+      "blocked": {
+        "structural_risk": 105,
+        "already_entered_this_m15": 7
+      }
+    },
+    "continuation_break/high_first/protection=False/slippage=0.02": {
+      "train": {
+        "trades": 562,
+        "wins": 171,
+        "pnl_price_units": -375.57,
+        "profit_factor": 0.6703,
+        "drawdown_price_units": 405.955,
+        "exits": {
+          "tp": 149,
+          "sl": 388,
+          "gap_or_time": 25
+        }
+      },
+      "holdout": {
+        "trades": 186,
+        "wins": 51,
+        "pnl_price_units": -165.93,
+        "profit_factor": 0.5753,
+        "drawdown_price_units": 166.42,
+        "exits": {
+          "sl": 131,
+          "tp": 49,
+          "gap_or_time": 6
+        }
+      },
+      "blocked": {
+        "structural_risk": 1434,
+        "already_entered_this_m15": 307,
+        "next_minute_missing": 2,
+        "spread_risk_ratio": 1
+      }
+    },
+    "continuation_break/high_first/protection=False/slippage=0.1": {
+      "train": {
+        "trades": 541,
+        "wins": 163,
+        "pnl_price_units": -415.515,
+        "profit_factor": 0.6357,
+        "drawdown_price_units": 443.475,
+        "exits": {
+          "tp": 141,
+          "sl": 374,
+          "gap_or_time": 26
+        }
+      },
+      "holdout": {
+        "trades": 177,
+        "wins": 49,
+        "pnl_price_units": -159.335,
+        "profit_factor": 0.5803,
+        "drawdown_price_units": 159.705,
+        "exits": {
+          "sl": 123,
+          "tp": 48,
+          "gap_or_time": 6
+        }
+      },
+      "blocked": {
+        "structural_risk": 1518,
+        "already_entered_this_m15": 292,
+        "next_minute_missing": 2,
+        "spread_risk_ratio": 1
+      }
+    },
+    "continuation_break/high_first/protection=True/slippage=0.02": {
+      "train": {
+        "trades": 607,
+        "wins": 221,
+        "pnl_price_units": -393.045,
+        "profit_factor": 0.6497,
+        "drawdown_price_units": 415.0375,
+        "exits": {
+          "protection": 165,
+          "sl": 383,
+          "tp": 49,
+          "gap_or_time": 10
+        }
+      },
+      "holdout": {
+        "trades": 203,
+        "wins": 78,
+        "pnl_price_units": -128.5325,
+        "profit_factor": 0.6442,
+        "drawdown_price_units": 132.915,
+        "exits": {
+          "sl": 124,
+          "protection": 69,
+          "tp": 8,
+          "gap_or_time": 2
+        }
+      },
+      "blocked": {
+        "structural_risk": 1462,
+        "already_entered_this_m15": 401,
+        "next_minute_missing": 2,
+        "spread_risk_ratio": 1
+      }
+    },
+    "continuation_break/high_first/protection=True/slippage=0.1": {
+      "train": {
+        "trades": 580,
+        "wins": 209,
+        "pnl_price_units": -441.55,
+        "profit_factor": 0.6054,
+        "drawdown_price_units": 463.8175,
+        "exits": {
+          "protection": 157,
+          "sl": 368,
+          "tp": 45,
+          "gap_or_time": 10
+        }
+      },
+      "holdout": {
+        "trades": 193,
+        "wins": 71,
+        "pnl_price_units": -150.195,
+        "profit_factor": 0.586,
+        "drawdown_price_units": 154.9375,
+        "exits": {
+          "sl": 120,
+          "protection": 59,
+          "tp": 11,
+          "gap_or_time": 3
+        }
+      },
+      "blocked": {
+        "structural_risk": 1546,
+        "already_entered_this_m15": 375,
+        "next_minute_missing": 2,
+        "spread_risk_ratio": 1
+      }
+    },
+    "continuation_break/low_first/protection=False/slippage=0.02": {
+      "train": {
+        "trades": 562,
+        "wins": 171,
+        "pnl_price_units": -375.57,
+        "profit_factor": 0.6703,
+        "drawdown_price_units": 405.955,
+        "exits": {
+          "tp": 149,
+          "sl": 388,
+          "gap_or_time": 25
+        }
+      },
+      "holdout": {
+        "trades": 186,
+        "wins": 51,
+        "pnl_price_units": -165.93,
+        "profit_factor": 0.5753,
+        "drawdown_price_units": 166.42,
+        "exits": {
+          "sl": 131,
+          "tp": 49,
+          "gap_or_time": 6
+        }
+      },
+      "blocked": {
+        "structural_risk": 1434,
+        "already_entered_this_m15": 307,
+        "next_minute_missing": 2,
+        "spread_risk_ratio": 1
+      }
+    },
+    "continuation_break/low_first/protection=False/slippage=0.1": {
+      "train": {
+        "trades": 541,
+        "wins": 163,
+        "pnl_price_units": -415.515,
+        "profit_factor": 0.6357,
+        "drawdown_price_units": 443.475,
+        "exits": {
+          "tp": 141,
+          "sl": 374,
+          "gap_or_time": 26
+        }
+      },
+      "holdout": {
+        "trades": 177,
+        "wins": 49,
+        "pnl_price_units": -159.335,
+        "profit_factor": 0.5803,
+        "drawdown_price_units": 159.705,
+        "exits": {
+          "sl": 123,
+          "tp": 48,
+          "gap_or_time": 6
+        }
+      },
+      "blocked": {
+        "structural_risk": 1518,
+        "already_entered_this_m15": 292,
+        "next_minute_missing": 2,
+        "spread_risk_ratio": 1
+      }
+    },
+    "continuation_break/low_first/protection=True/slippage=0.02": {
+      "train": {
+        "trades": 608,
+        "wins": 221,
+        "pnl_price_units": -396.38,
+        "profit_factor": 0.6474,
+        "drawdown_price_units": 422.87,
+        "exits": {
+          "protection": 168,
+          "sl": 384,
+          "tp": 47,
+          "gap_or_time": 9
+        }
+      },
+      "holdout": {
+        "trades": 204,
+        "wins": 78,
+        "pnl_price_units": -132.735,
+        "profit_factor": 0.6351,
+        "drawdown_price_units": 137.1175,
+        "exits": {
+          "sl": 125,
+          "protection": 68,
+          "tp": 9,
+          "gap_or_time": 2
+        }
+      },
+      "blocked": {
+        "structural_risk": 1459,
+        "already_entered_this_m15": 398,
+        "next_minute_missing": 2,
+        "spread_risk_ratio": 1
+      }
+    },
+    "continuation_break/low_first/protection=True/slippage=0.1": {
+      "train": {
+        "trades": 580,
+        "wins": 210,
+        "pnl_price_units": -441.0675,
+        "profit_factor": 0.6044,
+        "drawdown_price_units": 461.1825,
+        "exits": {
+          "protection": 163,
+          "sl": 367,
+          "tp": 41,
+          "gap_or_time": 9
+        }
+      },
+      "holdout": {
+        "trades": 192,
+        "wins": 71,
+        "pnl_price_units": -145.8,
+        "profit_factor": 0.594,
+        "drawdown_price_units": 150.0225,
+        "exits": {
+          "sl": 119,
+          "protection": 57,
+          "tp": 13,
+          "gap_or_time": 3
+        }
+      },
+      "blocked": {
+        "structural_risk": 1542,
+        "already_entered_this_m15": 370,
+        "next_minute_missing": 2,
+        "spread_risk_ratio": 1
+      }
+    }
+  }
+}
