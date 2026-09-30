@@ -1,5 +1,5 @@
 #property strict
-#property version "1.500"
+#property version "1.521"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -25,7 +25,7 @@ input string RequiredServerText = "LiteFinance";
 input bool AutoLockCurrentAccount = true; // Bind this EA session to the account active at OnInit.
 input long AllowedAccountLogin = 0; // Used only when AutoLockCurrentAccount=false.
 input bool EnableLiveTrading = false;
-input bool SmallOnlyMode = false; // Attach second EA instance on another M15 chart for parallel 2-cent trades.
+input bool SmallOnlyMode = false; // Attach second EA instance on another M15 chart for parallel SMALL trades.
 const ulong PrimaryMagicNumber = 26092212;
 const ulong SmallProfitMagicNumber = 26092213;
 input string ModelUrl = "http://127.0.0.1:8012/decision";
@@ -39,16 +39,21 @@ const double MaxExecutableRiskUSD = 0.20; // Hard fixed cap; MT5 chart inputs ca
 input int MaxSpreadPoints = 50;
 input int MaxTradesPerDay = 400;
 input int MaximumHoldBars = 4;
-input bool EnableSmallProfitTrades = true; // Optional live 2-cent entries when main model says WAIT.
-const double SmallProfitTargetUnits = 2.0; // CENT account units = USD 0.02 when MoneyUnitsPerUSD=100.
+input bool EnableMainFastProfit = false; // Optional MAIN-only early profit exit; off by default until explicitly enabled.
+const int MainFastProfitMinAgeBars = 2; // Evaluate only after at least 2 M15 bars (~30 min).
+const double MainFastProfitMinProfitUnits = 0.20; // Never close a losing MAIN trade through this feature.
+const double MainFastProfitMinProgressToTP1 = 0.35; // Below 35% of entry->TP1 after 2 bars is considered slow.
+const int MainFastProfitWeakSnapshotsRequired = 2; // Require repeated weak 30s snapshots.
+input bool EnableSmallProfitTrades = true; // Optional live SMALL entries when main model says WAIT.
+const double SmallProfitTargetUnits = 4.0; // CENT account units = USD 0.04 when MoneyUnitsPerUSD=100.
 const double ShadowSmallTP1Units = 2.0; // Observe-only SMALL stage 1.
 const double ShadowSmallTP2Units = 2.5; // Observe-only SMALL stage 2.
 const double ShadowSmallTP3Units = 3.0; // Observe-only SMALL stage 3.
 const double ShadowSmallStrongTargetUnits = ShadowSmallTP2Units; // Current strong-entry candidate.
-const double SmallProfitMaxLossUnits = 4.0; // Broker SL for new small entries: at most USD 0.04 on a 100-units/USD account.
+const double SmallProfitMaxLossUnits = 2.0; // Broker SL for new small entries: at most USD 0.02 on a 100-units/USD account.
 const double SmallProfitProtectionActivationUnits = 1.0;
 const double SmallProfitProtectionGivebackUnits = 0.5;
-const double SmallProfitMaxRiskUSD = 0.04; // Independent ceiling for new small entries.
+const double SmallProfitMaxRiskUSD = 0.02; // Independent ceiling for new small entries.
 const int SmallProfitMaxEntriesPerSignalBar = 2; // Sequential entries only; an open position still blocks another entry.
 const int SmallProfitMaximumHoldBars = 3;
 input bool EnableProfitProtection = true; // Close a managed position after an armed profit giveback.
@@ -72,7 +77,7 @@ input double EarlyReversalGivebackUnits = 6.0; // Require this much giveback fro
 input double EarlyReversalMaxCurrentUnits = 0.0; // Trigger only after the trade has returned to breakeven/loss.
 const bool EnableEarlyAdverseExit = true; // Active loss reduction: exit only after material loss plus repeated signal failure.
 const double EarlyAdverseRiskFraction = 0.60; // MAIN: arm at 60% of reconstructed initial SL risk.
-const double SmallEarlyAdverseRiskFraction = 0.50; // SMALL: evaluate earlier at 50% of risk (~2c on a 4c stop).
+const double SmallEarlyAdverseRiskFraction = 0.50; // SMALL: evaluate earlier at 50% of risk (~1c on a 2c stop).
 const int EarlyAdverseWeakSnapshotsRequired = 2; // Require two distinct model snapshots with no support.
 const int EarlyAdverseMinAgeSeconds = 120; // Give a new trade two minutes before adverse-exit evaluation.
 input int RequestTimeoutMs = 4000;
@@ -217,6 +222,11 @@ string TPStageStatus = "INACTIVE";
 bool MarketClosedExitPause = false;
 datetime MarketClosedExitPauseTickTime = 0;
 ulong MarketClosedExitPauseTicket = 0;
+ulong MainFastProfitTicket = 0;
+int MainFastProfitWeakSnapshots = 0;
+datetime MainFastProfitLastDecisionTime = 0;
+double MainFastProfitProgress = 0.0;
+string MainFastProfitStatus = "INACTIVE";
 
 // v0.50 improvement pack: telemetry only. These values MUST NOT be used by execution gates.
 bool ShadowBuyCaution = false;
@@ -485,7 +495,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.50\n"
+      +"EA version: 0.52.1\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -619,7 +629,13 @@ string BuildDiagnosticText()
       +"  TP1/TP2/TP3="+DoubleToString(TPStageTP1,_Digits)+"/"
          +DoubleToString(TPStageTP2,_Digits)+"/"+DoubleToString(TPStageTP3,_Digits)
       +"  progress="+DoubleToString(TPStageProgress*100.0,1)+"%"
-      +"  weak="+IntegerToString(TPStageWeakSnapshots)+"/"+IntegerToString(TPStageWeakSnapshotsRequired)+"\n"
+      +"  weak="+IntegerToString(TPStageWeakSnapshots)+"/"+IntegerToString(TPStageWeakSnapshotsRequired)+"\n"      +"MainFastProfit: "+(EnableMainFastProfit && !SmallOnlyMode ? "ACTIVE" : "OFF")
+      +"  status="+MainFastProfitStatus
+      +"  ageBars>="+IntegerToString(MainFastProfitMinAgeBars)
+      +"  progress="+DoubleToString(MainFastProfitProgress*100.0,1)+"%"
+      +"  minProgress="+DoubleToString(MainFastProfitMinProgressToTP1*100.0,1)+"%"
+      +"  weak="+IntegerToString(MainFastProfitWeakSnapshots)+"/"+IntegerToString(MainFastProfitWeakSnapshotsRequired)
+      +"  minProfit="+DoubleToString(MainFastProfitMinProfitUnits,2)+"\n"
       +"EarlyReversalShadow: "+BoolText(EarlyReversalShadowTriggered)
       +"  observe="+BoolText(ObserveEarlyReversalExit)
       +"  minPeak="+DoubleToString(EarlyReversalMinPeakUnits,2)
@@ -642,7 +658,8 @@ string BuildDiagnosticText()
       +"  Today: "+(today<0 ? "history unavailable" : IntegerToString(today))
       +"/unlimited\n"
       +"Small entries per signal bar: "+IntegerToString(SmallProfitMaxEntriesPerSignalBar)
-      +" max; second blocked after same-bar loss\n"
+      +" max; second blocked after same-bar loss\n"      +"SmallEntryQualityFilter: ACTIVE"
+      +"  Rule: edge>=minimum AND (intrabar OR ai_trend) same direction\n"
       +"RiskPerTradeUSD: "+DoubleToString(RiskPerTradeUSD,2)
       +"  EffectiveRiskUSD: "+DoubleToString(EffectiveRiskPerTradeUSD(),3)
       +"  RiskMultiplier: "+DoubleToString(LastRiskMultiplier,2)+"x"
@@ -784,7 +801,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.50 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.52.1 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
@@ -1186,16 +1203,48 @@ int SmallLossClosedThisSignalBar(const datetime bar_time)
 
 bool SmallProfitCandidate(const string decision,const string reason,
    const double buy_edge,const double sell_edge,const double strength,
-   string &direction)
+   string &direction,string &filter_reason)
 {
    direction="";
+   filter_reason="NOT_CANDIDATE";
    if(!SmallOnlyMode || !EnableSmallProfitTrades || decision!="WAIT"
       || (reason!="insufficient_model_edge" && reason!="insufficient_model_strength")
       || strength<=0.0)
       return false;
+
    if(buy_edge>sell_edge && buy_edge>0.0) direction="BUY";
    else if(sell_edge>buy_edge && sell_edge>0.0) direction="SELL";
-   return (direction!="");
+   if(direction=="")
+   {
+      filter_reason="SMALL_FILTER_NO_DIRECTION";
+      return false;
+   }
+
+   double directional_edge=(direction=="BUY" ? buy_edge : sell_edge);
+   if(LastMinimumEdge<=0.0 || directional_edge<LastMinimumEdge)
+   {
+      filter_reason="SMALL_FILTER_EDGE_FAIL";
+      return false;
+   }
+
+   bool intrabar_support=(
+      LastIntrabarConfirmed
+      && LastIntrabarDirection==direction
+   );
+   bool trend_support=(
+      LastAiTrendConfirmed
+      && LastAiTrendDirection==direction
+   );
+   if(!intrabar_support && !trend_support)
+   {
+      filter_reason="SMALL_FILTER_CONFIRM_FAIL";
+      return false;
+   }
+
+   filter_reason=(intrabar_support && trend_support
+      ? "SMALL_FILTER_PASS_BOTH"
+      : (intrabar_support ? "SMALL_FILTER_PASS_INTRABAR" : "SMALL_FILTER_PASS_TREND"));
+   return true;
 }
 
 bool SmallProfitTarget(const ENUM_ORDER_TYPE side,const double entry,
@@ -1822,7 +1871,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.50";
+      version="0.52.1";
    }
    if(close_detail!="") detail=close_detail;
 
@@ -2451,6 +2500,127 @@ bool ManageTPStages(const ulong ticket)
    return false;
 }
 
+void ResetMainFastProfitState()
+{
+   MainFastProfitTicket=0;
+   MainFastProfitWeakSnapshots=0;
+   MainFastProfitLastDecisionTime=0;
+   MainFastProfitProgress=0.0;
+   MainFastProfitStatus="INACTIVE";
+}
+
+bool ManageMainFastProfit(const ulong ticket,const datetime opened)
+{
+   if(!EnableMainFastProfit || SmallOnlyMode || ticket==0 || !PositionSelectByTicket(ticket))
+      return false;
+
+   if(MainFastProfitTicket!=ticket)
+   {
+      ResetMainFastProfitState();
+      MainFastProfitTicket=ticket;
+   }
+
+   int age=iBarShift(_Symbol,PERIOD_M15,opened,false);
+   if(age<MainFastProfitMinAgeBars)
+   {
+      MainFastProfitStatus="WAIT_AGE";
+      return false;
+   }
+
+   double current_units=PositionGetDouble(POSITION_PROFIT);
+   if(current_units<MainFastProfitMinProfitUnits)
+   {
+      MainFastProfitStatus="WAIT_PROFIT";
+      MainFastProfitWeakSnapshots=0;
+      return false;
+   }
+
+   long type=PositionGetInteger(POSITION_TYPE);
+   string direction=(type==POSITION_TYPE_BUY ? "BUY" : "SELL");
+   double entry=PositionGetDouble(POSITION_PRICE_OPEN);
+   MqlTick tick;
+   if(!SymbolInfoTick(_Symbol,tick))
+      return false;
+   double exit_price=(direction=="BUY" ? tick.bid : tick.ask);
+
+   // Prefer the learned TP1 plan when available; otherwise fall back to broker TP.
+   double target=0.0;
+   if(LoadTPStagePlan(ticket) && TPStageTP1>0.0)
+      target=TPStageTP1;
+   else
+      target=PositionGetDouble(POSITION_TP);
+   if(target<=0.0 || entry<=0.0)
+   {
+      MainFastProfitStatus="NO_TARGET";
+      return false;
+   }
+
+   MainFastProfitProgress=DirectionalProgress(direction,entry,target,exit_price);
+   if(MainFastProfitProgress>=MainFastProfitMinProgressToTP1)
+   {
+      MainFastProfitStatus="PROGRESS_OK";
+      MainFastProfitWeakSnapshots=0;
+      return false;
+   }
+
+   datetime now=TimeCurrent();
+   if(LastDecisionRequestTime<=0
+      || now-LastDecisionRequestTime>SnapshotIntervalSeconds*2+15)
+   {
+      MainFastProfitStatus="STALE_MODEL";
+      return false;
+   }
+
+   if(MainFastProfitLastDecisionTime!=LastDecisionRequestTime)
+   {
+      MainFastProfitLastDecisionTime=LastDecisionRequestTime;
+      bool model_support=(LastModelDecision==direction);
+      bool intrabar_support=(LastIntrabarConfirmed && LastIntrabarDirection==direction);
+      bool trend_support=(LastAiTrendConfirmed && LastAiTrendDirection==direction);
+      bool weak=(!model_support && !intrabar_support && !trend_support);
+
+      if(weak)
+         MainFastProfitWeakSnapshots++;
+      else
+         MainFastProfitWeakSnapshots=0;
+
+      Print("Ramon MAIN FAST PROFIT check ticket=",ticket,
+         " age=",age,
+         " profit=",DoubleToString(current_units,2),
+         " progress=",DoubleToString(MainFastProfitProgress,3),
+         " weak=",IntegerToString(MainFastProfitWeakSnapshots),"/",
+            IntegerToString(MainFastProfitWeakSnapshotsRequired));
+   }
+
+   if(MainFastProfitWeakSnapshots<MainFastProfitWeakSnapshotsRequired)
+   {
+      MainFastProfitStatus="WATCH";
+      return false;
+   }
+
+   if(ManagedExitPausedForMarketClosed(ticket))
+   {
+      MainFastProfitStatus="PAUSED_MARKET_CLOSED";
+      StatusLine="MAIN FAST PROFIT PAUSED: MARKET CLOSED";
+      return true;
+   }
+
+   if(Trade.PositionClose(ticket,MaxDeviationPoints))
+   {
+      ResetMarketClosedExitPause();
+      RecordDealTelemetry(Trade.ResultDeal(),"main_fast_profit");
+      MainFastProfitStatus="EXIT";
+      StatusLine="MAIN FAST PROFIT EXIT profit="
+         +DoubleToString(current_units,2)
+         +" progress="+DoubleToString(MainFastProfitProgress*100.0,1)+"%";
+      Print("Ramon execution: ",StatusLine);
+      return true;
+   }
+
+   HandleManagedExitFailure(ticket,"MAIN FAST PROFIT EXIT");
+   return true;
+}
+
 void ResetProfitProtectionState()
 {
    ProfitProtectionTicket=0;
@@ -2724,12 +2894,15 @@ void ManageOpenPosition()
       ResetProfitProtectionState();
       ResetTPStageRuntime();
       ResetEarlyAdverseState();
+      ResetMainFastProfitState();
       ResetMarketClosedExitPause();
       return;
    }
    if(EnforceSmallPositionRiskCap(ticket))
       return;
    if(ManageTPStages(ticket))
+      return;
+   if(ManageMainFastProfit(ticket,opened))
       return;
    ObserveOpenPositionProfit(ticket);
    if(ManageEarlyAdverseExit(ticket,opened))
@@ -2988,10 +3161,17 @@ void OnTimer()
    { StatusLine="Unknown model decision"; ShowStatus(); return; }
    if(SmallOnlyMode && decision!="WAIT")
    { StatusLine="Primary signal; small EA stands aside"; ShowStatus(); return; }
-   string small_direction="";
+   string small_direction="",small_filter_reason="";
    bool small_profit=SmallProfitCandidate(decision,reason,buy_edge,sell_edge,
-      signal_strength,small_direction);
-   if((decision=="WAIT" && !small_profit) || !EnableLiveTrading)
+      signal_strength,small_direction,small_filter_reason);
+   if(decision=="WAIT" && !small_profit)
+   {
+      if(SmallOnlyMode && StringFind(small_filter_reason,"SMALL_FILTER_")==0)
+         StatusLine=small_filter_reason;
+      ShowStatus();
+      return;
+   }
+   if(!EnableLiveTrading)
    { ShowStatus(); return; }
    if(small_profit)
       decision=small_direction;
@@ -3142,6 +3322,9 @@ int OnInit()
       || ProfitProtectionGivebackFraction<=0.0
       || ProfitProtectionGivebackMinUnits>=ProfitProtectionActivationMinUnits
       || TPStageWeakSnapshotsRequired<1 || TP1GraceSeconds<0 || TP2GraceSeconds<0
+      || MainFastProfitMinAgeBars<1 || MainFastProfitMinProfitUnits<=0.0
+      || MainFastProfitMinProgressToTP1<=0.0 || MainFastProfitMinProgressToTP1>=1.0
+      || MainFastProfitWeakSnapshotsRequired<1
       || TP1HealthyProgressFraction<=0.0 || TP1HealthyProgressFraction>=1.0
       || TP1RetraceFraction<=0.0 || TP1RetraceFraction>=1.0
       || TP2RetraceFraction<=0.0 || TP2RetraceFraction>=1.0
