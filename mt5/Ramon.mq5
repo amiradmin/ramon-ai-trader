@@ -1,5 +1,5 @@
 #property strict
-#property version "1.525"
+#property version "1.521"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -96,8 +96,6 @@ input string ShadowCsvFileName = "Ramon_Shadow_Improvements.csv";
 
 CTrade Trade;
 datetime LastDecisionRequestTime = 0;
-datetime LastForecastReceivedLocal = 0; // Display freshness only; never an execution gate.
-datetime LastForecastReceivedUTC = 0;
 datetime LastEntrySignalBar = 0;
 int LastSmallEntriesOnSignalBar = 0;
 string StatusLine = "Starting";
@@ -190,10 +188,6 @@ int LastModelSpreadPoints = 0;
 long LockedAccountLogin = 0;
 string LockedAccountServer = "";
 string LastCopyStatus = "Ready";
-string LastManualStatus = "Manual controls ready";
-datetime LastManualClickLocal = 0;
-ulong LastManualOrder = 0;
-string LastManualAction = "";
 const string UiPrefix = "RAMON_UI_";
 ulong ProfitProtectionTicket = 0;
 double ProfitProtectionPeakUnits = 0.0;
@@ -501,8 +495,8 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.52.5\n"
-      +"EA role: "+(SmallOnlyMode ? "SMALL TP4c SL2c" : "PRIMARY")
+      +"EA version: 0.52.1\n"
+      +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
       +"Symbol: "+_Symbol+"  Timeframe: M15\n"
@@ -519,9 +513,6 @@ string BuildDiagnosticText()
       +"Decision: "+LastModelDecision+"  Reason: "+LastModelReason+"\n"
       +"DecisionID: "+LastSampleKey+"  Saved: "+BoolText(LastSampleSaved)+"  Bundle: "+LastBundleId+"\n"
       +"TradeLearning: "+TradeLearningStatus+"\n"
-      +"Manual controls: "+LastManualStatus+"\n"
-      +"Manual audit (Common Files): "+DealTelemetryPath(0)
-         +(SmallOnlyMode ? ".small.manual.csv" : ".main.manual.csv")+"\n"
       +"LossCooldown: MT5_HISTORY | 2 consecutive same-direction net-loss SL closes | 30min\n"
       +"BaseDecision: "+LastBaseDecision+"  BaseReason: "+LastBaseReason+"\n"
       +"RoleModels: "+(LastEnsembleReady ? "READY" : "LEARNING")
@@ -773,23 +764,6 @@ void DrawDashboard()
       return;
    }
 
-   static bool was_narrow=false;
-   bool narrow=(int)ChartGetInteger(0,CHART_WIDTH_IN_PIXELS)<1020;
-   if(narrow!=was_narrow) ObjectsDeleteAll(0,UiPrefix);
-   was_narrow=narrow;
-   if(narrow)
-   {
-      DrawLiveModelPanel();
-      UiButton("MANUAL_BUY","BUY (MANUAL)",28,688,126,30);
-      UiButton("MANUAL_SELL","SELL (MANUAL)",164,688,126,30);
-      UiButton("MANUAL_CLOSE","CLOSE THIS EA",300,688,138,30);
-      UiLabel("MANUAL_STATUS",StringSubstr(LastManualStatus,0,72),28,728,clrGold,9);
-      UiButton("COPY","COPY DIAGNOSTIC",28,750,176,30);
-      UiLabel("COPY_STATUS",LastCopyStatus,218,758,C'148,163,184',8);
-      ManualButtonHelp();
-      ChartRedraw();
-      return;
-   }
    int spread_points=(int)SymbolInfoInteger(_Symbol,SYMBOL_SPREAD);
    int today=TradesToday();
    bool lock_ok=AccountLockHealthy();
@@ -799,8 +773,7 @@ void DrawDashboard()
    double dominant_edge=MathMax(LastBuyEdge,LastSellEdge);
    bool edge_pass=LastMinimumEdge>0.0 && dominant_edge>=LastMinimumEdge;
    bool strength_pass=LastMinimumStrength>0.0 && LastSignalStrength>=LastMinimumStrength;
-   string dominant=(LastBuyEdge>LastSellEdge ? "BUY" :
-      (LastSellEdge>LastBuyEdge ? "SELL" : "NEUTRAL"));
+   string dominant=(LastBuyEdge>=LastSellEdge ? "BUY" : "SELL");
    color state_color=(LastModelDecision=="BUY" ? clrLime :
       (LastModelDecision=="SELL" ? clrTomato : clrGold));
    string live_reason="";
@@ -827,8 +800,8 @@ void DrawDashboard()
       (live_profit_usd<-0.00001 ? "-$" : "$"))
       +DoubleToString(MathAbs(live_profit_usd),2);
 
-   UiRect("PANEL",12,24,520,662,C'15,23,42',C'71,85,105');
-   UiLabel("TITLE","RAMON AI TRADER  v0.52.5 "
+   UiRect("PANEL",12,24,520,574,C'15,23,42',C'71,85,105');
+   UiLabel("TITLE","RAMON AI TRADER  v0.52.1 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,C'148,163,184',9);
@@ -935,309 +908,7 @@ void DrawDashboard()
 
    UiButton("COPY","COPY DIAGNOSTIC",28,536,176,30);
    UiLabel("COPY_STATUS",LastCopyStatus,218,544,C'148,163,184',8);
-   UiButton("MANUAL_BUY","BUY (MANUAL)",28,576,146,30);
-   UiButton("MANUAL_SELL","SELL (MANUAL)",184,576,146,30);
-   UiButton("MANUAL_CLOSE","CLOSE THIS EA",340,576,164,30);
-   UiLabel("MANUAL_STATUS",StringSubstr(LastManualStatus,0,72),28,615,clrGold,9);
-   UiLabel("MANUAL_INFO","Manual entries use this EA's risk settings and automatic exits.",28,638,C'148,163,184',8);
-   ManualButtonHelp();
-   DrawLiveModelPanel();
    ChartRedraw();
-}
-
-// Read-only flow monitor. The standard, micro and trend routes are alternatives.
-// This view reports backend decisions; its display checks never become trading gates.
-void UiHelp(const string name,const string help)
-{
-   if(ObjectFind(0,UiPrefix+name)>=0)
-      ObjectSetString(0,UiPrefix+name,OBJPROP_TOOLTIP,help);
-}
-
-void FlowHelp(const string name,const string help)
-{
-   UiHelp("FLOW_"+name,help);
-   UiHelp("FLOW_"+name+"_TITLE",help);
-   UiHelp("FLOW_"+name+"_DETAIL",help);
-   UiHelp("FLOW_"+name+"_METRIC",help);
-}
-
-void ManualButtonHelp()
-{
-   UiHelp("MANUAL_BUY","خرید دستی در همین نقش EA؛ کنترل حجم، اسپرد و ریسک حفظ می‌شود. اقدام با USER_MANUAL ثبت می‌شود.");
-   UiHelp("MANUAL_SELL","فروش دستی در همین نقش EA؛ جهت را شما تعیین می‌کنید. مدیریت خودکار خروج فعال می‌ماند.");
-   UiHelp("MANUAL_CLOSE","فقط معامله متعلق به همین EA و همین نماد بسته می‌شود؛ معامله نقش دیگر بسته نمی‌شود. خروج دستی ثبت می‌شود.");
-}
-
-void DrawFlowProfit(const int x,const int y)
-{
-   ulong ticket=0;
-   datetime opened=0;
-   bool managed=ManagedPosition(ticket,opened) && PositionSelectByTicket(ticket);
-   double units=(managed ? PositionGetDouble(POSITION_PROFIT)+PositionGetDouble(POSITION_SWAP) : 0.0);
-   double cents=AccountUnitsToUSD(units)*100.0;
-   color pnl_color=(!managed ? C'148,163,184' : (cents>0.00001 ? clrLime : (cents<-0.00001 ? clrTomato : clrWhite)));
-   UiRect("FLOW_PNL_BOX",x,y,138,25,C'23,34,53',pnl_color);
-   UiLabel("FLOW_PNL",managed ? "P/L "+(cents>=0.0 ? "+" : "")+DoubleToString(cents,2)+"c" : "P/L --",x+8,y+4,pnl_color,10);
-   string help="سود یا ضرر باز معامله همین EA، به سنت دلار؛ شامل سود جاری و سواپ، بدون کارمزد.\n"
-      +(managed ? "شناسه معامله: "+IntegerToString((long)ticket)+"\nمقدار به واحد حساب: "+DoubleToString(units,2) : "این EA معامله بازی ندارد.");
-   UiHelp("FLOW_PNL",help);
-   UiHelp("FLOW_PNL_BOX",help);
-}
-
-void FlowHighlight(const string name,const bool blocked)
-{
-   if(!blocked) return;
-   ObjectSetInteger(0,UiPrefix+"FLOW_"+name,OBJPROP_BGCOLOR,C'67,25,35');
-   ObjectSetInteger(0,UiPrefix+"FLOW_"+name,OBJPROP_COLOR,clrTomato);
-   ObjectSetInteger(0,UiPrefix+"FLOW_"+name+"_TITLE",OBJPROP_COLOR,clrTomato);
-}
-
-void FlowCard(const string name,const string title,const string detail,const string metric,
-              const int x,const int y,const int width,const int height,const color accent)
-{
-   UiRect("FLOW_"+name,x,y,width,height,C'23,34,53',accent);
-   UiLabel("FLOW_"+name+"_TITLE",title,x+10,y+8,accent,10);
-   UiLabel("FLOW_"+name+"_DETAIL",detail,x+10,y+30,C'203,213,225',8);
-   UiLabel("FLOW_"+name+"_METRIC",metric,x+10,y+48,C'148,163,184',8);
-}
-
-void FlowConnector(const string name,const int x,const int y,const int width)
-{
-   UiRect("FLOW_"+name+"_LINE",x+width/2,y,2,14,C'100,116,139',C'100,116,139');
-   UiLabel("FLOW_"+name+"_ARROW","v",x+width/2-3,y+8,C'148,163,184',9);
-}
-
-void DrawLiveModelPanel()
-{
-   bool snapshot_available=LastForecastReceivedLocal>0 && LastSignalBid>0.0 && LastSignalAsk>0.0;
-   bool available=snapshot_available && LastForecast>0.0;
-   long age=(LastForecastReceivedLocal>0
-      ? (long)MathMax(0,(long)(TimeLocal()-LastForecastReceivedLocal)) : 0);
-   bool fresh=snapshot_available && age<=MathMax(60,2*SnapshotIntervalSeconds)
-      && (bool)TerminalInfoInteger(TERMINAL_CONNECTED);
-   string freshness=(!snapshot_available ? "WAITING FOR MODEL" : (fresh ? "LIVE" : "STALE - LAST SNAPSHOT"));
-   color muted=C'148,163,184';
-   double reference=(LastSignalBid+LastSignalAsk)/2.0;
-   double delta=LastForecast-reference;
-   string direction=(!available ? "UNKNOWN" :
-      (delta>_Point/2.0 ? "UP / BUY BIAS" :
-      (delta<-_Point/2.0 ? "DOWN / SELL BIAS" : "FLAT / NEUTRAL")));
-   color forecast_color=(!fresh || !available ? muted :
-      (delta>_Point/2.0 ? clrLime : (delta<-_Point/2.0 ? clrViolet : clrGold)));
-   int chart_width=(int)ChartGetInteger(0,CHART_WIDTH_IN_PIXELS);
-   bool stacked=chart_width<1020;
-   int x=(stacked ? 12 : 550), y=24;
-   UiRect("MODEL_PANEL",x,y,450,654,C'15,23,42',C'71,85,105');
-   UiLabel("MODEL_TITLE","FLOW | "+(!snapshot_available ? "WAITING" : (fresh ? "LIVE" : "STALE")),x+16,y+12,
-      (fresh ? clrLime : clrOrange),11);
-   UiHelp("MODEL_TITLE","وضعیت تازگی پاسخ مدل؛ LIVE یعنی پاسخ معتبر اخیر موجود است، نه مجوز ورود یا تضمین درست بودن پیش‌بینی.\n"+freshness);
-   DrawFlowProfit(x+300,y+8);
-   FlowCard("FORECAST","1. CHRONOS-2: "+direction,
-      available ? "Median "+DoubleToString(LastForecast,_Digits)
-         +" | delta "+(delta>=0.0 ? "+" : "")+DoubleToString(delta,_Digits) : "Waiting for forecast",
-      available ? "Snapshot midpoint: "+DoubleToString(reference,_Digits) : "No valid forecast",
-      x+12,y+42,426,70,forecast_color);
-   FlowConnector("TO_ROUTES",x+12,y+114,426);
-   bool conflict=LastBaseReason=="trend_conflict";
-   UiLabel("FLOW_VETO","2. ROUTES (OR) | trend veto: "+(!available ? "UNKNOWN" :
-      (conflict ? "BLOCKED" : "CLEAR")),x+16,y+137,
-      (!fresh ? muted : (conflict ? clrTomato : clrWhite)),9);
-   bool edge_ok=LastMinimumEdge>0.0 && MathMax(LastBuyEdge,LastSellEdge)>=LastMinimumEdge;
-   bool strength_ok=LastMinimumStrength>0.0 && LastSignalStrength>=LastMinimumStrength;
-   bool standard_ok=edge_ok && strength_ok;
-   color standard_color=(!fresh || !available ? muted : (standard_ok ? clrLime : clrOrange));
-   color micro_color=(!fresh || !available ? muted : (LastIntrabarConfirmed ? clrLime : clrOrange));
-   color route_trend_color=(!fresh || !available ? muted : (LastAiTrendConfirmed ? clrLime : clrOrange));
-   FlowCard("STANDARD","STANDARD"+(StringFind(LastBaseReason,"forecast_")==0 ? " *" : ""),
-      !available ? "UNKNOWN" : (standard_ok ? "PASS" : "NOT READY"),
-      "Edge "+(available ? PassFail(edge_ok) : "--"),x+12,y+160,138,114,standard_color);
-   UiLabel("FLOW_STANDARD_STRENGTH","Strength "+(available ? PassFail(strength_ok) : "--"),
-      x+22,y+228,standard_color,8);
-   UiLabel("FLOW_STANDARD_VALUE",available
-      ? DoubleToString(LastSignalStrength,3)+" / "+DoubleToString(LastMinimumStrength,3) : "--",
-      x+22,y+248,muted,8);
-   FlowCard("MICRO","INTRABAR"+(StringFind(LastBaseReason,"intrabar_reversal_")==0 ? " *" : ""),
-      !available ? "UNKNOWN" : (LastIntrabarConfirmed ? "PASS" : "NOT READY"),
-      available ? LastIntrabarDirection : "--",x+156,y+160,138,114,micro_color);
-   UiLabel("FLOW_MICRO_VALUE","Move "+(available ? DoubleToString(LastIntrabarMoveAtr,3) : "--"),
-      x+166,y+228,muted,8);
-   UiLabel("FLOW_MICRO_REBOUND","Rebound "+(available ? DoubleToString(LastIntrabarReboundAtr,3) : "--"),
-      x+166,y+248,muted,8);
-   FlowCard("TREND","AI TREND"+(StringFind(LastBaseReason,"ai_trend_continuation_")==0 ? " *" : ""),
-      !available ? "UNKNOWN" : (LastAiTrendConfirmed ? "PASS" : "NOT READY"),
-      available ? LastAiTrendDirection : "--",x+300,y+160,138,114,route_trend_color);
-   UiLabel("FLOW_TREND_PATH","Path "+(available ? DoubleToString(LastAiTrendMoveAtr,2)+" ATR" : "--"),
-      x+310,y+228,muted,8);
-   UiLabel("FLOW_TREND_CONSISTENCY","Cons. "+(available ? DoubleToString(LastAiTrendConsistency,2) : "--"),
-      x+310,y+248,muted,8);
-   // Join the alternative routes visually, rather than suggesting all three must pass.
-   UiRect("FLOW_JOIN",x+81,y+283,288,2,C'100,116,139',C'100,116,139');
-   for(int i=0;i<3;i++)
-      UiRect("FLOW_JOIN_"+IntegerToString(i),x+81+i*144,y+274,2,9,C'100,116,139',C'100,116,139');
-   FlowConnector("TO_BASE",x+12,y+285,426);
-   color base_color=(!fresh ? muted : (LastBaseDecision=="WAIT" ? clrGold : clrLime));
-   FlowCard("BASE","3. BASE DECISION: "+(snapshot_available ? LastBaseDecision : "NONE"),
-      snapshot_available ? LastBaseReason : "Waiting for valid model snapshot",
-      LastBaseReason=="insufficient_model_strength" ? "STOP: model strength below threshold; no alternative confirmed."
-         : (LastBaseReason=="insufficient_model_edge" ? "STOP: model edge too small; no alternative confirmed."
-         : (conflict ? "STOP: recent market trend conflicts with forecast."
-         : "* marks the selected route. Routes are alternatives.")),x+12,y+309,426,70,base_color);
-   FlowConnector("TO_FINAL",x+12,y+381,426);
-   color final_color=(!fresh ? muted : (LastModelDecision=="WAIT" ? clrGold : clrLime));
-   FlowCard("FINAL","4. FINAL SIGNAL: "+(snapshot_available ? LastModelDecision : "NONE"),
-      snapshot_available ? LastModelReason : "Waiting",
-      "Role models: "+(!snapshot_available ? "UNKNOWN" : (LastEnsembleActive ? "ACTIVE" : "BASE ONLY")),
-      x+12,y+404,426,70,final_color);
-   FlowConnector("TO_EA",x+12,y+476,426);
-   string live_reason="";
-   bool live_ready=LiveExecutionReady(live_reason);
-   FlowCard("EXECUTION","5. EA EXECUTION: "+(SmallOnlyMode ? "SMALL" : "MAIN"),
-      StringSubstr(StatusLine,0,60),
-      "Live "+LiveStateText()+" | position, quote and risk checks apply.",
-      x+12,y+498,426,70,(live_ready ? clrWhite : clrOrange));
-   DrawFlowBlocker(x,y,fresh,snapshot_available,available);
-   UiLabel("FLOW_UPDATED",(LastForecastReceivedLocal>0
-      ? TimeToString(LastForecastReceivedUTC,TIME_SECONDS)+" UTC | age "+IntegerToString(age)+"s"
-      : "No valid response")+" | snapshot "+IntegerToString(SnapshotIntervalSeconds)+"s",
-      x+16,y+628,muted,8);
-   AddFlowHelp();
-}
-
-void DrawFlowBlocker(const int x,const int y,const bool fresh,const bool snapshot,const bool forecast)
-{
-   int stage=0;
-   bool confirmed_stop=true;
-   string text="CHECK EA STATUS";
-   string help="وضعیت اجرای EA را در مرحله پنجم ببینید؛ سیگنال به تنهایی تضمین ورود نیست.";
-   color accent=clrOrange;
-   ulong ticket=0;
-   datetime opened=0;
-   bool managed=ManagedPosition(ticket,opened);
-   bool request_failed=StringFind(StatusLine,"Model HTTP")==0
-      || StatusLine=="Invalid/stale model response" || StatusLine=="Need 128 completed bars"
-      || StatusLine=="Bad tick" || StatusLine=="Stale tick" || StatusLine=="Stale completed bar";
-   string live_reason="";
-   bool live_ready=LiveExecutionReady(live_reason);
-   bool permissions=(bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED)
-      && (bool)MQLInfoInteger(MQL_TRADE_ALLOWED) && (bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED);
-   if(!snapshot || !fresh || request_failed)
-   {
-      stage=1; text=(!snapshot ? "STOP 1: NO VALID SNAPSHOT" : (!fresh ? "STOP 1: STALE / DISCONNECTED" : "STOP 1: DATA / REQUEST FAILED"));
-      help="توقف در داده یا پاسخ مدل؛ تاریخ آخرین پاسخ معتبر را بررسی کنید.\nوضعیت: "+StatusLine;
-   }
-   else if(managed)
-   {
-      text="POSITION OPEN: AUTO MANAGEMENT"; accent=clrDeepSkyBlue;
-      help="این EA یک معامله باز دارد؛ معامله جدید نمی‌گیرد و مدیریت خروج ادامه دارد. WAIT مدل دستور بستن فوری نیست.\n"+StatusLine;
-      if(StringFind(StatusLine,"PAUSED")>=0 || StringFind(StatusLine,"FAILED")>=0)
-      { stage=5; text="STOP 5: POSITION EXIT PAUSED / FAILED"; }
-   }
-   else if(!live_ready || !permissions)
-   {
-      stage=5; text="STOP 5: LIVE / PERMISSION";
-      help="اجرای زنده یا مجوز معامله فعال نیست؛ قفل حساب و تایید واحد پول نیز باید سالم باشند.\n"+live_reason;
-   }
-   else if(SmallOnlyMode && StringFind(StatusLine,"SMALL_FILTER_")==0)
-   {
-      stage=5; text="STOP 5: SMALL ENTRY FILTER";
-      help="فیلتر مخصوص SMALL ورود را رد کرده است.\n"+StatusLine;
-      if(StatusLine=="SMALL_FILTER_CONFIRM_FAIL")
-      {
-         text="STOP 5: SMALL NEEDS MICRO / TREND";
-         help="برای SMALL، حداقل یکی از تاییدهای حرکت کوتاه‌مدت یا ترند باید در جهت معامله برقرار باشد؛ اکنون هیچ‌کدام تایید نیست.";
-         FlowHighlight("MICRO",true); FlowHighlight("TREND",true);
-      }
-      if(StatusLine=="SMALL_FILTER_EDGE_FAIL") FlowHighlight("STANDARD",true);
-   }
-   else if(SmallOnlyMode && StatusLine=="Primary signal; small EA stands aside")
-   {
-      text="SMALL STANDS ASIDE: PRIMARY SIGNAL";
-      help="مدل سیگنال اصلی BUY یا SELL داده؛ SMALL در این نسخه فقط نامزدهای WAIT با شرایط مخصوص را بررسی می‌کند.";
-   }
-   else if(LastBaseDecision=="WAIT" && LastModelDecision=="WAIT")
-   {
-      stage=3; text="STOP 3: "+LastBaseReason;
-      help="تصمیم پایه صبر است؛ علت گزارش‌شده مدل: "+LastBaseReason;
-      if(LastBaseReason=="insufficient_model_strength")
-      {
-         text="STOP 3: MODEL STRENGTH TOO LOW";
-         help="قدرت مدل کمتر از حداقل است و مسیر جایگزین تایید نشده. این عدد احتمال موفقیت نیست.\n"
-            +DoubleToString(LastSignalStrength,3)+" < "+DoubleToString(LastMinimumStrength,3);
-         FlowHighlight("STANDARD",true);
-         ObjectSetInteger(0,UiPrefix+"FLOW_STANDARD_STRENGTH",OBJPROP_COLOR,clrTomato);
-         ObjectSetInteger(0,UiPrefix+"FLOW_STANDARD_VALUE",OBJPROP_COLOR,clrTomato);
-      }
-      else if(LastBaseReason=="insufficient_model_edge")
-      { text="STOP 3: MODEL EDGE TOO SMALL"; FlowHighlight("STANDARD",true); }
-      else if(LastBaseReason=="trend_conflict")
-      {
-         text="STOP 2: TREND CONFLICT"; stage=2;
-         help="جهت پیش‌بینی با حرکت شدید اخیر کندل‌های کامل مخالف است؛ این مانع می‌تواند هر سه مسیر را متوقف کند.";
-         ObjectSetInteger(0,UiPrefix+"FLOW_VETO",OBJPROP_COLOR,clrTomato);
-      }
-      else if(LastBaseReason=="spread_or_atr")
-      { text="STOP 3: SPREAD / ATR"; help="اسپرد بیش از سقف مجاز یا نوسان ATR نامعتبر است؛ ممکن است پیش‌بینی محاسبه نشده باشد."; }
-   }
-   else if(LastModelDecision=="WAIT")
-   {
-      stage=4; text="STOP 4: "+LastModelReason;
-      help="تصمیم پایه با تصمیم نهایی متفاوت است؛ علت توقف نهایی: "+LastModelReason;
-   }
-   else if(StringFind(StatusLine,"Order sent")==0)
-   {
-      text="ORDER SENT: "+LastModelDecision; accent=clrLime;
-      help="EA درخواست معامله را به کارگزار ارسال کرده است؛ وضعیت واقعی معامله را در تب Trade ببینید.";
-   }
-   else
-   {
-      stage=5; text="CHECK 5: EA ENTRY CONDITIONS";
-      confirmed_stop=false;
-      help="سیگنال وجود دارد، اما ورود به وضعیت حساب، معامله باز، کول‌داون، اسپرد، حجم، مارجین و پاسخ کارگزار وابسته است.\n"+StatusLine;
-      if(StringFind(StatusLine,"blocked")>=0 || StringFind(StatusLine,"BLOCKED")>=0
-         || StringFind(StatusLine,"unavailable")>=0 || StringFind(StatusLine,"Order rejected")==0
-         || StringFind(StatusLine,"Broker cannot")==0 || StringFind(StatusLine,"loss_cooldown")==0
-         || StatusLine=="same_direction_sl_cooldown"
-         || StatusLine=="Insufficient margin" || StatusLine=="Quote changed/stale"
-         || StatusLine=="Symbol trading disabled" || StatusLine=="Invalid stop/target"
-         || StatusLine=="Entry already used for this M15 signal bar"
-         || StatusLine=="Two small entries already used for this M15 signal bar"
-         || StatusLine=="Another robot has a position on this symbol"
-         || StatusLine=="Small profit risk > 2 cents")
-      { confirmed_stop=true; text="STOP 5: "+StatusLine; }
-   }
-   if(stage>0)
-   {
-      accent=(confirmed_stop ? clrTomato : clrOrange);
-      if(stage==1) FlowHighlight("FORECAST",true);
-      if(stage==3) FlowHighlight("BASE",true);
-      if(stage==4) FlowHighlight("FINAL",true);
-      if(stage==5) FlowHighlight("EXECUTION",confirmed_stop);
-   }
-   UiRect("FLOW_BLOCKER",x+12,y+575,426,44,C'23,34,53',accent);
-   UiLabel("FLOW_BLOCKER_TEXT",StringSubstr(text,0,60),x+22,y+581,accent,9);
-   UiLabel("FLOW_LEGEND","GREEN ready | AMBER pending | RED stop | BLUE managing",x+22,y+601,C'148,163,184',8);
-   UiHelp("FLOW_BLOCKER",help); UiHelp("FLOW_BLOCKER_TEXT",help);
-   UiHelp("FLOW_LEGEND","سبز: شرط یا مسیر آماده؛ زرد: انتظار یا مسیر تاییدنشده؛ قرمز: محل توقف ورود؛ آبی: مدیریت معامله باز. مسیرها جایگزین یکدیگرند.");
-}
-
-void AddFlowHelp()
-{
-   FlowHelp("FORECAST","جهت پیش‌بینی Chronos-2 از مقایسه میانه پیش‌بینی با وسط قیمت Bid/Ask همان پاسخ به دست می‌آید. پایین‌تر یعنی تمایل فروش؛ بالاتر یعنی تمایل خرید. این تمایل دستور معامله نیست. بنفش یعنی جهت نزولی، نه خطا.\nبازه پیش‌بینی: "+DoubleToString(LastForecastLow,_Digits)+" تا "+DoubleToString(LastForecastHigh,_Digits));
-   UiHelp("FLOW_VETO","سه مسیر ورود جایگزین یکدیگرند؛ تایید یکی می‌تواند کافی باشد. مانع تضاد ترند ممکن است هر سه مسیر را رد کند. CLEAR یعنی این مانع در پاسخ پایه فعال نیست.");
-   FlowHelp("STANDARD","مسیر استاندارد: مزیت قیمتی پس از لحاظ اسپرد باید به حداقل برسد و نسبت قدرت مدل کافی باشد. کمبود یک شرط، این مسیر را رد می‌کند؛ مسیر جایگزین ممکن است همچنان تایید شود.");
-   UiHelp("FLOW_STANDARD_METRIC","Edge یعنی فاصله پیش‌بینی در جهت معامله، با لحاظ اسپرد.\nBuyEdge: "+DoubleToString(LastBuyEdge,3)+"\nSellEdge: "+DoubleToString(LastSellEdge,3)+"\nحداقل: "+DoubleToString(LastMinimumEdge,3));
-   string strength="Strength نسبت مزیت پیش‌بینی به پهنای بازه عدم‌قطعیت است؛ احتمال برد نیست.\nمقدار فعلی: "+DoubleToString(LastSignalStrength,3)+"\nحداقل: "+DoubleToString(LastMinimumStrength,3);
-   UiHelp("FLOW_STANDARD_STRENGTH",strength); UiHelp("FLOW_STANDARD_VALUE",strength);
-   FlowHelp("MICRO","مسیر کوتاه‌مدت: قدرت کافی، مزیت کافی، حرکت و فاصله از سقف/کف اخیر و چرخش قیمت باید با جهت مدل هماهنگ باشند. PASS از پاسخ واقعی مدل خوانده می‌شود.\nحداقل قدرت این مسیر: "+DoubleToString(LastIntrabarMinStrength,3));
-   UiHelp("FLOW_MICRO_VALUE","Move اندازه حرکت کوتاه‌مدت در جهت پیش‌بینی نسبت به ATR است.\nمقدار: "+DoubleToString(LastIntrabarMoveAtr,3)+"\nحداقل: "+DoubleToString(LastIntrabarMinMoveAtr,3));
-   UiHelp("FLOW_MICRO_REBOUND","Rebound فاصله قیمت از کف اخیر برای خرید یا سقف اخیر برای فروش، نسبت به ATR است. عبور از حداقل به تنهایی تایید مسیر نیست؛ شرط چرخش قیمت هم لازم است.\nمقدار: "+DoubleToString(LastIntrabarReboundAtr,3)+"\nحداقل: "+DoubleToString(LastIntrabarMinReboundAtr,3));
-   FlowHelp("TREND","مسیر ترند از مسیر چندگامی پیش‌بینی Chronos استخراج می‌شود. جهت، طول حرکت، یکدستی گام‌ها، مزیت قیمتی و تایید حرکت کوتاه‌مدت باید شرایط لازم را داشته باشند.\nحداقل حرکت کوتاه‌مدت: "+DoubleToString(LastTrendMinMicroMoveAtr,3)+" ATR\nحداقل مزیت این مسیر: "+DoubleToString(LastMinimumEdge*LastTrendMinEdgeFraction,3));
-   UiHelp("FLOW_TREND_PATH","Path طول خالص حرکت پیش‌بینی نسبت به ATR است. ATR معیار نوسان اخیر است.\nمقدار: "+DoubleToString(LastAiTrendMoveAtr,3)+"\nحداقل: "+DoubleToString(LastTrendMinPathAtr,3));
-   UiHelp("FLOW_TREND_CONSISTENCY","Consistency سهم گام‌های مسیر پیش‌بینی همسو با جهت غالب است؛ احتمال موفقیت معامله نیست.\nمقدار: "+DoubleToString(LastAiTrendConsistency,3)+"\nحداقل: "+DoubleToString(LastTrendMinConsistency,3));
-   FlowHelp("BASE","تصمیم پایه پس از بررسی مسیرهای ورود و مانع تضاد ترند صادر می‌شود. WAIT یعنی شرایط ورود اصلی کامل نشده؛ به تنهایی دستور بستن معامله باز نیست.\nعلت فعلی: "+LastBaseReason);
-   FlowHelp("FINAL","سیگنال نهایی پس از ارزیابی مدل‌های کمکی است. BASE ONLY یعنی این پاسخ بدون دخالت فعال مدل‌های کمکی صادر شده.\nعلت فعلی: "+LastModelReason);
-   FlowHelp("EXECUTION","اجرای EA علاوه بر سیگنال به مجوز معامله، قفل حساب، اسپرد، سقف ریسک، حجم، مارجین و محدودیت‌های ورود وابسته است. MAIN و SMALL شرایط ورود متفاوت دارند.\nوضعیت فعلی: "+StatusLine);
-   UiHelp("FLOW_UPDATED","زمان دریافت آخرین پاسخ معتبر، سن آن و فاصله درخواست‌ها؛ پیش‌بینی Chronos تا تغییر کندل‌های کامل ممکن است کش شده باشد، اما تصمیم با قیمت تازه ارزیابی می‌شود.");
 }
 
 bool CopyDiagnosticToClipboard()
@@ -2077,7 +1748,7 @@ void AppendTradeCsv(const ulong deal)
       DoubleToString(HistoryDealGetDouble(deal,DEAL_COMMISSION),4),
       DoubleToString(HistoryDealGetDouble(deal,DEAL_SWAP),4),
       AccountInfoString(ACCOUNT_CURRENCY),
-      ManualDealComment(deal));
+      HistoryDealGetString(deal,DEAL_COMMENT));
    FileFlush(handle);
    FileClose(handle);
 }
@@ -2200,11 +1871,9 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.52.5";
+      version="0.52.1";
    }
    if(close_detail!="") detail=close_detail;
-   string manual_detail=ManualOrderAction((ulong)HistoryDealGetInteger(deal,DEAL_ORDER));
-   if(manual_detail!="") detail=manual_detail;
 
    string sizing_sample="";
    double risk_budget_units=0.0,planned_volume=0.0,min_lot_sl_units=0.0;
@@ -2304,11 +1973,6 @@ bool ClosedTradePayload(const ulong identifier,string &payload)
       }
       else if(entry==DEAL_ENTRY_OUT || entry==DEAL_ENTRY_OUT_BY)
       {
-         int manual_offset=0;
-         string manual_version="",manual_detail="";
-         if(ManualOrderAction((ulong)HistoryDealGetInteger(deal,DEAL_ORDER))=="manual_close"
-            || (ReadDealTelemetry(deal,manual_offset,manual_version,manual_detail)
-               && manual_detail=="manual_close")) return false;
          out_volume+=volume;
          if(at>=closed)
          {
@@ -2358,7 +2022,6 @@ bool ClosedTradePayload(const ulong identifier,string &payload)
    }
    if(ReadDealTelemetry(closing_deal,offset,version,detail))
    {
-      if(detail=="manual_close") return false; // User exit is not an autonomous model outcome.
       payload+=",\"closed_utc_offset_seconds\":"+IntegerToString(offset);
       if(exit_reason=="DEAL_REASON_EXPERT" && detail!="")
          payload+=",\"exit_detail\":\""+JsonEscape(detail)+"\"";
@@ -3282,18 +2945,6 @@ void ManageOpenPosition()
       HandleManagedExitFailure(ticket,"TIME EXIT");
 }
 
-void OnTick()
-{
-   if(!ShowDashboard || ObjectFind(0,UiPrefix+"MODEL_PANEL")<0) return;
-   static ulong last_paint=0;
-   ulong now=GetTickCount64();
-   if(now-last_paint<250) return; // Display only; avoid repainting on every high-frequency tick.
-   last_paint=now;
-   int x=((int)ChartGetInteger(0,CHART_WIDTH_IN_PIXELS)<1020 ? 12 : 550);
-   DrawFlowProfit(x+300,32);
-   ChartRedraw();
-}
-
 void OnTimer()
 {
    ShowStatus();
@@ -3493,8 +3144,6 @@ void OnTimer()
    LastTargetTP2=target_tp2;
    LastTargetTP3=target_tp3;
    LastLegacyTargetPrice=legacy_target_price;
-   LastForecastReceivedLocal=TimeLocal();
-   LastForecastReceivedUTC=TimeGMT();
    StatusLine=reason;
    UpdateSizingPreview();
    UpdateImprovementShadows();
@@ -3582,16 +3231,16 @@ void OnTimer()
    {
       // Small-profit trades never scale above the broker minimum volume.
       if(!SmallProfitStop(side,entry,stop,volume,tick,stop))
-      { StatusLine="Broker cannot place 2-cent small stop"; ShowStatus(); return; }
+      { StatusLine="Broker cannot place 4-cent small stop"; ShowStatus(); return; }
       double stop_loss_units=0.0;
       double small_risk_cap=SmallProfitRiskCapUnits();
       if(volume<=0.0 || small_risk_cap<=0.0
          || !OrderCalcProfit(side,_Symbol,volume,entry,stop,stop_loss_units)
          || stop_loss_units>=0.0
          || -stop_loss_units>small_risk_cap+0.00001)
-      { StatusLine="Small profit risk > 2 cents"; ShowStatus(); return; }
+      { StatusLine="Small profit risk > 4 cents"; ShowStatus(); return; }
       if(!SmallProfitTarget(side,entry,volume,tick,target))
-      { StatusLine="Broker cannot place 4-cent target"; ShowStatus(); return; }
+      { StatusLine="Broker cannot place 2-cent target"; ShowStatus(); return; }
    }
    double margin=0.0;
    if(!OrderCalcMargin(side,_Symbol,volume,entry,margin)
@@ -3620,7 +3269,7 @@ void OnTimer()
       LastEntrySignalBar=bar_time;
       if(SmallOnlyMode)
          LastSmallEntriesOnSignalBar=small_entries_on_bar+1;
-      StatusLine="Order sent "+(small_profit ? "SMALL TP4c SL2c " : "")
+      StatusLine="Order sent "+(small_profit ? "SMALL 2c " : "")
          +decision+" "+DoubleToString(volume,2);
    }
    Print("Ramon execution: ",StatusLine);
@@ -3641,195 +3290,14 @@ void OnTradeTransaction(
    }
 }
 
-string ManualOrderAction(const ulong order)
-{
-   if(order==0) return "";
-   if(order==LastManualOrder) return LastManualAction;
-   int file=FileOpen(DealTelemetryPath(order)+".manual",FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON);
-   if(file==INVALID_HANDLE) return "";
-   string action=FileReadString(file);
-   FileClose(file);
-   return action;
-}
-
-void MarkManualOrder(const ulong order,const string action)
-{
-   if(order==0) return;
-   LastManualOrder=order;
-   LastManualAction=action;
-   int file=FileOpen(DealTelemetryPath(order)+".manual",FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON);
-   if(file==INVALID_HANDLE)
-   { Print("Ramon MANUAL order marker failed order=",order," err=",GetLastError()); return; }
-   FileWriteString(file,action);
-   FileFlush(file);
-   FileClose(file);
-}
-
-string ManualDealComment(const ulong deal)
-{
-   string comment=HistoryDealGetString(deal,DEAL_COMMENT);
-   string action=ManualOrderAction((ulong)HistoryDealGetInteger(deal,DEAL_ORDER));
-   if(action!="") return "USER_"+action+" | "+comment;
-   if(StringFind(comment,"RamonManual:")==0) return "USER_MANUAL_ENTRY | "+comment;
-   return comment;
-}
-
-bool AuditManualAction(const string action,const string result,const ulong position=0,
-                       const ulong order=0,const ulong deal=0,const uint retcode=0)
-{
-   Print("Ramon USER_MANUAL ",action," ",result," position=",position,
-      " order=",order," deal=",deal," retcode=",retcode);
-   // Always log manual actions, independently of optional trade CSV logging.
-   string path=DealTelemetryPath(0)+(SmallOnlyMode ? ".small.manual.csv" : ".main.manual.csv");
-   int file=FileOpen(path,FILE_READ|FILE_WRITE|FILE_CSV|FILE_ANSI|FILE_COMMON,',');
-   if(file==INVALID_HANDLE) return false;
-   bool empty=FileSize(file)==0;
-   FileSeek(file,0,SEEK_END);
-   if(empty) FileWrite(file,"utc","actor","action","result","symbol","magic",
-      "position","order","deal","retcode","model_decision","model_reason");
-   uint written=FileWrite(file,TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS),"USER_MANUAL",action,result,
-      _Symbol,IntegerToString((long)MagicNumber),IntegerToString((long)position),
-      IntegerToString((long)order),IntegerToString((long)deal),IntegerToString((int)retcode),
-      LastModelDecision,LastModelReason);
-   FileFlush(file);
-   FileClose(file);
-   return written>0;
-}
-
-void ManualBlocked(const string action,const string reason)
-{
-   LastManualStatus="MANUAL "+action+" BLOCKED: "+reason;
-   AuditManualAction(action,LastManualStatus);
-}
-
-void ExecuteManualAction(const string action)
-{
-   if(action!="BUY" && action!="SELL" && action!="CLOSE") return;
-   if(!AuditManualAction(action,"REQUEST"))
-   { LastManualStatus="MANUAL BLOCKED: audit file unavailable"; return; }
-   if(LastManualClickLocal>0 && TimeLocal()-LastManualClickLocal<3)
-   { ManualBlocked(action,"wait 3 seconds between clicks"); return; }
-   LastManualClickLocal=TimeLocal();
-   string reason="";
-   if(!LiveExecutionReady(reason)) { ManualBlocked(action,reason); return; }
-   if(!(bool)TerminalInfoInteger(TERMINAL_CONNECTED)
-      || !(bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED)
-      || !(bool)MQLInfoInteger(MQL_TRADE_ALLOWED)
-      || !(bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED))
-   { ManualBlocked(action,"connection/trade permission"); return; }
-
-   ulong ticket=0;
-   datetime opened=0;
-   bool managed=ManagedPosition(ticket,opened);
-   bool submitted=false;
-   if(action=="CLOSE")
-   {
-      if(!managed || !PositionSelectByTicket(ticket)
-         || PositionGetString(POSITION_SYMBOL)!=_Symbol
-         || (ulong)PositionGetInteger(POSITION_MAGIC)!=MagicNumber)
-      { ManualBlocked(action,"no position belonging to this EA"); return; }
-      submitted=Trade.PositionClose(ticket,MaxDeviationPoints);
-   }
-   else
-   {
-      if(managed || OtherPositionOnSymbol())
-      { ManualBlocked(action,"position already open / foreign position"); return; }
-      for(int i=OrdersTotal()-1;i>=0;i--)
-      {
-         if(OrderGetTicket(i)>0 && OrderGetString(ORDER_SYMBOL)==_Symbol
-            && (ulong)OrderGetInteger(ORDER_MAGIC)==MagicNumber)
-         { ManualBlocked(action,"order already pending"); return; }
-      }
-      if(SymbolInfoInteger(_Symbol,SYMBOL_TRADE_MODE)!=SYMBOL_TRADE_MODE_FULL)
-      { ManualBlocked(action,"symbol trading disabled"); return; }
-      if(LocalLossCooldownBlocked(action,reason)) { ManualBlocked(action,reason); return; }
-      int today=(SmallOnlyMode ? 0 : TradesToday());
-      if(!SmallOnlyMode && (today<0 || today>=MaxTradesPerDay))
-      { ManualBlocked(action,"daily trade limit/history unavailable"); return; }
-      // Manual direction bypasses model BUY/SELL/WAIT and entry-strength gates only.
-      // A fresh valid snapshot is still required for MAIN stop/target distances.
-      if(!SmallOnlyMode && (LastForecastReceivedLocal<=0
-         || TimeLocal()-LastForecastReceivedLocal>MathMax(60,2*SnapshotIntervalSeconds)
-         || LastStopDistance<=0.0 || LastTargetDistance<=0.0))
-      { ManualBlocked(action,"fresh model SL/TP unavailable"); return; }
-      MqlTick tick;
-      if(!SymbolInfoTick(_Symbol,tick) || tick.bid<=0.0 || tick.ask<=tick.bid
-         || MathAbs((long)TimeCurrent()-(long)tick.time)>30
-         || (int)SymbolInfoInteger(_Symbol,SYMBOL_SPREAD)>MaxSpreadPoints)
-      { ManualBlocked(action,"quote stale / spread too high"); return; }
-      ENUM_ORDER_TYPE side=(action=="BUY" ? ORDER_TYPE_BUY : ORDER_TYPE_SELL);
-      double entry=(action=="BUY" ? tick.ask : tick.bid);
-      double point=SymbolInfoDouble(_Symbol,SYMBOL_POINT);
-      double minimum_distance=(double)SymbolInfoInteger(_Symbol,SYMBOL_TRADE_STOPS_LEVEL)*point+2*point;
-      double stop_distance=MathMax(LastStopDistance,minimum_distance);
-      double target_distance=MathMax(LastTargetDistance,minimum_distance);
-      double stop=NormalizeDouble(entry+(action=="BUY" ? -stop_distance : stop_distance),_Digits);
-      double target=NormalizeDouble(entry+(action=="BUY" ? target_distance : -target_distance),_Digits);
-      double volume=(SmallOnlyMode ? SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN) : SelectVolume(side,entry,stop));
-      if(volume<=0.0) { ManualBlocked(action,"minimum lot exceeds risk cap"); return; }
-      if(SmallOnlyMode)
-      {
-         // Let the existing broker-aware solver find a feasible stop within the fixed 2c cap.
-         double unit_loss=0.0;
-         if(!OrderCalcProfit(side,_Symbol,volume,entry,
-            entry+(action=="BUY" ? -1.0 : 1.0),unit_loss) || unit_loss>=0.0)
-         { ManualBlocked(action,"SMALL loss calculation unavailable"); return; }
-         double proposed_stop=entry+(action=="BUY" ? -1.0 : 1.0)
-            *SmallProfitRiskCapUnits()/(-unit_loss);
-         if(!SmallProfitStop(side,entry,proposed_stop,volume,tick,stop)
-            || !SmallProfitTarget(side,entry,volume,tick,target))
-         { ManualBlocked(action,"broker cannot place SMALL SL2c / TP4c"); return; }
-      }
-      double loss=0.0,margin=0.0;
-      double cap=(SmallOnlyMode ? SmallProfitRiskCapUnits() : MaxExecutableRiskUSD*MoneyUnitsPerUSD);
-      if(cap<=0.0 || !OrderCalcProfit(side,_Symbol,volume,entry,stop,loss)
-         || loss>=0.0 || -loss>cap+0.00001)
-      { ManualBlocked(action,"SL exceeds risk cap"); return; }
-      if(!OrderCalcMargin(side,_Symbol,volume,entry,margin)
-         || margin>AccountInfoDouble(ACCOUNT_MARGIN_FREE)*0.8)
-      { ManualBlocked(action,"insufficient margin"); return; }
-      ClearPendingSizing(); // Manual entries must not inherit an autonomous sample ID.
-      string comment="RamonManual:"+action;
-      submitted=(action=="BUY" ? Trade.Buy(volume,_Symbol,0.0,stop,target,comment)
-         : Trade.Sell(volume,_Symbol,0.0,stop,target,comment));
-   }
-   uint retcode=Trade.ResultRetcode();
-   bool accepted=submitted && (retcode==TRADE_RETCODE_DONE
-      || retcode==TRADE_RETCODE_DONE_PARTIAL || retcode==TRADE_RETCODE_PLACED);
-   if(accepted)
-   {
-      string detail=(action=="CLOSE" ? "manual_close" : "manual_entry_"+action);
-      ulong manual_order=Trade.ResultOrder();
-      if(manual_order==0 && Trade.ResultDeal()>0 && HistoryDealSelect(Trade.ResultDeal()))
-         manual_order=(ulong)HistoryDealGetInteger(Trade.ResultDeal(),DEAL_ORDER);
-      MarkManualOrder(manual_order,detail);
-      RecordDealTelemetry(Trade.ResultDeal(),detail);
-      if(action!="CLOSE") LastEntrySignalBar=LastSignalBarTime;
-   }
-   LastManualStatus="MANUAL "+action+" "+(accepted ? "ACCEPTED" : "REJECTED")
-      +" retcode="+IntegerToString((int)retcode);
-   if(!AuditManualAction(action,LastManualStatus,ticket,Trade.ResultOrder(),Trade.ResultDeal(),retcode))
-      LastManualStatus+=" (result audit write failed; see Experts)";
-}
-
 void OnChartEvent(const int id,const long &lparam,const double &dparam,const string &sparam)
 {
-   if(id!=CHARTEVENT_OBJECT_CLICK)
+   if(id!=CHARTEVENT_OBJECT_CLICK || sparam!=UiPrefix+"COPY")
       return;
-   if(sparam==UiPrefix+"COPY")
-   {
-      ObjectSetInteger(0,sparam,OBJPROP_STATE,false);
-      CopyDiagnosticToClipboard();
-      DrawDashboard();
-   }
-   else if(sparam==UiPrefix+"MANUAL_BUY" || sparam==UiPrefix+"MANUAL_SELL"
-      || sparam==UiPrefix+"MANUAL_CLOSE")
-   {
-      ObjectSetInteger(0,sparam,OBJPROP_STATE,false);
-      ExecuteManualAction(sparam==UiPrefix+"MANUAL_BUY" ? "BUY" :
-         (sparam==UiPrefix+"MANUAL_SELL" ? "SELL" : "CLOSE"));
-      ShowStatus();
-   }
+
+   ObjectSetInteger(0,sparam,OBJPROP_STATE,false);
+   CopyDiagnosticToClipboard();
+   DrawDashboard();
 }
 
 int OnInit()
@@ -3900,7 +3368,6 @@ int OnInit()
       Print("Ramon live BLOCKED: ConfirmMoneyUnitsPerUSD is false");
    if(EnableLiveTrading && !AccountLockHealthy())
       Print("Ramon live BLOCKED: account/server lock mismatch");
-   Trade.SetAsyncMode(false); // Manual result/order attribution uses synchronous requests.
    Trade.SetExpertMagicNumber(MagicNumber);
    Trade.SetDeviationInPoints(MaxDeviationPoints);
    Trade.SetTypeFillingBySymbol(_Symbol);
