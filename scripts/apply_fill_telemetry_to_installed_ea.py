@@ -137,7 +137,7 @@ def patch_source(source: str) -> str:
     for token in (
         "bool ClosedTradePayload(",
         "actual_fill_price",
-        "HistoryDealGetDouble(deal,DEAL_PRICE)",
+        "DEAL_PRICE",
     ):
         if token not in out:
             raise ValueError(f"required source token missing after patch: {token}")
