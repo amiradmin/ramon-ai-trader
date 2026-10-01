@@ -263,7 +263,7 @@ def test_shadow_and_learning_items_are_starred_in_ui() -> None:
     assert 'LastNewsModelReady ? "READY" : "*LEARNING*"' in source
     assert 'LastTargetStructureReady ? "READY" : "*LEARNING*"' in source
     assert '"TargetLearning*: "' in source
-    assert '"*ShadowRiskP: "' in source
+    assert '"  *ShadowRiskP: "' in source
     assert '"* = SHADOW / LEARNING / COLLECTING' in source
 
 
@@ -411,7 +411,7 @@ def test_v050_small_dynamic_target_is_shadow_only() -> None:
     assert "&& trend_support" in source
     assert "&& edge_support" in source
     assert "ShadowSmallTargetUnits=ShadowSmallStrongTargetUnits;" in source
-    assert '"ShadowExecutionEffect: NONE\\n\\n"' in source
+    assert '"*ShadowExecutionEffect: NONE\\n"' in source
     # Actual broker target must still use the fixed live 4-cent target.
     target_fn = source.split("bool SmallProfitTarget(", 1)[1].split("bool SmallProfitStop(", 1)[0]
     assert "SmallProfitTargetUnits/unit_gain" in target_fn
@@ -431,7 +431,7 @@ def test_v050_small_three_stage_tp_shadow_is_observational() -> None:
     assert "WOULD_CLOSE_AT_TP2" in source
     assert "WOULD_CLOSE_AT_TP3" in source
     # The experiment must not alter live order submission or broker target.
-    assert '"ShadowExecutionEffect: NONE\\n\\n"' in source
+    assert '"*ShadowExecutionEffect: NONE\\n"' in source
     target_fn = source.split("bool SmallProfitTarget(", 1)[1].split("bool SmallProfitStop(", 1)[0]
     assert "SmallProfitTargetUnits" in target_fn
     assert "ShadowSmallTP" not in target_fn
