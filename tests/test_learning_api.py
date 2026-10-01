@@ -102,6 +102,7 @@ def test_decision_metadata_and_enriched_outcome_round_trip(learning_server):
         'net_units': 7.5, 'initial_risk_units': 6, 'exit_reason': 'DEAL_REASON_EXPERT',
         'profit_units': 10, 'commission_units': -2, 'swap_units': -.4, 'fee_units': -.1,
         'opened_utc_offset_seconds': 10800, 'closed_utc_offset_seconds': 10800,
+        'actual_fill_price': 100.41,
         'entry_ea_version': '0.28', 'exit_detail': 'maximum_hold_bars',
     }
     assert post('/trades', payload) == {'saved': True}
@@ -116,5 +117,5 @@ def test_decision_metadata_and_enriched_outcome_round_trip(learning_server):
         assert audit['base']['signal_strength'] == decision['signal_strength']
         assert audit['settings'] == asdict(Settings())
         assert audit['final']['decision'] == payload['direction']
-        assert con.execute('SELECT COUNT(*),fee_units,exit_detail FROM trade_outcomes').fetchone() == (1, -.1, 'maximum_hold_bars')
+        assert con.execute('SELECT COUNT(*),fee_units,exit_detail,actual_fill_price FROM trade_outcomes').fetchone() == (1, -.1, 'maximum_hold_bars', 100.41)
     assert len(load_trade_examples(db, 'XAUUSD_l', 'test/fake')) == 1
