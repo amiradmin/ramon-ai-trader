@@ -236,6 +236,20 @@ def test_dashboard_rows_are_not_overlapped() -> None:
     assert 'UiButton("CLOSE","CLOSE TRADE",218,812,110,30)' in source
 
 
+def test_tp_stage_crossings_lock_profit_on_every_tick() -> None:
+    source = EA.read_text(encoding="utf-8")
+
+    assert "void OnTick()" in source
+    assert "ObserveTPStageCrossingsOnTick();" in source
+    assert "void MarkTPStageReached(" in source
+    assert "bool ProtectReachedTPStage(" in source
+    assert "Trade.PositionModify(ticket,desired_sl,current_tp)" in source
+    assert 'TPStageLockStatus="WAIT_BROKER_DISTANCE"' in source
+    assert 'TPStageLockStatus=(TPStage>=2 ? "TP2_LOCKED" : "TP1_LOCKED")' in source
+    assert '"TPStageLock: "+TPStageLockStatus' in source
+    assert '"  OnTickCrossing=YES\\n"' in source
+
+
 def test_role_model_dashboard_and_response_fields() -> None:
     source = EA.read_text(encoding="utf-8")
 
