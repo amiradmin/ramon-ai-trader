@@ -9,7 +9,7 @@ import pytest
 
 from ramon.bundles import FEATURES, atomic_json
 from ramon.core import Settings
-from ramon.shadow_roles import ShadowCoordinator, train_shadow
+from ramon.shadow_roles import SHADOW_EXTRA_FEATURES, ShadowCoordinator, train_shadow
 from test_ensemble import _market, _decision
 from test_role_learning import constant_model
 from test_decision import FixedModel, bars
@@ -19,9 +19,10 @@ def shadow_bundle(root, p=0.99, roles=None):
     directory = root / "shadow" / "versions" / "candidate"
     directory.mkdir(parents=True, exist_ok=True)
     hashes = {}
-    for role in roles if roles is not None else FEATURES:
+    schemas = {**FEATURES, **SHADOW_EXTRA_FEATURES}
+    for role in roles if roles is not None else schemas:
         path = directory / f"{role}.json"
-        constant_model(FEATURES[role], p).save(path)
+        constant_model(schemas[role], p).save(path)
         hashes[role] = hashlib.sha256(path.read_bytes()).hexdigest()
     atomic_json(directory / "manifest.json", {"mode": "shadow", "schema_version": 1,
                 "bundle_id": "candidate", "chronos_model": "test/model",
@@ -44,6 +45,18 @@ def test_shadow_predictions_never_change_decision_reason_edge_or_risk(tmp_path, 
     assert result["risk_multiplier"] == 1
     assert result["shadow_risk_probability"] == pytest.approx(p)
     assert result["meta_probability"] == pytest.approx(p)
+
+
+def test_direction_quality_shadows_are_display_only(tmp_path):
+    shadow_bundle(tmp_path, p=0.77)
+    decision = replace(_decision(), decision="SELL")
+    result, _ = ShadowCoordinator(tmp_path, "test/model").assess(_market(), decision)
+    assert result["decision"] == "SELL"
+    assert result["ensemble_active"] == 0
+    assert result["shadow_direction_quality_ready"] == 1
+    assert result["shadow_buy_success_probability"] == pytest.approx(0.77)
+    assert result["shadow_sell_success_probability"] == pytest.approx(0.77)
+    assert result["shadow_full_sl_probability"] == pytest.approx(0.77)
 
 
 def test_partial_bundle_and_corrupt_role_are_isolated(tmp_path):
