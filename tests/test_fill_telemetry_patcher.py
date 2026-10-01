@@ -105,4 +105,4 @@ void TradingCalls()
     patched = module.patch_source(source)
     assert '#property version "1.537"' in patched
     assert "entry_fill_value+=fill*volume;" in patched
-    assert '\"actual_fill_price\"' in patched
+    assert '\\\"actual_fill_price\\\"' in patched
