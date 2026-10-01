@@ -158,6 +158,34 @@ def fit_risk_role(examples: list[Example]) -> BinaryLogisticModel:
     )
 
 
+def fit_direction_quality_role(
+    examples: list[Example], direction: str
+) -> BinaryLogisticModel:
+    """Predict win probability for one executed side, display-only in shadow mode."""
+    if direction not in {"BUY", "SELL"}:
+        raise ValueError("direction quality: direction must be BUY or SELL")
+    rows = [row for row in examples if row.direction == direction]
+    labels = [row.label for row in rows]
+    role = f"{direction.lower()}_quality"
+    if len(rows) < 40 or min(labels.count(0), labels.count(1)) < 10:
+        raise ValueError(
+            f"{role}: need >=40 samples and >=10 wins/losses for this direction"
+        )
+    return train_binary_logistic(
+        [risk_features(row) for row in rows],
+        labels,
+        RISK_FEATURES,
+        metadata={
+            "role": role,
+            "target": "win",
+            "direction": direction,
+            "samples": len(rows),
+            "last_feature_time": max(row.time for row in rows),
+            "last_label_end": max(row.label_end for row in rows),
+        },
+    )
+
+
 def meta_features(row: Example, models: dict[str, BinaryLogisticModel]) -> dict[str, float]:
     features = dict(row.features["meta_base"])
     features["regime_probability"] = models["regime"].predict_proba(row.features["regime"])
