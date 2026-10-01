@@ -26,7 +26,7 @@ def row(i: int, raw: float, target: float, regime=None):
 
 
 def test_ridge_linear_calibration_learns_bias_and_scale():
-    features = [(x,) for x in (-2.0, -1.0, 0.0, 1.0, 2.0, 3.0)]
+    features = [(float(x),) for x in range(-5, 5)]
     targets = [1.5 * x - 0.25 for (x,) in features]
     model = fit_ridge(features, targets, l2=0.0)
     prediction = model.predict((4.0,))
