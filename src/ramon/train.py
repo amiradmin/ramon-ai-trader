@@ -50,6 +50,9 @@ def train_checkpoint(
     )
     checkpoint = output / "model"
     trained.save_pretrained(checkpoint)
+    # Fail the training job before evaluation if the saved artifact is not a
+    # loadable Ramon checkpoint (Chronos-2 LoRA produces an adapter directory).
+    checkpoint = Path(model_name(str(checkpoint)))
     (output / "manifest.json").write_text(
         json.dumps(
             {

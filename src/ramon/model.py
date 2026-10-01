@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 import hashlib
+import json
 from pathlib import Path
 
 from .core import Forecast
+
+
+SUPPORTED_CHRONOS_MODELS = frozenset({"autogluon/chronos-2-small", "amazon/chronos-2"})
 
 
 class ChronosForecaster:
@@ -35,12 +39,34 @@ class ChronosForecaster:
 
 
 def model_name(value: str) -> str:
-    """Allow only an explicit local checkpoint or a named Chronos-2 model."""
-    if value in {"autogluon/chronos-2-small", "amazon/chronos-2"}:
+    """Allow a supported Hub model, full local checkpoint, or local LoRA adapter."""
+    if value in SUPPORTED_CHRONOS_MODELS:
         return value
     path = Path(value).expanduser().resolve()
-    if not path.is_dir() or not (path / "config.json").exists():
+    if not path.is_dir():
         raise ValueError("model must be a supported Chronos-2 ID or local checkpoint")
+
+    # Full Hugging Face checkpoints expose config.json. Chronos-2 LoRA training
+    # intentionally saves a PEFT adapter instead, whose entrypoint is
+    # adapter_config.json plus adapter weights.
+    if (path / "config.json").is_file():
+        return str(path)
+
+    adapter_config = path / "adapter_config.json"
+    adapter_weights = (
+        (path / "adapter_model.safetensors").is_file()
+        or (path / "adapter_model.bin").is_file()
+    )
+    if not adapter_config.is_file() or not adapter_weights:
+        raise ValueError("model must be a supported Chronos-2 ID or local checkpoint")
+    try:
+        adapter = json.loads(adapter_config.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        raise ValueError("local Chronos-2 adapter config is unreadable") from exc
+    if adapter.get("peft_type") != "LORA":
+        raise ValueError("local Chronos-2 adapter must use LoRA")
+    if adapter.get("base_model_name_or_path") not in SUPPORTED_CHRONOS_MODELS:
+        raise ValueError("local adapter must target a supported Chronos-2 base model")
     return str(path)
 
 

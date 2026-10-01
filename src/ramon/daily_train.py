@@ -3,18 +3,25 @@ from __future__ import annotations
 import argparse
 import gc
 import json
+from collections.abc import Sequence
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .core import Bar
 from .history import history_count, load_bars
 from .model import ChronosForecaster, model_name
 from .replay import ReplayResult, replay
 from .train import train_checkpoint
 
 
-def _evaluate(db: str, symbol: str, model_value: str, device: str) -> ReplayResult:
-    bars, spreads = load_bars(db, symbol)
+def _evaluate(
+    bars: Sequence[Bar],
+    spreads: Sequence[int],
+    model_value: str,
+    device: str,
+) -> ReplayResult:
+    """Evaluate one model against an immutable in-memory market snapshot."""
     model = ChronosForecaster(model_name(model_value), device)
     try:
         return replay(bars, spreads, model, stride=4)
@@ -77,7 +84,9 @@ def main() -> None:
         }))
         return
 
-    bars, _ = load_bars(args.db, args.symbol)
+    # Read one immutable snapshot so the incumbent and challenger see exactly
+    # the same holdout even while the live service appends completed bars.
+    bars, spreads = load_bars(args.db, args.symbol)
     latest_bar = bars[-1].time
     root = Path(args.checkpoints_root).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -109,8 +118,8 @@ def main() -> None:
         steps=args.steps,
     )
 
-    incumbent_result = _evaluate(args.db, args.symbol, incumbent_model, args.device)
-    challenger_result = _evaluate(args.db, args.symbol, str(checkpoint), args.device)
+    incumbent_result = _evaluate(bars, spreads, incumbent_model, args.device)
+    challenger_result = _evaluate(bars, spreads, str(checkpoint), args.device)
     promote, reasons = _promotion_gate(
         incumbent_result,
         challenger_result,

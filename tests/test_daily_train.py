@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from ramon.daily_train import _promotion_gate
+from ramon.core import Bar
+from ramon.daily_train import _evaluate, _promotion_gate
 from ramon.replay import ReplayResult
 
 
@@ -41,3 +42,27 @@ def test_daily_promotion_gate_requires_real_improvement() -> None:
     )
     assert not ok
     assert reasons
+
+
+def test_evaluate_uses_the_supplied_immutable_market_snapshot(monkeypatch) -> None:
+    bars = tuple(Bar(i * 900, 100.0, 101.0, 99.0, 100.0) for i in range(300))
+    spreads = tuple(42 for _ in bars)
+    expected = result(net_r=1.0, dd=2.0)
+    seen: list[tuple[object, object, object]] = []
+
+    class FakeModel:
+        pass
+
+    monkeypatch.setattr("ramon.daily_train.model_name", lambda value: value)
+    monkeypatch.setattr("ramon.daily_train.ChronosForecaster", lambda value, device: FakeModel())
+
+    def fake_replay(got_bars, got_spreads, model, *, stride):
+        seen.append((got_bars, got_spreads, model))
+        assert stride == 4
+        return expected
+
+    monkeypatch.setattr("ramon.daily_train.replay", fake_replay)
+
+    assert _evaluate(bars, spreads, "adapter", "cpu") is expected
+    assert seen[0][0] is bars
+    assert seen[0][1] is spreads

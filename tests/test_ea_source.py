@@ -209,7 +209,7 @@ def test_minimum_lot_override_has_hard_cap() -> None:
 
     assert '#property version "1.535"' in source
     assert "input double RiskPerTradeUSD = 0.06" in source
-    assert "input bool AllowMinLotRiskOverride = true" in source
+    assert "input bool AllowMinLotRiskOverride = false" in source
     assert "const double MaxExecutableRiskUSD = 0.20" in source
     assert "bool MinimumLotOverrideEligible()" in source
     assert "bool RiskGateBlocked()" in source
@@ -221,6 +221,13 @@ def test_minimum_lot_override_has_hard_cap() -> None:
     assert "MaxExecutableRiskUSD<EffectiveRiskPerTradeUSD()" in source
     assert 'max_executable_risk_usd,' in source
     assert 'min_lot_override_used,' in source
+
+
+def test_small_profit_mode_is_opt_in() -> None:
+    source = EA.read_text(encoding="utf-8")
+
+    assert "input bool SmallOnlyMode = false" in source
+    assert "input bool EnableSmallProfitTrades = false" in source
 
 
 def test_dashboard_rows_are_not_overlapped() -> None:

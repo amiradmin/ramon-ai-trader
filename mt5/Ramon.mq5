@@ -34,7 +34,7 @@ input bool AccountIsCent = true; // Configured account mode; MT5 ACCOUNT_CURRENC
 input bool ConfirmMoneyUnitsPerUSD = false; // Must be true before live trading can arm.
 input string ExpectedAccountCurrency = ""; // Optional exact ACCOUNT_CURRENCY check when non-empty.
 input double RiskPerTradeUSD = 0.06; // Preferred sizing budget.
-input bool AllowMinLotRiskOverride = true; // Permit broker minimum lot above preferred budget.
+input bool AllowMinLotRiskOverride = false; // Opt-in only: default MAIN risk never exceeds the preferred budget.
 const double MaxExecutableRiskUSD = 0.20; // Hard fixed cap; MT5 chart inputs cannot override this value.
 input int MaxSpreadPoints = 50;
 input int MaxTradesPerDay = 400;
@@ -44,7 +44,7 @@ const int MainFastProfitMinAgeBars = 2; // Evaluate only after at least 2 M15 ba
 const double MainFastProfitMinProfitUnits = 0.20; // Never close a losing MAIN trade through this feature.
 const double MainFastProfitMinProgressToTP1 = 0.35; // Below 35% of entry->TP1 after 2 bars is considered slow.
 const int MainFastProfitWeakSnapshotsRequired = 2; // Require repeated weak 30s snapshots.
-input bool EnableSmallProfitTrades = true; // Optional live SMALL entries when main model says WAIT.
+input bool EnableSmallProfitTrades = false; // SMALL is out of scope unless explicitly enabled on a separate instance.
 const double SmallProfitTargetUnits = 4.0; // CENT account units = USD 0.04 when MoneyUnitsPerUSD=100.
 const double ShadowSmallTP1Units = 2.0; // Observe-only SMALL stage 1.
 const double ShadowSmallTP2Units = 2.5; // Observe-only SMALL stage 2.
