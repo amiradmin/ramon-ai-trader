@@ -14,10 +14,34 @@ import re
 from uuid import uuid4
 
 from .bundles import FEATURES, atomic_json
-from .ensemble import BinaryLogisticModel, EnsembleCoordinator, dominant_direction, entry_features, meta_base_features, regime_features, risk_features
+from .ensemble import (
+    RISK_FEATURES,
+    BinaryLogisticModel,
+    EnsembleCoordinator,
+    direction_risk_features,
+    dominant_direction,
+    entry_features,
+    meta_base_features,
+    regime_features,
+    risk_features,
+)
 from .history import load_bars
 from .news import neutral_news_features
-from .train_roles import Example, _regime_dataset, fit_risk_role, fit_role, load_trade_examples, meta_features, temporal_windows
+from .train_roles import (
+    Example,
+    _regime_dataset,
+    fit_direction_quality_role,
+    fit_risk_role,
+    fit_role,
+    load_trade_examples,
+    meta_features,
+    temporal_windows,
+)
+
+SHADOW_EXTRA_FEATURES = {
+    "buy_quality": RISK_FEATURES,
+    "sell_quality": RISK_FEATURES,
+}
 
 
 def train_shadow(db: str | Path, root: Path, symbol: str, chronos_model: str) -> dict:
@@ -49,6 +73,19 @@ def train_shadow(db: str | Path, root: Path, symbol: str, chronos_model: str) ->
     for role in ("entry", "news"):
         fit(role, training, lambda rows, role=role: fit_role(rows, role, FEATURES[role]))
     fit("risk", training, fit_risk_role)
+    # Direction-quality roles are display-only exploratory models. Use every
+    # clean historical trade so BUY and SELL can become observable sooner; they
+    # are never used for promotion, sizing, entry, or exit.
+    fit(
+        "buy_quality",
+        examples,
+        lambda rows: fit_direction_quality_role(rows, "BUY"),
+    )
+    fit(
+        "sell_quality",
+        examples,
+        lambda rows: fit_direction_quality_role(rows, "SELL"),
+    )
     if use_meta and all(name in models for name in ("regime", "entry", "news")):
         meta_rows = [Example(row.time, row.label_end, {"meta": meta_features(row, models)}, row.label) for row in meta]
         fit("meta", meta_rows, lambda rows: fit_role(rows, "meta", FEATURES["meta"]))
@@ -77,6 +114,7 @@ class ShadowCoordinator(EnsembleCoordinator):
     def __init__(self, root: str | Path, chronos_model: str | None = None):
         self.root = Path(root)
         self.regime = self.entry = self.news = self.meta = self.risk = None
+        self.buy_quality = self.sell_quality = None
         self.manifest = {}
         self.bundle_id = self.symbol = self.error = ""
         self.threshold = 0.65
@@ -96,7 +134,7 @@ class ShadowCoordinator(EnsembleCoordinator):
                     or manifest["chronos_model"] != chronos_model):
                 raise ValueError("shadow identity/checkpoint mismatch")
             self.manifest, self.bundle_id, self.symbol = manifest, bundle_id, manifest["symbol"]
-            for role, expected in FEATURES.items():
+            for role, expected in {**FEATURES, **SHADOW_EXTRA_FEATURES}.items():
                 if role not in manifest["sha256"]:
                     continue
                 try:
@@ -116,6 +154,8 @@ class ShadowCoordinator(EnsembleCoordinator):
         return {**super().status(), "ensemble_mode": "shadow", "ensemble_active": 0,
                 "risk_model_ready": False, "role_shadow": 1,
                 "shadow_risk_model_ready": self.risk_ready,
+                "shadow_buy_quality_ready": self.buy_quality is not None,
+                "shadow_sell_quality_ready": self.sell_quality is not None,
                 "shadow_roles": self.manifest.get("roles", {}),
                 "shadow_role_errors": self.role_errors}
 
@@ -143,6 +183,12 @@ class ShadowCoordinator(EnsembleCoordinator):
         meta_input = {**features["meta_base"], **{name + "_probability": p for name, p in probabilities.items()}}
         probabilities["meta"] = predict("meta", meta_input) if all(p >= 0 for p in probabilities.values()) else -1.0
         risk_probability = predict("risk", risk_features(market, decision))
+        buy_success_probability = predict(
+            "buy_quality", direction_risk_features(market, decision, "BUY")
+        )
+        sell_success_probability = predict(
+            "sell_quality", direction_risk_features(market, decision, "SELL")
+        )
         p = probabilities["regime"]
         payload = {"base_decision": decision.decision, "base_reason": decision.reason,
                    "decision": decision.decision, "reason": decision.reason, "edge": decision.edge,
@@ -151,6 +197,12 @@ class ShadowCoordinator(EnsembleCoordinator):
                    "ensemble_mode": "shadow", "risk_model_ready": 0,
                    "risk_probability": -1.0, "risk_target": "none", "risk_multiplier": 1.0,
                    "shadow_risk_probability": risk_probability,
+                   "shadow_full_sl_probability": risk_probability,
+                   "shadow_buy_success_probability": buy_success_probability,
+                   "shadow_sell_success_probability": sell_success_probability,
+                   "shadow_direction_quality_ready": int(
+                       buy_success_probability >= 0 and sell_success_probability >= 0
+                   ),
                    "shadow_regime_label": "UNAVAILABLE" if p < 0 else "TREND" if p >= 0.5 else "RANGE/UNCLEAR",
                    "shadow_candidate_direction": dominant_direction(decision),
                    "shadow_role_errors": errors, "shadow_roles": self.manifest.get("roles", {}),

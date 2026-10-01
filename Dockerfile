@@ -30,7 +30,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     python -m pip install \
       --timeout 600 \
       --retries 10 \
-      '.[model,train]' \
+      '.[model,train,timesfm]' \
     && groupadd --gid "$RAMON_GID" ramon \
     && useradd --create-home --uid "$RAMON_UID" --gid "$RAMON_GID" ramon \
     && mkdir -p /home/ramon/.cache/huggingface /checkpoints \
