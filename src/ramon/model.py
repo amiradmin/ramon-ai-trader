@@ -31,7 +31,9 @@ class ChronosForecaster:
             raise ValueError("invalid Chronos quantile output")
         low, median, high = rows[-1][:3]
         median_path = tuple(float(row[1]) for row in rows)
-        return Forecast(float(low), float(median), float(high), median_path)
+        return Forecast(float(low), float(median), float(high), median_path,
+                        tuple(float(row[0]) for row in rows),
+                        tuple(float(row[2]) for row in rows))
 
 
 def model_name(value: str) -> str:

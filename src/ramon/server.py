@@ -18,6 +18,7 @@ from .model import ChronosForecaster, model_name
 from .news import DEFAULT_FOREX_FACTORY_JSON, ForexFactoryNewsProvider
 from .target_learning import build_target_structure
 from .target_outcomes import backfill_target_outcomes
+from .telemetry import persist_inference, persist_events, implementation_digest, runtime_provenance
 
 
 def persist_market_safely(db: str, market: Market) -> str:
@@ -37,9 +38,13 @@ class CachedForecaster:
         self.model_id = model.model_id
         self._key: tuple[int, tuple[float, ...]] | None = None
         self._forecast: Forecast | None = None
+        self.cache_hit = False
+        self.used_in_request = False
 
     def forecast(self, closes: list[float], horizon: int) -> Forecast:
+        self.used_in_request = True
         key = (horizon, tuple(float(value) for value in closes))
+        self.cache_hit = self._key == key and self._forecast is not None
         if self._key != key or self._forecast is None:
             self._forecast = self.model.forecast(closes, horizon)
             self._key = key
@@ -67,9 +72,13 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
         max_stale_seconds=int(os.getenv("RAMON_NEWS_MAX_STALE_SECONDS", "1800")),
     )
     last_persisted_bar: dict[str, int] = {}
+    service_run_id = uuid4().hex
+    code_digest = implementation_digest()
+    runtime = runtime_provenance()
     history_status: dict[str, object] = {
         "last_error": "",
         "last_persisted_bar": 0,
+        "last_telemetry_error": "",
     }
 
     class Handler(BaseHTTPRequestHandler):
@@ -87,13 +96,14 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     "history_enabled": bool(history_db),
                     "history_last_error": str(history_status["last_error"]),
                     "history_last_persisted_bar": int(history_status["last_persisted_bar"]),
+                    "telemetry_last_error": str(history_status["last_telemetry_error"]),
                     **ensemble.status(),
                     **news_provider.status(),
                 },
             )
 
         def do_POST(self) -> None:
-            if self.path not in {"/decision", "/trades"}:
+            if self.path not in {"/decision", "/trades", "/events"}:
                 self.send_error(404)
                 return
             try:
@@ -103,6 +113,12 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 payload = json.loads(self.rfile.read(length))
                 if not isinstance(payload, dict):
                     raise ValueError("request must be a JSON object")
+                if self.path == "/events":
+                    if not history_db:
+                        raise ValueError("history persistence is disabled")
+                    acknowledged = persist_events(history_db, payload, time.time())
+                    self.reply(200, {"saved": True, "acknowledged": acknowledged})
+                    return
                 if self.path == "/trades":
                     if not history_db:
                         raise ValueError("history persistence is disabled")
@@ -116,6 +132,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         )
                     self.reply(200, {"saved": True})
                     return
+                request_received_utc = time.time()
+                started = time.perf_counter()
                 market = Market.from_dict(payload)
                 quote_time = int(payload["quote_time"]) if "quote_time" in payload else None
                 if quote_time is not None and not market.bars[-1].time + 900 <= quote_time <= market.bars[-1].time + 1830:
@@ -145,6 +163,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
 
                 news_snapshot = news_provider.snapshot()
                 with guard:
+                    cached_model.used_in_request = False
                     result = evaluate(market, cached_model, settings)
                     ensemble_payload, feature_snapshot = ensemble.assess(
                         market, result, news_snapshot.features
@@ -187,6 +206,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 sample_key = uuid4().hex[:16]
                 response["sample_key"] = sample_key
                 response["sample_saved"] = 0
+                response["telemetry_saved"] = 0
 
                 if history_db:
                     try:
@@ -224,7 +244,34 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                             },
                         )
                         response["sample_saved"] = int(saved)
+                        if saved:
+                            persist_inference(
+                                history_db, sample_key=sample_key, request=payload,
+                                response={**response, "telemetry_saved": 1},
+                                recorded_utc=time.time(),
+                                provenance={
+                                    "service_run_id": service_run_id,
+                                    "implementation_sha256": code_digest,
+                                    "runtime": runtime,
+                                    "model_id": model.model_id,
+                                    "checkpoint_revision": getattr(model, "revision", None),
+                                    "settings": asdict(settings),
+                                    "role_manifest": ensemble.manifest,
+                                    "feature_snapshot": feature_snapshot,
+                                    "news_snapshot": asdict(news_snapshot),
+                                    "news_events_observed": [asdict(event) for event in news_provider._events],
+                                    "news_fetched_utc": news_provider._fetched_at,
+                                    "request_received_utc": request_received_utc,
+                                    "decision_duration_ms": (time.perf_counter()-started)*1000,
+                                    "forecast_cache_hit": cached_model.cache_hit if cached_model.used_in_request else None,
+                                    "forecast_context_end_mt5": market.bars[-1].time if cached_model.used_in_request else None,
+                                    "forecast": asdict(cached_model._forecast) if cached_model.used_in_request and cached_model._forecast else None,
+                                },
+                            )
+                            response["telemetry_saved"] = 1
+                            history_status["last_telemetry_error"] = ""
                     except Exception as exc:
+                        history_status["last_telemetry_error"] = f"{type(exc).__name__}: {exc}"
                         print(
                             f"Ramon decision-sample persistence warning: {type(exc).__name__}: {exc}",
                             flush=True,

@@ -1,0 +1,8 @@
+# Reuse the installed image; no Docker Hub frontend/mirror rebuild needed.
+# All model starts using this override must also include compose.yaml.
+services:
+  model:
+    environment:
+      PYTHONPATH: /research-src
+    volumes:
+      - ./src:/research-src:ro

@@ -23,6 +23,7 @@ TRADE_TELEMETRY_COLUMNS = {
     "opened_utc_offset_seconds": "INTEGER", "closed_utc_offset_seconds": "INTEGER",
     "exit_detail": "TEXT", "entry_ea_version": "TEXT",
     "trade_role": "TEXT", "entry_magic": "INTEGER",
+    "manual_intervention": "INTEGER",
     **SIZING_TELEMETRY_COLUMNS,
 }
 
@@ -37,7 +38,7 @@ def classify_training_status(exit_reason: str, exit_detail: str = "") -> str:
     """
     reason = str(exit_reason or "UNKNOWN")
     detail = str(exit_detail or "")
-    if reason in MANUAL_EXIT_REASONS:
+    if reason in MANUAL_EXIT_REASONS or detail in {"manual_close", "manual_dashboard_close"}:
         return "CENSORED_MANUAL"
     if reason == "DEAL_REASON_SO":
         return "CENSORED_STOP_OUT"
@@ -75,8 +76,7 @@ CREATE TABLE IF NOT EXISTS decision_samples (
     base_decision TEXT NOT NULL,
     regime_features TEXT NOT NULL,
     entry_features TEXT NOT NULL,
-    meta_base_features TEXT NOT NULL,
-    UNIQUE(captured, symbol)
+    meta_base_features TEXT NOT NULL
 )
 """
 
@@ -86,8 +86,25 @@ def ensure_history_db(db: str | Path) -> Path:
     path = Path(db).expanduser().resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(path) as conn:
+        conn.execute("BEGIN IMMEDIATE")
         conn.execute(HISTORY_SCHEMA)
         conn.execute(DECISION_SAMPLE_SCHEMA)
+        # Old uniqueness by second silently lost concurrent MAIN/SMALL samples.
+        # Keep row IDs and all added columns; sample_key remains the identity.
+        sql = conn.execute("SELECT sql FROM sqlite_master WHERE name='decision_samples'").fetchone()[0]
+        unique_clock = r",\s*UNIQUE\s*\(\s*captured\s*,\s*symbol\s*\)"
+        if re.search(unique_clock, sql, re.IGNORECASE):
+            indexes = [row[0] for row in conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name='decision_samples' AND sql IS NOT NULL"
+            )]
+            replacement = sql.replace("decision_samples", "decision_samples_migrating", 1)
+            replacement = re.sub(unique_clock, "", replacement, flags=re.IGNORECASE)
+            conn.execute(replacement)
+            conn.execute("INSERT INTO decision_samples_migrating SELECT * FROM decision_samples")
+            conn.execute("DROP TABLE decision_samples")
+            conn.execute("ALTER TABLE decision_samples_migrating RENAME TO decision_samples")
+            for index in indexes:
+                conn.execute(index)
         columns = {row[1] for row in conn.execute("PRAGMA table_info(decision_samples)")}
         for name, definition in {
             "sample_key": "TEXT", "chronos_model": "TEXT", "schema_version": "INTEGER DEFAULT 1",
@@ -113,6 +130,9 @@ def ensure_history_db(db: str | Path) -> Path:
         conn.execute("""
             UPDATE trade_outcomes
             SET training_status = CASE
+                WHEN exit_detail IN ('manual_close','manual_dashboard_close')
+                    THEN 'CENSORED_MANUAL'
+                WHEN manual_intervention=1 THEN 'CENSORED_MANUAL'
                 WHEN exit_reason IN ('DEAL_REASON_CLIENT','DEAL_REASON_MOBILE','DEAL_REASON_WEB')
                     THEN 'CENSORED_MANUAL'
                 WHEN exit_reason='DEAL_REASON_SO'
@@ -126,6 +146,8 @@ def ensure_history_db(db: str | Path) -> Path:
                 ELSE 'CENSORED_UNKNOWN_EXIT'
             END
             WHERE training_status IS NULL OR training_status=''
+               OR (exit_detail IN ('manual_close','manual_dashboard_close') AND training_status!='CENSORED_MANUAL')
+               OR (manual_intervention=1 AND training_status!='CENSORED_MANUAL')
         """)
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_history_symbol_tf_time "
@@ -238,6 +260,12 @@ def persist_decision_sample(
     mid = (market.bid + market.ask) / 2.0
     spread = market.ask - market.bid
     with sqlite3.connect(path, timeout=10) as conn:
+        # Legacy callers without an identity still get their historical dedup.
+        if sample_key is None and conn.execute(
+            "SELECT 1 FROM decision_samples WHERE captured=? AND symbol=? AND sample_key IS NULL",
+            (int(captured), market.symbol),
+        ).fetchone():
+            return False
         cursor = conn.execute(
             """
             INSERT OR IGNORE INTO decision_samples
@@ -332,6 +360,8 @@ def persist_trade_outcome(db: str | Path, payload: dict[str, object], received: 
     extra["training_status"] = classify_training_status(
         exit_reason, str(extra.get("exit_detail", "") or "")
     )
+    if extra.get("manual_intervention"):
+        extra["training_status"] = "CENSORED_MANUAL"
     extra_names = [*TRADE_TELEMETRY_COLUMNS, "training_status"]
     updates = []
     for name in extra_names:
@@ -353,6 +383,7 @@ def persist_trade_outcome(db: str | Path, payload: dict[str, object], received: 
         elif name == "training_status":
             updates.append(
                 "training_status=CASE "
+                "WHEN trade_outcomes.manual_intervention=1 OR excluded.manual_intervention=1 THEN 'CENSORED_MANUAL' "
                 "WHEN excluded.exit_reason=trade_outcomes.exit_reason "
                 "AND excluded.exit_reason='DEAL_REASON_EXPERT' "
                 "AND excluded.exit_detail IS NULL "
@@ -360,6 +391,8 @@ def persist_trade_outcome(db: str | Path, payload: dict[str, object], received: 
                 "THEN trade_outcomes.training_status "
                 "ELSE excluded.training_status END"
             )
+        elif name == "manual_intervention":
+            updates.append("manual_intervention=CASE WHEN trade_outcomes.manual_intervention IS NULL AND excluded.manual_intervention IS NULL THEN NULL ELSE MAX(COALESCE(trade_outcomes.manual_intervention,0),COALESCE(excluded.manual_intervention,0)) END")
         else:
             updates.append(f"{name}=COALESCE(excluded.{name},trade_outcomes.{name})")
     extra_updates = ", ".join(updates)
@@ -385,6 +418,10 @@ def persist_trade_outcome(db: str | Path, payload: dict[str, object], received: 
 def validate_trade_telemetry(payload: dict[str, object], net: float) -> dict[str, object]:
     """Keep missing legacy telemetry NULL; reject nonfinite or unreconciled costs."""
     extra: dict[str, object] = {}
+    if payload.get("manual_intervention") is not None:
+        if payload["manual_intervention"] not in {0, 1}:
+            raise ValueError("invalid manual_intervention")
+        extra["manual_intervention"] = int(payload["manual_intervention"])
     cost_names = ("profit_units", "commission_units", "swap_units", "fee_units")
     present = [name for name in cost_names if payload.get(name) is not None]
     if present:
