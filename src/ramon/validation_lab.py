@@ -372,8 +372,14 @@ def ambiguous_fraction(
                 hit_sl = low <= stop
                 hit_tp = high >= target
             else:
-                hit_sl = high >= stop
-                hit_tp = low <= target
+                spread_points = int(bar["spread_points"]) if "spread_points" in bar.keys() else 0
+                ask_offset = (
+                    spread_points * sample.point
+                    if spread_points > 0 and sample.point > 0
+                    else sample.spread
+                )
+                hit_sl = high + ask_offset >= stop
+                hit_tp = low + ask_offset <= target
             if hit_sl and hit_tp:
                 ambiguous += 1
                 break
