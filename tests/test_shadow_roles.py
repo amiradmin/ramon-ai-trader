@@ -155,6 +155,10 @@ def test_http_default_shadow_preserves_base_with_ready_models(tmp_path, monkeypa
         assert result["ensemble_active"] == 0
         assert result["risk_multiplier"] == 1
         assert result["regime_probability"] > .9
+        assert result["shadow_direction_quality_ready"] == 1
+        assert result["shadow_buy_success_probability"] > .9
+        assert result["shadow_sell_success_probability"] > .9
+        assert result["timesfm3_shadow_effect"] == "NONE"
         assert result["sample_saved"] == 1
         with urlopen(base+"/health", timeout=5) as response:
             assert json.load(response)["ensemble_mode"] == "shadow"
