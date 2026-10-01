@@ -283,7 +283,7 @@ def test_role_model_dashboard_and_response_fields() -> None:
     assert "double EffectiveRiskPerTradeUSD()" in source
     assert 'JsonText(reply,"news_source",news_source)' in source
     assert 'JsonText(reply,"news_event_title",news_event_title)' in source
-    assert 'UiLabel("ROLE_MODELS",(LastRoleShadow ? "SHADOW | "' in source
+    assert 'UiLabel("ROLE_MODELS",(LastRoleShadow ? "*SHADOW* | "' in source
     assert 'UiLabel("NEWS","NEWS "' in source
     assert "LastEnsembleReady=(ensemble_ready>=0.5)" in source
     assert 'base_decision,base_reason,ensemble_ready,ensemble_active,' in source
