@@ -13,6 +13,7 @@ from pathlib import Path
 class Sample:
     captured: int
     signal_bar_time: int
+    entry_time: int
     direction: str
     mid: float
     spread: float
@@ -54,7 +55,10 @@ def replay_direction(
     if direction not in {"BUY", "SELL"} or sample.stop_distance <= 0 or sample.target_distance <= 0:
         return None
     entry, stop, target = _levels(sample, direction)
-    future = [row for row in bars if int(row["time"]) > sample.signal_bar_time][:max_bars]
+    # Use only complete M15 bars strictly after the actual fill's M15 bucket.
+    # This avoids contaminating the replay with pre-entry extremes from the entry bar.
+    next_full_bar = (sample.entry_time // 900 + 1) * 900
+    future = [row for row in bars if int(row["time"]) >= next_full_bar][:max_bars]
     if not future:
         return None
 
@@ -81,7 +85,7 @@ def replay_direction(
 
 
 def _deterministic_random_direction(sample: Sample, seed: int) -> str:
-    key = f"{seed}:{sample.captured}:{sample.signal_bar_time}".encode()
+    key = f"{seed}:{sample.captured}:{sample.entry_time}".encode()
     value = int(hashlib.sha256(key).hexdigest()[:16], 16)
     return "BUY" if value % 2 == 0 else "SELL"
 
@@ -89,7 +93,8 @@ def _deterministic_random_direction(sample: Sample, seed: int) -> str:
 def previous_bar_direction(bars: list[sqlite3.Row], sample: Sample) -> str | None:
     previous = None
     for row in bars:
-        if int(row["time"]) <= sample.signal_bar_time:
+        entry_bar = (sample.entry_time // 900) * 900
+        if int(row["time"]) < entry_bar:
             previous = row
         else:
             break
@@ -124,27 +129,34 @@ def load_data(db: str | Path, symbol: str) -> tuple[list[Sample], list[sqlite3.R
     con = sqlite3.connect(Path(db).expanduser())
     con.row_factory = sqlite3.Row
     try:
+        # Benchmark only times where Ramon actually entered a real trade.
+        # This avoids treating every 30-second model snapshot as an independent trade.
         samples = [
             Sample(
                 captured=int(row["captured"]),
                 signal_bar_time=int(row["signal_bar_time"]),
-                direction=str(row["final_decision"] or row["base_decision"] or row["direction"]),
+                entry_time=int(row["opened"]),
+                direction=str(row["trade_direction"]),
                 mid=float(row["mid"]),
                 spread=float(row["spread"]),
                 stop_distance=float(row["stop_distance"]),
                 target_distance=float(row["target_distance"]),
             )
             for row in con.execute(
-                """SELECT captured,signal_bar_time,direction,base_decision,final_decision,
-                          mid,spread,stop_distance,target_distance
-                   FROM decision_samples
-                   WHERE symbol=?
-                     AND COALESCE(stop_distance,0)>0
-                     AND COALESCE(target_distance,0)>0
-                   ORDER BY signal_bar_time,captured""",
+                """SELECT s.captured,s.signal_bar_time,t.opened,
+                          t.direction AS trade_direction,
+                          s.mid,s.spread,s.stop_distance,s.target_distance
+                   FROM trade_outcomes t
+                   JOIN decision_samples s
+                     ON s.sample_key=t.sample_key
+                    AND s.symbol=t.symbol
+                   WHERE t.symbol=?
+                     AND t.direction IN ('BUY','SELL')
+                     AND COALESCE(s.stop_distance,0)>0
+                     AND COALESCE(s.target_distance,0)>0
+                   ORDER BY t.opened,t.trade_key""",
                 (symbol,),
             )
-            if str(row["final_decision"] or row["base_decision"] or row["direction"]) in {"BUY", "SELL"}
         ]
         bars = list(
             con.execute(
@@ -227,10 +239,12 @@ def run(db: str | Path, symbol: str, *, max_bars: int, holdout: float, seed: int
     train, test = split_holdout(samples, holdout)
     print("=== RAMON VALIDATION LAB / BASELINE BENCHMARK ===")
     print(f"Symbol          : {symbol}")
-    print(f"Samples         : {len(samples)}")
+    print(f"Executed entries: {len(samples)}")
     print(f"Holdout fraction: {holdout:.0%}")
     print(f"Replay horizon  : {max_bars} M15 bars")
-    print("Costs           : stored bid/ask spread at entry")
+    print("Scope           : real executed Ramon entries only")
+    print("Replay start    : first complete M15 bar after actual fill")
+    print("Costs           : stored bid/ask spread from matched entry snapshot")
     print("Exit model      : stored SL/TP distance; same-bar ambiguity = SL-first")
     print("Interpretation  : research benchmark only; not live execution logic")
     print()

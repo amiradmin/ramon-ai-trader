@@ -2,8 +2,8 @@
 
 This lab is a research-only benchmark. It does not change live trading.
 
-It replays each stored Ramon decision sample with the same entry spread and the
-same stored stop/target distances, then compares:
+It replays only real executed Ramon entries joined back to their saved decision
+snapshots. It uses the same stored entry spread and stop/target distances, then compares:
 
 - Ramon recorded BUY/SELL direction
 - deterministic random BUY/SELL
@@ -11,7 +11,9 @@ same stored stop/target distances, then compares:
 - always SELL
 - previous completed M15 candle direction
 
-The last 30% of samples are reported separately as a chronological holdout.
+The last 30% of executed entries are reported separately as a chronological holdout.
+Replay starts from the first complete M15 bar after the actual fill so the entry
+bar cannot leak pre-entry high/low extremes into the counterfactual result.
 Because M15 OHLC cannot reveal intrabar ordering, a bar that touches both SL and
 TP is counted conservatively as SL-first.
 

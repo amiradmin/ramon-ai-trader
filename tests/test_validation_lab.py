@@ -12,6 +12,7 @@ def sample(**changes):
     base = dict(
         captured=1000,
         signal_bar_time=900,
+        entry_time=1000,
         direction="BUY",
         mid=100.0,
         spread=0.4,
@@ -48,8 +49,8 @@ def test_replay_target_reward_is_stored_rr():
 
 def test_evaluate_baselines_are_deterministic_and_keep_same_exit_geometry():
     samples = [
-        sample(captured=1, signal_bar_time=900, direction="BUY"),
-        sample(captured=2, signal_bar_time=1800, direction="SELL"),
+        sample(captured=1, signal_bar_time=900, entry_time=1000, direction="BUY"),
+        sample(captured=2, signal_bar_time=1800, entry_time=1900, direction="SELL"),
     ]
     data = bars(
         (900, 100, 101, 99, 100.5),
@@ -69,13 +70,13 @@ def test_evaluate_baselines_are_deterministic_and_keep_same_exit_geometry():
 
 def test_metrics_and_temporal_holdout():
     rows = [
-        sample(captured=i, signal_bar_time=i * 900, direction="BUY")
+        sample(captured=i, signal_bar_time=i * 900, entry_time=i * 900 + 100, direction="BUY")
         for i in range(1, 11)
     ]
     train, test = split_holdout(rows, 0.30)
     assert len(train) == 7
     assert len(test) == 3
-    assert train[-1].signal_bar_time < test[0].signal_bar_time
+    assert train[-1].entry_time < test[0].entry_time
 
     m = metrics([
         type("R", (), {"outcome_r": 2.0})(),
