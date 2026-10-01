@@ -16,7 +16,7 @@ import sys
 
 
 def patch_source(source: str) -> str:
-    if '\"actual_fill_price\"' in source and "entry_fill_value" in source:
+    if '\\\"actual_fill_price\\\"' in source and "entry_fill_value" in source:
         return source
 
     out = source
@@ -67,7 +67,7 @@ def patch_source(source: str) -> str:
         "double entry_fill_value=0.0;",
         "entry_fill_value+=fill*volume;",
         "double actual_fill_price=entry_fill_value/in_volume;",
-        '\"actual_fill_price\"',
+        '\\\"actual_fill_price\\\"',
     )
     for item in required:
         if item not in out:
