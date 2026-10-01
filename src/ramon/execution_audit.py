@@ -14,6 +14,7 @@ class TimingRow:
     captured: int
     quote_time: int | None
     signal_bar_time: int
+    opened_utc_offset_seconds: int | None
 
 
 def _pct(n: int, d: int) -> float:
@@ -31,6 +32,7 @@ def load_joined(con: sqlite3.Connection, symbol: str) -> list[sqlite3.Row]:
         con.execute(
             """SELECT
                    t.trade_key,t.direction,t.opened,t.closed,
+                   t.opened_utc_offset_seconds,t.actual_fill_price,
                    s.captured,s.quote_time,s.signal_bar_time,
                    s.mid,s.spread,s.stop_distance,s.target_distance
                FROM trade_outcomes t
@@ -77,26 +79,43 @@ def timing_audit(rows: list[sqlite3.Row]) -> dict[str, object]:
             captured=int(row["captured"]),
             quote_time=int(row["quote_time"]) if row["quote_time"] is not None else None,
             signal_bar_time=int(row["signal_bar_time"]),
+            opened_utc_offset_seconds=(
+                int(row["opened_utc_offset_seconds"])
+                if row["opened_utc_offset_seconds"] is not None
+                else None
+            ),
         )
         for row in rows
     ]
-    quote_coverage = sum(row.quote_time is not None for row in timing)
-    opened_after_capture = sum(row.opened >= row.captured for row in timing)
-    opened_after_quote = sum(
-        row.quote_time is not None and row.opened >= row.quote_time for row in timing
-    )
-    signal_before_open = sum(row.signal_bar_time < row.opened for row in timing)
+    canonical = [row for row in timing if row.opened_utc_offset_seconds is not None]
+    quote_coverage = sum(row.quote_time is not None for row in canonical)
 
-    capture_to_open = [row.opened - row.captured for row in timing]
+    def utc(value: int, row: TimingRow) -> int:
+        assert row.opened_utc_offset_seconds is not None
+        return value - row.opened_utc_offset_seconds
+
+    opened_after_capture = sum(utc(row.opened, row) >= row.captured for row in canonical)
+    opened_after_quote = sum(
+        row.quote_time is not None and utc(row.opened, row) >= utc(row.quote_time, row)
+        for row in canonical
+    )
+    signal_before_open = sum(
+        utc(row.signal_bar_time, row) < utc(row.opened, row) for row in canonical
+    )
+
+    capture_to_open = [utc(row.opened, row) - row.captured for row in canonical]
     quote_to_open = [
-        row.opened - row.quote_time
-        for row in timing
+        utc(row.opened, row) - utc(row.quote_time, row)
+        for row in canonical
         if row.quote_time is not None
     ]
-    signal_age = [row.opened - row.signal_bar_time for row in timing]
+    signal_age = [
+        utc(row.opened, row) - utc(row.signal_bar_time, row) for row in canonical
+    ]
 
     return {
         "trades": len(timing),
+        "canonical_coverage": len(canonical),
         "quote_coverage": quote_coverage,
         "opened_after_capture": opened_after_capture,
         "opened_after_quote": opened_after_quote,
@@ -234,17 +253,20 @@ def print_report(db: str | Path, symbol: str, *, max_bars: int) -> None:
         print()
         print("=== 1) ENTRY TIMING / ALIGNMENT ===")
         print(
-            f"quote_time coverage      : {timing['quote_coverage']}/{timing['trades']} "
-            f"({_fmt(_pct(int(timing['quote_coverage']), int(timing['trades'])))}%)"
+            f"UTC canonical coverage   : {timing['canonical_coverage']}/{timing['trades']} "
+            f"({_fmt(_pct(int(timing['canonical_coverage']), int(timing['trades'])))}%)"
         )
         print(
-            f"opened >= captured       : {timing['opened_after_capture']}/{timing['trades']}"
+            f"quote_time UTC coverage  : {timing['quote_coverage']}/{timing['canonical_coverage']}"
         )
         print(
-            f"opened >= quote_time     : {timing['opened_after_quote']}/{timing['quote_coverage']}"
+            f"opened_utc >= captured   : {timing['opened_after_capture']}/{timing['canonical_coverage']}"
         )
         print(
-            f"signal_bar < opened      : {timing['signal_before_open']}/{timing['trades']}"
+            f"opened_utc >= quote_utc  : {timing['opened_after_quote']}/{timing['quote_coverage']}"
+        )
+        print(
+            f"signal_utc < opened_utc  : {timing['signal_before_open']}/{timing['canonical_coverage']}"
         )
         for label, key in (
             ("capture -> open sec", "capture_to_open"),
@@ -259,8 +281,22 @@ def print_report(db: str | Path, symbol: str, *, max_bars: int) -> None:
                 print(
                     f"{label:24s}: median={median:.0f} p05={p05:.0f} p95={p95:.0f}"
                 )
-        print("Actual fill price        : NOT STORED in trade_outcomes")
-        print("Timing verdict           : times can be audited; exact signal-to-fill price slippage cannot")
+        fill_rows = [row for row in rows if row["actual_fill_price"] is not None]
+        print(f"Actual fill price        : {len(fill_rows)}/{len(rows)} stored")
+        if fill_rows:
+            slips = []
+            for row in fill_rows:
+                mid = float(row["mid"])
+                spread = float(row["spread"])
+                expected = mid + spread / 2.0 if row["direction"] == "BUY" else mid - spread / 2.0
+                fill = float(row["actual_fill_price"])
+                adverse = fill - expected if row["direction"] == "BUY" else expected - fill
+                slips.append(adverse)
+            print(
+                f"entry adverse slippage   : median={statistics.median(slips):.5f} "
+                f"mean={statistics.mean(slips):.5f} price units"
+            )
+        print("Timing basis             : broker times canonicalized with opened_utc_offset_seconds")
         print()
 
         print("=== 2) BID / ASK BAR SEMANTICS ===")
