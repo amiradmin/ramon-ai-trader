@@ -49,3 +49,14 @@ def test_tick_path_is_observational_and_upload_cursor_follows_ack():
     assert "bool submitted=Trade.PositionClose(ticket,deviation);" in wrapper
     assert "return submitted;" in wrapper
 
+
+
+def test_stop_changes_are_observational_and_have_previous_values():
+    text=EA.read_text()
+    observe=function(text,"ResearchObserveStops")
+    for field in ("sl_before", "sl_after", "tp_before", "tp_after", "previous_known", "external_unattributed"):
+        assert field in observe
+    assert "Trade." not in observe and "WebRequest" not in observe
+    assert "ResearchObserveStops" in function(text,"ResearchQuote")
+    assert "ResearchObserveStops" in function(text,"OnTradeTransaction")
+    assert "ResearchObserveStops" not in function(text,"BuildRequest")

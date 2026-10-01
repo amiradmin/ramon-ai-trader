@@ -414,6 +414,12 @@ def persist_trade_outcome(db: str | Path, payload: dict[str, object], received: 
              net / risk, exit_reason, int(received),
              *(extra.get(name) for name in extra_names)))
 
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='research_events'").fetchone():
+            conn.execute("""UPDATE trade_outcomes SET training_status='CENSORED_EXTERNAL_SL_TP'
+                WHERE sample_key=? AND training_status!='CENSORED_MANUAL' AND EXISTS
+                (SELECT 1 FROM research_events WHERE sample_key=? AND kind='protection_change'
+                 AND json_extract(body_json,'$.data.actor')='external_unattributed')""", (sample_key, sample_key))
+
 
 def validate_trade_telemetry(payload: dict[str, object], net: float) -> dict[str, object]:
     """Keep missing legacy telemetry NULL; reject nonfinite or unreconciled costs."""

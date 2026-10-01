@@ -152,7 +152,7 @@ def observed_path_labels(conn: sqlite3.Connection, sample_key: str) -> dict:
 
 
 EVENT_KINDS = {"session_start", "session_end", "decision_gate", "order_intent", "order_result",
-               "deal", "deal_detail", "position_quote", "position_change", "close_intent", "close_result", "telemetry_gap", "decision_error"}
+               "deal", "deal_detail", "position_quote", "position_change", "close_intent", "close_result", "telemetry_gap", "decision_error", "protection_change", "protection_baseline"}
 
 
 def persist_events(db: str | Path, payload: dict, received_utc: float) -> list[str]:
@@ -186,6 +186,15 @@ def persist_events(db: str | Path, payload: dict, received_utc: float) -> list[s
         data = event.get("data")
         if not isinstance(data, dict):
             raise ValueError("event data must be an object")
+        if kind == "protection_change":
+            try:
+                values = [float(data[name]) for name in ("sl_before", "tp_before", "sl_after", "tp_after")]
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError("invalid protection change") from exc
+            if (not all(isfinite(v) and v >= 0 for v in values)
+                    or values[:2] == values[2:] or data.get("previous_known") is not True
+                    or data.get("actor") != "external_unattributed"):
+                raise ValueError("invalid protection change")
         if kind == "position_quote":
             try:
                 bid, ask, entry = (float(data[name]) for name in ("bid", "ask", "entry_price"))
@@ -206,6 +215,10 @@ def persist_events(db: str | Path, payload: dict, received_utc: float) -> list[s
             if old and old[0] != row[-1]:
                 raise ValueError("conflicting event identity")
             conn.execute("INSERT OR IGNORE INTO research_events VALUES (?,?,?,?,?,?,?,?,?,?)", row)
+        conn.execute("""UPDATE trade_outcomes SET training_status='CENSORED_EXTERNAL_SL_TP'
+            WHERE training_status!='CENSORED_MANUAL' AND sample_key IN
+            (SELECT sample_key FROM research_events WHERE kind='protection_change'
+             AND json_extract(body_json,'$.data.actor')='external_unattributed')""")
     return [row[0] for row in rows]
 
 
@@ -254,6 +267,7 @@ def quality_report(db: str | Path) -> dict:
             (SELECT 1 FROM research_events e WHERE e.sample_key=a.sample_key AND e.kind='decision_gate')""")
         return {"schema_version": 1, "live_execution_effect": "NONE", "promotion_allowed": False,
                 "closed_trades": closed, "manual_closed_trades": manual,
+                "closed_with_external_sl_tp": scalar("SELECT COUNT(DISTINCT t.trade_key) FROM trade_outcomes t JOIN research_events e USING(sample_key) WHERE e.kind='protection_change' AND json_extract(e.body_json,'$.data.actor')='external_unattributed'"),
                 "closed_missing_immutable_input": missing_input,
                 "closed_missing_decision_sample": scalar("SELECT COUNT(*) FROM trade_outcomes t LEFT JOIN decision_samples s USING(sample_key) WHERE s.sample_key IS NULL"),
                 "closed_missing_cost_breakdown": scalar("SELECT COUNT(*) FROM trade_outcomes WHERE profit_units IS NULL OR commission_units IS NULL OR swap_units IS NULL OR fee_units IS NULL"),
@@ -269,6 +283,7 @@ def quality_report(db: str | Path) -> dict:
                     "Position quotes are sampled observations; extrema and first-touch order may be missed.",
                     "500 total trades are not 500 independent clean samples per role/policy.",
                     "Manual exits stay in account performance but are censored from autonomous-exit training.",
+                    "External SL/TP changes have an unattributed actor; observed changes censor autonomous-exit labels. Changes during downtime may be missed.",
                     "Price-only opportunity labels are not replacement trades or realized profitability."]}
 
 

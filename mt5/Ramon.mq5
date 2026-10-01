@@ -1,5 +1,5 @@
 #property strict
-#property version "1.536"
+#property version "1.537"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -501,7 +501,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.53.6\n"
+      +"EA version: 0.53.7\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -981,7 +981,7 @@ void DrawDashboard()
    // Tall/narrow panel: summary text first, checklist directly underneath.
    UiRect("PANEL",12,24,560,955,C'15,23,42',C'71,85,105');
 
-   UiLabel("TITLE","RAMON AI TRADER  v0.53.6 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.53.7 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,clrWhite,9);
@@ -1891,11 +1891,42 @@ string CsvField(const string value)
 // Observational research telemetry; execution policy never reads this outbox.
 input bool EnableResearchTelemetry = true;
 input int ResearchQuoteIntervalMs = 1000; // Sampled observations, not complete ticks.
-const string ResearchSourceSHA256 = "cef1034b10cdbf7a46946a289df3fe9438c3896df393dd0877ae5a41107202ac";
+const string ResearchSourceSHA256 = "4d6053ab29e349155db3663028c66ff65e4f28940d2c3552817f9a6cfb16137a";
 string ResearchRunId="";
 long ResearchSequence=0, ResearchLastQuoteMsc=0, ResearchOutboxOffset=0;
 string ResearchLastGateSample="", ResearchLastGateStatus="";
 bool ResearchSpoolError=false;
+ulong ResearchStopsPosition=0;
+double ResearchPreviousSL=0.0,ResearchPreviousTP=0.0;
+
+// This EA currently uses virtual exits and never submits SL/TP modifications.
+// MT5 position transactions do not identify the modifying user/application.
+void ResearchObserveStops(const ulong ticket,const double sl,const double tp,const string source)
+{
+   if(!EnableResearchTelemetry || !PositionSelectByTicket(ticket)) return;
+   ulong identifier=(ulong)PositionGetInteger(POSITION_IDENTIFIER);
+   string comment=PositionGetString(POSITION_COMMENT);
+   string sample=(StringFind(comment,"Ramon:")==0 ? StringSubstr(comment,6,16) : "");
+   bool known=(ResearchStopsPosition==identifier);
+   if(!known || sl!=ResearchPreviousSL || tp!=ResearchPreviousTP)
+   {
+      MqlTick tick; ZeroMemory(tick); SymbolInfoTick(_Symbol,tick);
+      string data="\"source\":\""+source+"\",\"actor\":\""+(known ? "external_unattributed" : "unknown_before_observation")+"\""
+         +",\"previous_known\":"+(known ? "true" : "false")
+         +",\"sl_before\":"+(known ? DoubleToString(ResearchPreviousSL,8) : "null")
+         +",\"tp_before\":"+(known ? DoubleToString(ResearchPreviousTP,8) : "null")
+         +",\"sl_after\":"+DoubleToString(sl,8)+",\"tp_after\":"+DoubleToString(tp,8)
+         +",\"position_type\":"+IntegerToString(PositionGetInteger(POSITION_TYPE))
+         +",\"entry_price\":"+DoubleToString(PositionGetDouble(POSITION_PRICE_OPEN),8)
+         +",\"bid\":"+DoubleToString(tick.bid,8)+",\"ask\":"+DoubleToString(tick.ask,8)
+         +",\"volume\":"+DoubleToString(PositionGetDouble(POSITION_VOLUME),8)
+         +",\"profit_units\":"+DoubleToString(PositionGetDouble(POSITION_PROFIT),8)
+         +",\"manual_confirmed\":false";
+      ResearchAppend(known ? "protection_change" : "protection_baseline",data,sample,identifier);
+   }
+   ResearchStopsPosition=identifier; ResearchPreviousSL=sl; ResearchPreviousTP=tp;
+}
+
 
 string ResearchAccountKey()
 {
@@ -1993,7 +2024,7 @@ string ResearchConfig()
 
 string ResearchContext()
 {
-   return "\"ea_version\":\"0.53.6\",\"run_id\":\""+JsonEscape(ResearchRunId)+"\""
+   return "\"ea_version\":\"0.53.7\",\"run_id\":\""+JsonEscape(ResearchRunId)+"\""
       +",\"account_currency\":\""+JsonEscape(AccountInfoString(ACCOUNT_CURRENCY))+"\""
       +",\"money_units_per_usd\":"+DoubleToString(MoneyUnitsPerUSD,4)
       +",\"balance_units\":"+DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),8)
@@ -2123,7 +2154,8 @@ void ResearchQuote()
 {
    if(!EnableResearchTelemetry) return;
    ulong ticket=0; datetime opened=0;
-   if(!ManagedPosition(ticket,opened) || !PositionSelectByTicket(ticket)) { ResearchLastQuoteMsc=0; return; }
+   if(!ManagedPosition(ticket,opened) || !PositionSelectByTicket(ticket)) { ResearchLastQuoteMsc=0; ResearchStopsPosition=0; return; }
+   ResearchObserveStops(ticket,PositionGetDouble(POSITION_SL),PositionGetDouble(POSITION_TP),"quote_observation");
    MqlTick tick;
    if(!SymbolInfoTick(_Symbol,tick) || tick.bid<=0.0 || tick.ask<tick.bid || tick.time_msc<=ResearchLastQuoteMsc
       || tick.time_msc-ResearchLastQuoteMsc<MathMax(1000,ResearchQuoteIntervalMs)) return;
@@ -2507,7 +2539,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.53.6";
+      version="0.53.7";
    }
    if(close_detail!="")
    {
@@ -3987,6 +4019,7 @@ void OnTradeTransaction(
       && PositionGetString(POSITION_SYMBOL)==_Symbol
       && (ulong)PositionGetInteger(POSITION_MAGIC)==MagicNumber)
    {
+      ResearchObserveStops(trans.position,trans.price_sl,trans.price_tp,"trade_transaction");
       string comment=PositionGetString(POSITION_COMMENT);
       string sample=(StringFind(comment,"Ramon:")==0 ? StringSubstr(comment,6,16) : "");
       ResearchAppend("position_change","\"source\":\"trade_transaction\",\"sl\":"+DoubleToString(trans.price_sl,8)

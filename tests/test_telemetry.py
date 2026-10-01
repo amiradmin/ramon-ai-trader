@@ -184,3 +184,32 @@ def test_bad_events_are_not_acknowledged(tmp_path,update):
     with pytest.raises(ValueError):
         persist_events(tmp_path/"db",{"events":[bad]},1)
 
+
+
+@pytest.mark.parametrize("event_first", [True, False])
+def test_external_stop_change_censors_outcome_in_either_arrival_order(tmp_path, event_first):
+    db=tmp_path/"db"
+    change=event()
+    change.update(kind="protection_change", data=dict(actor="external_unattributed",
+        previous_known=True, sl_before=0, sl_after=100, tp_before=0, tp_after=0))
+    if event_first:
+        persist_events(db,{"events":[change]},1)
+        persist_trade_outcome(db,outcome(),received=2)
+    else:
+        persist_trade_outcome(db,outcome(),received=2)
+        persist_events(db,{"events":[change]},1)
+    persist_trade_outcome(db,outcome(),received=3)  # retry must not remove censor
+    assert quality_report(db)["closed_with_external_sl_tp"]==1
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT training_status FROM trade_outcomes").fetchone()[0]=="CENSORED_EXTERNAL_SL_TP"
+    persist_trade_outcome(db,outcome(reason="DEAL_REASON_CLIENT"),received=4)
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT training_status FROM trade_outcomes").fetchone()[0]=="CENSORED_MANUAL"
+
+
+def test_initial_stop_baseline_is_not_a_claim_of_manual_change(tmp_path):
+    db=tmp_path/"db"
+    initial=event();initial.update(kind="protection_baseline",data=dict(sl_before=None,sl_after=100))
+    persist_events(db,{"events":[initial]},1)
+    persist_trade_outcome(db,outcome(),received=2)
+    assert quality_report(db)["closed_with_external_sl_tp"]==0

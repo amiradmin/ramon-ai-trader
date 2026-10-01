@@ -1,4 +1,4 @@
-# Research telemetry v1 — EA 0.53.6
+# Research telemetry v1 — EA 0.53.7
 
 This records observations only. Entry thresholds, role influence, position sizing,
 SL/TP and exit conditions retain their existing policy. Every robot close uses a
@@ -18,7 +18,7 @@ The installer makes a SQLite backup including committed WAL data, compiles with
 the existing MetaEditor, then restarts only the model using the current source
 mounted read-only. It does not rebuild the image or touch the forward worker.
 Reload the EA on both charts, retain MAIN/SMALL magic and chart settings, and
-verify the displayed version is 0.53.6. Research inputs default to enabled and
+verify the displayed version is 0.53.7. Research inputs default to enabled and
 1000 ms sampled quotes. Sampling is clamped to >=1000 ms to limit disk activity.
 Use 5000 ms if storage latency is excessive; the interval is recorded in data.
 No MetaEditor is available in the development environment: the install step is
@@ -117,3 +117,25 @@ both classes, provenance coverage and temporal coverage. Reserve untouched later
 data for evaluation; fit scalers/calibration on prior data only and purge
 overlapping result intervals. There is no automatic assertion that 500 total
 trades are sufficient or that forecast accuracy means trading profitability.
+
+
+### Observed manual/external SL and TP edits (EA 0.53.7)
+
+`protection_change` stores the previous and new SL/TP, broker observation time,
+position/sample identity, side, entry, current bid/ask, volume and floating P&L.
+Both position transactions and quote observations feed one deduplicated observer.
+SL additions, removals, increases, decreases and TP edits are included. This EA
+uses virtual exits and does not submit SL/TP modifications; observed edits are
+therefore marked `external_unattributed`, not confirmed human actions. MT5 position
+transactions do not reliably distinguish a desktop/mobile user from another EA.
+`manual_confirmed=false` preserves that uncertainty.
+
+The first observation after attaching/restarting is `protection_baseline` with
+null previous values, never an invented edit. Changes while the observer is offline
+cannot be reconstructed; rapid edits before the first observation may be missed.
+Trades with observed external edits remain in financial reports and raw training
+exports, but have `CENSORED_EXTERNAL_SL_TP` autonomous-exit labels. Manual exits
+keep `CENSORED_MANUAL` precedence. Arrival order and retries preserve censoring.
+`closed_with_external_sl_tp` counts affected closed trades in the quality report.
+Reload both MAIN and SMALL with 0.53.7 and recreate the model using the telemetry
+override so the new event kinds are accepted before the new EA starts uploading.
