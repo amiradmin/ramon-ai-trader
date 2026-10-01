@@ -166,13 +166,13 @@ class Decision:
     trend_min_consistency: float
     trend_min_edge_fraction: float
     trend_min_micro_move_atr: float
-    strong_entry_min_intrabar_move_atr: float
-    strong_entry_guard_active: int
     forecast_low: float
     forecast_median: float
     forecast_high: float
     stop_distance: float
     target_distance: float
+    strong_entry_min_intrabar_move_atr: float = -0.03
+    strong_entry_guard_active: int = 0
 
     def to_dict(self) -> dict[str, str | int | float]:
         return asdict(self)
