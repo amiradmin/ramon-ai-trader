@@ -333,20 +333,35 @@ def multi_seed_random_distribution(
     seeds: int,
     seed_base: int,
 ) -> tuple[list[float], float, float]:
-    """Return random-baseline mean-R distribution and Ramon's percentile."""
+    """Return random-baseline mean-R distribution and Ramon's percentile.
+
+    BUY/SELL counterfactuals are replayed once per entry and reused for all
+    random seeds so 1,000+ seeds remain cheap and deterministic.
+    """
     if seeds <= 0:
         return [], math.nan, math.nan
-    ramon_results = evaluate(samples, bars, max_bars=max_bars, random_seed=seed_base)["ramon"]
-    ramon_mean = metrics(ramon_results)["mean_r"]
+
+    cached: list[tuple[Sample, Result, Result, Result]] = []
+    for sample in samples:
+        ramon = replay_direction(bars, sample, sample.direction, max_bars=max_bars)
+        buy = replay_direction(bars, sample, "BUY", max_bars=max_bars)
+        sell = replay_direction(bars, sample, "SELL", max_bars=max_bars)
+        if ramon is not None and buy is not None and sell is not None:
+            cached.append((sample, ramon, buy, sell))
+
+    if not cached:
+        return [], math.nan, math.nan
+
+    ramon_mean = statistics.mean(item[1].outcome_r for item in cached)
     random_means: list[float] = []
     for offset in range(seeds):
-        evaluated = evaluate(
-            samples,
-            bars,
-            max_bars=max_bars,
-            random_seed=seed_base + offset,
-        )
-        random_means.append(metrics(evaluated["random"])["mean_r"])
+        seed = seed_base + offset
+        values = []
+        for sample, _ramon, buy, sell in cached:
+            direction = _deterministic_random_direction(sample, seed)
+            values.append(buy.outcome_r if direction == "BUY" else sell.outcome_r)
+        random_means.append(statistics.mean(values))
+
     at_or_below = sum(value <= ramon_mean for value in random_means)
     percentile = 100.0 * at_or_below / len(random_means)
     return random_means, ramon_mean, percentile
