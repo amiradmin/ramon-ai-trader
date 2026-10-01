@@ -54,3 +54,23 @@ Interpretation:
   bid/ask exit-side behavior, swaps, latency, or broker tick ordering.
 - Next validation work: audit bid/ask bar semantics and execution timing, add
   all-bars timing baselines and ablations, then trial logging for CPCV/PBO/DSR.
+
+
+## UTC / fill / Ask-side accuracy
+
+The validation lab now keeps two time bases deliberately separate:
+
+- `entry_time`: raw MT5 broker clock, used only to locate the corresponding
+  `CopyRates` M15 bars.
+- `entry_time_utc`: canonical chronology for holdout splits, purging and
+  walk-forward folds. It is computed as `opened - opened_utc_offset_seconds`;
+  legacy rows without a stored offset fall back to the UTC decision receipt time.
+
+SELL replay is Ask-aware. Stored MT5 OHLC is treated as the chart/Bid side, and
+each future bar uses `Bid OHLC + spread_points * point` as the Ask proxy. When
+a bar lacks spread telemetry, the matched entry spread is used as a fallback.
+
+New closed trades can also persist the volume-weighted actual entry fill price.
+That value is retained for execution/slippage audit; baseline entry geometry
+still uses the same matched decision-side Bid/Ask for every strategy so the
+direction comparison remains apples-to-apples.
