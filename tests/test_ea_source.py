@@ -250,6 +250,23 @@ def test_tp_stage_crossings_lock_profit_on_every_tick() -> None:
     assert '"  OnTickCrossing=YES\\n"' in source
 
 
+def test_shadow_and_learning_items_are_starred_in_ui() -> None:
+    source = EA.read_text(encoding="utf-8")
+
+    assert '"*SHADOW* | "+LastShadowRegimeLabel' in source
+    assert '"*LEARNING*"' in source
+    assert '" R"+role_mark+":"' in source
+    assert '" E"+role_mark+":"' in source
+    assert '" N"+role_mark+":"' in source
+    assert '" M"+role_mark+":"' in source
+    assert '" SL"+role_mark+":"' in source
+    assert 'LastNewsModelReady ? "READY" : "*LEARNING*"' in source
+    assert 'LastTargetStructureReady ? "READY" : "*LEARNING*"' in source
+    assert '"TargetLearning*: "' in source
+    assert '"  *ShadowRiskP: "' in source
+    assert '"* = SHADOW / LEARNING / COLLECTING' in source
+
+
 def test_role_model_dashboard_and_response_fields() -> None:
     source = EA.read_text(encoding="utf-8")
 
@@ -266,7 +283,7 @@ def test_role_model_dashboard_and_response_fields() -> None:
     assert "double EffectiveRiskPerTradeUSD()" in source
     assert 'JsonText(reply,"news_source",news_source)' in source
     assert 'JsonText(reply,"news_event_title",news_event_title)' in source
-    assert 'UiLabel("ROLE_MODELS",(LastRoleShadow ? "SHADOW | "' in source
+    assert 'UiLabel("ROLE_MODELS",(LastRoleShadow ? "*SHADOW* | "' in source
     assert 'UiLabel("NEWS","NEWS "' in source
     assert "LastEnsembleReady=(ensemble_ready>=0.5)" in source
     assert 'base_decision,base_reason,ensemble_ready,ensemble_active,' in source
@@ -394,7 +411,7 @@ def test_v050_small_dynamic_target_is_shadow_only() -> None:
     assert "&& trend_support" in source
     assert "&& edge_support" in source
     assert "ShadowSmallTargetUnits=ShadowSmallStrongTargetUnits;" in source
-    assert '"ShadowExecutionEffect: NONE\\n\\n"' in source
+    assert '"*ShadowExecutionEffect: NONE\\n"' in source
     # Actual broker target must still use the fixed live 4-cent target.
     target_fn = source.split("bool SmallProfitTarget(", 1)[1].split("bool SmallProfitStop(", 1)[0]
     assert "SmallProfitTargetUnits/unit_gain" in target_fn
@@ -414,7 +431,7 @@ def test_v050_small_three_stage_tp_shadow_is_observational() -> None:
     assert "WOULD_CLOSE_AT_TP2" in source
     assert "WOULD_CLOSE_AT_TP3" in source
     # The experiment must not alter live order submission or broker target.
-    assert '"ShadowExecutionEffect: NONE\\n\\n"' in source
+    assert '"*ShadowExecutionEffect: NONE\\n"' in source
     target_fn = source.split("bool SmallProfitTarget(", 1)[1].split("bool SmallProfitStop(", 1)[0]
     assert "SmallProfitTargetUnits" in target_fn
     assert "ShadowSmallTP" not in target_fn

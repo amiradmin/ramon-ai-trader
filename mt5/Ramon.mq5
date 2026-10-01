@@ -521,17 +521,17 @@ string BuildDiagnosticText()
       +"Decision: "+LastModelDecision+"  Reason: "+LastModelReason+"\n"
       +"Attribution: "+AttributionSummary()+"\n"
       +"DecisionID: "+LastSampleKey+"  Saved: "+BoolText(LastSampleSaved)+"  Bundle: "+LastBundleId+"\n"
-      +"TradeLearning: "+TradeLearningStatus+"\n"
+      +"TradeLearning*: "+TradeLearningStatus+"\n"
       +"LossCooldown: MT5_HISTORY | 2 consecutive same-direction net-loss SL closes | 30min\n"
       +"BaseDecision: "+LastBaseDecision+"  BaseReason: "+LastBaseReason+"\n"
-      +"RoleModels: "+(LastRoleShadow ? "SHADOW (display only)" : (LastEnsembleReady ? "READY" : "LEARNING"))
+      +"RoleModels: "+(LastRoleShadow ? "*SHADOW* (display only)" : (LastEnsembleReady ? "READY" : "*LEARNING*"))
       +"  Active: "+BoolText(LastEnsembleActive)
       +"  RegimeP: "+DoubleToString(LastRegimeProbability,3)
       +"  EntryP: "+DoubleToString(LastEntryProbability,3)
       +"  NewsP: "+DoubleToString(LastNewsProbability,3)
       +"  MetaP: "+DoubleToString(LastMetaProbability,3)
-      +"  ShadowRegime: "+LastShadowRegimeLabel
-      +"  ShadowRiskP: "+DoubleToString(LastShadowRiskProbability,3)
+      +"  *ShadowRegime: "+LastShadowRegimeLabel
+      +"  *ShadowRiskP: "+DoubleToString(LastShadowRiskProbability,3)
       +"  RiskReady: "+BoolText(LastRiskModelReady)
       +"  RiskP: "+DoubleToString(LastRiskProbability,3)
       +"  RiskMult: "+DoubleToString(LastRiskMultiplier,2)+"x\n"
@@ -574,34 +574,35 @@ string BuildDiagnosticText()
       +"  MicroFloor: "+DoubleToString(LastTrendMinMicroMoveAtr,3)+"\n"
       +"StopDistance: "+DoubleToString(LastStopDistance,_Digits)
       +"  TargetDistance: "+DoubleToString(LastTargetDistance,_Digits)+"\n"
-      +"TargetLearning: "+(LastTargetLearningActive ? "COLLECTING" : "OFF")
+      +"TargetLearning*: "+(LastTargetLearningActive ? "*COLLECTING*" : "OFF")
       +"  Structure: "+(LastTargetStructureReady ? "READY" : "FALLBACK")
       +"  Method: "+LastTargetMethod+"  Direction: "+LastTargetDirection+"\n"
       +"Impulse: "+DoubleToString(LastTargetImpulseStart,_Digits)
       +" -> "+DoubleToString(LastTargetImpulseEnd,_Digits)
       +"  RangeATR: "+DoubleToString(LastTargetImpulseAtr,3)+"\n"
-      +"TP1/TP2/TP3 learn: "+DoubleToString(LastTargetTP1,_Digits)
+      +"*TP1/TP2/TP3 learn: "+DoubleToString(LastTargetTP1,_Digits)
       +" / "+DoubleToString(LastTargetTP2,_Digits)
       +" / "+DoubleToString(LastTargetTP3,_Digits)
       +"  LegacyTP: "+DoubleToString(LastLegacyTargetPrice,_Digits)+"\n"
       +"ExecutionTargetMode: MAIN_TP3_BROKER_FAILSAFE_WHEN_VALID\n"      +"MainExitMode: TP1_TP2_TP3_ONLY (broker SL + manual close remain)\n\n"
-      +"=== V0.50 IMPROVEMENT SHADOWS (OBSERVE ONLY) ===\n"
-      +"ShadowPack: "+BoolText(EnableImprovementShadowPack)
+      +"=== * V0.50 IMPROVEMENT SHADOWS (OBSERVE ONLY) ===\n"
+      +"*ShadowPack: "+BoolText(EnableImprovementShadowPack)
       +"  Reason: "+ShadowReason+"\n"
-      +"DirectionCaution: BUY="+BoolText(ShadowBuyCaution)
+      +"*DirectionCaution: BUY="+BoolText(ShadowBuyCaution)
       +" SELL="+BoolText(ShadowSellCaution)+"\n"
-      +"ShadowRiskMultiplier: "+DoubleToString(ShadowRiskMultiplier,2)+"x"
+      +"*ShadowRiskMultiplier: "+DoubleToString(ShadowRiskMultiplier,2)+"x"
       +"  ActualRiskMultiplier: "+DoubleToString(LastRiskMultiplier,2)+"x\n"
-      +"ShadowSmallTargetUnits: "+DoubleToString(ShadowSmallTargetUnits,2)
+      +"*ShadowSmallTargetUnits: "+DoubleToString(ShadowSmallTargetUnits,2)
       +"  ActualTargetUnits: "+DoubleToString(SmallProfitTargetUnits,2)
       +"  StrongTargetCandidate: "+BoolText(ShadowSmallStrongTargetCandidate)+"\n"
-      +"ShadowSmallTPPlan: "+ShadowSmallTPPlan
+      +"*ShadowSmallTPPlan: "+ShadowSmallTPPlan
       +"  Stage: "+IntegerToString(ShadowSmallTPStage)
       +"  Next: "+ShadowSmallTPNextAction+"\n"
-      +"DeadTradeShadow: "+BoolText(ShadowDeadTrade)
+      +"*DeadTradeShadow: "+BoolText(ShadowDeadTrade)
       +"  PeakR="+DoubleToString(ShadowDeadTradePeakR,3)
       +"  CurrentR="+DoubleToString(ShadowDeadTradeCurrentR,3)+"\n"
-      +"ShadowExecutionEffect: NONE\n\n"
+      +"*ShadowExecutionEffect: NONE\n"
+      +"* = SHADOW / LEARNING / COLLECTING; not a live decision input unless explicitly activated.\n\n"
       +"=== ACCOUNT / EXECUTION ===\n"
       +"Live: "+LiveStateText()
       +"  AccountLock: "+(AccountLockHealthy() ? "OK" : "FAIL")
@@ -1008,19 +1009,21 @@ void DrawDashboard()
    // The old Forecast / Edge / Strength / Intrabar / AI Trend rows were removed here
    // because the same live values now appear once in the checklist below.
 
-   UiLabel("ROLE_MODELS",(LastRoleShadow ? "SHADOW | "+LastShadowRegimeLabel : "ROLE MODELS "+(LastEnsembleReady ? "READY" : "LEARNING"))
-      +" R:"+RoleProbabilityText(LastRegimeProbability)
-      +" E:"+RoleProbabilityText(LastEntryProbability)
-      +" N:"+RoleProbabilityText(LastNewsProbability)
-      +" M:"+RoleProbabilityText(LastMetaProbability)
-      +" SL:"+RoleProbabilityText(LastRoleShadow ? LastShadowRiskProbability : LastRiskProbability),
+   string role_mark=(LastRoleShadow || !LastEnsembleReady ? "*" : "");
+   UiLabel("ROLE_MODELS",(LastRoleShadow ? "*SHADOW* | "+LastShadowRegimeLabel : "ROLE MODELS "+(LastEnsembleReady ? "READY" : "*LEARNING*"))
+      +" R"+role_mark+":"+RoleProbabilityText(LastRegimeProbability)
+      +" E"+role_mark+":"+RoleProbabilityText(LastEntryProbability)
+      +" N"+role_mark+":"+RoleProbabilityText(LastNewsProbability)
+      +" M"+role_mark+":"+RoleProbabilityText(LastMetaProbability)
+      +" SL"+role_mark+":"+RoleProbabilityText(LastRoleShadow ? LastShadowRiskProbability : LastRiskProbability),
       28,200,clrWhite,9);
    ObjectSetString(0,UiPrefix+"ROLE_MODELS",OBJPROP_TOOLTIP,
       "حالت سایه: فقط نمایش؛ بدون دخالت در معامله\n"
       "R: احتمال رونددار بودن، نه صعودی یا نزولی\n"
       "E: احتمال نتیجه مثبت ورود | N: برآورد مدل خبر\n"
       "M: برآورد ترکیبی | SL: احتمال برخورد به حد ضرر\n"
-      "N/A: پیش‌بینی معتبر موجود نیست. درصدها دقت مدل نیستند.");
+      "N/A: پیش‌بینی معتبر موجود نیست. درصدها دقت مدل نیستند.\n"
+      "* = SHADOW / LEARNING / COLLECTING؛ هنوز Live نیست.");
 
    string news_title=(StringLen(LastNewsEventTitle)>28
       ? StringSubstr(LastNewsEventTitle,0,28)+"..." : LastNewsEventTitle);
@@ -1032,7 +1035,7 @@ void DrawDashboard()
 
    UiLabel("NEWS","NEWS "+LastNewsSource
       +" "+(LastNewsSourceReady ? "READY" : "OFFLINE")
-      +" | model "+(LastNewsModelReady ? "READY" : "LEARNING")
+      +" | model "+(LastNewsModelReady ? "READY" : "*LEARNING*")
       +" | "+LastNewsEventImpact+" "+LastNewsEventCountry+" "+news_title+news_delta,
       28,222,news_color,9);
 
@@ -1125,7 +1128,7 @@ void DrawDashboard()
    cstats[3]=PassFail(edge_pass);
    cstats[4]=PassFail(LastIntrabarConfirmed);
    cstats[5]=PassFail(LastAiTrendConfirmed);
-   cstats[6]=(LastTargetStructureReady ? "READY" : "LEARNING");
+   cstats[6]=(LastTargetStructureReady ? "READY" : "*LEARNING*");
    cstats[7]=(checklist_volatility_ok ? "DATA OK" : "INVALID");
    cstats[8]=PassFail(checklist_spread_pass);
    cstats[9]=(checklist_risk_exit_ok ? "DEFINED" : "INVALID");
@@ -1151,7 +1154,7 @@ void DrawDashboard()
       UiLabel("CXS_"+IntegerToString(i),cstats[i],tx+442,cy,ccolors[i],8);
    }
 
-   UiLabel("CHECK_NOTE","DISPLAY ONLY - execution logic unchanged.",
+   UiLabel("CHECK_NOTE","DISPLAY ONLY - execution logic unchanged.   * = SHADOW / LEARNING",
       tx+12,ty+346,clrWhite,8);
 
    UiButton("COPY","COPY DIAGNOSTIC",28,812,176,30);
