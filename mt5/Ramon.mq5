@@ -638,7 +638,10 @@ string BuildDiagnosticText()
       +"  TP1/TP2/TP3="+DoubleToString(TPStageTP1,_Digits)+"/"
          +DoubleToString(TPStageTP2,_Digits)+"/"+DoubleToString(TPStageTP3,_Digits)
       +"  progress="+DoubleToString(TPStageProgress*100.0,1)+"%"
-      +"  weak="+IntegerToString(TPStageWeakSnapshots)+"/"+IntegerToString(TPStageWeakSnapshotsRequired)+"\n"      +"MainFastProfit: "+(EnableMainFastProfit && !SmallOnlyMode ? "ACTIVE" : "OFF")
+      +"  weak="+IntegerToString(TPStageWeakSnapshots)+"/"+IntegerToString(TPStageWeakSnapshotsRequired)+"\n"
+      +"TPStageLock: "+TPStageLockStatus
+      +"  LockedSL="+DoubleToString(TPStageLockedSL,_Digits)
+      +"  OnTickCrossing=YES\n"      +"MainFastProfit: "+(EnableMainFastProfit && !SmallOnlyMode ? "ACTIVE" : "OFF")
       +"  status="+MainFastProfitStatus
       +"  ageBars>="+IntegerToString(MainFastProfitMinAgeBars)
       +"  progress="+DoubleToString(MainFastProfitProgress*100.0,1)+"%"
@@ -2559,6 +2562,8 @@ void ResetTPStageRuntime()
    TPStageWeakSnapshots=0;
    TPStageProgress=0.0;
    TPStageStatus="INACTIVE";
+   TPStageLockedSL=0.0;
+   TPStageLockStatus="INACTIVE";
 }
 
 bool LoadTPStagePlan(const ulong ticket)
@@ -2621,6 +2626,117 @@ bool LoadTPStagePlan(const ulong ticket)
 bool TargetReached(const string direction,const double exit_price,const double target)
 {
    return (direction=="BUY" ? exit_price>=target : exit_price<=target);
+}
+
+void MarkTPStageReached(const int stage,const datetime now,const ulong ticket)
+{
+   TPStage=stage;
+   TPStageHitTime=now;
+   TPStageWeakSnapshots=0;
+   GlobalVariableSet(TPPlanGlobalKey(TPStageSampleKey,"STAGE"),(double)stage);
+   GlobalVariableSet(TPPlanGlobalKey(TPStageSampleKey,"HIT"),(double)now);
+   Print("Ramon TP STAGE ",stage," hit ticket=",ticket,
+      " target=",DoubleToString(stage==1 ? TPStageTP1 : TPStageTP2,_Digits));
+}
+
+bool ProtectReachedTPStage(const ulong ticket)
+{
+   if(TPStage<1 || ticket==0 || !PositionSelectByTicket(ticket))
+      return false;
+
+   MqlTick tick;
+   if(!SymbolInfoTick(_Symbol,tick))
+      return false;
+
+   double entry=PositionGetDouble(POSITION_PRICE_OPEN);
+   double current_sl=PositionGetDouble(POSITION_SL);
+   double current_tp=PositionGetDouble(POSITION_TP);
+   double point=SymbolInfoDouble(_Symbol,SYMBOL_POINT);
+   if(entry<=0.0 || point<=0.0)
+      return false;
+
+   long stops_points=SymbolInfoInteger(_Symbol,SYMBOL_TRADE_STOPS_LEVEL);
+   long freeze_points=SymbolInfoInteger(_Symbol,SYMBOL_TRADE_FREEZE_LEVEL);
+   double min_distance=(double)MathMax(stops_points,freeze_points)*point+2.0*point;
+   double stage_target=(TPStage>=2 ? TPStageTP2 : TPStageTP1);
+   double desired_sl=0.0;
+
+   if(TPStageDirection=="BUY")
+   {
+      double legal_max=tick.bid-min_distance;
+      desired_sl=MathMin(stage_target,legal_max);
+      if(desired_sl<=entry+point)
+      {
+         TPStageLockStatus="WAIT_BROKER_DISTANCE";
+         return false;
+      }
+      desired_sl=NormalizeDouble(desired_sl,_Digits);
+      if(current_sl>0.0 && current_sl>=desired_sl-point*0.5)
+      {
+         TPStageLockedSL=current_sl;
+         TPStageLockStatus="PROTECTED";
+         return true;
+      }
+   }
+   else if(TPStageDirection=="SELL")
+   {
+      double legal_min=tick.ask+min_distance;
+      desired_sl=MathMax(stage_target,legal_min);
+      if(desired_sl>=entry-point)
+      {
+         TPStageLockStatus="WAIT_BROKER_DISTANCE";
+         return false;
+      }
+      desired_sl=NormalizeDouble(desired_sl,_Digits);
+      if(current_sl>0.0 && current_sl<=desired_sl+point*0.5)
+      {
+         TPStageLockedSL=current_sl;
+         TPStageLockStatus="PROTECTED";
+         return true;
+      }
+   }
+   else
+      return false;
+
+   ResetLastError();
+   if(Trade.PositionModify(ticket,desired_sl,current_tp))
+   {
+      TPStageLockedSL=desired_sl;
+      TPStageLockStatus=(TPStage>=2 ? "TP2_LOCKED" : "TP1_LOCKED");
+      Print("Ramon TP PROFIT LOCK ticket=",ticket,
+         " stage=",TPStage,
+         " sl=",DoubleToString(desired_sl,_Digits),
+         " tp=",DoubleToString(current_tp,_Digits));
+      return true;
+   }
+
+   TPStageLockStatus="LOCK_RETRY "+IntegerToString((int)Trade.ResultRetcode());
+   return false;
+}
+
+void ObserveTPStageCrossingsOnTick()
+{
+   if(SmallOnlyMode)
+      return;
+
+   ulong ticket=0;
+   datetime opened=0;
+   if(!ManagedPosition(ticket,opened) || !LoadTPStagePlan(ticket))
+      return;
+
+   MqlTick tick;
+   if(!SymbolInfoTick(_Symbol,tick))
+      return;
+
+   double exit_price=(TPStageDirection=="BUY" ? tick.bid : tick.ask);
+   datetime now=TimeCurrent();
+   if(TPStage<1 && TargetReached(TPStageDirection,exit_price,TPStageTP1))
+      MarkTPStageReached(1,now,ticket);
+   if(TPStage<2 && TargetReached(TPStageDirection,exit_price,TPStageTP2))
+      MarkTPStageReached(2,now,ticket);
+
+   if(TPStage>=1)
+      ProtectReachedTPStage(ticket);
 }
 
 double DirectionalProgress(
@@ -2711,23 +2827,11 @@ bool ManageTPStages(const ulong ticket)
    datetime now=TimeCurrent();
 
    if(TPStage<1 && TargetReached(TPStageDirection,exit_price,TPStageTP1))
-   {
-      TPStage=1;
-      TPStageHitTime=now;
-      TPStageWeakSnapshots=0;
-      GlobalVariableSet(TPPlanGlobalKey(TPStageSampleKey,"STAGE"),1.0);
-      GlobalVariableSet(TPPlanGlobalKey(TPStageSampleKey,"HIT"),(double)now);
-      Print("Ramon TP STAGE 1 hit ticket=",ticket," tp1=",DoubleToString(TPStageTP1,_Digits));
-   }
+      MarkTPStageReached(1,now,ticket);
    if(TPStage<2 && TargetReached(TPStageDirection,exit_price,TPStageTP2))
-   {
-      TPStage=2;
-      TPStageHitTime=now;
-      TPStageWeakSnapshots=0;
-      GlobalVariableSet(TPPlanGlobalKey(TPStageSampleKey,"STAGE"),2.0);
-      GlobalVariableSet(TPPlanGlobalKey(TPStageSampleKey,"HIT"),(double)now);
-      Print("Ramon TP STAGE 2 hit ticket=",ticket," tp2=",DoubleToString(TPStageTP2,_Digits));
-   }
+      MarkTPStageReached(2,now,ticket);
+   if(TPStage>=1)
+      ProtectReachedTPStage(ticket);
    if(TargetReached(TPStageDirection,exit_price,TPStageTP3))
    {
       TPStage=3;
@@ -3268,6 +3372,13 @@ void ManageOpenPosition()
    }
    else
       HandleManagedExitFailure(ticket,"SMALL TIME EXIT");
+}
+
+void OnTick()
+{
+   // Price crossings must not wait for the 5-second timer or 30-second model snapshot.
+   // This handler only advances TP stages and tightens SL; it never creates entries.
+   ObserveTPStageCrossingsOnTick();
 }
 
 void OnTimer()
