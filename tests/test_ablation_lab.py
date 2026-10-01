@@ -102,7 +102,7 @@ def test_cost_stress_worsens_sell_ask_side_when_spread_is_larger():
     )
     data = [
         {"time": 900, "open": 100.0, "high": 100.2, "low": 99.8, "close": 100.0, "spread_points": 40},
-        {"time": 1800, "open": 100.0, "high": 100.45, "low": 98.8, "close": 99.1, "spread_points": 40},
+        {"time": 1800, "open": 100.0, "high": 100.45, "low": 98.5, "close": 99.1, "spread_points": 40},
     ]
     normal = replay_with_cost_stress(data, s, "SELL", max_bars=1, cost_mult=1.0)
     stressed = replay_with_cost_stress(data, s, "SELL", max_bars=1, cost_mult=2.0)
