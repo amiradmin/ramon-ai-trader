@@ -14,7 +14,7 @@ from ramon.validation_lab import (
 
 def bars(*rows):
     return [
-        {"time": t, "open": o, "high": h, "low": l, "close": c}
+        {"time": t, "open": o, "high": h, "low": l, "close": c, "spread_points": 40}
         for t, o, h, l, c in rows
     ]
 
@@ -24,6 +24,7 @@ def sample(**changes):
         captured=1000,
         signal_bar_time=900,
         entry_time=1000,
+        entry_time_utc=1000,
         direction="BUY",
         mid=100.0,
         spread=0.4,
@@ -60,8 +61,8 @@ def test_replay_target_reward_is_stored_rr():
 
 def test_evaluate_baselines_are_deterministic_and_keep_same_exit_geometry():
     samples = [
-        sample(captured=1, signal_bar_time=900, entry_time=1000, direction="BUY"),
-        sample(captured=2, signal_bar_time=1800, entry_time=1900, direction="SELL"),
+        sample(captured=1, signal_bar_time=900, entry_time=1000, entry_time_utc=1000, direction="BUY"),
+        sample(captured=2, signal_bar_time=1800, entry_time=1900, entry_time_utc=1900, direction="SELL"),
     ]
     data = bars(
         (900, 100, 101, 99, 100.5),
@@ -81,13 +82,13 @@ def test_evaluate_baselines_are_deterministic_and_keep_same_exit_geometry():
 
 def test_metrics_and_temporal_holdout():
     rows = [
-        sample(captured=i, signal_bar_time=i * 900, entry_time=i * 900 + 100, direction="BUY")
+        sample(captured=i, signal_bar_time=i * 900, entry_time=i * 900 + 100, entry_time_utc=i * 900 + 100, direction="BUY")
         for i in range(1, 11)
     ]
     train, test = split_holdout(rows, 0.30)
     assert len(train) == 7
     assert len(test) == 3
-    assert train[-1].entry_time < test[0].entry_time
+    assert train[-1].entry_time_utc < test[0].entry_time_utc
 
     m = metrics([
         type("R", (), {"outcome_r": 2.0})(),
@@ -103,7 +104,7 @@ def test_metrics_and_temporal_holdout():
 
 def test_walk_forward_folds_are_chronological_and_purged():
     rows = [
-        sample(captured=i, signal_bar_time=i * 900, entry_time=i * 900 + 100)
+        sample(captured=i, signal_bar_time=i * 900, entry_time=i * 900 + 100, entry_time_utc=i * 900 + 100)
         for i in range(1, 31)
     ]
     folds = walk_forward_folds(
@@ -117,10 +118,10 @@ def test_walk_forward_folds_are_chronological_and_purged():
     for fold in folds:
         assert fold.test
         assert all(
-            dev.entry_time + (2 + 1) * 900 < fold.test[0].entry_time
+            dev.entry_time_utc + (2 + 1) * 900 < fold.test[0].entry_time_utc
             for dev in fold.development
         )
-        assert list(fold.test) == sorted(fold.test, key=lambda row: row.entry_time)
+        assert list(fold.test) == sorted(fold.test, key=lambda row: row.entry_time_utc)
 
 
 def test_bootstrap_mean_ci_is_deterministic_and_contains_sample_mean():
@@ -135,8 +136,8 @@ def test_bootstrap_mean_ci_is_deterministic_and_contains_sample_mean():
 
 def test_paired_delta_compares_same_entries():
     samples = [
-        sample(captured=1, entry_time=1000, signal_bar_time=900, direction="BUY"),
-        sample(captured=2, entry_time=1900, signal_bar_time=1800, direction="SELL"),
+        sample(captured=1, entry_time=1000, entry_time_utc=1000, signal_bar_time=900, direction="BUY"),
+        sample(captured=2, entry_time=1900, entry_time_utc=1900, signal_bar_time=1800, direction="SELL"),
     ]
     data = bars(
         (900, 100, 101, 99, 100),
@@ -158,8 +159,8 @@ def test_paired_delta_compares_same_entries():
 
 def test_multi_seed_random_distribution_is_deterministic():
     samples = [
-        sample(captured=1, entry_time=1000, signal_bar_time=900, direction="BUY"),
-        sample(captured=2, entry_time=1900, signal_bar_time=1800, direction="SELL"),
+        sample(captured=1, entry_time=1000, entry_time_utc=1000, signal_bar_time=900, direction="BUY"),
+        sample(captured=2, entry_time=1900, entry_time_utc=1900, signal_bar_time=1800, direction="SELL"),
     ]
     data = bars(
         (900, 100, 101, 99, 100),
@@ -178,7 +179,7 @@ def test_multi_seed_random_distribution_is_deterministic():
 
 
 def test_ambiguous_fraction_counts_same_bar_tp_and_sl_touch():
-    samples = [sample(entry_time=1000, signal_bar_time=900, direction="BUY")]
+    samples = [sample(entry_time=1000, entry_time_utc=1000, signal_bar_time=900, direction="BUY")]
     data = bars(
         (900, 100, 101, 99, 100),
         (1800, 100, 105, 97, 104),
@@ -191,3 +192,38 @@ def test_ambiguous_fraction_counts_same_bar_tp_and_sl_touch():
         seed=1,
     )
     assert (ambiguous, total, pct) == (1, 1, 100.0)
+
+
+
+def test_sell_replay_uses_ask_proxy_from_bar_spread():
+    s = sample(
+        direction="SELL",
+        mid=100.2,
+        spread=0.4,
+        stop_distance=1.0,
+        target_distance=1.0,
+        point=0.01,
+    )
+    data = [
+        {"time": 900, "open": 100.0, "high": 100.2, "low": 99.8, "close": 100.0, "spread_points": 40},
+        {"time": 1800, "open": 100.0, "high": 100.6, "low": 98.8, "close": 99.2, "spread_points": 50},
+    ]
+    result = replay_direction(data, s, "SELL", max_bars=1)
+    assert result is not None
+    # SELL stop is 101.0. Raw high=100.6 would miss it, Ask high=101.1 hits it.
+    assert result.exit_kind == "SL"
+    assert result.outcome_r == -1.0
+
+
+def test_walk_forward_uses_utc_time_not_broker_time():
+    rows = [
+        sample(captured=1, entry_time=11800, entry_time_utc=1000),
+        sample(captured=2, entry_time=12700, entry_time_utc=1900),
+        sample(captured=3, entry_time=13600, entry_time_utc=2800),
+        sample(captured=4, entry_time=14500, entry_time_utc=3700),
+        sample(captured=5, entry_time=15400, entry_time_utc=4600),
+        sample(captured=6, entry_time=16300, entry_time_utc=5500),
+    ]
+    folds = walk_forward_folds(rows, folds=2, max_bars=1, embargo_bars=0, initial_fraction=0.5)
+    assert folds
+    assert folds[0].test[0].entry_time_utc < folds[-1].test[-1].entry_time_utc

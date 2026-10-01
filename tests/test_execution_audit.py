@@ -21,7 +21,9 @@ def make_db():
         );
         CREATE TABLE trade_outcomes (
             trade_key TEXT, sample_key TEXT, symbol TEXT, direction TEXT,
-            opened INTEGER, closed INTEGER
+            opened INTEGER, closed INTEGER,
+            opened_utc_offset_seconds INTEGER,
+            actual_fill_price REAL
         );
         CREATE TABLE history_bars (
             symbol TEXT, timeframe TEXT, time INTEGER,
@@ -37,15 +39,16 @@ def test_timing_audit_detects_alignment_and_quote_coverage():
     con = make_db()
     con.execute(
         "INSERT INTO decision_samples VALUES (?,?,?,?,?,?,?,?,?)",
-        ("a", "XAUUSD_l", 1000, 999, 0, 100.0, .4, 2.0, 4.0),
+        ("a", "XAUUSD_l", 1000, 11799, 10800, 100.0, .4, 2.0, 4.0),
     )
     con.execute(
-        "INSERT INTO trade_outcomes VALUES (?,?,?,?,?,?)",
-        ("t1", "a", "XAUUSD_l", "BUY", 1002, 2000),
+        "INSERT INTO trade_outcomes VALUES (?,?,?,?,?,?,?,?)",
+        ("t1", "a", "XAUUSD_l", "BUY", 11802, 20000, 10800, 100.25),
     )
     rows = load_joined(con, "XAUUSD_l")
     audit = timing_audit(rows)
     assert audit["trades"] == 1
+    assert audit["canonical_coverage"] == 1
     assert audit["quote_coverage"] == 1
     assert audit["opened_after_capture"] == 1
     assert audit["opened_after_quote"] == 1
@@ -74,8 +77,8 @@ def test_sell_ask_proxy_can_change_raw_tp_into_sl():
         ("a", "XAUUSD_l", 1000, 999, 900, 100.2, .4, 1.0, 1.0),
     )
     con.execute(
-        "INSERT INTO trade_outcomes VALUES (?,?,?,?,?,?)",
-        ("t1", "a", "XAUUSD_l", "SELL", 1000, 3000),
+        "INSERT INTO trade_outcomes VALUES (?,?,?,?,?,?,?,?)",
+        ("t1", "a", "XAUUSD_l", "SELL", 1000, 3000, 0, 100.0),
     )
     # SELL entry = bid = 100.0, stop 101.0, target 99.0.
     # Raw bar reaches target without stop, but Ask proxy with +0.5 reaches stop.
@@ -102,3 +105,20 @@ def test_bar_spread_coverage_counts_nonzero_rows():
     )
     nonzero, total, pct = bar_spread_coverage(con, "XAUUSD_l")
     assert (nonzero, total, pct) == (1, 2, 50.0)
+
+
+
+def test_timing_audit_excludes_rows_without_utc_offset_from_canonical_checks():
+    con = make_db()
+    con.execute(
+        "INSERT INTO decision_samples VALUES (?,?,?,?,?,?,?,?,?)",
+        ("a", "XAUUSD_l", 1000, 999, 900, 100.0, .4, 2.0, 4.0),
+    )
+    con.execute(
+        "INSERT INTO trade_outcomes VALUES (?,?,?,?,?,?,?,?)",
+        ("t1", "a", "XAUUSD_l", "BUY", 11800, 12000, None, None),
+    )
+    audit = timing_audit(load_joined(con, "XAUUSD_l"))
+    assert audit["trades"] == 1
+    assert audit["canonical_coverage"] == 0
+    assert audit["capture_to_open"] == []

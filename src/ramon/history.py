@@ -21,6 +21,7 @@ SIZING_TELEMETRY_COLUMNS = {
 TRADE_TELEMETRY_COLUMNS = {
     "profit_units": "REAL", "commission_units": "REAL", "swap_units": "REAL", "fee_units": "REAL",
     "opened_utc_offset_seconds": "INTEGER", "closed_utc_offset_seconds": "INTEGER",
+    "actual_fill_price": "REAL",
     "exit_detail": "TEXT", "entry_ea_version": "TEXT",
     "trade_role": "TEXT", "entry_magic": "INTEGER",
     **SIZING_TELEMETRY_COLUMNS,
@@ -403,6 +404,12 @@ def validate_trade_telemetry(payload: dict[str, object], net: float) -> dict[str
             if not isfinite(value) or not value.is_integer() or abs(value) > 14 * 3600:
                 raise ValueError("invalid broker UTC offset")
             extra[name] = int(value)
+    if payload.get("actual_fill_price") is not None:
+        value = float(payload["actual_fill_price"])
+        if not isfinite(value) or value <= 0:
+            raise ValueError("invalid actual_fill_price")
+        extra["actual_fill_price"] = value
+
     for name in ("exit_detail", "entry_ea_version"):
         if payload.get(name):
             value = str(payload[name])
