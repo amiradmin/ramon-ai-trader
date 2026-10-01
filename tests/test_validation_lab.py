@@ -1,8 +1,10 @@
 from ramon.validation_lab import (
     Sample,
+    ambiguous_fraction,
     bootstrap_mean_ci,
     evaluate,
     metrics,
+    multi_seed_random_distribution,
     paired_mean_r_deltas,
     replay_direction,
     split_holdout,
@@ -151,3 +153,41 @@ def test_paired_delta_compares_same_entries():
         seed=42,
     )
     assert len(deltas) == 2
+
+
+
+def test_multi_seed_random_distribution_is_deterministic():
+    samples = [
+        sample(captured=1, entry_time=1000, signal_bar_time=900, direction="BUY"),
+        sample(captured=2, entry_time=1900, signal_bar_time=1800, direction="SELL"),
+    ]
+    data = bars(
+        (900, 100, 101, 99, 100),
+        (1800, 100, 105, 99, 104),
+        (2700, 104, 106, 98, 99),
+        (3600, 99, 103, 97, 102),
+        (4500, 102, 104, 96, 97),
+    )
+    one = multi_seed_random_distribution(samples, data, max_bars=2, seeds=100, seed_base=11)
+    two = multi_seed_random_distribution(samples, data, max_bars=2, seeds=100, seed_base=11)
+    assert one == two
+    random_means, ramon_mean, percentile = one
+    assert len(random_means) == 100
+    assert -10 < ramon_mean < 10
+    assert 0 <= percentile <= 100
+
+
+def test_ambiguous_fraction_counts_same_bar_tp_and_sl_touch():
+    samples = [sample(entry_time=1000, signal_bar_time=900, direction="BUY")]
+    data = bars(
+        (900, 100, 101, 99, 100),
+        (1800, 100, 105, 97, 104),
+    )
+    ambiguous, total, pct = ambiguous_fraction(
+        samples,
+        data,
+        direction_mode="ramon",
+        max_bars=2,
+        seed=1,
+    )
+    assert (ambiguous, total, pct) == (1, 1, 100.0)
