@@ -269,11 +269,18 @@ def dominant_direction(decision: Decision) -> str:
     return "BUY" if decision.buy_edge >= decision.sell_edge else "SELL"
 
 
-def risk_features(market: Market, decision: Decision) -> dict[str, float]:
-    """Entry-time features for the learned risk-sizing role."""
+def direction_risk_features(
+    market: Market, decision: Decision, direction: str
+) -> dict[str, float]:
+    """Build the same immutable entry snapshot as the risk model for one side.
+
+    This is used by display-only BUY/SELL quality models. It does not participate
+    in the live decision path.
+    """
+    if direction not in {"BUY", "SELL"}:
+        raise ValueError("direction must be BUY or SELL")
     entry = entry_features(market, decision)
     regime = regime_features(market.bars)
-    direction = dominant_direction(decision)
     sign = -1.0 if direction == "SELL" else 1.0
     return {
         "side_sell": 1.0 if direction == "SELL" else 0.0,
@@ -293,6 +300,15 @@ def risk_features(market: Market, decision: Decision) -> dict[str, float]:
         "body_efficiency_12": regime["body_efficiency_12"],
         "atr_pct": regime["atr_pct"],
     }
+
+
+def risk_features(market: Market, decision: Decision) -> dict[str, float]:
+    """Entry-time features for the learned risk-sizing role."""
+    direction = dominant_direction(decision)
+    # Preserve the historical fallback used when neither edge is positive.
+    if direction not in {"BUY", "SELL"}:
+        direction = "BUY"
+    return direction_risk_features(market, decision, direction)
 
 
 def probability_to_risk_multiplier(probability: float, *, target: str = "win") -> float:
