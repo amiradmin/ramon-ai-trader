@@ -68,3 +68,41 @@ def test_fill_patcher_is_telemetry_only_and_idempotent():
         assert patched.count(call) == source.count(call)
 
     assert module.patch_source(patched) == patched
+
+
+
+def test_fill_patcher_accepts_local_v0537_style_spacing():
+    module = load_module()
+    source = r'''#property version "1.537"
+
+bool ClosedTradePayload(const ulong identifier,string &payload)
+{
+    string sample="", direction="";
+    double profit=0.0, commission=0.0, swap=0.0, fee=0.0;
+    double in_volume = 0.0, out_volume = 0.0, net = 0.0, risk = 0.0;
+
+    double volume = 0.01;
+    double fill = HistoryDealGetDouble( deal , DEAL_PRICE );
+    double loss=0.0;
+
+    if(sample=="" || risk<=0.0 || in_volume<=0.0) return false;
+    net = profit + commission + swap + fee;
+
+    payload="{\"trade_key\":\"x\""
+       +",\"net_units\":"+DoubleToString(net,8)+",\"initial_risk_units\":"+DoubleToString(risk,8)
+       +",\"profit_units\":"+DoubleToString(profit,8);
+    return true;
+}
+
+void TradingCalls()
+{
+   Trade.Buy(0.01,_Symbol);
+   Trade.Sell(0.01,_Symbol);
+   Trade.PositionClose(1);
+   Trade.PositionModify(1,2.0,3.0);
+}
+'''
+    patched = module.patch_source(source)
+    assert '#property version "1.537"' in patched
+    assert "entry_fill_value+=fill*volume;" in patched
+    assert '\\\"actual_fill_price\\\"' in patched

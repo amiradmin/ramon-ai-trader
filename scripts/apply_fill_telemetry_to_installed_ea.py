@@ -3,7 +3,8 @@
 
 This patch is telemetry-only. It preserves the installed EA version and does not
 change trading gates, thresholds, sizing, entries, exits, SL or TP behavior.
-A timestamped backup is written before modification.
+It is intentionally function-aware so locally newer Ramon.mq5 files can be
+patched without replacing them with the repository copy.
 """
 from __future__ import annotations
 
@@ -15,68 +16,178 @@ import shutil
 import sys
 
 
-def patch_source(source: str) -> str:
-    if '\\\"actual_fill_price\\\"' in source and "entry_fill_value" in source:
-        return source
+def find_function_body(source: str, signature: str) -> tuple[int, int]:
+    start = source.find(signature)
+    if start < 0:
+        raise ValueError(f"{signature} not found")
+    brace = source.find("{", start + len(signature))
+    if brace < 0:
+        raise ValueError(f"{signature} opening brace not found")
 
-    out = source
-    anchors = [
-        (
-            "   double in_volume=0.0,out_volume=0.0,net=0.0,risk=0.0;\n"
-            "   double profit=0.0,commission=0.0,swap=0.0,fee=0.0;",
-            "   double in_volume=0.0,out_volume=0.0,net=0.0,risk=0.0;\n"
-            "   double entry_fill_value=0.0;\n"
-            "   double profit=0.0,commission=0.0,swap=0.0,fee=0.0;",
-        ),
-        (
-            "         double fill=HistoryDealGetDouble(deal,DEAL_PRICE);\n"
-            "         double loss=0.0;",
-            "         double fill=HistoryDealGetDouble(deal,DEAL_PRICE);\n"
-            "         if(fill<=0.0) return false;\n"
-            "         entry_fill_value+=fill*volume;\n"
-            "         double loss=0.0;",
-        ),
-        (
-            '   if(sample=="" || risk<=0.0 || closed<opened || in_volume<=0.0\n'
-            "      || MathAbs(in_volume-out_volume)>0.000001) return false;\n"
-            "   net=profit+commission+swap+fee;",
-            '   if(sample=="" || risk<=0.0 || closed<opened || in_volume<=0.0\n'
-            "      || entry_fill_value<=0.0\n"
-            "      || MathAbs(in_volume-out_volume)>0.000001) return false;\n"
-            "   double actual_fill_price=entry_fill_value/in_volume;\n"
-            "   net=profit+commission+swap+fee;",
-        ),
-        (
-            '      +",\\\"net_units\\\":"+DoubleToString(net,8)+",\\\"initial_risk_units\\\":"+DoubleToString(risk,8)\n'
-            '      +",\\\"profit_units\\\":"+DoubleToString(profit,8)',
-            '      +",\\\"net_units\\\":"+DoubleToString(net,8)+",\\\"initial_risk_units\\\":"+DoubleToString(risk,8)\n'
-            '      +",\\\"actual_fill_price\\\":"+DoubleToString(actual_fill_price,_Digits)\n'
-            '      +",\\\"profit_units\\\":"+DoubleToString(profit,8)',
-        ),
-    ]
+    depth = 0
+    in_string = False
+    in_line_comment = False
+    in_block_comment = False
+    escaped = False
+    index = brace
+    while index < len(source):
+        char = source[index]
+        nxt = source[index + 1] if index + 1 < len(source) else ""
 
-    for old, new in anchors:
-        if new in out:
+        if in_line_comment:
+            if char == "\n":
+                in_line_comment = False
+            index += 1
             continue
-        count = out.count(old)
-        if count != 1:
-            raise ValueError(f"expected one telemetry anchor, found {count}")
-        out = out.replace(old, new, 1)
+
+        if in_block_comment:
+            if char == "*" and nxt == "/":
+                in_block_comment = False
+                index += 2
+                continue
+            index += 1
+            continue
+
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            index += 1
+            continue
+
+        if char == "/" and nxt == "/":
+            in_line_comment = True
+            index += 2
+            continue
+        if char == "/" and nxt == "*":
+            in_block_comment = True
+            index += 2
+            continue
+        if char == '"':
+            in_string = True
+            index += 1
+            continue
+
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return brace, index
+        index += 1
+
+    raise ValueError(f"{signature} closing brace not found")
+
+
+def replace_one_regex(text: str, pattern: str, repl, label: str) -> str:
+    matches = list(re.finditer(pattern, text, flags=re.MULTILINE))
+    if len(matches) != 1:
+        raise ValueError(f"{label}: expected exactly one match, found {len(matches)}")
+    return re.sub(pattern, repl, text, count=1, flags=re.MULTILINE)
+
+
+def patch_closed_trade_body(body: str) -> str:
+    if '\\"actual_fill_price\\"' in body and "entry_fill_value" in body:
+        return body
+
+    out = body
+
+    if "double entry_fill_value=0.0;" not in out:
+        pattern = (
+            r"^(?P<indent>[ \t]*)double[^;\n]*\bin_volume\b[^;\n]*"
+            r"\bout_volume\b[^;\n]*\brisk\b[^;\n]*;[ \t]*$"
+        )
+
+        def add_accumulator(match: re.Match[str]) -> str:
+            indent = match.group("indent")
+            return match.group(0) + f"\n{indent}double entry_fill_value=0.0;"
+
+        out = replace_one_regex(out, pattern, add_accumulator, "entry-volume declaration")
+
+    if "entry_fill_value+=fill*volume;" not in out:
+        pattern = (
+            r"^(?P<indent>[ \t]*)double[ \t]+fill[ \t]*=[ \t]*"
+            r"HistoryDealGetDouble\([ \t]*deal[ \t]*,[ \t]*DEAL_PRICE[ \t]*\);[ \t]*$"
+        )
+
+        def add_fill_capture(match: re.Match[str]) -> str:
+            indent = match.group("indent")
+            return (
+                match.group(0)
+                + f"\n{indent}if(fill<=0.0) return false;"
+                + f"\n{indent}entry_fill_value+=fill*volume;"
+            )
+
+        out = replace_one_regex(out, pattern, add_fill_capture, "DEAL_PRICE fill capture")
+
+    if "double actual_fill_price=entry_fill_value/in_volume;" not in out:
+        pattern = (
+            r"^(?P<indent>[ \t]*)net[ \t]*=[ \t]*profit[ \t]*\+[ \t]*commission"
+            r"[ \t]*\+[ \t]*swap[ \t]*\+[ \t]*fee[ \t]*;[ \t]*$"
+        )
+
+        def add_weighted_fill(match: re.Match[str]) -> str:
+            indent = match.group("indent")
+            return (
+                f"{indent}if(entry_fill_value<=0.0 || in_volume<=0.0) return false;\n"
+                f"{indent}double actual_fill_price=entry_fill_value/in_volume;\n"
+                + match.group(0)
+            )
+
+        out = replace_one_regex(out, pattern, add_weighted_fill, "net calculation")
+
+    if '\\"actual_fill_price\\"' not in out:
+        lines = out.splitlines()
+        candidates = [
+            i for i, line in enumerate(lines)
+            if "initial_risk_units" in line and "DoubleToString(risk" in line
+        ]
+        if len(candidates) != 1:
+            raise ValueError(
+                "payload initial_risk_units: expected exactly one match, "
+                f"found {len(candidates)}"
+            )
+        i = candidates[0]
+        indent = re.match(r"[ \t]*", lines[i]).group(0)
+        lines.insert(
+            i + 1,
+            indent + '+",\\\"actual_fill_price\\\":"+DoubleToString(actual_fill_price,_Digits)'
+        )
+        out = "\n".join(lines)
 
     required = (
         "double entry_fill_value=0.0;",
         "entry_fill_value+=fill*volume;",
         "double actual_fill_price=entry_fill_value/in_volume;",
-        '\\\"actual_fill_price\\\"',
+        '\\"actual_fill_price\\"',
     )
-    for item in required:
-        if item not in out:
-            raise ValueError(f"required fill telemetry missing: {item}")
+    missing = [item for item in required if item not in out]
+    if missing:
+        raise ValueError("required fill telemetry missing: " + ", ".join(missing))
+    return out
 
+
+def patch_source(source: str) -> str:
+    brace, end = find_function_body(source, "bool ClosedTradePayload(")
+    body = source[brace + 1:end]
+    patched_body = patch_closed_trade_body(body)
+    out = source[:brace + 1] + patched_body + source[end:]
+
+    # Hard safety contract: this patch may enrich telemetry only.
     for call in ("Trade.Buy(", "Trade.Sell(", "Trade.PositionClose(", "Trade.PositionModify("):
         if out.count(call) != source.count(call):
             raise ValueError(f"unsafe change: {call} count changed")
 
+    for token in (
+        "bool ClosedTradePayload(",
+        "actual_fill_price",
+        "DEAL_PRICE",
+    ):
+        if token not in out:
+            raise ValueError(f"required source token missing after patch: {token}")
     return out
 
 
@@ -96,11 +207,17 @@ def main() -> int:
 
     print(f"Target: {target}")
     print(f"EA version preserved: {version.group(1) if version else 'unknown'}")
+    print("ClosedTradePayload located: YES")
     print("Actual fill telemetry: READY")
     print("Trading call counts preserved: YES")
+    print(f"Would change source: {'YES' if patched != source else 'NO (already patched)'}")
 
     if args.check:
         print("CHECK ONLY: no file changed")
+        return 0
+
+    if patched == source:
+        print("Already patched; no file changed.")
         return 0
 
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
