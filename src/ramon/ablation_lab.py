@@ -9,7 +9,7 @@ import statistics
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from .validation_lab import Result, Sample, metrics, split_holdout
+from .validation_lab import Result, Sample, metrics, replay_direction, split_holdout
 
 
 @dataclass(frozen=True)
@@ -71,10 +71,20 @@ def ma_trend_direction(
     return None
 
 
-def matched_ratio_random_direction(sample: Sample, seed: int, buy_ratio: float) -> str:
-    key = f"matched:{seed}:{sample.captured}:{sample.entry_time_utc}".encode()
-    unit = int(hashlib.sha256(key).hexdigest()[:16], 16) / float(0xFFFFFFFFFFFFFFFF)
-    return "BUY" if unit < buy_ratio else "SELL"
+def matched_ratio_random_directions(samples: list[Sample], seed: int) -> dict[int, str]:
+    """Deterministically shuffle directions while preserving the exact BUY count."""
+    ranked = []
+    for index, sample in enumerate(samples):
+        key = f"matched:{seed}:{sample.captured}:{sample.entry_time_utc}".encode()
+        rank = int(hashlib.sha256(key).hexdigest()[:16], 16)
+        ranked.append((rank, index))
+    ranked.sort()
+    buy_count = sum(sample.direction == "BUY" for sample in samples)
+    buy_indexes = {index for _, index in ranked[:buy_count]}
+    return {
+        index: ("BUY" if index in buy_indexes else "SELL")
+        for index in range(len(samples))
+    }
 
 
 def _levels(sample: Sample, direction: str, cost_mult: float) -> tuple[float, float, float]:
@@ -97,6 +107,9 @@ def replay_with_cost_stress(
         return None
     if sample.stop_distance <= 0 or sample.target_distance <= 0 or cost_mult <= 0:
         return None
+
+    if cost_mult == 1.0:
+        return replay_direction(bars, sample, direction, max_bars=max_bars)
 
     entry, stop, target = _levels(sample, direction, cost_mult)
     next_full_bar = (sample.entry_time // 900 + 1) * 900
@@ -245,10 +258,7 @@ def strategy_directions(
     ma_slow: int,
 ) -> dict[str, list[tuple[Sample, str]]]:
     samples = [entry.sample for entry in entries]
-    buy_ratio = (
-        sum(sample.direction == "BUY" for sample in samples) / len(samples)
-        if samples else 0.5
-    )
+    matched_random = matched_ratio_random_directions(samples, seed)
     out: dict[str, list[tuple[Sample, str]]] = {
         "ramon": [],
         "chronos_only": [],
@@ -257,7 +267,7 @@ def strategy_directions(
         f"ma_{ma_fast}_{ma_slow}": [],
         "random_matched": [],
     }
-    for entry in entries:
+    for index, entry in enumerate(entries):
         sample = entry.sample
         out["ramon"].append((sample, sample.direction))
         if entry.chronos_direction is not None:
@@ -271,10 +281,76 @@ def strategy_directions(
         ma = ma_trend_direction(bars, sample, fast=ma_fast, slow=ma_slow)
         if ma is not None:
             out[f"ma_{ma_fast}_{ma_slow}"].append((sample, ma))
-        out["random_matched"].append(
-            (sample, matched_ratio_random_direction(sample, seed, buy_ratio))
+        out["random_matched"].append((sample, matched_random[index]))
+    return out
+
+
+def direction_agreement(
+    entries: list[AblationEntry],
+    bars: list[sqlite3.Row],
+    *,
+    seed: int,
+    momentum_bars: int,
+    ma_fast: int,
+    ma_slow: int,
+) -> dict[str, tuple[int, int, float]]:
+    directions = strategy_directions(
+        entries,
+        bars,
+        seed=seed,
+        momentum_bars=momentum_bars,
+        ma_fast=ma_fast,
+        ma_slow=ma_slow,
+    )
+    ramon_by_key = {
+        (sample.captured, sample.entry_time_utc): direction
+        for sample, direction in directions["ramon"]
+    }
+    out: dict[str, tuple[int, int, float]] = {}
+    for name, pairs in directions.items():
+        if name == "ramon":
+            continue
+        compared = same = 0
+        for sample, direction in pairs:
+            key = (sample.captured, sample.entry_time_utc)
+            if key not in ramon_by_key:
+                continue
+            compared += 1
+            same += int(direction == ramon_by_key[key])
+        out[name] = (
+            same,
+            compared,
+            100.0 * same / compared if compared else math.nan,
         )
     return out
+
+
+def assert_factor_one_matches_validation(
+    entries: list[AblationEntry],
+    bars: list[sqlite3.Row],
+    *,
+    max_bars: int,
+) -> None:
+    """Hard integrity check: ablation x1.0 must equal Validation Lab replay."""
+    for entry in entries:
+        sample = entry.sample
+        baseline = replay_direction(bars, sample, sample.direction, max_bars=max_bars)
+        ablation = replay_with_cost_stress(
+            bars, sample, sample.direction, max_bars=max_bars, cost_mult=1.0
+        )
+        if (baseline is None) != (ablation is None):
+            raise RuntimeError("ablation integrity mismatch at spread x1.0")
+        if baseline is None:
+            continue
+        if (
+            baseline.exit_kind != ablation.exit_kind
+            or baseline.bars_held != ablation.bars_held
+            or abs(baseline.outcome_r - ablation.outcome_r) > 1e-12
+        ):
+            raise RuntimeError(
+                "ablation integrity mismatch at spread x1.0 "
+                f"for entry {sample.entry_time_utc}"
+            )
 
 
 def evaluate_strategies(
@@ -386,6 +462,8 @@ def run(
     train_entries = [by_id[id(sample)] for sample in train_samples]
     test_entries = [by_id[id(sample)] for sample in test_samples]
 
+    assert_factor_one_matches_validation(entries, bars, max_bars=max_bars)
+
     chronos_coverage = sum(entry.chronos_direction is not None for entry in entries)
     buy_ratio = (
         sum(entry.sample.direction == "BUY" for entry in entries) / len(entries)
@@ -404,6 +482,20 @@ def run(
     print("Rules-only reason      : Ramon's intrabar/trend rules are conditioned on Chronos-derived direction/path;")
     print("                         removing Chronos cannot be reconstructed without inventing a new rule system.")
     print("Scope                  : matched Ramon entry times; direction ablation, not entry-timing test")
+    print("Integrity x1.0         : PASS (exactly matches Validation Lab replay)")
+    print()
+
+    agreement = direction_agreement(
+        test_entries,
+        bars,
+        seed=seed,
+        momentum_bars=momentum_bars,
+        ma_fast=ma_fast,
+        ma_slow=ma_slow,
+    )
+    print("=== HOLDOUT DIRECTION AGREEMENT WITH RAMON ===")
+    for name, (same, compared, pct) in agreement.items():
+        print(f"{name:17s}: {same}/{compared} ({_fmt(pct,2)}%)")
     print()
 
     print_result_table(
