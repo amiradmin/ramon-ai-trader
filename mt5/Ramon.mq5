@@ -2252,6 +2252,7 @@ bool ClosedTradePayload(const ulong identifier,string &payload)
    datetime opened=0,closed=0;
    ulong opening_deal=0,closing_deal=0;
    double in_volume=0.0,out_volume=0.0,net=0.0,risk=0.0;
+   double entry_fill_value=0.0;
    double profit=0.0,commission=0.0,swap=0.0,fee=0.0;
    // Do not call HistoryDealSelect here: it resets the selected position history.
    for(int i=0;i<HistoryDealsTotal();i++)
@@ -2284,6 +2285,8 @@ bool ClosedTradePayload(const ulong identifier,string &payload)
          ulong order=(ulong)HistoryDealGetInteger(deal,DEAL_ORDER);
          double stop=HistoryOrderGetDouble(order,ORDER_SL);
          double fill=HistoryDealGetDouble(deal,DEAL_PRICE);
+         if(fill<=0.0) return false;
+         entry_fill_value+=fill*volume;
          double loss=0.0;
          ENUM_ORDER_TYPE order_side=(type==DEAL_TYPE_BUY ? ORDER_TYPE_BUY : ORDER_TYPE_SELL);
          if(stop<=0.0 || !OrderCalcProfit(order_side,_Symbol,volume,fill,stop,loss) || loss>=0.0)
@@ -2303,7 +2306,9 @@ bool ClosedTradePayload(const ulong identifier,string &payload)
       else return false; // Reversals/netting multiple decisions have ambiguous attribution.
    }
    if(sample=="" || risk<=0.0 || closed<opened || in_volume<=0.0
+      || entry_fill_value<=0.0
       || MathAbs(in_volume-out_volume)>0.000001) return false;
+   double actual_fill_price=entry_fill_value/in_volume;
    net=profit+commission+swap+fee;
    string trade_key=AccountInfoString(ACCOUNT_SERVER)+":"
       +IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN))+":"+IntegerToString((long)identifier);
@@ -2311,6 +2316,7 @@ bool ClosedTradePayload(const ulong identifier,string &payload)
       +"\",\"symbol\":\""+_Symbol+"\",\"direction\":\""+direction
       +"\",\"opened\":"+IntegerToString((long)opened)+",\"closed\":"+IntegerToString((long)closed)
       +",\"net_units\":"+DoubleToString(net,8)+",\"initial_risk_units\":"+DoubleToString(risk,8)
+      +",\"actual_fill_price\":"+DoubleToString(actual_fill_price,_Digits)
       +",\"profit_units\":"+DoubleToString(profit,8)
       +",\"commission_units\":"+DoubleToString(commission,8)
       +",\"swap_units\":"+DoubleToString(swap,8)
