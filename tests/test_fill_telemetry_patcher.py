@@ -61,7 +61,7 @@ def test_fill_patcher_is_telemetry_only_and_idempotent():
 
     assert "entry_fill_value+=fill*volume;" in patched
     assert "actual_fill_price=entry_fill_value/in_volume" in patched
-    assert '\"actual_fill_price\"' in patched
+    assert '\\\"actual_fill_price\\\"' in patched
     assert '#property version "1.537"' in patched
 
     for call in ("Trade.Buy(", "Trade.Sell(", "Trade.PositionClose(", "Trade.PositionModify("):
