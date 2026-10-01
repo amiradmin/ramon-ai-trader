@@ -250,6 +250,23 @@ def test_tp_stage_crossings_lock_profit_on_every_tick() -> None:
     assert '"  OnTickCrossing=YES\\n"' in source
 
 
+def test_shadow_and_learning_items_are_starred_in_ui() -> None:
+    source = EA.read_text(encoding="utf-8")
+
+    assert '"*SHADOW* | "+LastShadowRegimeLabel' in source
+    assert '"*LEARNING*"' in source
+    assert '" R"+role_mark+":"' in source
+    assert '" E"+role_mark+":"' in source
+    assert '" N"+role_mark+":"' in source
+    assert '" M"+role_mark+":"' in source
+    assert '" SL"+role_mark+":"' in source
+    assert 'LastNewsModelReady ? "READY" : "*LEARNING*"' in source
+    assert 'LastTargetStructureReady ? "READY" : "*LEARNING*"' in source
+    assert '"TargetLearning*: "' in source
+    assert '"*ShadowRiskP: "' in source
+    assert '"* = SHADOW / LEARNING / COLLECTING' in source
+
+
 def test_role_model_dashboard_and_response_fields() -> None:
     source = EA.read_text(encoding="utf-8")
 
