@@ -3,7 +3,7 @@ import json
 from ramon.ablation_lab import (
     _chronos_direction_from_metadata,
     ma_trend_direction,
-    matched_ratio_random_direction,
+    matched_ratio_random_directions,
     n_bar_momentum_direction,
     previous_bar_reversal_direction,
     replay_with_cost_stress,
@@ -81,14 +81,17 @@ def test_price_only_baselines_use_completed_bars_before_entry():
     assert previous_bar_reversal_direction(data, s) == "SELL"
 
 
-def test_matched_ratio_random_is_deterministic():
-    s = sample()
-    one = matched_ratio_random_direction(s, 42, 0.70)
-    two = matched_ratio_random_direction(s, 42, 0.70)
+def test_matched_ratio_random_is_deterministic_and_exact_count():
+    samples = [
+        sample(captured=i, entry_time=i * 1000, entry_time_utc=i * 1000,
+               direction="BUY" if i < 7 else "SELL")
+        for i in range(10)
+    ]
+    one = matched_ratio_random_directions(samples, 42)
+    two = matched_ratio_random_directions(samples, 42)
     assert one == two
-    assert one in {"BUY", "SELL"}
-    assert matched_ratio_random_direction(s, 42, 1.0) == "BUY"
-    assert matched_ratio_random_direction(s, 42, 0.0) == "SELL"
+    assert sum(direction == "BUY" for direction in one.values()) == 7
+    assert sum(direction == "SELL" for direction in one.values()) == 3
 
 
 def test_cost_stress_worsens_sell_ask_side_when_spread_is_larger():
