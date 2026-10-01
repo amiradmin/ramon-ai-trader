@@ -489,8 +489,6 @@ def print_statistical_comparison(
     momentum_bars: int,
     ma_fast: int,
     ma_slow: int,
-    random_seeds: int,
-    bootstrap_iterations: int,
 ) -> None:
     print("=== HOLDOUT STATISTICAL COMPARISON ===")
 
