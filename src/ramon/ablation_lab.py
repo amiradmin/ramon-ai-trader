@@ -6,10 +6,17 @@ import json
 import math
 import sqlite3
 import statistics
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
-from .validation_lab import Result, Sample, metrics, replay_direction, split_holdout
+from .validation_lab import (
+    Result,
+    Sample,
+    bootstrap_mean_ci,
+    metrics,
+    replay_direction,
+    split_holdout,
+)
 
 
 @dataclass(frozen=True)
@@ -387,6 +394,175 @@ def evaluate_strategies(
     return out
 
 
+def paired_deltas_for_strategy(
+    entries: list[AblationEntry],
+    bars: list[sqlite3.Row],
+    *,
+    strategy: str,
+    max_bars: int,
+    seed: int,
+    momentum_bars: int,
+    ma_fast: int,
+    ma_slow: int,
+) -> list[float]:
+    directions = strategy_directions(
+        entries,
+        bars,
+        seed=seed,
+        momentum_bars=momentum_bars,
+        ma_fast=ma_fast,
+        ma_slow=ma_slow,
+    )
+    ramon_map = {
+        (sample.captured, sample.entry_time_utc): (sample, direction)
+        for sample, direction in directions["ramon"]
+    }
+    other_map = {
+        (sample.captured, sample.entry_time_utc): (sample, direction)
+        for sample, direction in directions[strategy]
+    }
+    deltas: list[float] = []
+    for key, (sample, ramon_direction) in ramon_map.items():
+        other = other_map.get(key)
+        if other is None:
+            continue
+        other_sample, other_direction = other
+        ramon = replay_direction(bars, sample, ramon_direction, max_bars=max_bars)
+        comparison = replay_direction(
+            bars, other_sample, other_direction, max_bars=max_bars
+        )
+        if ramon is not None and comparison is not None:
+            deltas.append(ramon.outcome_r - comparison.outcome_r)
+    return deltas
+
+
+def multi_seed_matched_random_distribution(
+    entries: list[AblationEntry],
+    bars: list[sqlite3.Row],
+    *,
+    max_bars: int,
+    seeds: int,
+    seed_base: int,
+) -> tuple[list[float], float, float, float]:
+    """Compare Ramon with exact-ratio random directions over many seeds."""
+    if seeds <= 0 or not entries:
+        return [], math.nan, math.nan, math.nan
+
+    samples = [entry.sample for entry in entries]
+    cached: list[tuple[Sample, Result, Result, Result]] = []
+    for sample in samples:
+        ramon = replay_direction(bars, sample, sample.direction, max_bars=max_bars)
+        buy = replay_direction(bars, sample, "BUY", max_bars=max_bars)
+        sell = replay_direction(bars, sample, "SELL", max_bars=max_bars)
+        if ramon is not None and buy is not None and sell is not None:
+            cached.append((sample, ramon, buy, sell))
+    if not cached:
+        return [], math.nan, math.nan, math.nan
+
+    cached_samples = [item[0] for item in cached]
+    ramon_mean = statistics.mean(item[1].outcome_r for item in cached)
+    random_means: list[float] = []
+    for offset in range(seeds):
+        directions = matched_ratio_random_directions(
+            cached_samples, seed_base + offset
+        )
+        values = [
+            (buy.outcome_r if directions[index] == "BUY" else sell.outcome_r)
+            for index, (_sample, _ramon, buy, sell) in enumerate(cached)
+        ]
+        random_means.append(statistics.mean(values))
+
+    at_or_below = sum(value <= ramon_mean for value in random_means)
+    percentile = 100.0 * at_or_below / len(random_means)
+    beat_fraction = 100.0 * sum(ramon_mean > value for value in random_means) / len(random_means)
+    return random_means, ramon_mean, percentile, beat_fraction
+
+
+def print_statistical_comparison(
+    entries: list[AblationEntry],
+    bars: list[sqlite3.Row],
+    *,
+    max_bars: int,
+    seed: int,
+    random_seeds: int,
+    bootstrap_iterations: int,
+    momentum_bars: int,
+    ma_fast: int,
+    ma_slow: int,
+) -> None:
+    print("=== HOLDOUT STATISTICAL COMPARISON ===")
+
+    chronos_deltas = paired_deltas_for_strategy(
+        entries,
+        bars,
+        strategy="chronos_only",
+        max_bars=max_bars,
+        seed=seed,
+        momentum_bars=momentum_bars,
+        ma_fast=ma_fast,
+        ma_slow=ma_slow,
+    )
+    random_deltas = paired_deltas_for_strategy(
+        entries,
+        bars,
+        strategy="random_matched",
+        max_bars=max_bars,
+        seed=seed,
+        momentum_bars=momentum_bars,
+        ma_fast=ma_fast,
+        ma_slow=ma_slow,
+    )
+
+    c_mean, c_lo, c_hi = bootstrap_mean_ci(
+        chronos_deltas,
+        iterations=bootstrap_iterations,
+        seed=seed + 701,
+    )
+    r_mean, r_lo, r_hi = bootstrap_mean_ci(
+        random_deltas,
+        iterations=bootstrap_iterations,
+        seed=seed + 703,
+    )
+    print(
+        f"Ramon - Chronos-only : n={len(chronos_deltas)} "
+        f"mean ΔR={_fmt(c_mean,4)} "
+        f"95% CI=[{_fmt(c_lo,4)}, {_fmt(c_hi,4)}]"
+    )
+    print(
+        f"Ramon - random seed  : n={len(random_deltas)} "
+        f"mean ΔR={_fmt(r_mean,4)} "
+        f"95% CI=[{_fmt(r_lo,4)}, {_fmt(r_hi,4)}]"
+    )
+
+    random_means, ramon_mean, percentile, beat_fraction = (
+        multi_seed_matched_random_distribution(
+            entries,
+            bars,
+            max_bars=max_bars,
+            seeds=random_seeds,
+            seed_base=seed,
+        )
+    )
+    if random_means:
+        ordered = sorted(random_means)
+        lo = ordered[max(0, int(0.025 * len(ordered)))]
+        hi = ordered[min(len(ordered) - 1, int(0.975 * len(ordered)))]
+        print(
+            f"Exact-ratio random     : seeds={random_seeds} "
+            f"95% meanR range=[{_fmt(lo,4)}, {_fmt(hi,4)}]"
+        )
+        print(
+            f"Ramon meanR            : {_fmt(ramon_mean,4)} | "
+            f"percentile={_fmt(percentile,1)}% | "
+            f"beats random seeds={_fmt(beat_fraction,1)}%"
+        )
+    print(
+        "CI note                : a CI containing 0 does not show a clear "
+        "paired difference at the stated confidence level."
+    )
+    print()
+
+
 def _fmt(value: float, digits: int = 3) -> str:
     if math.isnan(value):
         return "N/A"
@@ -454,6 +630,8 @@ def run(
     momentum_bars: int,
     ma_fast: int,
     ma_slow: int,
+    random_seeds: int,
+    bootstrap_iterations: int,
 ) -> None:
     entries, bars = load_ablation_data(db, symbol)
     samples = [entry.sample for entry in entries]
@@ -516,6 +694,17 @@ def run(
         test_entries, bars, max_bars=max_bars, seed=seed,
         momentum_bars=momentum_bars, ma_fast=ma_fast, ma_slow=ma_slow,
     )
+    print_statistical_comparison(
+        test_entries,
+        bars,
+        max_bars=max_bars,
+        seed=seed,
+        random_seeds=random_seeds,
+        bootstrap_iterations=bootstrap_iterations,
+        momentum_bars=momentum_bars,
+        ma_fast=ma_fast,
+        ma_slow=ma_slow,
+    )
 
 
 def main() -> None:
@@ -528,6 +717,8 @@ def main() -> None:
     parser.add_argument("--momentum-bars", type=int, default=4)
     parser.add_argument("--ma-fast", type=int, default=4)
     parser.add_argument("--ma-slow", type=int, default=12)
+    parser.add_argument("--random-seeds", type=int, default=1000)
+    parser.add_argument("--bootstrap-iterations", type=int, default=4000)
     args = parser.parse_args()
 
     if args.max_bars < 1:
@@ -538,6 +729,10 @@ def main() -> None:
         parser.error("--momentum-bars must be >= 1")
     if args.ma_fast < 1 or args.ma_slow <= args.ma_fast:
         parser.error("--ma-slow must be greater than --ma-fast")
+    if args.random_seeds < 100:
+        parser.error("--random-seeds must be >= 100")
+    if args.bootstrap_iterations < 200:
+        parser.error("--bootstrap-iterations must be >= 200")
 
     run(
         args.db,
@@ -548,6 +743,8 @@ def main() -> None:
         momentum_bars=args.momentum_bars,
         ma_fast=args.ma_fast,
         ma_slow=args.ma_slow,
+        random_seeds=args.random_seeds,
+        bootstrap_iterations=args.bootstrap_iterations,
     )
 
 

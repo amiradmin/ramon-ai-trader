@@ -1,10 +1,13 @@
 import json
 
 from ramon.ablation_lab import (
+    AblationEntry,
     _chronos_direction_from_metadata,
     ma_trend_direction,
     matched_ratio_random_directions,
+    multi_seed_matched_random_distribution,
     n_bar_momentum_direction,
+    paired_deltas_for_strategy,
     previous_bar_reversal_direction,
     replay_with_cost_stress,
 )
@@ -112,3 +115,53 @@ def test_cost_stress_worsens_sell_ask_side_when_spread_is_larger():
     assert normal is not None and stressed is not None
     assert normal.exit_kind == "TP"
     assert stressed.exit_kind == "SL"
+
+
+
+def test_multi_seed_exact_ratio_random_distribution_is_deterministic():
+    data = [
+        {"time": 900, "open": 100.0, "high": 100.4, "low": 99.6, "close": 100.0, "spread_points": 40},
+        {"time": 1800, "open": 100.0, "high": 105.0, "low": 99.5, "close": 104.0, "spread_points": 40},
+        {"time": 2700, "open": 104.0, "high": 104.5, "low": 96.0, "close": 97.0, "spread_points": 40},
+        {"time": 3600, "open": 97.0, "high": 106.0, "low": 96.0, "close": 105.0, "spread_points": 40},
+    ]
+    entries = [
+        AblationEntry(sample(captured=1, entry_time=1000, entry_time_utc=1000, direction="BUY"), "BUY"),
+        AblationEntry(sample(captured=2, entry_time=1900, entry_time_utc=1900, direction="SELL"), "SELL"),
+    ]
+    one = multi_seed_matched_random_distribution(
+        entries, data, max_bars=2, seeds=100, seed_base=7
+    )
+    two = multi_seed_matched_random_distribution(
+        entries, data, max_bars=2, seeds=100, seed_base=7
+    )
+    assert one == two
+    random_means, ramon_mean, percentile, beat_fraction = one
+    assert len(random_means) == 100
+    assert -10 < ramon_mean < 10
+    assert 0 <= percentile <= 100
+    assert 0 <= beat_fraction <= 100
+
+
+def test_paired_chronos_delta_is_zero_when_directions_match_ramon():
+    data = [
+        {"time": 900, "open": 100.0, "high": 100.4, "low": 99.6, "close": 100.0, "spread_points": 40},
+        {"time": 1800, "open": 100.0, "high": 105.0, "low": 99.5, "close": 104.0, "spread_points": 40},
+        {"time": 2700, "open": 104.0, "high": 104.5, "low": 96.0, "close": 97.0, "spread_points": 40},
+    ]
+    entries = [
+        AblationEntry(sample(captured=1, entry_time=1000, entry_time_utc=1000, direction="BUY"), "BUY"),
+        AblationEntry(sample(captured=2, entry_time=1900, entry_time_utc=1900, direction="SELL"), "SELL"),
+    ]
+    deltas = paired_deltas_for_strategy(
+        entries,
+        data,
+        strategy="chronos_only",
+        max_bars=2,
+        seed=42,
+        momentum_bars=4,
+        ma_fast=4,
+        ma_slow=12,
+    )
+    assert deltas
+    assert all(abs(value) < 1e-12 for value in deltas)

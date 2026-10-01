@@ -42,3 +42,19 @@ docker compose --profile tools run --rm tools \
 This remains a matched-timing direction benchmark. It does not test whether a
 baseline would have selected the same entry times on its own, and it must not be
 used as a direct replacement for live trading logic.
+
+
+## Multi-seed exact-ratio random and paired confidence intervals
+
+The holdout report now also includes:
+
+- 1,000 deterministic exact-ratio random seeds by default;
+- the 95% range of random mean-R across those seeds;
+- Ramon's percentile against that distribution;
+- the fraction of random seeds Ramon beats;
+- paired bootstrap 95% confidence intervals for Ramon minus Chronos-only;
+- paired bootstrap 95% confidence intervals for Ramon minus the primary exact-ratio random seed.
+
+Use `--random-seeds` and `--bootstrap-iterations` to change the defaults.
+A paired CI containing zero is reported as inconclusive rather than evidence of
+a clear difference.
