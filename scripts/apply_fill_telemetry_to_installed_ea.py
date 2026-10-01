@@ -23,15 +23,62 @@ def find_function_body(source: str, signature: str) -> tuple[int, int]:
     brace = source.find("{", start + len(signature))
     if brace < 0:
         raise ValueError(f"{signature} opening brace not found")
+
     depth = 0
-    for index in range(brace, len(source)):
+    in_string = False
+    in_line_comment = False
+    in_block_comment = False
+    escaped = False
+    index = brace
+    while index < len(source):
         char = source[index]
+        nxt = source[index + 1] if index + 1 < len(source) else ""
+
+        if in_line_comment:
+            if char == "\n":
+                in_line_comment = False
+            index += 1
+            continue
+
+        if in_block_comment:
+            if char == "*" and nxt == "/":
+                in_block_comment = False
+                index += 2
+                continue
+            index += 1
+            continue
+
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            index += 1
+            continue
+
+        if char == "/" and nxt == "/":
+            in_line_comment = True
+            index += 2
+            continue
+        if char == "/" and nxt == "*":
+            in_block_comment = True
+            index += 2
+            continue
+        if char == '"':
+            in_string = True
+            index += 1
+            continue
+
         if char == "{":
             depth += 1
         elif char == "}":
             depth -= 1
             if depth == 0:
                 return brace, index
+        index += 1
+
     raise ValueError(f"{signature} closing brace not found")
 
 
