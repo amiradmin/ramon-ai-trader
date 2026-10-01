@@ -117,6 +117,7 @@ class Settings:
     trend_min_micro_move_atr: float = 0.03
     trend_conflict_lookback: int = 12
     trend_conflict_atr: float = 3.0
+    strong_entry_min_intrabar_move_atr: float = -0.03
     stop_atr: float = 1.5
     target_atr: float = 3.0
 
@@ -170,6 +171,8 @@ class Decision:
     forecast_high: float
     stop_distance: float
     target_distance: float
+    strong_entry_min_intrabar_move_atr: float = -0.03
+    strong_entry_guard_active: int = 0
 
     def to_dict(self) -> dict[str, str | int | float]:
         return asdict(self)
@@ -262,6 +265,7 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
         and settings.trend_min_micro_move_atr >= 0
         and settings.trend_conflict_lookback >= 2
         and settings.trend_conflict_atr > 0
+        and -1.0 <= settings.strong_entry_min_intrabar_move_atr <= 0.0
     ):
         raise ValueError("invalid intrabar/trend settings")
 
@@ -286,6 +290,7 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
     ai_trend_score = 0.0
     ai_trend_move_atr = 0.0
     ai_trend_consistency = 0.0
+    strong_entry_guard_active = 0
 
     if atr <= market.point or spread_points > settings.max_spread_points:
         reason = "spread_or_atr"
@@ -364,8 +369,20 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
         # A strong Chronos point forecast must not repeatedly fade an extreme
         # completed-bar move in the opposite direction. This is intentionally
         # a narrow veto, not a generic trend-following replacement for Chronos.
+        strong_entry = (
+            dominant_edge >= minimum
+            and dominant_strength >= settings.minimum_strength
+        )
+        adverse_intrabar_timing = (
+            strong_entry
+            and bool(market.micro_bars)
+            and intrabar_move_atr < settings.strong_entry_min_intrabar_move_atr
+        )
         if trend_conflict:
             reason = "trend_conflict"
+        elif adverse_intrabar_timing:
+            strong_entry_guard_active = 1
+            reason = "adverse_intrabar_timing"
         elif dominant_buy and buy_edge >= minimum and buy_strength >= settings.minimum_strength:
             side, edge, reason = "BUY", buy_edge, "forecast_up"
         elif not dominant_buy and sell_edge >= minimum and sell_strength >= settings.minimum_strength:
@@ -417,6 +434,8 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
         trend_min_consistency=settings.trend_min_consistency,
         trend_min_edge_fraction=settings.trend_min_edge_fraction,
         trend_min_micro_move_atr=settings.trend_min_micro_move_atr,
+        strong_entry_min_intrabar_move_atr=settings.strong_entry_min_intrabar_move_atr,
+        strong_entry_guard_active=strong_entry_guard_active,
         forecast_low=forecast.low,
         forecast_median=forecast.median,
         forecast_high=forecast.high,
