@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Offline-only: consistent SQLite backup, Entry validation, covariate comparison.
+# Reuse installed dependencies but read current checkout code without rebuilding.
+cd "$(dirname "$0")/.."
+run_tools() {
+  docker compose --profile tools run --rm --no-deps \
+    -v "$PWD/src:/research-src:ro" -e PYTHONPATH=/research-src tools "$@"
+}
+run_tools -c '
+from pathlib import Path
+import sqlite3
+source = Path("/data/ramon_history.sqlite3")
+target = Path("/data/research/input.sqlite3")
+target.parent.mkdir(parents=True, exist_ok=True)
+with sqlite3.connect(source.as_uri()+"?mode=ro", uri=True) as src:
+    with sqlite3.connect(target) as dst:
+        src.backup(dst)
+print("Consistent research snapshot:", target)
+'
+run_tools -m ramon.entry_validation \
+  --db /data/research/input.sqlite3 --out /data/research/entry-validation.json
+run_tools -m ramon.research_compare \
+  --db /data/research/input.sqlite3 --out /data/research/chronos-covariates.json "$@"

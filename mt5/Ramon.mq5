@@ -1,5 +1,5 @@
 #property strict
-#property version "1.535"
+#property version "1.537"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -501,7 +501,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.53.5\n"
+      +"EA version: 0.53.7\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -981,7 +981,7 @@ void DrawDashboard()
    // Tall/narrow panel: summary text first, checklist directly underneath.
    UiRect("PANEL",12,24,560,955,C'15,23,42',C'71,85,105');
 
-   UiLabel("TITLE","RAMON AI TRADER  v0.53.5 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.53.7 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,clrWhite,9);
@@ -1289,7 +1289,10 @@ bool BuildRequest(string &payload,datetime &bar_time)
          +",\"open\":"+DoubleToString(bars[i].open,_Digits)
          +",\"high\":"+DoubleToString(bars[i].high,_Digits)
          +",\"low\":"+DoubleToString(bars[i].low,_Digits)
-         +",\"close\":"+DoubleToString(bars[i].close,_Digits)+"}";
+         +",\"close\":"+DoubleToString(bars[i].close,_Digits)
+         +",\"tick_volume\":"+IntegerToString(bars[i].tick_volume)
+         +",\"real_volume\":"+IntegerToString(bars[i].real_volume)
+         +",\"spread_points\":"+IntegerToString(bars[i].spread)+"}";
    }
    payload+="],\"micro_bars\":[";
    MqlRates micro[];
@@ -1304,10 +1307,15 @@ bool BuildRequest(string &payload,datetime &bar_time)
             +",\"open\":"+DoubleToString(micro[j].open,_Digits)
             +",\"high\":"+DoubleToString(micro[j].high,_Digits)
             +",\"low\":"+DoubleToString(micro[j].low,_Digits)
-            +",\"close\":"+DoubleToString(micro[j].close,_Digits)+"}";
+            +",\"close\":"+DoubleToString(micro[j].close,_Digits)
+            +",\"tick_volume\":"+IntegerToString(micro[j].tick_volume)
+            +",\"spread_points\":"+IntegerToString(micro[j].spread)+"}";
       }
    }
-   payload+="],\"quote_time\":"+IntegerToString((long)tick.time)+"}";
+   payload+="],\"quote_time\":"+IntegerToString((long)tick.time)
+      +",\"quote_time_msc\":"+IntegerToString(tick.time_msc)
+      +",\"ea_context\":{"+ResearchContext()+",\"account_key\":\""+JsonEscape(ResearchAccountKey())
+      +"\",\"magic\":"+IntegerToString((long)MagicNumber)+",\"role\":\""+(SmallOnlyMode ? "SMALL" : "MAIN")+"\"}}";
    return true;
 }
 
@@ -1880,6 +1888,355 @@ string CsvField(const string value)
    return "\""+escaped+"\"";
 }
 
+// Observational research telemetry; execution policy never reads this outbox.
+input bool EnableResearchTelemetry = true;
+input int ResearchQuoteIntervalMs = 1000; // Sampled observations, not complete ticks.
+const string ResearchSourceSHA256 = "4d6053ab29e349155db3663028c66ff65e4f28940d2c3552817f9a6cfb16137a";
+string ResearchRunId="";
+long ResearchSequence=0, ResearchLastQuoteMsc=0, ResearchOutboxOffset=0;
+string ResearchLastGateSample="", ResearchLastGateStatus="";
+bool ResearchSpoolError=false;
+ulong ResearchStopsPosition=0;
+double ResearchPreviousSL=0.0,ResearchPreviousTP=0.0;
+
+// This EA currently uses virtual exits and never submits SL/TP modifications.
+// MT5 position transactions do not identify the modifying user/application.
+void ResearchObserveStops(const ulong ticket,const double sl,const double tp,const string source)
+{
+   if(!EnableResearchTelemetry || !PositionSelectByTicket(ticket)) return;
+   ulong identifier=(ulong)PositionGetInteger(POSITION_IDENTIFIER);
+   string comment=PositionGetString(POSITION_COMMENT);
+   string sample=(StringFind(comment,"Ramon:")==0 ? StringSubstr(comment,6,16) : "");
+   bool known=(ResearchStopsPosition==identifier);
+   if(!known || sl!=ResearchPreviousSL || tp!=ResearchPreviousTP)
+   {
+      MqlTick tick; ZeroMemory(tick); SymbolInfoTick(_Symbol,tick);
+      string data="\"source\":\""+source+"\",\"actor\":\""+(known ? "external_unattributed" : "unknown_before_observation")+"\""
+         +",\"previous_known\":"+(known ? "true" : "false")
+         +",\"sl_before\":"+(known ? DoubleToString(ResearchPreviousSL,8) : "null")
+         +",\"tp_before\":"+(known ? DoubleToString(ResearchPreviousTP,8) : "null")
+         +",\"sl_after\":"+DoubleToString(sl,8)+",\"tp_after\":"+DoubleToString(tp,8)
+         +",\"position_type\":"+IntegerToString(PositionGetInteger(POSITION_TYPE))
+         +",\"entry_price\":"+DoubleToString(PositionGetDouble(POSITION_PRICE_OPEN),8)
+         +",\"bid\":"+DoubleToString(tick.bid,8)+",\"ask\":"+DoubleToString(tick.ask,8)
+         +",\"volume\":"+DoubleToString(PositionGetDouble(POSITION_VOLUME),8)
+         +",\"profit_units\":"+DoubleToString(PositionGetDouble(POSITION_PROFIT),8)
+         +",\"manual_confirmed\":false";
+      ResearchAppend(known ? "protection_change" : "protection_baseline",data,sample,identifier);
+   }
+   ResearchStopsPosition=identifier; ResearchPreviousSL=sl; ResearchPreviousTP=tp;
+}
+
+
+string ResearchAccountKey()
+{
+   return AccountInfoString(ACCOUNT_SERVER)+":"+IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN));
+}
+
+string ResearchSpoolPath()
+{
+   string server=AccountInfoString(ACCOUNT_SERVER);
+   StringReplace(server,"/","_"); StringReplace(server,"\\","_"); StringReplace(server,":","_");
+   return "RamonResearch_"+server+"_"+IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN))
+      +"_"+IntegerToString((long)MagicNumber)+".jsonl";
+}
+
+string ResearchConfig()
+{
+   return "{\"TradeSymbol\":"+"\""+JsonEscape(TradeSymbol)+"\""
+      +",\"RequiredServerText\":"+"\""+JsonEscape(RequiredServerText)+"\""
+      +",\"AutoLockCurrentAccount\":"+(AutoLockCurrentAccount ? "true" : "false")
+      +",\"AllowedAccountLogin\":"+IntegerToString((long)AllowedAccountLogin)
+      +",\"EnableLiveTrading\":"+(EnableLiveTrading ? "true" : "false")
+      +",\"SmallOnlyMode\":"+(SmallOnlyMode ? "true" : "false")
+      +",\"PrimaryMagicNumber\":"+IntegerToString((long)PrimaryMagicNumber)
+      +",\"SmallProfitMagicNumber\":"+IntegerToString((long)SmallProfitMagicNumber)
+      +",\"ModelUrl\":"+"\""+JsonEscape(ModelUrl)+"\""
+      +",\"MoneyUnitsPerUSD\":"+DoubleToString(MoneyUnitsPerUSD,16)
+      +",\"AccountIsCent\":"+(AccountIsCent ? "true" : "false")
+      +",\"ConfirmMoneyUnitsPerUSD\":"+(ConfirmMoneyUnitsPerUSD ? "true" : "false")
+      +",\"ExpectedAccountCurrency\":"+"\""+JsonEscape(ExpectedAccountCurrency)+"\""
+      +",\"RiskPerTradeUSD\":"+DoubleToString(RiskPerTradeUSD,16)
+      +",\"AllowMinLotRiskOverride\":"+(AllowMinLotRiskOverride ? "true" : "false")
+      +",\"MaxExecutableRiskUSD\":"+DoubleToString(MaxExecutableRiskUSD,16)
+      +",\"MaxSpreadPoints\":"+IntegerToString((long)MaxSpreadPoints)
+      +",\"MaxTradesPerDay\":"+IntegerToString((long)MaxTradesPerDay)
+      +",\"MaximumHoldBars\":"+IntegerToString((long)MaximumHoldBars)
+      +",\"EnableMainFastProfit\":"+(EnableMainFastProfit ? "true" : "false")
+      +",\"MainFastProfitMinAgeBars\":"+IntegerToString((long)MainFastProfitMinAgeBars)
+      +",\"MainFastProfitMinProfitUnits\":"+DoubleToString(MainFastProfitMinProfitUnits,16)
+      +",\"MainFastProfitMinProgressToTP1\":"+DoubleToString(MainFastProfitMinProgressToTP1,16)
+      +",\"MainFastProfitWeakSnapshotsRequired\":"+IntegerToString((long)MainFastProfitWeakSnapshotsRequired)
+      +",\"EnableSmallProfitTrades\":"+(EnableSmallProfitTrades ? "true" : "false")
+      +",\"SmallProfitTargetUnits\":"+DoubleToString(SmallProfitTargetUnits,16)
+      +",\"ShadowSmallTP1Units\":"+DoubleToString(ShadowSmallTP1Units,16)
+      +",\"ShadowSmallTP2Units\":"+DoubleToString(ShadowSmallTP2Units,16)
+      +",\"ShadowSmallTP3Units\":"+DoubleToString(ShadowSmallTP3Units,16)
+      +",\"ShadowSmallStrongTargetUnits\":"+DoubleToString(ShadowSmallStrongTargetUnits,16)
+      +",\"SmallProfitMaxLossUnits\":"+DoubleToString(SmallProfitMaxLossUnits,16)
+      +",\"SmallProfitProtectionActivationUnits\":"+DoubleToString(SmallProfitProtectionActivationUnits,16)
+      +",\"SmallProfitProtectionGivebackUnits\":"+DoubleToString(SmallProfitProtectionGivebackUnits,16)
+      +",\"SmallProfitMaxRiskUSD\":"+DoubleToString(SmallProfitMaxRiskUSD,16)
+      +",\"SmallProfitMaxEntriesPerSignalBar\":"+IntegerToString((long)SmallProfitMaxEntriesPerSignalBar)
+      +",\"SmallProfitMaximumHoldBars\":"+IntegerToString((long)SmallProfitMaximumHoldBars)
+      +",\"EnableProfitProtection\":"+(EnableProfitProtection ? "true" : "false")
+      +",\"ProfitProtectionFallbackActivationUnits\":"+DoubleToString(ProfitProtectionFallbackActivationUnits,16)
+      +",\"ProfitProtectionActivationMinUnits\":"+DoubleToString(ProfitProtectionActivationMinUnits,16)
+      +",\"ProfitProtectionActivationMaxUnits\":"+DoubleToString(ProfitProtectionActivationMaxUnits,16)
+      +",\"ProfitProtectionActivationRiskFraction\":"+DoubleToString(ProfitProtectionActivationRiskFraction,16)
+      +",\"ProfitProtectionGivebackMinUnits\":"+DoubleToString(ProfitProtectionGivebackMinUnits,16)
+      +",\"ProfitProtectionGivebackMaxUnits\":"+DoubleToString(ProfitProtectionGivebackMaxUnits,16)
+      +",\"ProfitProtectionGivebackFraction\":"+DoubleToString(ProfitProtectionGivebackFraction,16)
+      +",\"EnableTPStageManagement\":"+(EnableTPStageManagement ? "true" : "false")
+      +",\"TPStageWeakSnapshotsRequired\":"+IntegerToString((long)TPStageWeakSnapshotsRequired)
+      +",\"TP1GraceSeconds\":"+IntegerToString((long)TP1GraceSeconds)
+      +",\"TP2GraceSeconds\":"+IntegerToString((long)TP2GraceSeconds)
+      +",\"TP1HealthyProgressFraction\":"+DoubleToString(TP1HealthyProgressFraction,16)
+      +",\"TP1RetraceFraction\":"+DoubleToString(TP1RetraceFraction,16)
+      +",\"TP2RetraceFraction\":"+DoubleToString(TP2RetraceFraction,16)
+      +",\"ObserveEarlyReversalExit\":"+(ObserveEarlyReversalExit ? "true" : "false")
+      +",\"EarlyReversalMinPeakUnits\":"+DoubleToString(EarlyReversalMinPeakUnits,16)
+      +",\"EarlyReversalGivebackUnits\":"+DoubleToString(EarlyReversalGivebackUnits,16)
+      +",\"EarlyReversalMaxCurrentUnits\":"+DoubleToString(EarlyReversalMaxCurrentUnits,16)
+      +",\"EnableEarlyAdverseExit\":"+(EnableEarlyAdverseExit ? "true" : "false")
+      +",\"EarlyAdverseRiskFraction\":"+DoubleToString(EarlyAdverseRiskFraction,16)
+      +",\"SmallEarlyAdverseRiskFraction\":"+DoubleToString(SmallEarlyAdverseRiskFraction,16)
+      +",\"EarlyAdverseWeakSnapshotsRequired\":"+IntegerToString((long)EarlyAdverseWeakSnapshotsRequired)
+      +",\"EarlyAdverseMinAgeSeconds\":"+IntegerToString((long)EarlyAdverseMinAgeSeconds)
+      +",\"RequestTimeoutMs\":"+IntegerToString((long)RequestTimeoutMs)
+      +",\"SnapshotIntervalSeconds\":"+IntegerToString((long)SnapshotIntervalSeconds)
+      +",\"MaxDeviationPoints\":"+IntegerToString((long)MaxDeviationPoints)
+      +",\"MagicNumber\":"+IntegerToString((long)MagicNumber)
+      +",\"WriteDiagnosticFile\":"+(WriteDiagnosticFile ? "true" : "false")
+      +",\"DiagnosticFileName\":"+"\""+JsonEscape(DiagnosticFileName)+"\""
+      +",\"ShowDashboard\":"+(ShowDashboard ? "true" : "false")
+      +",\"ShowTPLevelsOnChart\":"+(ShowTPLevelsOnChart ? "true" : "false")
+      +",\"EnableClipboardButton\":"+(EnableClipboardButton ? "true" : "false")
+      +",\"WriteCsvLogs\":"+(WriteCsvLogs ? "true" : "false")
+      +",\"SignalCsvFileName\":"+"\""+JsonEscape(SignalCsvFileName)+"\""
+      +",\"TradeCsvFileName\":"+"\""+JsonEscape(TradeCsvFileName)+"\""
+      +",\"EnableImprovementShadowPack\":"+(EnableImprovementShadowPack ? "true" : "false")
+      +",\"ShadowCsvFileName\":"+"\""+JsonEscape(ShadowCsvFileName)+"\""
+      +",\"EnableResearchTelemetry\":"+(EnableResearchTelemetry ? "true" : "false")
+      +",\"ResearchQuoteIntervalMs\":"+IntegerToString((long)ResearchQuoteIntervalMs)
+      +"}";
+}
+
+string ResearchContext()
+{
+   return "\"ea_version\":\"0.53.7\",\"run_id\":\""+JsonEscape(ResearchRunId)+"\""
+      +",\"account_currency\":\""+JsonEscape(AccountInfoString(ACCOUNT_CURRENCY))+"\""
+      +",\"money_units_per_usd\":"+DoubleToString(MoneyUnitsPerUSD,4)
+      +",\"balance_units\":"+DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),8)
+      +",\"equity_units\":"+DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY),8)
+      +",\"margin_free_units\":"+DoubleToString(AccountInfoDouble(ACCOUNT_MARGIN_FREE),8)
+      +",\"positions_total\":"+IntegerToString(PositionsTotal())
+      +",\"terminal_connected\":"+((bool)TerminalInfoInteger(TERMINAL_CONNECTED) ? "true" : "false")
+      +",\"terminal_trade_allowed\":"+((bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) ? "true" : "false")
+      +",\"ea_trade_allowed\":"+((bool)MQLInfoInteger(MQL_TRADE_ALLOWED) ? "true" : "false")
+      +",\"account_trade_allowed\":"+((bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED) ? "true" : "false")
+      +",\"account_lock\":"+(AccountLockHealthy() ? "true" : "false")
+      +",\"point\":"+DoubleToString(_Point,8)
+      +",\"tick_size\":"+DoubleToString(SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_SIZE),8)
+      +",\"tick_value_loss\":"+DoubleToString(SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_VALUE_LOSS),8)
+      +",\"contract_size\":"+DoubleToString(SymbolInfoDouble(_Symbol,SYMBOL_TRADE_CONTRACT_SIZE),8)
+      +",\"volume_min\":"+DoubleToString(SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN),8)
+      +",\"volume_step\":"+DoubleToString(SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_STEP),8)
+      +",\"stops_level\":"+IntegerToString(SymbolInfoInteger(_Symbol,SYMBOL_TRADE_STOPS_LEVEL))
+      +",\"freeze_level\":"+IntegerToString(SymbolInfoInteger(_Symbol,SYMBOL_TRADE_FREEZE_LEVEL))
+      +",\"max_spread_points\":"+IntegerToString(MaxSpreadPoints)
+      +",\"max_deviation_points\":"+IntegerToString(MaxDeviationPoints)
+      +",\"risk_per_trade_usd\":"+DoubleToString(RiskPerTradeUSD,8)
+      +",\"max_executable_risk_usd\":"+DoubleToString(MaxExecutableRiskUSD,8)
+      +",\"live_enabled\":"+(EnableLiveTrading ? "true" : "false")
+      +",\"quote_sampling_interval_ms\":"+IntegerToString(ResearchQuoteIntervalMs)
+      +",\"observed_broker_minus_utc_seconds\":"+IntegerToString((long)TimeCurrent()-(long)TimeGMT())
+      +",\"tp_stage_management\":"+(EnableTPStageManagement ? "true" : "false")
+      +",\"profit_protection_enabled\":"+(EnableProfitProtection ? "true" : "false")
+      +",\"snapshot_interval_seconds\":"+IntegerToString(SnapshotIntervalSeconds)
+      +",\"max_trades_per_day\":"+IntegerToString(MaxTradesPerDay)
+      +",\"config\":"+ResearchConfig()
+      +",\"ea_source_sha256\":\""+ResearchSourceSHA256+"\"";
+}
+
+void ResearchAppend(const string kind,const string data,const string sample="",const ulong position=0,const long at_msc=0)
+{
+   if(!EnableResearchTelemetry || ResearchRunId=="") return;
+   int handle=FileOpen(ResearchSpoolPath(),FILE_READ|FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON,0,CP_UTF8);
+   if(handle==INVALID_HANDLE)
+   { ResearchSpoolError=true; Print("Ramon research outbox write failed ",GetLastError()); return; }
+   FileSeek(handle,0,SEEK_END);
+   ResearchSequence++;
+   string identity=ResearchAccountKey()+":"+IntegerToString((long)MagicNumber)+":"+ResearchRunId+":"+IntegerToString(ResearchSequence);
+   long at=(at_msc>0 ? at_msc : (long)TimeCurrent()*1000);
+   string row="{\"event_id\":\""+JsonEscape(identity)+"\",\"account_key\":\""+JsonEscape(ResearchAccountKey())
+      +"\",\"role\":\""+(SmallOnlyMode ? "SMALL" : "MAIN")+"\",\"symbol\":\""+JsonEscape(_Symbol)
+      +"\",\"kind\":\""+kind+"\",\"sample_key\":\""+(ValidSampleKey(sample) ? sample : "")
+      +"\",\"position_id\":\""+(position>0 ? IntegerToString((long)position) : "")
+      +"\",\"broker_time_msc\":"+IntegerToString(at)
+      +",\"observed_utc\":"+IntegerToString((long)TimeGMT())+",\"data\":{"+data+"}}\r\n";
+   uint written=FileWriteString(handle,row);
+   FileFlush(handle); FileClose(handle);
+   if(written==0) { ResearchSpoolError=true; Print("Ramon research outbox write failed"); }
+}
+
+// Manual deals can have magic 0. Identify ownership by the original entry.
+// HistorySelectByPosition resets deal selection; restore it before returning.
+bool ResearchDealOwned(const ulong deal,string &sample)
+{
+   sample="";
+   if(deal==0 || !HistoryDealSelect(deal) || HistoryDealGetString(deal,DEAL_SYMBOL)!=_Symbol) return false;
+   ulong identifier=(ulong)HistoryDealGetInteger(deal,DEAL_POSITION_ID);
+   if(identifier==0 || !HistorySelectByPosition(identifier)) return false;
+   bool ours=false;
+   for(int i=0;i<HistoryDealsTotal();i++)
+   {
+      ulong ticket=HistoryDealGetTicket(i);
+      if(HistoryDealGetInteger(ticket,DEAL_ENTRY)!=DEAL_ENTRY_IN) continue;
+      if((ulong)HistoryDealGetInteger(ticket,DEAL_MAGIC)!=MagicNumber) { ours=false; break; }
+      ours=true;
+      string comment=HistoryDealGetString(ticket,DEAL_COMMENT);
+      if(StringFind(comment,"Ramon:")==0) sample=StringSubstr(comment,6,16);
+   }
+   HistoryDealSelect(deal);
+   return ours;
+}
+
+bool ResearchDealOwned(const ulong deal)
+{
+   string sample="";
+   return ResearchDealOwned(deal,sample);
+}
+
+void ResearchRecordDeal(const ulong deal)
+{
+   string sample="";
+   if(!ResearchDealOwned(deal,sample)) return;
+   string data="\"deal_id\":\""+IntegerToString((long)deal)+"\",\"order_id\":\""
+      +IntegerToString(HistoryDealGetInteger(deal,DEAL_ORDER))+"\""
+      +",\"magic\":"+IntegerToString(HistoryDealGetInteger(deal,DEAL_MAGIC))
+      +",\"entry\":"+IntegerToString(HistoryDealGetInteger(deal,DEAL_ENTRY))
+      +",\"type\":"+IntegerToString(HistoryDealGetInteger(deal,DEAL_TYPE))
+      +",\"reason\":\""+EnumToString((ENUM_DEAL_REASON)HistoryDealGetInteger(deal,DEAL_REASON))+"\""
+      +",\"volume\":"+DoubleToString(HistoryDealGetDouble(deal,DEAL_VOLUME),8)
+      +",\"price\":"+DoubleToString(HistoryDealGetDouble(deal,DEAL_PRICE),8)
+      +",\"sl\":"+DoubleToString(HistoryDealGetDouble(deal,DEAL_SL),8)
+      +",\"tp\":"+DoubleToString(HistoryDealGetDouble(deal,DEAL_TP),8)
+      +",\"profit_units\":"+DoubleToString(HistoryDealGetDouble(deal,DEAL_PROFIT),8)
+      +",\"commission_units\":"+DoubleToString(HistoryDealGetDouble(deal,DEAL_COMMISSION),8)
+      +",\"swap_units\":"+DoubleToString(HistoryDealGetDouble(deal,DEAL_SWAP),8)
+      +",\"fee_units\":"+DoubleToString(HistoryDealGetDouble(deal,DEAL_FEE),8)
+      +",\"comment\":\""+JsonEscape(HistoryDealGetString(deal,DEAL_COMMENT))+"\"";
+   ResearchAppend("deal",data,sample,(ulong)HistoryDealGetInteger(deal,DEAL_POSITION_ID),HistoryDealGetInteger(deal,DEAL_TIME_MSC));
+}
+
+void ResearchGate()
+{
+   if(!EnableResearchTelemetry || !ValidSampleKey(LastSampleKey)) return;
+   if(ResearchLastGateSample==LastSampleKey && ResearchLastGateStatus==StatusLine) return;
+   ResearchLastGateSample=LastSampleKey; ResearchLastGateStatus=StatusLine;
+   MqlTick tick; ZeroMemory(tick); SymbolInfoTick(_Symbol,tick);
+   string data=ResearchContext()+",\"status\":\""+JsonEscape(StatusLine)+"\""
+      +",\"model_decision\":\""+LastModelDecision+"\",\"model_reason\":\""+JsonEscape(LastModelReason)+"\""
+      +",\"signal_bar_time\":"+IntegerToString((long)LastSignalBarTime)
+      +",\"bid\":"+DoubleToString(tick.bid,8)+",\"ask\":"+DoubleToString(tick.ask,8)
+      +",\"observed_spread_points\":"+IntegerToString(SymbolInfoInteger(_Symbol,SYMBOL_SPREAD))
+      +",\"quote_age_seconds\":"+IntegerToString((long)TimeCurrent()-(long)tick.time)
+      +",\"planned_volume\":"+DoubleToString(LastPlannedVolume,8)
+      +",\"risk_budget_units\":"+DoubleToString(LastRiskBudgetUnits,8)
+      +",\"estimated_sl_units\":"+DoubleToString(LastEstimatedStopLossUnits,8)
+      +",\"min_lot_sl_units\":"+DoubleToString(LastMinimumLotStopLossUnits,8)
+      +",\"min_lot_override\":"+(LastMinLotOverrideUsed ? "true" : "false");
+   ResearchAppend("decision_gate",data,LastSampleKey,0,tick.time_msc);
+}
+
+void ResearchQuote()
+{
+   if(!EnableResearchTelemetry) return;
+   ulong ticket=0; datetime opened=0;
+   if(!ManagedPosition(ticket,opened) || !PositionSelectByTicket(ticket)) { ResearchLastQuoteMsc=0; ResearchStopsPosition=0; return; }
+   ResearchObserveStops(ticket,PositionGetDouble(POSITION_SL),PositionGetDouble(POSITION_TP),"quote_observation");
+   MqlTick tick;
+   if(!SymbolInfoTick(_Symbol,tick) || tick.bid<=0.0 || tick.ask<tick.bid || tick.time_msc<=ResearchLastQuoteMsc
+      || tick.time_msc-ResearchLastQuoteMsc<MathMax(1000,ResearchQuoteIntervalMs)) return;
+   string comment=PositionGetString(POSITION_COMMENT);
+   string sample=(StringFind(comment,"Ramon:")==0 ? StringSubstr(comment,6,16) : "");
+   ulong identifier=(ulong)PositionGetInteger(POSITION_IDENTIFIER);
+   if(ResearchLastQuoteMsc>0 && tick.time_msc-ResearchLastQuoteMsc>3*MathMax(1000,ResearchQuoteIntervalMs))
+      ResearchAppend("telemetry_gap","\"source\":\"position_quote\",\"gap_ms\":"+IntegerToString(tick.time_msc-ResearchLastQuoteMsc),sample,identifier,tick.time_msc);
+   ResearchLastQuoteMsc=tick.time_msc;
+   static ulong previous=0; static double prior_sl=-1,prior_tp=-1,prior_volume=-1; static int prior_stage=-1;
+   double sl=PositionGetDouble(POSITION_SL),tp=PositionGetDouble(POSITION_TP),volume=PositionGetDouble(POSITION_VOLUME);
+   string data="\"bid\":"+DoubleToString(tick.bid,8)+",\"ask\":"+DoubleToString(tick.ask,8)
+      +",\"volume\":"+DoubleToString(volume,8)+",\"entry_price\":"+DoubleToString(PositionGetDouble(POSITION_PRICE_OPEN),8)
+      +",\"position_type\":"+IntegerToString(PositionGetInteger(POSITION_TYPE))
+      +",\"sl\":"+DoubleToString(sl,8)+",\"tp\":"+DoubleToString(tp,8)
+      +",\"tp_stage\":"+IntegerToString(TPStage)
+      +",\"profit_units\":"+DoubleToString(PositionGetDouble(POSITION_PROFIT),8)
+      +",\"swap_units\":"+DoubleToString(PositionGetDouble(POSITION_SWAP),8)
+      +",\"sampling_interval_ms\":"+IntegerToString(MathMax(1000,ResearchQuoteIntervalMs));
+   if(previous!=identifier || prior_sl!=sl || prior_tp!=tp || prior_volume!=volume || prior_stage!=TPStage)
+      ResearchAppend("position_change",data,sample,identifier,tick.time_msc);
+   previous=identifier; prior_sl=sl; prior_tp=tp; prior_volume=volume; prior_stage=TPStage;
+   ResearchAppend("position_quote",data,sample,identifier,tick.time_msc);
+}
+
+
+bool ResearchPositionClose(const ulong ticket,const ulong deviation,const string detail="automatic_close")
+{
+   string sample=""; ulong identifier=0;
+   double requested_price=0.0,volume=0.0;
+   if(PositionSelectByTicket(ticket))
+   {
+      identifier=(ulong)PositionGetInteger(POSITION_IDENTIFIER);
+      string comment=PositionGetString(POSITION_COMMENT);
+      if(StringFind(comment,"Ramon:")==0) sample=StringSubstr(comment,6,16);
+      volume=PositionGetDouble(POSITION_VOLUME);
+      MqlTick tick;
+      if(SymbolInfoTick(_Symbol,tick))
+         requested_price=(PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY ? tick.bid : tick.ask);
+   }
+   ResearchAppend("close_intent","\"detail\":\""+JsonEscape(detail)+"\",\"requested_price\":"+DoubleToString(requested_price,8)
+      +",\"volume\":"+DoubleToString(volume,8)+",\"deviation_points\":"+IntegerToString((long)deviation),sample,identifier);
+   ulong started=GetMicrosecondCount();
+   bool submitted=Trade.PositionClose(ticket,deviation);
+   ResearchAppend("close_result","\"detail\":\""+JsonEscape(detail)+"\",\"submitted\":"+(submitted ? "true" : "false")
+      +",\"retcode\":"+IntegerToString((long)Trade.ResultRetcode())+",\"deal_id\":\""+IntegerToString((long)Trade.ResultDeal())
+      +"\",\"order_id\":\""+IntegerToString((long)Trade.ResultOrder())+"\",\"fill_price\":"+DoubleToString(Trade.ResultPrice(),8)
+      +",\"duration_ms\":"+DoubleToString((double)(GetMicrosecondCount()-started)/1000.0,3),sample,identifier);
+   return submitted;
+}
+
+void ResearchFlush()
+{
+   if(!EnableResearchTelemetry || !AccountLockHealthy()) return;
+   int handle=FileOpen(ResearchSpoolPath(),FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON,0,CP_UTF8);
+   if(handle==INVALID_HANDLE) return;
+   if((ulong)ResearchOutboxOffset>FileSize(handle))
+   { FileClose(handle); Print("Ramon research cursor beyond outbox; recovery needed"); return; }
+   FileSeek(handle,ResearchOutboxOffset,SEEK_SET);
+   string payload="{\"events\":["; int count=0;
+   while(!FileIsEnding(handle) && count<50 && StringLen(payload)<200000)
+   {
+      string line=FileReadString(handle);
+      if(StringLen(line)<2) continue;
+      if(count>0) payload+=",";
+      payload+=line; count++;
+   }
+   long next=(long)FileTell(handle); FileClose(handle);
+   if(count==0) return;
+   payload+="]}";
+   char request[],response[]; string headers="";
+   StringToCharArray(payload,request,0,WHOLE_ARRAY,CP_UTF8); ArrayResize(request,ArraySize(request)-1);
+   string url=StringSubstr(ModelUrl,0,StringLen(ModelUrl)-StringLen("/decision"))+"/events";
+   int code=WebRequest("POST",url,"Content-Type: application/json\r\n",1000,request,response,headers);
+   if(code!=200) return;
+   int cursor=FileOpen(ResearchSpoolPath()+".cursor",FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON);
+   if(cursor==INVALID_HANDLE) { Print("Ramon research cursor write failed"); return; }
+   FileWriteString(cursor,IntegerToString(next)); FileFlush(cursor); FileClose(cursor);
+   ResearchOutboxOffset=next;
+}
+
 void AppendSignalCsv()
 {
    if(!WriteCsvLogs || StringLen(EffectiveSignalCsvFileName())==0)
@@ -2009,7 +2366,7 @@ void AppendTradeCsv(const ulong deal)
       return;
    if(HistoryDealGetString(deal,DEAL_SYMBOL)!=_Symbol)
       return;
-   if((ulong)HistoryDealGetInteger(deal,DEAL_MAGIC)!=MagicNumber)
+   if(!ResearchDealOwned(deal))
       return;
 
    int handle=FileOpen(
@@ -2046,6 +2403,7 @@ void AppendTradeCsv(const ulong deal)
    if(ramon_pos>=0 && StringLen(deal_comment)>=ramon_pos+22)
       deal_sample_key=StringSubstr(deal_comment,ramon_pos+6,16);
 
+   if(!ValidSampleKey(deal_sample_key)) ResearchDealOwned(deal,deal_sample_key);
    FileWrite(handle,
       TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS),
       (LastSignalBarTime>0 ? TimeToString(LastSignalBarTime,TIME_DATE|TIME_MINUTES) : "NONE"),
@@ -2168,8 +2526,7 @@ bool ReadDealSizingTelemetry(
 void RecordDealTelemetry(const ulong deal,const string close_detail="")
 {
    if(deal==0 || !HistoryDealSelect(deal)) return;
-   if(HistoryDealGetString(deal,DEAL_SYMBOL)!=_Symbol
-      || (ulong)HistoryDealGetInteger(deal,DEAL_MAGIC)!=MagicNumber) return;
+   if(!ResearchDealOwned(deal)) return;
    int offset=0;
    string version="",detail="";
    bool recorded=ReadDealTelemetry(deal,offset,version,detail);
@@ -2182,9 +2539,17 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.53.5";
+      version="0.53.7";
    }
-   if(close_detail!="") detail=close_detail;
+   if(close_detail!="")
+   {
+      detail=close_detail;
+      string research_sample="";
+      ResearchDealOwned(deal,research_sample);
+      ResearchAppend("deal_detail","\"deal_id\":\""+IntegerToString((long)deal)
+         +"\",\"exit_detail\":\""+JsonEscape(detail)+"\"",research_sample,
+         (ulong)HistoryDealGetInteger(deal,DEAL_POSITION_ID),HistoryDealGetInteger(deal,DEAL_TIME_MSC));
+   }
 
    string sizing_sample="";
    double risk_budget_units=0.0,planned_volume=0.0,min_lot_sl_units=0.0;
@@ -2244,6 +2609,7 @@ bool ClosedTradePayload(const ulong identifier,string &payload)
    datetime opened=0,closed=0;
    ulong opening_deal=0,closing_deal=0;
    double in_volume=0.0,out_volume=0.0,net=0.0,risk=0.0;
+   bool manual_intervention=false;
    double profit=0.0,commission=0.0,swap=0.0,fee=0.0;
    // Do not call HistoryDealSelect here: it resets the selected position history.
    for(int i=0;i<HistoryDealsTotal();i++)
@@ -2285,6 +2651,12 @@ bool ClosedTradePayload(const ulong identifier,string &payload)
       else if(entry==DEAL_ENTRY_OUT || entry==DEAL_ENTRY_OUT_BY)
       {
          out_volume+=volume;
+         long close_reason=HistoryDealGetInteger(deal,DEAL_REASON);
+         int detail_offset=0; string detail_version="",partial_detail="";
+         ReadDealTelemetry(deal,detail_offset,detail_version,partial_detail);
+         if(close_reason==DEAL_REASON_CLIENT || close_reason==DEAL_REASON_MOBILE || close_reason==DEAL_REASON_WEB
+            || partial_detail=="manual_close" || partial_detail=="manual_dashboard_close")
+            manual_intervention=true;
          if(at>=closed)
          {
             closed=at;
@@ -2309,7 +2681,8 @@ bool ClosedTradePayload(const ulong identifier,string &payload)
       +",\"fee_units\":"+DoubleToString(fee,8)
       +",\"exit_reason\":\""+exit_reason+"\""
       +",\"trade_role\":\""+(SmallOnlyMode ? "SMALL" : "MAIN")+"\""
-      +",\"entry_magic\":"+IntegerToString((long)MagicNumber);
+      +",\"entry_magic\":"+IntegerToString((long)MagicNumber)
+      +",\"manual_intervention\":"+(manual_intervention ? "1" : "0");
    int offset=0;
    string version="",detail="";
    if(ReadDealTelemetry(opening_deal,offset,version,detail))
@@ -2737,7 +3110,7 @@ bool ManageTPStages(const ulong ticket)
          StatusLine="EXIT PAUSED: MARKET CLOSED";
          return true;
       }
-      if(Trade.PositionClose(ticket,MaxDeviationPoints))
+      if(ResearchPositionClose(ticket,MaxDeviationPoints))
       {
          ResetMarketClosedExitPause();
          RecordDealTelemetry(Trade.ResultDeal(),"tp3_stage_exit");
@@ -2794,7 +3167,7 @@ bool ManageTPStages(const ulong ticket)
          StatusLine="EXIT PAUSED: MARKET CLOSED";
          return true;
       }
-      if(Trade.PositionClose(ticket,MaxDeviationPoints))
+      if(ResearchPositionClose(ticket,MaxDeviationPoints))
       {
          ResetMarketClosedExitPause();
          RecordDealTelemetry(Trade.ResultDeal(),detail);
@@ -2916,7 +3289,7 @@ bool ManageMainFastProfit(const ulong ticket,const datetime opened)
       return true;
    }
 
-   if(Trade.PositionClose(ticket,MaxDeviationPoints))
+   if(ResearchPositionClose(ticket,MaxDeviationPoints))
    {
       ResetMarketClosedExitPause();
       RecordDealTelemetry(Trade.ResultDeal(),"main_fast_profit");
@@ -2991,7 +3364,7 @@ bool EnforceSmallPositionRiskCap(const ulong ticket)
       return true;
    }
 
-   if(Trade.PositionClose(ticket,MaxDeviationPoints))
+   if(ResearchPositionClose(ticket,MaxDeviationPoints))
    {
       ResetMarketClosedExitPause();
       RecordDealTelemetry(Trade.ResultDeal(),"small_risk_guard");
@@ -3098,7 +3471,7 @@ bool ManageEarlyAdverseExit(const ulong ticket,const datetime opened)
       StatusLine="EARLY ADVERSE EXIT PAUSED: MARKET CLOSED";
       return true;
    }
-   if(Trade.PositionClose(ticket,MaxDeviationPoints))
+   if(ResearchPositionClose(ticket,MaxDeviationPoints))
    {
       ResetMarketClosedExitPause();
       RecordDealTelemetry(Trade.ResultDeal(),"early_adverse_exit");
@@ -3235,7 +3608,7 @@ void ManageOpenPosition()
          StatusLine="EXIT PAUSED: MARKET CLOSED";
          return;
       }
-      if(Trade.PositionClose(ticket,MaxDeviationPoints))
+      if(ResearchPositionClose(ticket,MaxDeviationPoints))
       {
          ResetMarketClosedExitPause();
          RecordDealTelemetry(Trade.ResultDeal(),"profit_protection");
@@ -3260,7 +3633,7 @@ void ManageOpenPosition()
       StatusLine="EXIT PAUSED: MARKET CLOSED";
       return;
    }
-   if(Trade.PositionClose(ticket,MaxDeviationPoints))
+   if(ResearchPositionClose(ticket,MaxDeviationPoints))
    {
       ResetMarketClosedExitPause();
       RecordDealTelemetry(Trade.ResultDeal(),"maximum_hold_bars");
@@ -3290,7 +3663,9 @@ void OnTimer()
       // Never issue trade telemetry immediately before a live model decision.
       // On Wine/MT5, back-to-back WebRequest calls can fail locally with 1003/5203.
       // Use idle timer cycles for learning telemetry and always prioritize /decision.
-      SyncClosedTrades();
+      static bool research_turn=false;
+      if(research_turn) ResearchFlush(); else SyncClosedTrades();
+      research_turn=!research_turn;
       return;
    }
    LastDecisionRequestTime=now;
@@ -3298,7 +3673,7 @@ void OnTimer()
    string payload,reply;
    datetime bar_time=0;
    if(!BuildRequest(payload,bar_time) || !QueryModel(payload,reply))
-   { ShowStatus(); return; }
+   { ResearchAppend("decision_error","\"status\":\""+JsonEscape(StatusLine)+"\""); ShowStatus(); return; }
    string decision="",reason="",base_decision="",base_reason="",intrabar_direction="";
    double ensemble_ready=0.0,ensemble_active=0.0;
    string sample_key="",bundle_id="";
@@ -3398,7 +3773,7 @@ void OnTimer()
       || (risk_model_ready<0.5 && (MathAbs(risk_multiplier-1.0)>0.000001 || risk_probability!=-1.0))
       || (datetime)signal_time!=bar_time
       || (decision!="BUY" && decision!="SELL" && decision!="WAIT"))
-   { StatusLine="Invalid/stale model response"; ShowStatus(); return; }
+   { StatusLine="Invalid/stale model response"; ResearchAppend("decision_error","\"status\":\""+StatusLine+"\""); ShowStatus(); return; }
    LastSampleKey=sample_key;
    LastSampleSaved=(sample_saved>=0.5);
    LastBundleId=bundle_id;
@@ -3488,13 +3863,13 @@ void OnTimer()
 
    // Learning snapshots continue while positions exist; execution remains single-position.
    if(ManagedPosition(ticket,opened))
-   { StatusLine=(LastSampleSaved ? "Managed position OPEN; learning snapshot saved" : "Managed position OPEN; snapshot storage failed"); ShowStatus(); return; }
+   { StatusLine=(LastSampleSaved ? "Managed position OPEN; learning snapshot saved" : "Managed position OPEN; snapshot storage failed"); ResearchGate(); ShowStatus(); return; }
    if(OtherPositionOnSymbol())
-   { StatusLine="Another robot has a position on this symbol"; ShowStatus(); return; }
+   { StatusLine="Another robot has a position on this symbol"; ResearchGate(); ShowStatus(); return; }
    if(decision!="BUY" && decision!="SELL" && decision!="WAIT")
-   { StatusLine="Unknown model decision"; ShowStatus(); return; }
+   { StatusLine="Unknown model decision"; ResearchGate(); ShowStatus(); return; }
    if(SmallOnlyMode && decision!="WAIT")
-   { StatusLine="Primary signal; small EA stands aside"; ShowStatus(); return; }
+   { StatusLine="Primary signal; small EA stands aside"; ResearchGate(); ShowStatus(); return; }
    string small_direction="",small_filter_reason="";
    bool small_profit=SmallProfitCandidate(decision,reason,buy_edge,sell_edge,
       signal_strength,small_direction,small_filter_reason);
@@ -3502,11 +3877,11 @@ void OnTimer()
    {
       if(SmallOnlyMode && StringFind(small_filter_reason,"SMALL_FILTER_")==0)
          StatusLine=small_filter_reason;
-      ShowStatus();
+      ResearchGate(); ShowStatus();
       return;
    }
    if(!EnableLiveTrading)
-   { ShowStatus(); return; }
+   { StatusLine="LIVE DISARMED"; ResearchGate(); ShowStatus(); return; }
    if(small_profit)
       decision=small_direction;
    int small_entries_on_bar=0;
@@ -3514,41 +3889,41 @@ void OnTimer()
    {
       small_entries_on_bar=SmallEntriesThisSignalBar(bar_time);
       if(small_entries_on_bar<0)
-      { StatusLine="Small entry history unavailable"; ShowStatus(); return; }
+      { StatusLine="Small entry history unavailable"; ResearchGate(); ShowStatus(); return; }
       if(small_entries_on_bar>0)
       {
          int small_loss_on_bar=SmallLossClosedThisSignalBar(bar_time);
          if(small_loss_on_bar<0)
-         { StatusLine="Small loss-gate history unavailable"; ShowStatus(); return; }
+         { StatusLine="Small loss-gate history unavailable"; ResearchGate(); ShowStatus(); return; }
          if(small_loss_on_bar>0)
-         { StatusLine="Second SMALL blocked: first attempt lost this M15 bar"; ShowStatus(); return; }
+         { StatusLine="Second SMALL blocked: first attempt lost this M15 bar"; ResearchGate(); ShowStatus(); return; }
       }
       if(small_entries_on_bar>=SmallProfitMaxEntriesPerSignalBar)
-      { StatusLine="Two small entries already used for this M15 signal bar"; ShowStatus(); return; }
+      { StatusLine="Two small entries already used for this M15 signal bar"; ResearchGate(); ShowStatus(); return; }
    }
    else if(LastEntrySignalBar==bar_time)
-   { StatusLine="Entry already used for this M15 signal bar"; ShowStatus(); return; }
+   { StatusLine="Entry already used for this M15 signal bar"; ResearchGate(); ShowStatus(); return; }
    string live_block_reason="";
    if(!LiveExecutionReady(live_block_reason))
-   { StatusLine=live_block_reason; ShowStatus(); return; }
+   { StatusLine=live_block_reason; ResearchGate(); ShowStatus(); return; }
    if(!(bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED)
       || !(bool)MQLInfoInteger(MQL_TRADE_ALLOWED)
       || !(bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED))
-   { StatusLine="Trade permission denied"; ShowStatus(); return; }
+   { StatusLine="Trade permission denied"; ResearchGate(); ShowStatus(); return; }
    if(SymbolInfoInteger(_Symbol,SYMBOL_TRADE_MODE)!=SYMBOL_TRADE_MODE_FULL)
-   { StatusLine="Symbol trading disabled"; ShowStatus(); return; }
+   { StatusLine="Symbol trading disabled"; ResearchGate(); ShowStatus(); return; }
    string cooldown_reason="";
    if(LocalLossCooldownBlocked(decision,cooldown_reason))
-   { StatusLine=cooldown_reason; ShowStatus(); return; }
+   { StatusLine=cooldown_reason; ResearchGate(); ShowStatus(); return; }
    int today=(SmallOnlyMode ? 0 : TradesToday());
    if(!SmallOnlyMode && (today<0 || today>=MaxTradesPerDay))
-   { StatusLine="Daily trade limit/history unavailable"; ShowStatus(); return; }
+   { StatusLine="Daily trade limit/history unavailable"; ResearchGate(); ShowStatus(); return; }
    MqlTick tick;
    if(!SymbolInfoTick(_Symbol,tick) || TimeCurrent()-tick.time>30
       || (int)SymbolInfoInteger(_Symbol,SYMBOL_SPREAD)>MaxSpreadPoints)
-   { StatusLine="Quote changed/stale"; ShowStatus(); return; }
+   { StatusLine="Quote changed/stale"; ResearchGate(); ShowStatus(); return; }
    if(stop_distance<=0.0 || target_distance<=0.0 || atr<=0.0)
-   { StatusLine="Invalid stop/target"; ShowStatus(); return; }
+   { StatusLine="Invalid stop/target"; ResearchGate(); ShowStatus(); return; }
    ENUM_ORDER_TYPE side=(decision=="BUY" ? ORDER_TYPE_BUY : ORDER_TYPE_SELL);
    double entry=(decision=="BUY" ? tick.ask : tick.bid);
    double point=SymbolInfoDouble(_Symbol,SYMBOL_POINT);
@@ -3575,26 +3950,26 @@ void OnTimer()
    double volume=(small_profit ? SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN)
       : SelectVolume(side,entry,stop));
    if(volume<=0.0)
-   { StatusLine="TRADE BLOCKED: min lot > hard risk cap"; ShowStatus(); return; }
+   { StatusLine="TRADE BLOCKED: min lot > hard risk cap"; ResearchGate(); ShowStatus(); return; }
    if(small_profit)
    {
       // Small-profit trades never scale above the broker minimum volume.
       if(!SmallProfitStop(side,entry,stop,volume,tick,stop))
-      { StatusLine="Broker cannot place 4-cent small stop"; ShowStatus(); return; }
+      { StatusLine="Broker cannot place 4-cent small stop"; ResearchGate(); ShowStatus(); return; }
       double stop_loss_units=0.0;
       double small_risk_cap=SmallProfitRiskCapUnits();
       if(volume<=0.0 || small_risk_cap<=0.0
          || !OrderCalcProfit(side,_Symbol,volume,entry,stop,stop_loss_units)
          || stop_loss_units>=0.0
          || -stop_loss_units>small_risk_cap+0.00001)
-      { StatusLine="Small profit risk > 4 cents"; ShowStatus(); return; }
+      { StatusLine="Small profit risk > 4 cents"; ResearchGate(); ShowStatus(); return; }
       if(!SmallProfitTarget(side,entry,volume,tick,target))
-      { StatusLine="Broker cannot place 2-cent target"; ShowStatus(); return; }
+      { StatusLine="Broker cannot place 2-cent target"; ResearchGate(); ShowStatus(); return; }
    }
    double margin=0.0;
    if(!OrderCalcMargin(side,_Symbol,volume,entry,margin)
       || margin>AccountInfoDouble(ACCOUNT_MARGIN_FREE)*0.8)
-   { StatusLine="Insufficient margin"; ShowStatus(); return; }
+   { StatusLine="Insufficient margin"; ResearchGate(); ShowStatus(); return; }
 
    // Telemetry/management staging must never block an otherwise valid entry.
    StageEntrySizing(LastSampleKey,side,entry,stop,volume);
@@ -3602,12 +3977,19 @@ void OnTimer()
       PersistTPPlan(LastSampleKey,decision,entry,LastTargetTP1,LastTargetTP2,LastTargetTP3);
    // The broker owns SL/TP immediately. No position is opened when the model is unavailable.
    string trade_comment="Ramon:"+LastSampleKey+(small_profit ? ":S" : "");
+   ResearchAppend("order_intent",ResearchContext()+",\"direction\":\""+decision+"\",\"requested_price\":"+DoubleToString(entry,8)
+      +",\"volume\":"+DoubleToString(volume,8)+",\"sl\":"+DoubleToString(stop,8)+",\"tp\":"+DoubleToString(target,8),LastSampleKey);
+   ulong research_submit_start=GetMicrosecondCount();
    bool submitted=(
       decision=="BUY"
       ? Trade.Buy(volume,_Symbol,0.0,stop,target,trade_comment)
       : Trade.Sell(volume,_Symbol,0.0,stop,target,trade_comment)
    );
    uint retcode=Trade.ResultRetcode();
+   ResearchAppend("order_result","\"retcode\":"+IntegerToString((long)retcode)+",\"submitted\":"+(submitted ? "true" : "false")
+      +",\"order_id\":\""+IntegerToString((long)Trade.ResultOrder())+"\",\"deal_id\":\""+IntegerToString((long)Trade.ResultDeal())
+      +"\",\"fill_price\":"+DoubleToString(Trade.ResultPrice(),8)+",\"fill_volume\":"+DoubleToString(Trade.ResultVolume(),8)
+      +",\"duration_ms\":"+DoubleToString((double)(GetMicrosecondCount()-research_submit_start)/1000.0,3),LastSampleKey);
    if(!submitted || (retcode!=TRADE_RETCODE_DONE && retcode!=TRADE_RETCODE_PLACED))
    {
       ClearPendingSizing();
@@ -3622,7 +4004,7 @@ void OnTimer()
          +decision+" "+DoubleToString(volume,2);
    }
    Print("Ramon execution: ",StatusLine);
-   ShowStatus();
+   ResearchGate(); ShowStatus();
 }
 
 
@@ -3632,10 +4014,22 @@ void OnTradeTransaction(
    const MqlTradeResult &result
 )
 {
+   if(trans.type==TRADE_TRANSACTION_POSITION && trans.position>0
+      && PositionSelectByTicket(trans.position)
+      && PositionGetString(POSITION_SYMBOL)==_Symbol
+      && (ulong)PositionGetInteger(POSITION_MAGIC)==MagicNumber)
+   {
+      ResearchObserveStops(trans.position,trans.price_sl,trans.price_tp,"trade_transaction");
+      string comment=PositionGetString(POSITION_COMMENT);
+      string sample=(StringFind(comment,"Ramon:")==0 ? StringSubstr(comment,6,16) : "");
+      ResearchAppend("position_change","\"source\":\"trade_transaction\",\"sl\":"+DoubleToString(trans.price_sl,8)
+         +",\"tp\":"+DoubleToString(trans.price_tp,8),sample,(ulong)PositionGetInteger(POSITION_IDENTIFIER));
+   }
    if(trans.type==TRADE_TRANSACTION_DEAL_ADD && trans.deal>0)
    {
       RecordDealTelemetry(trans.deal);
       AppendTradeCsv(trans.deal);
+      ResearchRecordDeal(trans.deal);
    }
 }
 
@@ -3677,7 +4071,7 @@ bool CloseManagedPositionFromDashboard()
    }
 
    double profit_units=PositionGetDouble(POSITION_PROFIT);
-   if(Trade.PositionClose(ticket,MaxDeviationPoints))
+   if(ResearchPositionClose(ticket,MaxDeviationPoints,"manual_dashboard_close"))
    {
       RecordDealTelemetry(Trade.ResultDeal(),"manual_dashboard_close");
       LastCloseStatus="CLOSED #"+IntegerToString((long)ticket);
@@ -3786,6 +4180,11 @@ int OnInit()
    Trade.SetExpertMagicNumber(MagicNumber);
    Trade.SetDeviationInPoints(MaxDeviationPoints);
    Trade.SetTypeFillingBySymbol(_Symbol);
+   ResearchRunId=IntegerToString((long)TimeGMT())+"-"+IntegerToString((long)GetMicrosecondCount())+"-"+IntegerToString(ChartID());
+   int research_cursor=FileOpen(ResearchSpoolPath()+".cursor",FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON);
+   if(research_cursor!=INVALID_HANDLE)
+   { ResearchOutboxOffset=StringToInteger(FileReadString(research_cursor)); FileClose(research_cursor); }
+   ResearchAppend("session_start",ResearchContext());
    EventSetTimer(5);
    // Stagger the second chart's WebRequest cadence from the primary chart.
    if(SmallOnlyMode)
@@ -3798,8 +4197,14 @@ int OnInit()
 
 void OnDeinit(const int reason)
 {
+   ResearchAppend("session_end","\"reason\":"+IntegerToString(reason));
    EventKillTimer();
    ObjectsDeleteAll(0,UiPrefix);
    ObjectsDeleteAll(0,TpUiPrefix);
    Comment("");
+}
+
+void OnTick()
+{
+   ResearchQuote(); // No network calls or trading decisions.
 }

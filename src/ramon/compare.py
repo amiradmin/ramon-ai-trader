@@ -85,7 +85,7 @@ def holdout_metadata(db: str | Path, symbol: str, bars, start: int, stride: int)
 
 def compare(db: str | Path, chronos, *, symbol: str = "XAUUSD_l",
             point: float = 0.01, stride: int = 4,
-            cost_r: float | None = None) -> dict[str, object]:
+            cost_r: float | None = None, skip_missing_spread_windows: bool = False) -> dict[str, object]:
     bars, spreads = load_bars(db, symbol)
     if len(bars) < 600:
         raise ValueError("need >=600 completed bars for the chronological holdout")
@@ -93,7 +93,7 @@ def compare(db: str | Path, chronos, *, symbol: str = "XAUUSD_l",
         raise ValueError("cost_r must be nonnegative")
     start = max(256, len(bars) * 4 // 5)
     missing = sum(value <= 0 for value in spreads[start:])
-    if missing:
+    if missing and not skip_missing_spread_windows:
         raise ValueError(f"holdout has {missing} bars without recorded spread; import actual MT5 spreads")
     if cost_r is None:
         cost_r, observed = observed_cost_r(db, symbol)
@@ -105,6 +105,8 @@ def compare(db: str | Path, chronos, *, symbol: str = "XAUUSD_l",
     settings = Settings()
     kwargs = dict(point=point, settings=settings, start=start, stride=stride,
                   require_recorded_spreads=True, roundtrip_cost_r=cost_r or 0.0)
+    kwargs["symbol"] = symbol
+    kwargs["skip_missing_spread_windows"] = skip_missing_spread_windows
     baseline_result = replay(bars, spreads, MomentumBaseline(), **kwargs)
     chronos_result = replay(bars, spreads, chronos, **kwargs)
     results = {"momentum_baseline": asdict(baseline_result), "chronos": asdict(chronos_result)}

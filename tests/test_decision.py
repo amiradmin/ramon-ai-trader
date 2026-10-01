@@ -200,7 +200,8 @@ class DecisionTests(unittest.TestCase):
         adapter.pipeline = FakePipeline()
         self.assertEqual(
             adapter.forecast([100.0] * 128, 4),
-            Forecast(99.0, 103.0, 105.0, (100.5, 101.5, 102.5, 103.0)),
+            Forecast(99.0, 103.0, 105.0, (100.5, 101.5, 102.5, 103.0),
+                     (98.0, 98.5, 99.0, 99.0), (103.0, 104.0, 104.5, 105.0)),
         )
 
     def test_bad_history_and_bad_forecast_fail_closed(self) -> None:

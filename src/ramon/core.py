@@ -127,6 +127,8 @@ class Forecast:
     median: float
     high: float
     median_path: tuple[float, ...] = ()
+    low_path: tuple[float, ...] = ()
+    high_path: tuple[float, ...] = ()
 
 
 class Forecaster(Protocol):
