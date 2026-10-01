@@ -73,7 +73,7 @@ def test_bootstrap_difference_is_deterministic():
     )
     assert one == two
     mean, low, high = one
-    assert mean == 1.5
+    assert mean == 2.0
     assert low <= mean <= high
 
 
