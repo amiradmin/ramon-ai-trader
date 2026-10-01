@@ -209,7 +209,7 @@ def test_minimum_lot_override_has_hard_cap() -> None:
 
     assert '#property version "1.535"' in source
     assert "input double RiskPerTradeUSD = 0.06" in source
-    assert "input bool AllowMinLotRiskOverride = false" in source
+    assert "input bool AllowMinLotRiskOverride = true" in source
     assert "const double MaxExecutableRiskUSD = 0.20" in source
     assert "bool MinimumLotOverrideEligible()" in source
     assert "bool RiskGateBlocked()" in source
@@ -517,7 +517,7 @@ def test_v052_main_fast_profit_is_main_only_and_conservative() -> None:
     assert 'RecordDealTelemetry(Trade.ResultDeal(),"main_fast_profit")' in fn
 
 
-def test_v0523_main_uses_tp_stage_only_managed_exit_policy() -> None:
+def test_main_manages_early_adverse_exit_after_tp_stages() -> None:
     source = EA.read_text(encoding="utf-8")
     manager = source.split("void ManageOpenPosition()", 1)[1].split("void OnTimer()", 1)[0]
     main_branch = manager.split("if(!SmallOnlyMode)", 1)[1].split("if(EnforceSmallPositionRiskCap(ticket))", 1)[0]
@@ -525,8 +525,9 @@ def test_v0523_main_uses_tp_stage_only_managed_exit_policy() -> None:
     assert "ManageTPStages(ticket)" in main_branch
     assert "ManageMainFastProfit(ticket,opened)" not in main_branch
     assert "ObserveOpenPositionProfit(ticket)" not in main_branch
-    assert "ManageEarlyAdverseExit(ticket,opened)" not in main_branch
+    assert "ManageEarlyAdverseExit(ticket,opened)" in main_branch
+    assert main_branch.index("ManageTPStages(ticket)") < main_branch.index("ManageEarlyAdverseExit(ticket,opened)")
     assert "ProfitProtectionShadowTriggered" not in main_branch
     assert "maximum_hold_bars" not in main_branch
-    assert 'StatusLine="Managed MAIN OPEN | exit mode TP1/TP2/TP3 ONLY"' in main_branch
-    assert '"MainExitMode: TP1_TP2_TP3_ONLY (broker SL + manual close remain)\\n\\n"' in source
+    assert 'StatusLine="Managed MAIN OPEN | exit mode TP1/TP2/TP3 + EARLY ADVERSE"' in main_branch
+    assert "MainExitMode: TP1_TP2_TP3 + EARLY_ADVERSE" in source
