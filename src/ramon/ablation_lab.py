@@ -6,7 +6,7 @@ import json
 import math
 import sqlite3
 import statistics
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 from .validation_lab import (
@@ -632,6 +632,8 @@ def run(
     momentum_bars: int,
     ma_fast: int,
     ma_slow: int,
+    random_seeds: int,
+    bootstrap_iterations: int,
 ) -> None:
     entries, bars = load_ablation_data(db, symbol)
     samples = [entry.sample for entry in entries]
