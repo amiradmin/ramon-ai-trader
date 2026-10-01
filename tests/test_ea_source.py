@@ -257,6 +257,26 @@ def test_tp_stage_crossings_lock_profit_on_every_tick() -> None:
     assert '"  OnTickCrossing=YES\\n"' in source
 
 
+def test_main_early_profit_lock_is_r_based_and_never_loosens_manual_sl() -> None:
+    source = EA.read_text(encoding="utf-8")
+
+    assert "input bool EnableEarlyProfitLock = true" in source
+    assert "EarlyProfitLockActivation1R = 0.40" in source
+    assert "EarlyProfitLockActivation2R = 0.70" in source
+    assert "EarlyProfitLockStage1R = 0.05" in source
+    assert "EarlyProfitLockStage2R = 0.20" in source
+    assert 'GlobalVariableSet(TPPlanGlobalKey(sample_key,"ISL"),initial_sl);' in source
+    assert "bool LoadEarlyProfitPlan(" in source
+    assert "bool ProtectEarlyProfit(" in source
+    assert "risk_distance=MathAbs(entry-initial_sl)" in source
+    assert "ProtectEarlyProfit(ticket,tick);" in source
+    assert "current_sl>=desired_sl-point*0.5" in source
+    assert "current_sl<=desired_sl+point*0.5" in source
+    assert '"EARLY_WAIT_BROKER_DISTANCE"' in source
+    assert '"EARLY_BE_PLUS_LOCKED"' in source
+    assert '"EARLY_02R_LOCKED"' in source
+
+
 def test_shadow_and_learning_items_are_starred_in_ui() -> None:
     source = EA.read_text(encoding="utf-8")
 
@@ -343,7 +363,8 @@ def test_v038_tp_stage_management_is_live_but_broker_tp_stays_legacy() -> None:
     assert "bool main_tp_plan_valid=(" in source
     assert "ValidDirectionalTargets(decision,entry,LastTargetTP1,LastTargetTP2,LastTargetTP3)" in source
     assert "target=broker_tp3;" in source
-    assert "PersistTPPlan(LastSampleKey,decision,entry,LastTargetTP1,LastTargetTP2,LastTargetTP3);" in source
+    assert "PersistTPPlan(LastSampleKey,decision,entry,stop," in source
+    assert "LastTargetTP1,LastTargetTP2,LastTargetTP3);" in source
     assert "bool ManageTPStages(const ulong ticket)" in source
     assert 'RecordDealTelemetry(Trade.ResultDeal(),"tp3_stage_exit")' in source
     assert '"tp1_stall_exit"' in source

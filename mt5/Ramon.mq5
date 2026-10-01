@@ -65,6 +65,11 @@ const double ProfitProtectionGivebackMinUnits = 3.0;
 const double ProfitProtectionGivebackMaxUnits = 5.0;
 const double ProfitProtectionGivebackFraction = 0.60; // Giveback scales with the selected activation threshold.
 const bool EnableTPStageManagement = true; // Live TP1/TP2/TP3 state machine.
+input bool EnableEarlyProfitLock = true; // MAIN: tighten broker SL before TP1 after measured R progress.
+const double EarlyProfitLockActivation1R = 0.40;
+const double EarlyProfitLockActivation2R = 0.70;
+const double EarlyProfitLockStage1R = 0.05; // Breakeven-plus buffer for costs/slippage.
+const double EarlyProfitLockStage2R = 0.20;
 const int TPStageWeakSnapshotsRequired = 2; // Consecutive weak 30s snapshots before an early stage exit.
 const int TP1GraceSeconds = 60; // Give TP1->TP2 continuation one minute before weakness exit.
 const int TP2GraceSeconds = 30; // Shorter grace after TP2.
@@ -644,7 +649,13 @@ string BuildDiagnosticText()
       +"  weak="+IntegerToString(TPStageWeakSnapshots)+"/"+IntegerToString(TPStageWeakSnapshotsRequired)+"\n"
       +"TPStageLock: "+TPStageLockStatus
       +"  LockedSL="+DoubleToString(TPStageLockedSL,_Digits)
-      +"  OnTickCrossing=YES\n"      +"MainFastProfit: "+(EnableMainFastProfit && !SmallOnlyMode ? "ACTIVE" : "OFF")
+      +"  OnTickCrossing=YES\n"
+      +"EarlyProfitLock: "+(EnableEarlyProfitLock && !SmallOnlyMode ? "ACTIVE" : "OFF")
+      +"  TriggerR="+DoubleToString(EarlyProfitLockActivation1R,2)
+      +"/"+DoubleToString(EarlyProfitLockActivation2R,2)
+      +"  LockR="+DoubleToString(EarlyProfitLockStage1R,2)
+      +"/"+DoubleToString(EarlyProfitLockStage2R,2)+"\n"
+      +"MainFastProfit: "+(EnableMainFastProfit && !SmallOnlyMode ? "ACTIVE" : "OFF")
       +"  status="+MainFastProfitStatus
       +"  ageBars>="+IntegerToString(MainFastProfitMinAgeBars)
       +"  progress="+DoubleToString(MainFastProfitProgress*100.0,1)+"%"
@@ -2546,13 +2557,19 @@ bool ValidDirectionalTargets(
 
 void PersistTPPlan(
    const string sample_key,const string direction,
-   const double entry,const double tp1,const double tp2,const double tp3
+   const double entry,const double initial_sl,
+   const double tp1,const double tp2,const double tp3
 )
 {
    if(!EnableTPStageManagement || !ValidSampleKey(sample_key)
-      || !ValidDirectionalTargets(direction,entry,tp1,tp2,tp3))
+      || initial_sl<=0.0
+      || (direction=="BUY" && initial_sl>=entry)
+      || (direction=="SELL" && initial_sl<=entry))
       return;
    GlobalVariableSet(TPPlanGlobalKey(sample_key,"DIR"),direction=="BUY" ? 1.0 : -1.0);
+   GlobalVariableSet(TPPlanGlobalKey(sample_key,"ISL"),initial_sl);
+   if(!ValidDirectionalTargets(direction,entry,tp1,tp2,tp3))
+      return; // Early R-lock remains available even when no TP-stage plan exists.
    GlobalVariableSet(TPPlanGlobalKey(sample_key,"TP1"),tp1);
    GlobalVariableSet(TPPlanGlobalKey(sample_key,"TP2"),tp2);
    GlobalVariableSet(TPPlanGlobalKey(sample_key,"TP3"),tp3);
@@ -2587,6 +2604,7 @@ bool LoadTPStagePlan(const ulong ticket)
       return false;
    if(TPStagePositionIdentifier==identifier && ValidSampleKey(TPStageSampleKey))
       return true;
+   ResetTPStageRuntime();
 
    string comment=PositionGetString(POSITION_COMMENT);
    string sample_key=(StringFind(comment,"Ramon:")==0 ? StringSubstr(comment,6,16) : "");
@@ -2725,6 +2743,115 @@ bool ProtectReachedTPStage(const ulong ticket)
    return false;
 }
 
+bool LoadEarlyProfitPlan(const ulong ticket,string &direction,double &initial_sl)
+{
+   direction="";
+   initial_sl=0.0;
+   if(ticket==0 || !PositionSelectByTicket(ticket))
+      return false;
+   string comment=PositionGetString(POSITION_COMMENT);
+   string sample_key=(StringFind(comment,"Ramon:")==0 ? StringSubstr(comment,6,16) : "");
+   if(!ValidSampleKey(sample_key))
+      return false;
+   string kdir=TPPlanGlobalKey(sample_key,"DIR");
+   string kisl=TPPlanGlobalKey(sample_key,"ISL");
+   if(!GlobalVariableCheck(kdir) || !GlobalVariableCheck(kisl))
+      return false;
+   direction=(GlobalVariableGet(kdir)>=0.0 ? "BUY" : "SELL");
+   initial_sl=GlobalVariableGet(kisl);
+   long position_type=PositionGetInteger(POSITION_TYPE);
+   return initial_sl>0.0
+      && ((direction=="BUY" && position_type==POSITION_TYPE_BUY)
+         || (direction=="SELL" && position_type==POSITION_TYPE_SELL));
+}
+
+bool ProtectEarlyProfit(const ulong ticket,const MqlTick &tick)
+{
+   if(!EnableEarlyProfitLock || SmallOnlyMode || ticket==0 || !PositionSelectByTicket(ticket))
+      return false;
+
+   string direction="";
+   double initial_sl=0.0;
+   if(!LoadEarlyProfitPlan(ticket,direction,initial_sl))
+      return false;
+   double entry=PositionGetDouble(POSITION_PRICE_OPEN);
+   double current_sl=PositionGetDouble(POSITION_SL);
+   double current_tp=PositionGetDouble(POSITION_TP);
+   double point=SymbolInfoDouble(_Symbol,SYMBOL_POINT);
+   double risk_distance=MathAbs(entry-initial_sl);
+   if(entry<=0.0 || point<=0.0 || risk_distance<=point
+      || (direction=="BUY" && initial_sl>=entry)
+      || (direction=="SELL" && initial_sl<=entry))
+      return false;
+
+   double exit_price=(direction=="BUY" ? tick.bid : tick.ask);
+   double current_r=(direction=="BUY"
+      ? exit_price-entry : entry-exit_price)/risk_distance;
+   if(current_r<EarlyProfitLockActivation1R)
+   {
+      TPStageLockStatus="EARLY_WAIT";
+      return false;
+   }
+
+   double lock_r=(current_r>=EarlyProfitLockActivation2R
+      ? EarlyProfitLockStage2R : EarlyProfitLockStage1R);
+   long stops_points=SymbolInfoInteger(_Symbol,SYMBOL_TRADE_STOPS_LEVEL);
+   long freeze_points=SymbolInfoInteger(_Symbol,SYMBOL_TRADE_FREEZE_LEVEL);
+   double min_distance=(double)MathMax(stops_points,freeze_points)*point+2.0*point;
+   double desired_sl=entry+(direction=="BUY" ? 1.0 : -1.0)*lock_r*risk_distance;
+
+   if(direction=="BUY")
+   {
+      desired_sl=MathMin(desired_sl,tick.bid-min_distance);
+      if(desired_sl<=entry+point)
+      {
+         TPStageLockStatus="EARLY_WAIT_BROKER_DISTANCE";
+         return false;
+      }
+      desired_sl=NormalizeDouble(desired_sl,_Digits);
+      if(current_sl>0.0 && current_sl>=desired_sl-point*0.5)
+      {
+         TPStageLockedSL=current_sl;
+         TPStageLockStatus="EARLY_PROTECTED";
+         return true;
+      }
+   }
+   else if(direction=="SELL")
+   {
+      desired_sl=MathMax(desired_sl,tick.ask+min_distance);
+      if(desired_sl>=entry-point)
+      {
+         TPStageLockStatus="EARLY_WAIT_BROKER_DISTANCE";
+         return false;
+      }
+      desired_sl=NormalizeDouble(desired_sl,_Digits);
+      if(current_sl>0.0 && current_sl<=desired_sl+point*0.5)
+      {
+         TPStageLockedSL=current_sl;
+         TPStageLockStatus="EARLY_PROTECTED";
+         return true;
+      }
+   }
+   else
+      return false;
+
+   ResetLastError();
+   if(Trade.PositionModify(ticket,desired_sl,current_tp))
+   {
+      TPStageLockedSL=desired_sl;
+      TPStageLockStatus=(lock_r>=EarlyProfitLockStage2R
+         ? "EARLY_02R_LOCKED" : "EARLY_BE_PLUS_LOCKED");
+      Print("Ramon EARLY PROFIT LOCK ticket=",ticket,
+         " current_r=",DoubleToString(current_r,3),
+         " lock_r=",DoubleToString(lock_r,3),
+         " sl=",DoubleToString(desired_sl,_Digits));
+      return true;
+   }
+
+   TPStageLockStatus="EARLY_LOCK_RETRY "+IntegerToString((int)Trade.ResultRetcode());
+   return false;
+}
+
 void ObserveTPStageCrossingsOnTick()
 {
    if(SmallOnlyMode)
@@ -2732,12 +2859,20 @@ void ObserveTPStageCrossingsOnTick()
 
    ulong ticket=0;
    datetime opened=0;
-   if(!ManagedPosition(ticket,opened) || !LoadTPStagePlan(ticket))
+   if(!ManagedPosition(ticket,opened))
       return;
+
+   bool has_stage_plan=LoadTPStagePlan(ticket);
 
    MqlTick tick;
    if(!SymbolInfoTick(_Symbol,tick))
       return;
+
+   if(!has_stage_plan)
+   {
+      ProtectEarlyProfit(ticket,tick);
+      return;
+   }
 
    double exit_price=(TPStageDirection=="BUY" ? tick.bid : tick.ask);
    datetime now=TimeCurrent();
@@ -2748,6 +2883,8 @@ void ObserveTPStageCrossingsOnTick()
 
    if(TPStage>=1)
       ProtectReachedTPStage(ticket);
+   else
+      ProtectEarlyProfit(ticket,tick);
 }
 
 double DirectionalProgress(
@@ -3721,7 +3858,8 @@ void OnTimer()
    // Telemetry/management staging must never block an otherwise valid entry.
    StageEntrySizing(LastSampleKey,side,entry,stop,volume);
    if(!small_profit)
-      PersistTPPlan(LastSampleKey,decision,entry,LastTargetTP1,LastTargetTP2,LastTargetTP3);
+      PersistTPPlan(LastSampleKey,decision,entry,stop,
+         LastTargetTP1,LastTargetTP2,LastTargetTP3);
    // The broker owns SL/TP immediately. No position is opened when the model is unavailable.
    string trade_comment="Ramon:"+LastSampleKey+(small_profit ? ":S" : "");
    bool submitted=(
@@ -3858,6 +3996,12 @@ int OnInit()
       || ProfitProtectionGivebackMaxUnits<ProfitProtectionGivebackMinUnits
       || ProfitProtectionGivebackFraction<=0.0
       || ProfitProtectionGivebackMinUnits>=ProfitProtectionActivationMinUnits
+      || EarlyProfitLockActivation1R<=0.0
+      || EarlyProfitLockActivation2R<=EarlyProfitLockActivation1R
+      || EarlyProfitLockStage1R<=0.0
+      || EarlyProfitLockStage2R<=EarlyProfitLockStage1R
+      || EarlyProfitLockStage1R>=EarlyProfitLockActivation1R
+      || EarlyProfitLockStage2R>=EarlyProfitLockActivation2R
       || TPStageWeakSnapshotsRequired<1 || TP1GraceSeconds<0 || TP2GraceSeconds<0
       || MainFastProfitMinAgeBars<1 || MainFastProfitMinProfitUnits<=0.0
       || MainFastProfitMinProgressToTP1<=0.0 || MainFastProfitMinProgressToTP1>=1.0

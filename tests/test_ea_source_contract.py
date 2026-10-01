@@ -22,7 +22,8 @@ def test_ea_038_keeps_sizing_telemetry_observational():
     assert re.search(
         r'StageEntrySizing\(LastSampleKey,side,entry,stop,volume\);\s*'
         r'if\(!small_profit\)\s*'
-        r'PersistTPPlan\(LastSampleKey,decision,entry,LastTargetTP1,LastTargetTP2,LastTargetTP3\);\s*'
+        r'PersistTPPlan\(LastSampleKey,decision,entry,stop,\s*'
+        r'LastTargetTP1,LastTargetTP2,LastTargetTP3\);\s*'
         r'// The broker owns SL/TP immediately',
         text,
     )
