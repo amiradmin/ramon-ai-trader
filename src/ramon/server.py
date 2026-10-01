@@ -18,6 +18,7 @@ from .model import ChronosForecaster, model_name
 from .news import DEFAULT_FOREX_FACTORY_JSON, ForexFactoryNewsProvider
 from .target_learning import build_target_structure
 from .target_outcomes import backfill_target_outcomes
+from .timesfm_shadow import TimesFM3Shadow
 
 
 def persist_market_safely(db: str, market: Market) -> str:
@@ -59,6 +60,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
     coordinator = ShadowCoordinator if role_mode == "shadow" else EnsembleCoordinator
     ensemble = coordinator(ensemble_dir, model.model_id)
     news_enabled = os.getenv("RAMON_NEWS_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
+    timesfm3_shadow = TimesFM3Shadow.from_env()
     news_provider = ForexFactoryNewsProvider(
         enabled=news_enabled,
         url=os.getenv("RAMON_NEWS_URL", DEFAULT_FOREX_FACTORY_JSON).strip() or DEFAULT_FOREX_FACTORY_JSON,
@@ -88,6 +90,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     "history_last_error": str(history_status["last_error"]),
                     "history_last_persisted_bar": int(history_status["last_persisted_bar"]),
                     **ensemble.status(),
+                    **timesfm3_shadow.status(),
                     **news_provider.status(),
                 },
             )
@@ -149,9 +152,13 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     ensemble_payload, feature_snapshot = ensemble.assess(
                         market, result, news_snapshot.features
                     )
+                    timesfm3_payload = timesfm3_shadow.assess(
+                        market, result, settings.horizon
+                    )
 
                 response = result.to_dict()
                 response.update(ensemble_payload)
+                response.update(timesfm3_payload)
 
                 # The terminal owns the loss-streak gate. Uploaded history can lag
                 # fresh closes or omit intervening outcomes; it is not authoritative.
@@ -220,6 +227,20 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                                     "base": result.to_dict(),
                                     "final": ensemble_payload,
                                     "settings": asdict(settings),
+                                    "shadow_forecasts": {
+                                        "timesfm3": timesfm3_payload,
+                                        "direction_quality": {
+                                            "buy_success_probability": response.get(
+                                                "shadow_buy_success_probability", -1.0
+                                            ),
+                                            "sell_success_probability": response.get(
+                                                "shadow_sell_success_probability", -1.0
+                                            ),
+                                            "full_sl_probability": response.get(
+                                                "shadow_full_sl_probability", -1.0
+                                            ),
+                                        },
+                                    },
                                 },
                             },
                         )
