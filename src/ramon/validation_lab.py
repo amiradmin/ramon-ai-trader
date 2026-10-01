@@ -15,11 +15,14 @@ class Sample:
     captured: int
     signal_bar_time: int
     entry_time: int
+    entry_time_utc: int
     direction: str
     mid: float
     spread: float
     stop_distance: float
     target_distance: float
+    point: float = 0.0
+    actual_fill_price: float | None = None
 
 
 @dataclass(frozen=True)
@@ -79,8 +82,16 @@ def replay_direction(
             hit_sl = low <= stop
             hit_tp = high >= target
         else:
-            hit_sl = high >= stop
-            hit_tp = low <= target
+            spread_points = int(bar["spread_points"]) if "spread_points" in bar.keys() else 0
+            ask_offset = (
+                spread_points * sample.point
+                if spread_points > 0 and sample.point > 0
+                else sample.spread
+            )
+            ask_high = high + ask_offset
+            ask_low = low + ask_offset
+            hit_sl = ask_high >= stop
+            hit_tp = ask_low <= target
 
         if hit_sl:
             return Result(direction, -1.0, index, "SL")
@@ -88,13 +99,26 @@ def replay_direction(
             return Result(direction, rr, index, "TP")
 
     close = float(future[-1]["close"])
-    pnl_price = close - entry if direction == "BUY" else entry - close
+    if direction == "BUY":
+        pnl_price = close - entry
+    else:
+        spread_points = (
+            int(future[-1]["spread_points"])
+            if "spread_points" in future[-1].keys()
+            else 0
+        )
+        ask_offset = (
+            spread_points * sample.point
+            if spread_points > 0 and sample.point > 0
+            else sample.spread
+        )
+        pnl_price = entry - (close + ask_offset)
     outcome_r = pnl_price / sample.stop_distance
     return Result(direction, outcome_r, len(future), "TIME")
 
 
 def _deterministic_random_direction(sample: Sample, seed: int) -> str:
-    key = f"{seed}:{sample.captured}:{sample.entry_time}".encode()
+    key = f"{seed}:{sample.captured}:{sample.entry_time_utc}".encode()
     value = int(hashlib.sha256(key).hexdigest()[:16], 16)
     return "BUY" if value % 2 == 0 else "SELL"
 
@@ -138,21 +162,54 @@ def load_data(db: str | Path, symbol: str) -> tuple[list[Sample], list[sqlite3.R
     con = sqlite3.connect(Path(db).expanduser())
     con.row_factory = sqlite3.Row
     try:
+        point_rows = list(
+            con.execute(
+                """SELECT s.spread,h.spread_points
+                   FROM decision_samples s
+                   JOIN history_bars h
+                     ON h.symbol=s.symbol
+                    AND h.timeframe='M15'
+                    AND h.time=s.signal_bar_time
+                   WHERE s.symbol=? AND s.spread>0 AND h.spread_points>0""",
+                (symbol,),
+            )
+        )
+        point_values = [
+            float(row["spread"]) / int(row["spread_points"])
+            for row in point_rows
+            if int(row["spread_points"]) > 0
+        ]
+        point = statistics.median(point_values) if point_values else 0.0
+
         # Benchmark only times where Ramon actually entered a real trade.
-        # This avoids treating every 30-second model snapshot as an independent trade.
+        # entry_time remains broker-clock for matching CopyRates bars.
+        # entry_time_utc is canonical for chronological split/purge; legacy rows
+        # without a stored offset fall back to the UTC server receipt timestamp.
         samples = [
             Sample(
                 captured=int(row["captured"]),
                 signal_bar_time=int(row["signal_bar_time"]),
                 entry_time=int(row["opened"]),
+                entry_time_utc=(
+                    int(row["opened"]) - int(row["opened_utc_offset_seconds"])
+                    if row["opened_utc_offset_seconds"] is not None
+                    else int(row["captured"])
+                ),
                 direction=str(row["trade_direction"]),
                 mid=float(row["mid"]),
                 spread=float(row["spread"]),
                 stop_distance=float(row["stop_distance"]),
                 target_distance=float(row["target_distance"]),
+                point=point,
+                actual_fill_price=(
+                    float(row["actual_fill_price"])
+                    if row["actual_fill_price"] is not None
+                    else None
+                ),
             )
             for row in con.execute(
                 """SELECT s.captured,s.signal_bar_time,t.opened,
+                          t.opened_utc_offset_seconds,t.actual_fill_price,
                           t.direction AS trade_direction,
                           s.mid,s.spread,s.stop_distance,s.target_distance
                    FROM trade_outcomes t
@@ -163,13 +220,13 @@ def load_data(db: str | Path, symbol: str) -> tuple[list[Sample], list[sqlite3.R
                      AND t.direction IN ('BUY','SELL')
                      AND COALESCE(s.stop_distance,0)>0
                      AND COALESCE(s.target_distance,0)>0
-                   ORDER BY t.opened,t.trade_key""",
+                   ORDER BY COALESCE(t.opened-t.opened_utc_offset_seconds,s.captured),t.trade_key""",
                 (symbol,),
             )
         ]
         bars = list(
             con.execute(
-                """SELECT time,open,high,low,close
+                """SELECT time,open,high,low,close,spread_points
                    FROM history_bars
                    WHERE symbol=? AND timeframe='M15'
                    ORDER BY time""",
@@ -235,7 +292,7 @@ def walk_forward_folds(
     """
     if folds < 2 or len(samples) < folds + 2:
         return []
-    ordered = sorted(samples, key=lambda row: row.entry_time)
+    ordered = sorted(samples, key=lambda row: row.entry_time_utc)
     initial = max(1, min(len(ordered) - folds, int(len(ordered) * initial_fraction)))
     remaining = len(ordered) - initial
     base = remaining // folds
@@ -252,10 +309,10 @@ def walk_forward_folds(
         test = ordered[start:stop]
         if not test:
             break
-        test_start = test[0].entry_time
+        test_start = test[0].entry_time_utc
         development = tuple(
             row for row in ordered[:start]
-            if row.entry_time + purge_seconds < test_start
+            if row.entry_time_utc + purge_seconds < test_start
         )
         result.append(
             WalkForwardFold(
@@ -599,8 +656,11 @@ def run(
     print(f"Replay horizon  : {max_bars} M15 bars")
     print("Scope           : real executed Ramon entries only")
     print("Replay start    : first complete M15 bar after actual fill")
-    print("Costs           : stored bid/ask spread from matched entry snapshot")
-    print("Exit model      : stored SL/TP distance; same-bar ambiguity = SL-first")
+    fill_count = sum(sample.actual_fill_price is not None for sample in samples)
+    print("Time basis      : UTC canonical for split/purge; broker clock only for CopyRates bar lookup")
+    print(f"Actual fill     : {fill_count}/{len(samples)} stored (telemetry/audit; baseline entry geometry unchanged)")
+    print("Costs           : entry spread + per-bar spread_points for Ask-aware SELL replay")
+    print("Exit model      : BUY uses stored Bid-like OHLC; SELL uses Ask proxy; same-bar ambiguity = SL-first")
     print("Interpretation  : research benchmark only; not live execution logic")
     print()
     print_table("=== FULL HISTORY ===", evaluate(samples, bars, max_bars=max_bars, random_seed=seed))
