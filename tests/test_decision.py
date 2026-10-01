@@ -96,6 +96,42 @@ class DecisionTests(unittest.TestCase):
         self.assertGreaterEqual(max(strength_wait.buy_edge, strength_wait.sell_edge), strength_wait.minimum_edge)
         self.assertLess(strength_wait.signal_strength, strength_wait.minimum_strength)
 
+    def test_strong_chronos_entry_waits_when_intrabar_move_is_adverse(self) -> None:
+        micro = (
+            Bar(1_800_100_000, 100.20, 100.25, 100.15, 100.20),
+            Bar(1_800_100_060, 100.20, 100.22, 100.08, 100.10),
+            Bar(1_800_100_120, 100.10, 100.12, 99.98, 100.02),
+            Bar(1_800_100_180, 100.02, 100.04, 99.98, 100.00),
+        )
+        market = Market("XAUUSD_l", "M15", 100.0, 100.4, 0.01, bars(), micro)
+
+        result = evaluate(market, self.model)
+
+        self.assertEqual(result.decision, "WAIT")
+        self.assertEqual(result.reason, "adverse_intrabar_timing")
+        self.assertEqual(result.strong_entry_guard_active, 1)
+        self.assertLess(
+            result.intrabar_move_atr,
+            result.strong_entry_min_intrabar_move_atr,
+        )
+        self.assertGreaterEqual(result.buy_edge, result.minimum_edge)
+        self.assertGreaterEqual(result.signal_strength, result.minimum_strength)
+
+    def test_strong_chronos_entry_allows_small_intrabar_noise(self) -> None:
+        micro = (
+            Bar(1_800_100_000, 100.02, 100.04, 99.98, 100.02),
+            Bar(1_800_100_060, 100.02, 100.03, 99.99, 100.01),
+            Bar(1_800_100_120, 100.01, 100.02, 99.99, 100.00),
+            Bar(1_800_100_180, 100.00, 100.02, 99.99, 100.00),
+        )
+        market = Market("XAUUSD_l", "M15", 100.0, 100.4, 0.01, bars(), micro)
+
+        result = evaluate(market, self.model)
+
+        self.assertEqual(result.decision, "BUY")
+        self.assertEqual(result.reason, "forecast_up")
+        self.assertEqual(result.strong_entry_guard_active, 0)
+
     def test_intrabar_reversal_can_confirm_low_strength_model_direction(self) -> None:
         micro = (
             Bar(1_800_100_000, 99.90, 100.00, 99.82, 99.90),
