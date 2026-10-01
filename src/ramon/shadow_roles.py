@@ -73,14 +73,17 @@ def train_shadow(db: str | Path, root: Path, symbol: str, chronos_model: str) ->
     for role in ("entry", "news"):
         fit(role, training, lambda rows, role=role: fit_role(rows, role, FEATURES[role]))
     fit("risk", training, fit_risk_role)
+    # Direction-quality roles are display-only exploratory models. Use every
+    # clean historical trade so BUY and SELL can become observable sooner; they
+    # are never used for promotion, sizing, entry, or exit.
     fit(
         "buy_quality",
-        training,
+        examples,
         lambda rows: fit_direction_quality_role(rows, "BUY"),
     )
     fit(
         "sell_quality",
-        training,
+        examples,
         lambda rows: fit_direction_quality_role(rows, "SELL"),
     )
     if use_meta and all(name in models for name in ("regime", "entry", "news")):
