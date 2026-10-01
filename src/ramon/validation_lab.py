@@ -281,6 +281,77 @@ def _baseline_direction(name: str, sample: Sample, bars: list[sqlite3.Row], seed
     raise ValueError(f"unknown baseline: {name}")
 
 
+def ambiguous_fraction(
+    samples: list[Sample],
+    bars: list[sqlite3.Row],
+    *,
+    direction_mode: str,
+    max_bars: int,
+    seed: int,
+) -> tuple[int, int, float]:
+    """Count paths where the same M15 bar touches both SL and TP.
+
+    This is a simulator-quality diagnostic. OHLC cannot reveal intrabar ordering,
+    so the main replay uses conservative SL-first ordering.
+    """
+    ambiguous = total = 0
+    for sample in samples:
+        direction = sample.direction if direction_mode == "ramon" else _baseline_direction(
+            direction_mode, sample, bars, seed
+        )
+        if direction is None:
+            continue
+        entry, stop, target = _levels(sample, direction)
+        del entry
+        next_full_bar = (sample.entry_time // 900 + 1) * 900
+        future = [row for row in bars if int(row["time"]) >= next_full_bar][:max_bars]
+        if not future:
+            continue
+        total += 1
+        for bar in future:
+            high = float(bar["high"])
+            low = float(bar["low"])
+            if direction == "BUY":
+                hit_sl = low <= stop
+                hit_tp = high >= target
+            else:
+                hit_sl = high >= stop
+                hit_tp = low <= target
+            if hit_sl and hit_tp:
+                ambiguous += 1
+                break
+            if hit_sl or hit_tp:
+                break
+    return ambiguous, total, (100.0 * ambiguous / total if total else math.nan)
+
+
+def multi_seed_random_distribution(
+    samples: list[Sample],
+    bars: list[sqlite3.Row],
+    *,
+    max_bars: int,
+    seeds: int,
+    seed_base: int,
+) -> tuple[list[float], float, float]:
+    """Return random-baseline mean-R distribution and Ramon's percentile."""
+    if seeds <= 0:
+        return [], math.nan, math.nan
+    ramon_results = evaluate(samples, bars, max_bars=max_bars, random_seed=seed_base)["ramon"]
+    ramon_mean = metrics(ramon_results)["mean_r"]
+    random_means: list[float] = []
+    for offset in range(seeds):
+        evaluated = evaluate(
+            samples,
+            bars,
+            max_bars=max_bars,
+            random_seed=seed_base + offset,
+        )
+        random_means.append(metrics(evaluated["random"])["mean_r"])
+    at_or_below = sum(value <= ramon_mean for value in random_means)
+    percentile = 100.0 * at_or_below / len(random_means)
+    return random_means, ramon_mean, percentile
+
+
 def paired_mean_r_deltas(
     samples: list[Sample],
     bars: list[sqlite3.Row],
@@ -335,6 +406,7 @@ def print_walk_forward(
     embargo_bars: int,
     seed: int,
     bootstrap_iterations: int,
+    random_seeds: int,
 ) -> None:
     wf = walk_forward_folds(
         samples,
@@ -437,6 +509,33 @@ def print_walk_forward(
         "CI note         : if a Ramon-minus-baseline CI includes 0, this benchmark "
         "does not show a clear difference at the stated confidence level."
     )
+    random_means, ramon_mean, percentile = multi_seed_random_distribution(
+        [sample for fold in wf for sample in fold.test],
+        bars,
+        max_bars=max_bars,
+        seeds=random_seeds,
+        seed_base=seed,
+    )
+    if random_means:
+        random_means_sorted = sorted(random_means)
+        lo = random_means_sorted[max(0, int(0.025 * len(random_means_sorted)))]
+        hi = random_means_sorted[min(len(random_means_sorted) - 1, int(0.975 * len(random_means_sorted)))]
+        print(
+            f"Multi-seed random baseline: seeds={random_seeds} | "
+            f"random meanR 95% range=[{_fmt(lo,4)}, {_fmt(hi,4)}] | "
+            f"Ramon meanR={_fmt(ramon_mean,4)} | Ramon percentile={_fmt(percentile,1)}%"
+        )
+    amb, total, amb_pct = ambiguous_fraction(
+        [sample for fold in wf for sample in fold.test],
+        bars,
+        direction_mode="ramon",
+        max_bars=max_bars,
+        seed=seed,
+    )
+    print(
+        f"Ambiguous same-bar Ramon paths: {amb}/{total} "
+        f"({_fmt(amb_pct,2)}%) | main result resolves these SL-first"
+    )
     print()
 
 
@@ -474,6 +573,7 @@ def run(
     folds: int,
     embargo_bars: int,
     bootstrap_iterations: int,
+    random_seeds: int,
 ) -> None:
     samples, bars = load_data(db, symbol)
     train, test = split_holdout(samples, holdout)
@@ -499,6 +599,7 @@ def run(
         embargo_bars=embargo_bars,
         seed=seed,
         bootstrap_iterations=bootstrap_iterations,
+        random_seeds=random_seeds,
     )
 
 
@@ -512,6 +613,7 @@ def main() -> None:
     parser.add_argument("--folds", type=int, default=5)
     parser.add_argument("--embargo-bars", type=int, default=4)
     parser.add_argument("--bootstrap-iterations", type=int, default=4000)
+    parser.add_argument("--random-seeds", type=int, default=1000)
     args = parser.parse_args()
     if args.max_bars < 1:
         parser.error("--max-bars must be >= 1")
@@ -523,6 +625,8 @@ def main() -> None:
         parser.error("--embargo-bars must be >= 0")
     if args.bootstrap_iterations < 200:
         parser.error("--bootstrap-iterations must be >= 200")
+    if args.random_seeds < 100:
+        parser.error("--random-seeds must be >= 100")
     run(
         args.db,
         args.symbol,
@@ -532,6 +636,7 @@ def main() -> None:
         folds=args.folds,
         embargo_bars=args.embargo_bars,
         bootstrap_iterations=args.bootstrap_iterations,
+        random_seeds=args.random_seeds,
     )
 
 
