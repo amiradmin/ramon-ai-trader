@@ -138,6 +138,15 @@ to half of one CPU and one BLAS thread on the HP Mini. It shares the host's CPU
 and memory with live inference; the limit reduces CPU contention but cannot
 remove it. Actual real-checkpoint runtime must be checked on the user's machine.
 
+The CPU limit is defined by `tools.cpus: 0.5` in
+`compose.forward-research.yaml`, loaded only by this wrapper alongside
+`compose.yaml`. `docker compose run` does not support a `--cpus` CLI option.
+To inspect the merged configuration without starting a container:
+
+```bash
+docker compose -f compose.yaml -f compose.forward-research.yaml --profile tools config
+```
+
 The worker loads one checkpoint, then freezes its resolved revision, settings,
 implementation hash and UTC start boundary in `data/research/forward-v1.sqlite3`.
 All three models forecast the same frozen 256 completed candles, once per newest
