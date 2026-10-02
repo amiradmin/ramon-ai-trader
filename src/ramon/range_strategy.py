@@ -34,7 +34,14 @@ def candidate(market: Market) -> dict:
 def live_candidate(market: Market, response: dict, *, enabled: bool, capable: bool, quote_time: int | None, max_spread_points: int) -> dict | None:
     if not enabled or not capable or quote_time is None:
         return None
-    if response.get('decision') != 'WAIT' or response.get('reason') not in {'insufficient_model_strength', 'insufficient_model_edge'}:
+    # RANGE execution may take over selected WAIT states, including a primary
+    # adverse-intrabar veto. The range candidate still requires a fresh boundary
+    # reversal, so this does not buy/sell into the adverse move itself.
+    if response.get('decision') != 'WAIT' or response.get('reason') not in {
+        'insufficient_model_strength',
+        'insufficient_model_edge',
+        'adverse_intrabar_timing',
+    }:
         return None
     if (market.ask-market.bid)/market.point > max_spread_points:
         return None
