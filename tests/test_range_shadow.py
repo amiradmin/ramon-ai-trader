@@ -45,7 +45,8 @@ def test_live_requires_capability_and_never_overrides_primary_or_veto():
  assert live_candidate(m,response,**kwargs)['direction']=='BUY'
  assert live_candidate(m,response,**(kwargs|{'enabled':False})) is None
  assert live_candidate(m,response,**(kwargs|{'capable':False})) is None
- for response in [{'decision':'BUY','reason':'forecast_up'},{'decision':'WAIT','reason':'adverse_intrabar_timing'},{'decision':'WAIT','reason':'trend_conflict'}]:
+ assert live_candidate(m,{'decision':'WAIT','reason':'adverse_intrabar_timing'},**kwargs)['direction']=='BUY'
+ for response in [{'decision':'BUY','reason':'forecast_up'},{'decision':'WAIT','reason':'trend_conflict'}]:
   assert live_candidate(m,response,**kwargs) is None
  assert live_candidate(replace(m,ask=m.bid+1),{'decision':'WAIT','reason':'insufficient_model_strength'},**kwargs) is None
 
