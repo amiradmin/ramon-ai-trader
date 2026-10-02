@@ -1,5 +1,5 @@
 #property strict
-#property version "1.545"
+#property version "1.546"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -38,7 +38,7 @@ input bool ConfirmMoneyUnitsPerUSD = false; // Must be true before live trading 
 input string ExpectedAccountCurrency = ""; // Optional exact ACCOUNT_CURRENCY check when non-empty.
 input double RiskPerTradeUSD = 0.06; // Preferred sizing budget.
 input bool AllowMinLotRiskOverride = true; // Permit minimum volume within the fixed executable risk cap.
-const double MaxExecutableRiskUSD = 0.20; // Hard fixed cap; MT5 chart inputs cannot override this value.
+const double MaxExecutableRiskUSD = 0.35; // Hard fixed cap; MT5 chart inputs cannot override this value.
 input int MaxSpreadPoints = 50;
 input int MaxTradesPerDay = 400;
 input int MaximumHoldBars = 4;
@@ -1011,7 +1011,7 @@ void DrawDashboard()
    // Tall/narrow panel: summary text first, checklist directly underneath.
    UiRect("PANEL",12,24,560,955,C'15,23,42',C'71,85,105');
 
-   UiLabel("TITLE","RAMON AI TRADER  v0.54.5 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.54.6 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,clrWhite,9);
@@ -2291,7 +2291,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.54.5";
+      version="0.54.6";
    }
    if(close_detail!="") detail=close_detail;
 
