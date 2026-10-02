@@ -1,5 +1,5 @@
 #property strict
-#property version "1.542"
+#property version "1.545"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -25,6 +25,8 @@ input string RequiredServerText = "LiteFinance";
 input bool AutoLockCurrentAccount = true; // Bind this EA session to the account active at OnInit.
 input long AllowedAccountLogin = 0; // Used only when AutoLockCurrentAccount=false.
 input bool EnableRangeMain = true; // Explicit cent-account range-reversal trial on MAIN.
+const double RangeMainTargetUnits = 5.0; // Quick RANGE take-profit: USD 0.05 on 100 units/USD.
+const double RangeMainMaxLossUnits = 5.0; // RANGE entries must keep broker SL risk <= USD 0.05.
 input bool EnableLiveTrading = false;
 input bool SmallOnlyMode = false; // Attach second EA instance on another M15 chart for parallel SMALL trades.
 const ulong PrimaryMagicNumber = 26092212;
@@ -685,6 +687,9 @@ string BuildDiagnosticText()
       +"  minAgeSec="+IntegerToString(EarlyAdverseMinAgeSeconds)+"\n"
       +"Trades today: "+(today<0 ? "history unavailable" : IntegerToString(today))
       +"/"+(SmallOnlyMode ? "unlimited" : IntegerToString(MaxTradesPerDay))+"\n"
+      +"Range MAIN: "+(EnableRangeMain && !SmallOnlyMode ? "ACTIVE" : "OFF")
+      +"  TargetUnits: "+DoubleToString(RangeMainTargetUnits,2)
+      +"  MaxLossUnits: "+DoubleToString(RangeMainMaxLossUnits,2)+"\n"
       +"SmallProfit: "+(SmallOnlyMode && EnableSmallProfitTrades ? "ACTIVE" : "OFF")
       +"  TargetUnits: "+DoubleToString(SmallProfitTargetUnits,2)
       +"  MaxRiskUSD: "+DoubleToString(SmallProfitMaxRiskUSD,2)
@@ -1006,7 +1011,7 @@ void DrawDashboard()
    // Tall/narrow panel: summary text first, checklist directly underneath.
    UiRect("PANEL",12,24,560,955,C'15,23,42',C'71,85,105');
 
-   UiLabel("TITLE","RAMON AI TRADER  v0.54.2 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.54.5 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,clrWhite,9);
@@ -1594,6 +1599,42 @@ bool SmallProfitTarget(const ENUM_ORDER_TYPE side,const double entry,
       if(!OrderCalcProfit(side,_Symbol,volume,entry,target,gain)) return false;
       if(gain+0.00001>=SmallProfitTargetUnits)
          return gain<=SmallProfitTargetUnits+0.25;
+   }
+   return false;
+}
+
+bool RangeMainProfitTarget(const ENUM_ORDER_TYPE side,const double entry,
+   const double volume,const MqlTick &quote,const double midpoint,double &target)
+{
+   double point=SymbolInfoDouble(_Symbol,SYMBOL_POINT);
+   double tick_size=SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_SIZE);
+   if(tick_size<=0.0) tick_size=point;
+   if(tick_size<=0.0 || volume<=0.0 || RangeMainTargetUnits<=0.0) return false;
+   double sign=(side==ORDER_TYPE_BUY ? 1.0 : -1.0);
+   double unit_gain=0.0;
+   if(!OrderCalcProfit(side,_Symbol,volume,entry,entry+sign,unit_gain)
+      || unit_gain<=0.0)
+      return false;
+   double min_stop=(double)SymbolInfoInteger(_Symbol,SYMBOL_TRADE_STOPS_LEVEL)*point;
+   double required_from_quote=(side==ORDER_TYPE_BUY ? quote.bid : quote.ask);
+   double distance=MathMax(RangeMainTargetUnits/unit_gain,
+      MathAbs(required_from_quote-entry)+min_stop+2*point);
+   double steps=MathCeil(distance/tick_size-0.00000001);
+   for(int attempt=0;attempt<32;attempt++)
+   {
+      double candidate=NormalizeDouble(entry+sign*(steps+attempt)*tick_size,_Digits);
+      // A quick RANGE target must be reached before the range midpoint.
+      if(midpoint>0.0
+         && ((side==ORDER_TYPE_BUY && candidate>midpoint)
+            || (side==ORDER_TYPE_SELL && candidate<midpoint)))
+         return false;
+      double gain=0.0;
+      if(!OrderCalcProfit(side,_Symbol,volume,entry,candidate,gain)) return false;
+      if(gain+0.00001>=RangeMainTargetUnits)
+      {
+         target=candidate;
+         return gain<=RangeMainTargetUnits+0.25;
+      }
    }
    return false;
 }
@@ -2250,7 +2291,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.54.2";
+      version="0.54.5";
    }
    if(close_detail!="") detail=close_detail;
 
@@ -3537,7 +3578,7 @@ bool ManageRangeMainPosition(const ulong ticket,const datetime opened)
    if(!PositionSelectByTicket(ticket) || !IsRangeTradeComment(PositionGetString(POSITION_COMMENT)))
       return false;
    if(TimeCurrent()-opened<1800)
-   { StatusLine="Managed RANGE MAIN OPEN | midpoint TP / boundary SL / 30min"; return true; }
+   { StatusLine="Managed RANGE MAIN OPEN | 5c TP / boundary SL <=5c / 30min"; return true; }
    if(ManagedExitPausedForMarketClosed(ticket))
    { StatusLine="RANGE EXIT PAUSED: MARKET CLOSED"; return true; }
    if(Trade.PositionClose(ticket,MaxDeviationPoints))
@@ -3984,6 +4025,26 @@ void OnTimer()
       : SelectVolume(side,entry,stop));
    if(volume<=0.0)
    { StatusLine="TRADE BLOCKED: min lot > hard risk cap"; ShowStatus(); return; }
+
+   if(range_trade)
+   {
+      double range_loss_units=0.0;
+      if(!OrderCalcProfit(side,_Symbol,volume,entry,stop,range_loss_units)
+         || range_loss_units>=0.0
+         || -range_loss_units>RangeMainMaxLossUnits+0.00001)
+      {
+         StatusLine="Range MAIN blocked: boundary SL risk > 5c";
+         ShowStatus();
+         return;
+      }
+      if(!RangeMainProfitTarget(side,entry,volume,tick,range_target,target))
+      {
+         StatusLine="Range MAIN blocked: 5c TP not inside midpoint";
+         ShowStatus();
+         return;
+      }
+   }
+
    if(small_profit)
    {
       // Small-profit trades never scale above the broker minimum volume.
