@@ -57,3 +57,14 @@ def test_news_snapshot_is_causal_and_bounded() -> None:
 
 def test_neutral_features_are_complete() -> None:
     assert neutral_news_features() == {name: 0.0 for name in NEWS_FEATURES}
+
+
+def test_high_event_guard_is_not_masked_by_nearer_low_event():
+    now = 1_800_000_000
+    snap = build_news_snapshot((
+        NewsEvent('Low event', 'USD', 'Low', now + 30),
+        NewsEvent('High event', 'USD', 'High', now + 600),
+        NewsEvent('EUR event', 'EUR', 'High', now + 60),
+    ), now=now, source_ready=True, source_age_seconds=20)
+    assert snap.event_title == 'Low event'
+    assert snap.payload()['news_high_event_time'] == now + 600

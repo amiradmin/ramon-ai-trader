@@ -48,9 +48,11 @@ class NewsSnapshot:
     event_time: int
     event_delta_minutes: float
     error: str = ""
+    high_event_time: int = 0
 
     def payload(self) -> dict[str, object]:
         return {
+            "news_high_event_time": self.high_event_time,
             "news_source": self.source,
             "news_source_ready": int(self.source_ready),
             "news_source_age_seconds": self.source_age_seconds,
@@ -188,6 +190,7 @@ def build_news_snapshot(
         event_time=nearest.timestamp if nearest else 0,
         event_delta_minutes=((nearest.timestamp - now) / 60.0) if nearest else 0.0,
         error=error,
+        high_event_time=nearest_high.timestamp if nearest_high else 0,
     )
 
 

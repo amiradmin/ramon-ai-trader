@@ -107,9 +107,10 @@ class Settings:
     max_spread_points: int = 50
     minimum_edge_atr: float = 0.12
     minimum_edge_spreads: float = 1.5
+    maximum_entry_extension_atr: float = 3.0
     minimum_strength: float = 0.20
     intrabar_min_strength: float = 0.05
-    allow_weak_intrabar_entries: bool = False
+    allow_weak_intrabar_entries: bool = True
     intrabar_min_move_atr: float = 0.06
     intrabar_min_rebound_atr: float = 0.08
     trend_min_path_atr: float = 0.15
@@ -266,6 +267,7 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
         and settings.trend_min_micro_move_atr >= 0
         and settings.trend_conflict_lookback >= 2
         and settings.trend_conflict_atr > 0
+        and settings.maximum_entry_extension_atr > 0
         and -1.0 <= settings.strong_entry_min_intrabar_move_atr <= 0.0
     ):
         raise ValueError("invalid intrabar/trend settings")
@@ -384,13 +386,18 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
         elif adverse_intrabar_timing:
             strong_entry_guard_active = 1
             reason = "adverse_intrabar_timing"
-        elif (
-            intrabar_confirmed
-            and dominant_strength < settings.minimum_strength
-            and not settings.allow_weak_intrabar_entries
+        elif aligned_recent_move_atr >= settings.maximum_entry_extension_atr or intrabar_move_atr >= settings.maximum_entry_extension_atr:
+            reason = "late_entry_extension"
+        elif dominant_edge < minimum:
+            reason = "insufficient_model_edge"
+        elif dominant_strength < settings.minimum_strength and not (
+            settings.allow_weak_intrabar_entries
+            and dominant_edge >= minimum
+            and intrabar_confirmed
+            and ai_trend_confirmed
+            and ai_trend_direction == intrabar_direction
         ):
-            # Keep the timing observation, but do not let it substitute for
-            # forecast strength or fall through into a continuation entry.
+            # Weak forecasts need all three independent observations aligned.
             reason = "insufficient_model_strength"
         elif dominant_buy and buy_edge >= minimum and buy_strength >= settings.minimum_strength:
             side, edge, reason = "BUY", buy_edge, "forecast_up"

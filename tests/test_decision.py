@@ -149,8 +149,8 @@ class DecisionTests(unittest.TestCase):
         self.assertEqual(result.intrabar_confirmed, 1)
         result = evaluate(market, self.model, Settings(allow_weak_intrabar_entries=True))
 
-        self.assertEqual(result.decision, "BUY")
-        self.assertEqual(result.reason, "intrabar_reversal_up")
+        self.assertEqual(result.decision, "WAIT")
+        self.assertEqual(result.reason, "insufficient_model_strength")
         self.assertEqual(result.intrabar_confirmed, 1)
         self.assertEqual(result.intrabar_direction, "BUY")
         self.assertGreaterEqual(result.buy_edge, result.minimum_edge)
@@ -184,7 +184,7 @@ class DecisionTests(unittest.TestCase):
         )
         market = Market("XAUUSD_l", "M15", 100.0, 100.4, 0.01, bars(), micro)
         self.model.value = Forecast(94.0, 98.9, 106.0, (99.8, 99.6, 99.4, 98.9))
-        result = evaluate(market, self.model)
+        result = evaluate(market, self.model, Settings(allow_weak_intrabar_entries=False))
         self.assertEqual(result.intrabar_confirmed, 1)
         self.assertEqual(result.ai_trend_confirmed, 1)
         self.assertEqual(result.decision, "WAIT")
@@ -192,6 +192,13 @@ class DecisionTests(unittest.TestCase):
         legacy = evaluate(market, self.model, Settings(allow_weak_intrabar_entries=True))
         self.assertEqual(legacy.decision, "SELL")
         self.assertEqual(legacy.reason, "intrabar_reversal_down")
+        # Default policy permits aligned weak entries, but rejects chasing.
+        aligned = evaluate(market, self.model)
+        self.assertEqual(aligned.decision, "SELL")
+        late = evaluate(market, self.model, Settings(maximum_entry_extension_atr=0.08))
+        self.assertEqual(late.decision, "WAIT")
+        self.assertEqual(late.reason, "late_entry_extension")
+
 
     def test_ai_trend_continuation_uses_chronos_path_not_indicators(self) -> None:
         micro = (
@@ -212,8 +219,8 @@ class DecisionTests(unittest.TestCase):
 
         self.assertEqual(result.ai_trend_direction, "SELL")
         self.assertEqual(result.ai_trend_confirmed, 1)
-        self.assertEqual(result.decision, "SELL")
-        self.assertEqual(result.reason, "ai_trend_continuation_down")
+        self.assertEqual(result.decision, "WAIT")
+        self.assertEqual(result.reason, "insufficient_model_edge")
         self.assertLess(result.sell_edge, result.minimum_edge)
         self.assertGreaterEqual(
             result.sell_edge,

@@ -13,10 +13,10 @@ def source() -> str:
 
 def test_ea_038_keeps_sizing_telemetry_observational():
     text = source()
-    assert '#property version "1.541"' in text
-    assert 'EA version: 0.54.1' in text
-    assert 'RAMON AI TRADER  v0.54.1' in text
-    assert 'version="0.54.1";' in text
+    assert '#property version "1.542"' in text
+    assert 'EA version: 0.54.2' in text
+    assert 'RAMON AI TRADER  v0.54.2' in text
+    assert 'version="0.54.2";' in text
     # Telemetry staging is deliberately not a trade gate.
     assert 'if(!StageEntrySizing' not in text
     assert re.search(
@@ -65,3 +65,25 @@ def test_deal_telemetry_reader_is_backward_compatible():
     text = source()
     assert '(marker=="v1" || marker=="v2")' in text
     assert 'if(marker!="v2")' in text
+
+
+def test_closed_position_runtime_is_cleared_before_rendering():
+    for name in ('Ramon.mq5', 'Ramon_installed_early_adverse.mq5'):
+        text = (Path(__file__).resolve().parents[1] / 'mt5' / name).read_text()
+        render = text.split('void ShowStatus()', 1)[1].split('bool JsonText', 1)[0]
+        assert 'if(!ManagedPosition(status_ticket,status_opened))' in render
+        for reset in ('ResetProfitProtectionState', 'ResetTPStageRuntime',
+                      'ResetEarlyAdverseState', 'ResetMainFastProfitState',
+                      'ResetMarketClosedExitPause'):
+            assert render.index(reset + '();') < render.index('WriteDiagnostic();')
+
+
+def test_news_guard_applies_to_normal_and_range_positions_before_entry():
+    text = source()
+    manager = text.split('void ManageOpenPosition()', 1)[1].split('void OnTimer()', 1)[0]
+    assert manager.index('ManageNewsGuard(ticket)') < manager.index('ManageRangeMainPosition(ticket,opened)')
+    assert 'delta<=before_minutes*60 && delta>=-15*60' in text
+    assert 'NewsGuardWindow(15)' in text
+    assert 'NewsGuardWindow(5)' in text
+    assert '"news_guard_exit"' in text
+    assert 'news_high_event_time' in text

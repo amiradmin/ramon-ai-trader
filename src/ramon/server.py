@@ -92,6 +92,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     "history_enabled": bool(history_db),
                     "allow_weak_intrabar_entries": settings.allow_weak_intrabar_entries,
                     "minimum_strength": settings.minimum_strength,
+                    "weak_entry_policy": "forecast_intrabar_ai_trend_agreement",
+                    "maximum_entry_extension_atr": settings.maximum_entry_extension_atr,
                     "range_shadow_mode": "OBSERVE_ONLY" if history_db else "DISABLED",
                     "range_main_enabled": range_live_enabled,
                     "history_last_error": str(history_status["last_error"]),

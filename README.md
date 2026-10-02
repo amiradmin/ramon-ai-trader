@@ -667,3 +667,20 @@ account/risk gates and a 5-minute post-close cooldown. They are tagged `:R` and
 recorded under `range-reversal-v1`, separately from Chronos training labels.
 See `docs/range-shadow.md` for experimental rules and limitations. Profitability
 has not been validated. Reload the compiled EA to activate its capability flag.
+
+EA 0.54.2 adds a live USD high-impact news guard for both MAIN strategies:
+new entries pause from 15 minutes before through 15 minutes after the nearest
+high-impact USD event, and managed positions are closed from 5 minutes before
+through that post-event window. Unknown or stale calendar data blocks entries.
+The dedicated high-impact timestamp is independent of the nearest displayed
+news event. Exit attempts use the broker and can still slip or fail; this is
+preventive protection, not a guaranteed loss cap. Reload the EA after installing
+its newly compiled binary. Diagnostics expose the guard policy.
+
+Weak Chronos entries (<0.20 strength) now require minimum model edge plus
+agreement of forecast direction, confirmed intrabar reversal, and confirmed
+AI model path. AI continuation cannot bypass this gate. Normal entries are
+blocked after >=3 ATR of aligned movement over the last 12 completed bars or
+current intrabar movement (`late_entry_extension`). This initial fixed threshold
+requires forward validation; range strategy remains independent. NewsGuard
+continues to govern both strategies in the EA.

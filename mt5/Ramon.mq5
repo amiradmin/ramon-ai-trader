@@ -1,5 +1,5 @@
 #property strict
-#property version "1.541"
+#property version "1.542"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -514,8 +514,9 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.54.1\n"
+      +"EA version: 0.54.2\n"
       +"Range MAIN: "+BoolText(EnableRangeMain)+" | midpoint TP, boundary SL, 30min maximum\n"
+      +"NewsGuard: ACTIVE | entries -15/+15min; close -5min; calendar required\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -1005,7 +1006,7 @@ void DrawDashboard()
    // Tall/narrow panel: summary text first, checklist directly underneath.
    UiRect("PANEL",12,24,560,955,C'15,23,42',C'71,85,105');
 
-   UiLabel("TITLE","RAMON AI TRADER  v0.54.1 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.54.2 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,clrWhite,9);
@@ -1250,8 +1251,48 @@ bool CopyDiagnosticToClipboard()
    return true;
 }
 
+datetime NewsHighEventUTC=0;
+datetime NewsGuardReceivedUTC=0;
+bool NewsGuardWindow(const int before_minutes)
+{
+   if(NewsHighEventUTC<=0) return false;
+   long delta=(long)NewsHighEventUTC-(long)TimeGMT();
+   return delta<=before_minutes*60 && delta>=-15*60;
+}
+bool NewsGuardEntryBlocked()
+{
+   return !LastNewsSourceReady || NewsGuardReceivedUTC<=0
+      || LastNewsSourceAgeSeconds+(TimeGMT()-NewsGuardReceivedUTC)>1800
+      || NewsGuardWindow(15);
+}
+bool ManageNewsGuard(const ulong ticket)
+{
+   if(!NewsGuardWindow(5)) return false;
+   StatusLine="NEWS GUARD: close before high-impact USD news";
+   if(ManagedExitPausedForMarketClosed(ticket)) return true;
+   if(Trade.PositionClose(ticket,MaxDeviationPoints))
+   {
+      ResetMarketClosedExitPause();
+      RecordDealTelemetry(Trade.ResultDeal(),"news_guard_exit");
+      StatusLine="NEWS GUARD: position closed";
+   }
+   else HandleManagedExitFailure(ticket,"NEWS GUARD EXIT");
+   return true;
+}
+
 void ShowStatus()
 {
+   // Clear the closed position's runtime before any diagnostic or chart render.
+   ulong status_ticket=0;
+   datetime status_opened=0;
+   if(!ManagedPosition(status_ticket,status_opened))
+   {
+      ResetProfitProtectionState();
+      ResetTPStageRuntime();
+      ResetEarlyAdverseState();
+      ResetMainFastProfitState();
+      ResetMarketClosedExitPause();
+   }
    WriteDiagnostic();
    UpdateTPStageObjects();
    DrawDashboard();
@@ -2209,7 +2250,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.54.1";
+      version="0.54.2";
    }
    if(close_detail!="") detail=close_detail;
 
@@ -3523,6 +3564,7 @@ void ManageOpenPosition()
       return;
    }
 
+   if(ManageNewsGuard(ticket)) return;
    if(ManageRangeMainPosition(ticket,opened)) return;
 
    // MAIN also closes materially losing positions after repeated loss of signal support.
@@ -3756,6 +3798,12 @@ void OnTimer()
    LastNewsEventCountry=news_event_country;
    LastNewsEventImpact=news_event_impact;
    LastNewsEventTime=(datetime)news_event_time;
+   double high_event_utc=0.0;
+   if(JsonNumber(reply,"news_high_event_time",high_event_utc))
+      NewsHighEventUTC=(datetime)high_event_utc;
+   else
+      NewsHighEventUTC=(LastNewsEventImpact=="High" && LastNewsEventCountry=="USD" ? LastNewsEventTime : 0);
+   NewsGuardReceivedUTC=TimeGMT();
    LastNewsEventDeltaMinutes=news_event_delta_minutes;
    LastSignalBarTime=bar_time;
    LastSignalBid=signal_bid;
@@ -3809,6 +3857,11 @@ void OnTimer()
    AppendImprovementShadowCsv();
    Print("Ramon ",UTCText(bar_time,TIME_DATE|TIME_SECONDS)," ",decision," ",reason,
       " median=",DoubleToString(median,_Digits));
+
+   if(ManagedPosition(ticket,opened) && ManageNewsGuard(ticket))
+   { ShowStatus(); return; }
+   if(NewsGuardEntryBlocked())
+   { StatusLine="NEWS GUARD: entry paused (high-impact window or calendar unavailable)"; ShowStatus(); return; }
 
    // Learning snapshots continue while positions exist; execution remains single-position.
    if(ManagedPosition(ticket,opened))
