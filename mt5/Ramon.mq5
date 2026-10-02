@@ -1,5 +1,5 @@
 #property strict
-#property version "1.535"
+#property version "1.541"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -24,6 +24,7 @@ input string TradeSymbol = "XAUUSD_l";
 input string RequiredServerText = "LiteFinance";
 input bool AutoLockCurrentAccount = true; // Bind this EA session to the account active at OnInit.
 input long AllowedAccountLogin = 0; // Used only when AutoLockCurrentAccount=false.
+input bool EnableRangeMain = true; // Explicit cent-account range-reversal trial on MAIN.
 input bool EnableLiveTrading = false;
 input bool SmallOnlyMode = false; // Attach second EA instance on another M15 chart for parallel SMALL trades.
 const ulong PrimaryMagicNumber = 26092212;
@@ -513,7 +514,8 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.53.5\n"
+      +"EA version: 0.54.1\n"
+      +"Range MAIN: "+BoolText(EnableRangeMain)+" | midpoint TP, boundary SL, 30min maximum\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -1003,7 +1005,7 @@ void DrawDashboard()
    // Tall/narrow panel: summary text first, checklist directly underneath.
    UiRect("PANEL",12,24,560,955,C'15,23,42',C'71,85,105');
 
-   UiLabel("TITLE","RAMON AI TRADER  v0.53.5 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.54.1 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,clrWhite,9);
@@ -1331,7 +1333,8 @@ bool BuildRequest(string &payload,datetime &bar_time)
             +",\"close\":"+DoubleToString(micro[j].close,_Digits)+"}";
       }
    }
-   payload+="],\"quote_time\":"+IntegerToString((long)tick.time)+"}";
+   payload+="],\"quote_time\":"+IntegerToString((long)tick.time)
+      +",\"range_execution_ready\":"+((EnableRangeMain && !SmallOnlyMode) ? "true" : "false")+"}";
    return true;
 }
 
@@ -2206,7 +2209,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.53.5";
+      version="0.54.1";
    }
    if(close_detail!="") detail=close_detail;
 
@@ -3456,6 +3459,56 @@ void ObserveOpenPositionProfit(const ulong ticket)
    }
 }
 
+
+bool IsRangeTradeComment(const string comment)
+{
+   return StringFind(comment,"Ramon:")==0 && StringSubstr(comment,22,2)==":R";
+}
+
+int RangeMainCooldownRemaining()
+{
+   datetime now=TimeCurrent();
+   if(!HistorySelect(now-86400,now)) return -1;
+   int total=HistoryDealsTotal();
+   for(int i=total-1;i>=0;i--)
+   {
+      ulong close_deal=HistoryDealGetTicket(i);
+      datetime closed=(datetime)HistoryDealGetInteger(close_deal,DEAL_TIME);
+      if(now-closed>=300) break;
+      if(HistoryDealGetString(close_deal,DEAL_SYMBOL)!=_Symbol
+         || (ulong)HistoryDealGetInteger(close_deal,DEAL_MAGIC)!=MagicNumber
+         || HistoryDealGetInteger(close_deal,DEAL_ENTRY)!=DEAL_ENTRY_OUT) continue;
+      ulong identifier=(ulong)HistoryDealGetInteger(close_deal,DEAL_POSITION_ID);
+      for(int j=i-1;j>=0;j--)
+      {
+         ulong entry_deal=HistoryDealGetTicket(j);
+         if((ulong)HistoryDealGetInteger(entry_deal,DEAL_POSITION_ID)==identifier
+            && HistoryDealGetInteger(entry_deal,DEAL_ENTRY)==DEAL_ENTRY_IN
+            && IsRangeTradeComment(HistoryDealGetString(entry_deal,DEAL_COMMENT)))
+            return (int)(300-(now-closed));
+      }
+   }
+   return 0;
+}
+
+bool ManageRangeMainPosition(const ulong ticket,const datetime opened)
+{
+   if(!PositionSelectByTicket(ticket) || !IsRangeTradeComment(PositionGetString(POSITION_COMMENT)))
+      return false;
+   if(TimeCurrent()-opened<1800)
+   { StatusLine="Managed RANGE MAIN OPEN | midpoint TP / boundary SL / 30min"; return true; }
+   if(ManagedExitPausedForMarketClosed(ticket))
+   { StatusLine="RANGE EXIT PAUSED: MARKET CLOSED"; return true; }
+   if(Trade.PositionClose(ticket,MaxDeviationPoints))
+   {
+      ResetMarketClosedExitPause();
+      RecordDealTelemetry(Trade.ResultDeal(),"maximum_hold_bars");
+      StatusLine="RANGE MAIN 30min TIME EXIT";
+   }
+   else HandleManagedExitFailure(ticket,"RANGE MAIN TIME EXIT");
+   return true;
+}
+
 void ManageOpenPosition()
 {
    ulong ticket;
@@ -3469,6 +3522,8 @@ void ManageOpenPosition()
       ResetMarketClosedExitPause();
       return;
    }
+
+   if(ManageRangeMainPosition(ticket,opened)) return;
 
    // MAIN also closes materially losing positions after repeated loss of signal support.
    if(!SmallOnlyMode)
@@ -3534,6 +3589,7 @@ void OnTick()
 {
    // Price crossings must not wait for the 5-second timer or 30-second model snapshot.
    // This handler only advances TP stages and tightens SL; it never creates entries.
+   if(PositionSelect(_Symbol) && IsRangeTradeComment(PositionGetString(POSITION_COMMENT))) return;
    ObserveTPStageCrossingsOnTick();
 }
 
@@ -3817,6 +3873,22 @@ void OnTimer()
    { StatusLine="Quote changed/stale"; ShowStatus(); return; }
    if(stop_distance<=0.0 || target_distance<=0.0 || atr<=0.0)
    { StatusLine="Invalid stop/target"; ShowStatus(); return; }
+   double range_execution=0.0,range_stop=0.0,range_target=0.0,range_low=0.0,range_high=0.0;
+   JsonNumber(reply,"range_execution",range_execution);
+   bool range_trade=(range_execution>=0.5);
+   if(range_trade)
+   {
+      if(!EnableRangeMain || SmallOnlyMode || small_profit
+         || (reason!="range_reversal_buy" && reason!="range_reversal_sell")
+         || !JsonNumber(reply,"range_stop_price",range_stop)
+         || !JsonNumber(reply,"range_target_price",range_target)
+         || !JsonNumber(reply,"range_low",range_low)
+         || !JsonNumber(reply,"range_high",range_high))
+      { StatusLine="Range MAIN protocol not ready"; ShowStatus(); return; }
+      int cooldown=RangeMainCooldownRemaining();
+      if(cooldown!=0)
+      { StatusLine="Range MAIN cooldown/history unavailable"; ShowStatus(); return; }
+   }
    ENUM_ORDER_TYPE side=(decision=="BUY" ? ORDER_TYPE_BUY : ORDER_TYPE_SELL);
    double entry=(decision=="BUY" ? tick.ask : tick.bid);
    double point=SymbolInfoDouble(_Symbol,SYMBOL_POINT);
@@ -3826,10 +3898,25 @@ void OnTimer()
    double stop=NormalizeDouble(entry+(decision=="BUY" ? -stop_distance : stop_distance),_Digits);
    double target=NormalizeDouble(entry+(decision=="BUY" ? target_distance : -target_distance),_Digits);
 
+   if(range_trade)
+   {
+      stop=NormalizeDouble(range_stop,_Digits);
+      target=NormalizeDouble(range_target,_Digits);
+      double risk=(decision=="BUY" ? entry-stop : stop-entry);
+      double reward=(decision=="BUY" ? target-entry : entry-target);
+      double spread=tick.ask-tick.bid;
+      bool boundary=(decision=="BUY" ? tick.bid<=range_low+0.2*(range_high-range_low)
+                                     : tick.bid>=range_high-0.2*(range_high-range_low));
+      if(tick.bid<range_low || tick.bid>range_high || !boundary
+         || risk<min_stop+2*point || reward<min_stop+2*point
+         || reward<MathMax(3*spread,1.2*risk))
+      { StatusLine="Range MAIN quote/risk changed"; ShowStatus(); return; }
+   }
+
    // MAIN three-stage plan: use TP3 as the broker-side fail-safe target whenever
    // the model supplied a valid directional TP1/TP2/TP3 structure.
    bool main_tp_plan_valid=(
-      !small_profit
+      !small_profit && !range_trade
       && EnableTPStageManagement
       && ValidDirectionalTargets(decision,entry,LastTargetTP1,LastTargetTP2,LastTargetTP3)
    );
@@ -3866,11 +3953,11 @@ void OnTimer()
 
    // Telemetry/management staging must never block an otherwise valid entry.
    StageEntrySizing(LastSampleKey,side,entry,stop,volume);
-   if(!small_profit)
+   if(!small_profit && !range_trade)
       PersistTPPlan(LastSampleKey,decision,entry,stop,
          LastTargetTP1,LastTargetTP2,LastTargetTP3);
    // The broker owns SL/TP immediately. No position is opened when the model is unavailable.
-   string trade_comment="Ramon:"+LastSampleKey+(small_profit ? ":S" : "");
+   string trade_comment="Ramon:"+LastSampleKey+(small_profit ? ":S" : (range_trade ? ":R" : ""));
    bool submitted=(
       decision=="BUY"
       ? Trade.Buy(volume,_Symbol,0.0,stop,target,trade_comment)

@@ -19,6 +19,8 @@ from .news import DEFAULT_FOREX_FACTORY_JSON, ForexFactoryNewsProvider
 from .target_learning import build_target_structure
 from .target_outcomes import backfill_target_outcomes
 from .timesfm_shadow import TimesFM3Shadow
+from .range_shadow import observe as observe_range_shadow
+from .range_strategy import live_candidate
 
 
 def persist_market_safely(db: str, market: Market) -> str:
@@ -52,6 +54,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
     guard = Lock()
     cached_model = CachedForecaster(model)
     history_db = os.getenv("RAMON_HISTORY_DB", "").strip()
+    range_live_enabled = os.getenv("RAMON_RANGE_LIVE_ENABLED", "0") == "1"
     ensemble_dir = os.getenv("RAMON_ENSEMBLE_DIR", "/checkpoints/ensemble").strip()
     # Preview is the default; enabling the live ensemble requires an explicit mode.
     role_mode = os.getenv("RAMON_ROLE_MODE", "shadow").strip().lower()
@@ -89,6 +92,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     "history_enabled": bool(history_db),
                     "allow_weak_intrabar_entries": settings.allow_weak_intrabar_entries,
                     "minimum_strength": settings.minimum_strength,
+                    "range_shadow_mode": "OBSERVE_ONLY" if history_db else "DISABLED",
+                    "range_main_enabled": range_live_enabled,
                     "history_last_error": str(history_status["last_error"]),
                     "history_last_persisted_bar": int(history_status["last_persisted_bar"]),
                     **ensemble.status(),
@@ -161,6 +166,12 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 response = result.to_dict()
                 response.update(ensemble_payload)
                 response.update(timesfm3_payload)
+                if history_db:
+                    try:
+                        response.update(observe_range_shadow(history_db, market, quote_time))
+                    except Exception as exc:
+                        response["range_shadow_status"] = "ERROR"
+                        response["range_shadow_error"] = str(exc)
 
                 # The terminal owns the loss-streak gate. Uploaded history can lag
                 # fresh closes or omit intervening outcomes; it is not authoritative.
@@ -193,6 +204,29 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 response["target_tp2"] = target_structure.tp2
                 response["target_tp3"] = target_structure.tp3
                 response["legacy_target_price"] = target_structure.legacy_target
+                range_setup = live_candidate(
+                    market, response, enabled=range_live_enabled,
+                    capable=payload.get("range_execution_ready") is True,
+                    quote_time=quote_time, max_spread_points=settings.max_spread_points,
+                )
+                response["range_execution"] = int(range_setup is not None)
+                if range_setup:
+                    response.update({
+                        "decision": range_setup["direction"],
+                        "reason": "range_reversal_" + range_setup["direction"].lower(),
+                        "stop_distance": range_setup["stop_distance"],
+                        "target_distance": range_setup["target_distance"],
+                        "range_stop_price": range_setup["stop"],
+                        "range_target_price": range_setup["target"],
+                        "range_low": range_setup["low"], "range_high": range_setup["high"],
+                        "target_structure_ready": 0, "target_method": "range_midpoint",
+                        "target_direction": range_setup["direction"],
+                        "target_tp1": 0.0, "target_tp2": 0.0, "target_tp3": 0.0,
+                        "legacy_target_price": range_setup["target"],
+                    })
+                    target_payload = {"ready": 0, "method": "range_midpoint",
+                                      "direction": range_setup["direction"],
+                                      "legacy_target": range_setup["target"]}
                 sample_key = uuid4().hex[:16]
                 response["sample_key"] = sample_key
                 response["sample_saved"] = 0
@@ -205,17 +239,17 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                             market=market,
                             signal_bar_time=result.signal_bar_time,
                             atr=result.atr,
-                            direction=dominant_direction(result),
+                            direction=range_setup["direction"] if range_setup else dominant_direction(result),
                             base_decision=result.decision,
                             regime_features=feature_snapshot["regime"],
                             entry_features=feature_snapshot["entry"],
                             news_features=feature_snapshot["news"],
                             meta_base_features=feature_snapshot["meta_base"],
                             sample_key=sample_key,
-                            chronos_model=model.model_id,
+                            chronos_model="range-reversal-v1" if range_setup else model.model_id,
                             quote_time=quote_time,
-                            stop_distance=result.stop_distance,
-                            target_distance=result.target_distance,
+                            stop_distance=float(response["stop_distance"]),
+                            target_distance=float(response["target_distance"]),
                             final_decision=str(response["decision"]),
                             bundle_id=ensemble.bundle_id,
                             target_structure=target_payload,
@@ -224,10 +258,14 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                                 "ensemble_mode": ensemble.status()["ensemble_mode"],
                                 "ensemble_active": response.get("ensemble_active", 0),
                                 "role_manifest": ensemble.manifest,
+                                "execution_strategy": "range-reversal-v1" if range_setup else "chronos",
+                                "range_setup": range_setup,
                                 "decision_audit": {
                                     "schema_version": 2,
                                     "base": result.to_dict(),
-                                    "final": ensemble_payload,
+                                    "final": {**ensemble_payload, "decision": response["decision"],
+                                              "reason": response["reason"],
+                                              "range_execution": response["range_execution"]},
                                     "settings": asdict(settings),
                                     "shadow_forecasts": {
                                         "timesfm3": timesfm3_payload,
@@ -253,6 +291,10 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                             flush=True,
                         )
 
+                if range_setup and not response["sample_saved"]:
+                    response["decision"] = "WAIT"
+                    response["reason"] = "range_sample_not_saved"
+                    response["range_execution"] = 0
                 self.reply(200, response)
             except (ValueError, TypeError, KeyError, OverflowError, json.JSONDecodeError) as exc:
                 self.reply(400, {"error": str(exc)})

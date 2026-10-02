@@ -655,3 +655,15 @@ evaluate prospectively with fixed settings before drawing performance conclusion
 Updating source does not update an already running model container. This policy
 was deployed on 2026-10-02 for the user-authorized cent-account trial; live health
 confirmed `allow_weak_intrabar_entries=false` and `minimum_strength=0.2`.
+
+### MAIN range-reversal cent-account trial
+
+The user-authorized range trial is enabled with `RAMON_RANGE_LIVE_ENABLED=1`
+in Compose and `EnableRangeMain=true` in EA 0.54.1. It supplements primary WAIT
+signals only when entry-time range/reversal criteria pass. The server requires
+an explicit capability flag from the new EA; older EAs retain normal behavior.
+Range trades use boundary stops, midpoint targets, a 30-minute timeout, existing
+account/risk gates and a 5-minute post-close cooldown. They are tagged `:R` and
+recorded under `range-reversal-v1`, separately from Chronos training labels.
+See `docs/range-shadow.md` for experimental rules and limitations. Profitability
+has not been validated. Reload the compiled EA to activate its capability flag.

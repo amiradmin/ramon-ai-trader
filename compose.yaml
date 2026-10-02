@@ -17,6 +17,7 @@ services:
       RAMON_HISTORY_DB: /data/ramon_history.sqlite3
       RAMON_ENSEMBLE_DIR: /checkpoints/ensemble
       RAMON_ROLE_MODE: shadow
+      RAMON_RANGE_LIVE_ENABLED: "1"
       RAMON_TIMESFM3_SHADOW_ENABLED: ${RAMON_TIMESFM3_SHADOW_ENABLED:-0}
       RAMON_TIMESFM3_CHECKPOINT: ${RAMON_TIMESFM3_CHECKPOINT:-google/timesfm-3.0-pytorch}
       RAMON_TIMESFM3_DEVICE: ${RAMON_TIMESFM3_DEVICE:-cpu}
