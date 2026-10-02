@@ -87,6 +87,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     "forecast_context": "completed_m15_cached",
                     "live_quote_decisions": True,
                     "history_enabled": bool(history_db),
+                    "allow_weak_intrabar_entries": settings.allow_weak_intrabar_entries,
+                    "minimum_strength": settings.minimum_strength,
                     "history_last_error": str(history_status["last_error"]),
                     "history_last_persisted_bar": int(history_status["last_persisted_bar"]),
                     **ensemble.status(),

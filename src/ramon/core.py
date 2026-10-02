@@ -109,6 +109,7 @@ class Settings:
     minimum_edge_spreads: float = 1.5
     minimum_strength: float = 0.20
     intrabar_min_strength: float = 0.05
+    allow_weak_intrabar_entries: bool = False
     intrabar_min_move_atr: float = 0.06
     intrabar_min_rebound_atr: float = 0.08
     trend_min_path_atr: float = 0.15
@@ -383,6 +384,14 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
         elif adverse_intrabar_timing:
             strong_entry_guard_active = 1
             reason = "adverse_intrabar_timing"
+        elif (
+            intrabar_confirmed
+            and dominant_strength < settings.minimum_strength
+            and not settings.allow_weak_intrabar_entries
+        ):
+            # Keep the timing observation, but do not let it substitute for
+            # forecast strength or fall through into a continuation entry.
+            reason = "insufficient_model_strength"
         elif dominant_buy and buy_edge >= minimum and buy_strength >= settings.minimum_strength:
             side, edge, reason = "BUY", buy_edge, "forecast_up"
         elif not dominant_buy and sell_edge >= minimum and sell_strength >= settings.minimum_strength:

@@ -642,3 +642,16 @@ Validation includes Python regressions for both-direction Meta vetoes and a C++
 API adapter executing the actual MQL cooldown functions against synthetic deal
 history (manual/partial exits, fees, other robots, expiry, restart and history
 errors). This does not replace MetaEditor compilation or terminal validation.
+
+### Conservative weak-intrabar entry policy
+
+By default, a confirmed intrabar reversal with forecast strength below
+`minimum_strength` (0.20) returns `WAIT / insufficient_model_strength`.
+Intrabar telemetry remains available, and the same weak signal cannot fall
+through into an AI continuation entry. `Settings(allow_weak_intrabar_entries=True)`
+explicitly restores the experimental legacy behavior for controlled comparisons.
+This policy is a conservative trial, not evidence of improved profitability;
+evaluate prospectively with fixed settings before drawing performance conclusions.
+Updating source does not update an already running model container. This policy
+was deployed on 2026-10-02 for the user-authorized cent-account trial; live health
+confirmed `allow_weak_intrabar_entries=false` and `minimum_strength=0.2`.
