@@ -1,7 +1,12 @@
 import hashlib
 import sqlite3
 
-from ramon.historical_benchmark import ContrarianBaseline, PreviousBarBaseline, benchmark_database
+from ramon.historical_benchmark import (
+    ContrarianBaseline,
+    PersistentForecastCache,
+    PreviousBarBaseline,
+    benchmark_database,
+)
 from ramon.history import ensure_history_db
 
 
@@ -163,3 +168,60 @@ def test_regime_trade_stability_sums_trade_metrics(tmp_path):
         assert len(row["folds"]) == 3
         assert row["folds_with_trades"] <= 3
         assert row["overall"]["trades"] == matrix["by_regime"][state]["trades"]
+
+
+def test_persistent_forecast_cache_reuses_identical_context(tmp_path):
+    from ramon.core import Forecast
+
+    class CountingModel:
+        def __init__(self):
+            self.calls = 0
+
+        def forecast(self, closes, horizon):
+            self.calls += 1
+            anchor = closes[-1]
+            path = tuple(anchor + 0.1 * (i + 1) for i in range(horizon))
+            return Forecast(path[-1] - 0.2, path[-1], path[-1] + 0.2, path)
+
+    base = CountingModel()
+    cache = PersistentForecastCache(base, tmp_path / "forecast-cache.sqlite3", "fake@1")
+    closes = [100.0 + i * 0.01 for i in range(256)]
+    first = cache.forecast(closes, 4)
+    second = cache.forecast(closes, 4)
+    assert first == second
+    assert base.calls == 1
+    assert cache.stats()["hits"] == 1
+    assert cache.stats()["misses"] == 1
+    cache.close()
+
+    # Cache survives a new wrapper/process-like lifecycle.
+    again = CountingModel()
+    cache2 = PersistentForecastCache(again, tmp_path / "forecast-cache.sqlite3", "fake@1")
+    third = cache2.forecast(closes, 4)
+    assert third == first
+    assert again.calls == 0
+    assert cache2.stats()["hits"] == 1
+    cache2.close()
+
+
+def test_additional_model_can_use_independent_stride(tmp_path):
+    from ramon.core import Forecast
+
+    class FlatUp:
+        def forecast(self, closes, horizon):
+            anchor = closes[-1]
+            path = tuple(anchor + 0.05 * (i + 1) for i in range(horizon))
+            return Forecast(path[-1] - 0.2, path[-1], path[-1] + 0.2, path)
+
+    db = tmp_path / "external.sqlite3"
+    seed(db, rows=1600)
+    report = benchmark_database(
+        db,
+        folds=3,
+        stride=4,
+        analysis_horizons=(1, 4),
+        additional_models=(("fake_model", FlatUp(), 32),),
+    )
+    assert report["models"]["previous_bar"]["stride"] == 4
+    assert report["models"]["fake_model"]["stride"] == 32
+    assert set(report["models"]["fake_model"]["directional_accuracy"]) == {"1", "4"}
