@@ -46,9 +46,9 @@ class ContrarianBaseline:
     def forecast(self, closes: Sequence[float], horizon: int) -> Forecast:
         base = self.base.forecast(closes, horizon)
         anchor = closes[-1]
-        path = tuple(anchor - (value - anchor) for value in base.median_path)
-        median = anchor - (base.median - anchor)
-        # Mirror the interval and keep low <= median <= high.
+        path = tuple(max(1e-6, anchor - (value - anchor)) for value in base.median_path)
+        median = max(1e-6, anchor - (base.median - anchor))
+        # Mirror the interval and keep every forecast value strictly positive.
         low = max(1e-6, anchor - (base.high - anchor))
         high = max(low, anchor - (base.low - anchor))
         median = min(max(median, low), high)
