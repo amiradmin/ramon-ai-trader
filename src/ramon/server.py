@@ -455,6 +455,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                                         "moment": dict(latest_moment_payload),
                                         "finbert": dict(latest_finbert_payload),
                                     },
+                                    "news_snapshot": news_snapshot.payload(),
                                     "shadow_forecasts": {
                                         "timesfm3": timesfm3_payload,
                                         "direction_quality": {
