@@ -102,10 +102,16 @@ def select_inner(samples, outcomes, *, horizon, training_start, validation_start
 
 def run(db, *, symbol='XAUUSD_KAGGLE', output_dir='data/trade_selector_lab',
         stride=4, train_stride=16, horizon=4, cost=.1, fallback=42, point=.01,
-        show_progress=True):
+        show_progress=True, backend="ridge", cpu_workers=2):
     if (min(stride,train_stride,horizon,fallback)<=0 or cost<0 or point<=0
             or not all(isfinite(v) for v in (cost,point))):
         raise ValueError('invalid research configuration')
+    if backend not in ('ridge','xgboost') or cpu_workers<1:
+        raise ValueError('invalid research backend or CPU worker count')
+    tree_backend=None
+    if backend=='xgboost':
+        from . import xgboost_lab as tree_backend
+        import xgboost
     bars,spreads=load_bars(db,symbol)
     gaps=m15_gap_prefix(bars)
     warmup=len(bars)//5
@@ -117,7 +123,7 @@ def run(db, *, symbol='XAUUSD_KAGGLE', output_dir='data/trade_selector_lab',
         digest.update(json.dumps([asdict(b),spread],sort_keys=True).encode())
     fingerprint=digest.hexdigest()
     progress=ProgressReporter(10000,'Cost-aware trade selector',enabled=show_progress)
-    cache={}; labels={}; pooled={}; report={'schema_version':1,'advisor':'SMC_TRADE_SELECTOR',
+    cache={}; labels={}; pooled={}; report={'schema_version':1,'advisor':'SMC_XGBOOST' if tree_backend else 'SMC_TRADE_SELECTOR',
         'dataset':{'bars':len(bars),'symbol':symbol,'sha256':fingerprint,'gaps':gaps[-1],
                    'window':_window_iso(bars,0,len(bars))},
         'method':{'folds':5,'horizon':horizon,'evaluation_stride':stride,'training_stride':train_stride,
@@ -125,13 +131,17 @@ def run(db, *, symbol='XAUUSD_KAGGLE', output_dir='data/trade_selector_lab',
                   'stop_atr':1.5,'target_atr':3.,'feature_schema':SELECTOR_SCHEMA,
                   'feature_names':SELECTOR_FEATURES,'label':'hypothetical BUY and SELL net R, next-open entry',
                   'inner_validation':'last 25% of prior history; purge all label overlap',
-                  'selection_grid':{'l2':[.1,1.,10.],'threshold_r':[0.,.05,.1]},
+                  'selection_grid':({'trees':tree_backend.CONFIGS,'threshold_r':[0.,.05,.1]} if tree_backend
+                                    else {'l2':[.1,1.,10.],'threshold_r':[0.,.05,.1]}),
+                  'backend':backend,'cpu_workers':cpu_workers if tree_backend else 1,
+                  'xgboost_version':xgboost.__version__ if tree_backend else None,
                   'inner_gate':'>=30 trades, PF>1 and MeanR>0; rank by MeanR',
                   'no_inner_candidate':'WAIT entire outer fold; never choose from held-out outcomes',
                   'gap_guard':'exclude horizon deltas !=900s; context may contain historical gaps',
                   'live_changes':False,
                   'implementation_sha256':{n:hashlib.sha256(Path(__file__).with_name(n).read_bytes()).hexdigest()
-                    for n in ('trade_selector_lab.py','smc_local_lab.py','smc_features.py','historical_benchmark.py','core.py')}},
+                    for n in ('trade_selector_lab.py','smc_local_lab.py','smc_features.py','historical_benchmark.py','core.py')
+                        + (('xgboost_lab.py',) if tree_backend else ())}},
         'limitations':['External assumed spreads; no live EA management, tick fills or slippage.',
                        'Pure research decision policy does not run or weaken live entry filters.',
                        'Baselines below use the same fixed exits, not the legacy forecast entry filters.',
@@ -156,22 +166,33 @@ def run(db, *, symbol='XAUUSD_KAGGLE', output_dir='data/trade_selector_lab',
             progress.update(fold*2000+int(400*(i-256)/max(1,start-256)),stage=f'fold {fold+1}: labels/features')
         validation_start=256+(start-256)*3//4
         progress.update(fold*2000+400,stage=f'fold {fold+1}: inner selection',force=True)
-        selected,candidates,inner=select_inner(training,labels,horizon=horizon,
+        selector=tree_backend.select_inner if tree_backend else select_inner
+        selected,candidates,inner=selector(training,labels,horizon=horizon,
                                                training_start=256,validation_start=validation_start,
-                                               artifact_dir=destination/f'fold_{fold+1}_inner_models')
+                                               artifact_dir=destination/f'fold_{fold+1}_inner_models',
+                                               **({'cpu_workers':cpu_workers} if tree_backend else {}))
         pair=None
         if selected:
-            pair=tuple(fit([x for i,x in training],[labels[i][side][0] for i,x in training],
-                        l2=selected['l2'],feature_names=SELECTOR_FEATURES,metadata={'side':side,'label':'net_trade_R',
-                        'last_training_label_index':training[-1][0]+horizon,'outer_start':start})
-                        for side in ('BUY','SELL'))
-            (destination/f'fold_{fold+1}_model.json').write_text(json.dumps(
-                {'schema':SELECTOR_SCHEMA,'models':[asdict(m) for m in pair],'selected':selected,'features':SELECTOR_FEATURES},indent=2)+'\n')
+            if tree_backend:
+                pair=tree_backend.fit_pair(training,labels,selected,cpu_workers=cpu_workers,
+                    artifact_dir=destination/f'fold_{fold+1}_outer_models',metadata={
+                    'last_training_label_index':training[-1][0]+horizon,'outer_start':start,
+                    'dataset_sha256':fingerprint})
+            else:
+                pair=tuple(fit([x for i,x in training],[labels[i][side][0] for i,x in training],
+                            l2=selected['l2'],feature_names=SELECTOR_FEATURES,metadata={'side':side,'label':'net_trade_R',
+                            'last_training_label_index':training[-1][0]+horizon,'outer_start':start})
+                            for side in ('BUY','SELL'))
+                (destination/f'fold_{fold+1}_model.json').write_text(json.dumps(
+                    {'schema':SELECTOR_SCHEMA,'models':[asdict(m) for m in pair],'selected':selected,'features':SELECTOR_FEATURES},indent=2)+'\n')
         evaluation=[]
         for i in range(start,end-horizon,stride):
             if horizon_is_contiguous(gaps,i,horizon) and atr14(bars[i-255:i+1])>point:
                 evaluation.append(sample(i))
             progress.update(fold*2000+800+int(1100*(i-start)/max(1,end-start)),stage=f'fold {fold+1}: held-out evaluation')
+        if pair and tree_backend:
+            for model in pair:
+                model.prefill([x for i,x in evaluation])
         policies={'SELECTOR':lambda i,x:choose(pair,x,selected['threshold_r']) if pair else 'WAIT',
                   'always_buy':lambda i,x:'BUY','always_sell':lambda i,x:'SELL',
                   'previous_bar':lambda i,x:move_side(bars[i].close-bars[i-1].close),

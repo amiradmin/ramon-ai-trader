@@ -1,0 +1,96 @@
+{
+  "dataset": "CarlosSilva1/xauusd-ticks",
+  "observed_revision": "d14fc64dc3b0452732e60662d94b500a6bb3d534",
+  "license": "CC-BY-4.0",
+  "attribution": "Silva, C. (2026), XAU/USD Tick Data, Hugging Face.",
+  "source_url": "https://huggingface.co/datasets/CarlosSilva1/xauusd-ticks",
+  "timezone_basis": "dataset card declares UTC; preview timestamps are naive",
+  "sample_type": "three bounded viewer windows, at most 100 rows each",
+  "revision_binding": "viewer response not cryptographically tied to repository revision",
+  "limitations": [
+    "Small selected windows are not representative of the whole feed.",
+    "Source describes reconstructed broker feed; broker is not independently verified.",
+    "No LiteFinance equivalence, fill/slippage calibration or live use established."
+  ],
+  "windows": [
+    {
+      "offset": 0,
+      "audit": {
+        "rows": 100,
+        "valid_rows": 100,
+        "invalid_rows": 0,
+        "backward_timestamps": 0,
+        "duplicate_timestamps": 0,
+        "zero_spreads": 0,
+        "naive_timestamps": 100,
+        "first_utc": "2021-05-24T00:00:00.256000+00:00",
+        "last_utc": "2021-05-24T00:00:54.768000+00:00",
+        "spread_price": {
+          "min": 0.3569999999999709,
+          "median": 0.4069999999999254,
+          "mean": 0.4041399999999817,
+          "max": 0.43000000000006366
+        },
+        "reference_point": 0.01,
+        "median_spread_reference_points": 40.69999999999254,
+        "can_calibrate_execution": false
+      },
+      "sha256": "0eb18b63a7959c60807872efd5ea448e4a6605555303c45b7838b5ed72bad502",
+      "sample_file": "data/tick_sample_audit/offset_0.json"
+    },
+    {
+      "offset": 1000000,
+      "audit": {
+        "rows": 100,
+        "valid_rows": 100,
+        "invalid_rows": 0,
+        "backward_timestamps": 0,
+        "duplicate_timestamps": 0,
+        "zero_spreads": 0,
+        "naive_timestamps": 100,
+        "first_utc": "2021-05-28T15:17:34.928000+00:00",
+        "last_utc": "2021-05-28T15:17:57.367000+00:00",
+        "spread_price": {
+          "min": 0.25700000000006185,
+          "median": 0.31399999999985084,
+          "mean": 0.30723999999995383,
+          "max": 0.34400000000005093
+        },
+        "reference_point": 0.01,
+        "median_spread_reference_points": 31.399999999985084,
+        "can_calibrate_execution": false
+      },
+      "sha256": "02a2f4855a7b8edfc30c121e80ec8f6882c0380f1668b964fbceb0ec6b7357ce",
+      "sample_file": "data/tick_sample_audit/offset_1000000.json"
+    },
+    {
+      "offset": 100000000,
+      "audit": {
+        "rows": 100,
+        "valid_rows": 100,
+        "invalid_rows": 0,
+        "backward_timestamps": 0,
+        "duplicate_timestamps": 0,
+        "zero_spreads": 0,
+        "naive_timestamps": 100,
+        "first_utc": "2023-05-24T19:29:57.679000+00:00",
+        "last_utc": "2023-05-24T19:30:38.308000+00:00",
+        "spread_price": {
+          "min": 0.30999999999994543,
+          "median": 0.3369999999999891,
+          "mean": 0.3379699999999798,
+          "max": 0.3669999999999618
+        },
+        "reference_point": 0.01,
+        "median_spread_reference_points": 33.69999999999891,
+        "can_calibrate_execution": false
+      },
+      "sha256": "8b1c86fcab0fce7eb3e3866706a5f1a314167616263a62afe1c4fae2199e0b6a",
+      "sample_file": "data/tick_sample_audit/offset_100000000.json"
+    }
+  ],
+  "revision_unchanged_during_fetch": true,
+  "fetched_rows": 300,
+  "usable_for_initial_inspection": true,
+  "can_calibrate_execution": false
+}

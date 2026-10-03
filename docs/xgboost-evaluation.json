@@ -1,0 +1,2067 @@
+{
+  "schema_version": 1,
+  "advisor": "SMC_XGBOOST",
+  "dataset": {
+    "bars": 494235,
+    "symbol": "XAUUSD_KAGGLE",
+    "sha256": "e491f8fc1e7defd48b240aa06694212a683f47bec8f0c0e2ac40ed0321bba5ec",
+    "gaps": 8520,
+    "window": {
+      "start_index": 0,
+      "end_index_exclusive": 494235,
+      "start_utc": "2004-06-11T04:15:00+00:00",
+      "end_utc": "2026-01-30T20:45:00+00:00",
+      "bars": 494235
+    }
+  },
+  "method": {
+    "folds": 5,
+    "horizon": 4,
+    "evaluation_stride": 4,
+    "training_stride": 16,
+    "point": 0.01,
+    "fallback_spread": 42,
+    "additional_cost_r": 0.1,
+    "stop_atr": 1.5,
+    "target_atr": 3.0,
+    "feature_schema": "smc-trade-selector-v1",
+    "feature_names": [
+      "Open",
+      "High",
+      "Low",
+      "Close",
+      "SMA_20",
+      "SMA_50",
+      "EMA_12",
+      "EMA_26",
+      "BB_upper",
+      "BB_middle",
+      "BB_lower",
+      "Close_lag1",
+      "Close_lag2",
+      "Close_lag3",
+      "MACD",
+      "MACD_signal",
+      "MACD_hist",
+      "FVG_Size",
+      "RSI",
+      "FVG_Type",
+      "OB_Type",
+      "Recovery_Type",
+      "signal_spread_atr",
+      "atr_pct"
+    ],
+    "label": "hypothetical BUY and SELL net R, next-open entry",
+    "inner_validation": "last 25% of prior history; purge all label overlap",
+    "selection_grid": {
+      "trees": [
+        {
+          "max_depth": 2,
+          "rounds": 100
+        },
+        {
+          "max_depth": 4,
+          "rounds": 150
+        },
+        {
+          "max_depth": 6,
+          "rounds": 200
+        }
+      ],
+      "threshold_r": [
+        0.0,
+        0.05,
+        0.1
+      ]
+    },
+    "backend": "xgboost",
+    "cpu_workers": 2,
+    "xgboost_version": "3.0.5",
+    "inner_gate": ">=30 trades, PF>1 and MeanR>0; rank by MeanR",
+    "no_inner_candidate": "WAIT entire outer fold; never choose from held-out outcomes",
+    "gap_guard": "exclude horizon deltas !=900s; context may contain historical gaps",
+    "live_changes": false,
+    "implementation_sha256": {
+      "trade_selector_lab.py": "8c27eea2f3b3f00346b9d9ac2fd79f74ec9524f5f107a974dfc8dabd250c9f0a",
+      "smc_local_lab.py": "47303954620911e7b66d8fbbcb6f88e208818b77e45beabe1c2e7c5566413064",
+      "smc_features.py": "af608d222035f364cb58b08406fee0139dadf2ac410022c256e460624256d0ab",
+      "historical_benchmark.py": "4c34a1c520653e009bf6514a04486641b95f3e32230e8e25e92fa355276f854a",
+      "core.py": "b7fcb7735d4d198cdb6375a7a15a77ccccfa71324d10ebfd677552ecc65e199e",
+      "xgboost_lab.py": "24e9e08ca6ee3e92d0445851d28aa9b8174fdb21b3526c75baa9b31270a7c9d1"
+    }
+  },
+  "limitations": [
+    "External assumed spreads; no live EA management, tick fills or slippage.",
+    "Pure research decision policy does not run or weaken live entry filters.",
+    "Baselines below use the same fixed exits, not the legacy forecast entry filters.",
+    "Gap exclusions use future timestamps for offline eligibility only.",
+    "Drawdown is closed-trade R, not intratrade equity drawdown.",
+    "Archive reused in prior research; algorithmic OOS is not a pristine project-level holdout."
+  ],
+  "folds": [
+    {
+      "fold": 1,
+      "evaluation": {
+        "start_index": 98847,
+        "end_index_exclusive": 177924,
+        "start_utc": "2008-12-18T12:30:00+00:00",
+        "end_utc": "2012-07-10T16:00:00+00:00",
+        "bars": 79077
+      },
+      "training_samples": 5497,
+      "last_training_label_index": 98836,
+      "inner": {
+        "train_samples": 4030,
+        "validation_samples": 1467,
+        "last_training_label_index": 74196,
+        "validation_start_index": 74199
+      },
+      "inner_candidates": [
+        {
+          "max_depth": 2,
+          "rounds": 100,
+          "threshold_r": 0.0,
+          "metrics": {
+            "trades": 19,
+            "buys": 19,
+            "sells": 0,
+            "wins": 3,
+            "losses": 11,
+            "timed_out": 5,
+            "resolved_win_rate": 0.214286,
+            "timeout_rate": 0.263158,
+            "profit_factor": 0.553104,
+            "gross_profit_r": 7.0111,
+            "gross_loss_r": 12.676,
+            "mean_r": -0.298149,
+            "net_r": -5.6648,
+            "max_drawdown_r": 7.5648
+          }
+        },
+        {
+          "max_depth": 2,
+          "rounds": 100,
+          "threshold_r": 0.05,
+          "metrics": {
+            "trades": 13,
+            "buys": 13,
+            "sells": 0,
+            "wins": 1,
+            "losses": 8,
+            "timed_out": 4,
+            "resolved_win_rate": 0.111111,
+            "timeout_rate": 0.307692,
+            "profit_factor": 0.350199,
+            "gross_profit_r": 3.2111,
+            "gross_loss_r": 9.1694,
+            "mean_r": -0.458332,
+            "net_r": -5.9583,
+            "max_drawdown_r": 5.9583
+          }
+        },
+        {
+          "max_depth": 2,
+          "rounds": 100,
+          "threshold_r": 0.1,
+          "metrics": {
+            "trades": 5,
+            "buys": 5,
+            "sells": 0,
+            "wins": 1,
+            "losses": 4,
+            "timed_out": 0,
+            "resolved_win_rate": 0.2,
+            "timeout_rate": 0.0,
+            "profit_factor": 0.431818,
+            "gross_profit_r": 1.9,
+            "gross_loss_r": 4.4,
+            "mean_r": -0.5,
+            "net_r": -2.5,
+            "max_drawdown_r": 3.3
+          }
+        },
+        {
+          "max_depth": 4,
+          "rounds": 150,
+          "threshold_r": 0.0,
+          "metrics": {
+            "trades": 72,
+            "buys": 51,
+            "sells": 21,
+            "wins": 5,
+            "losses": 26,
+            "timed_out": 41,
+            "resolved_win_rate": 0.16129,
+            "timeout_rate": 0.569444,
+            "profit_factor": 0.560364,
+            "gross_profit_r": 20.7171,
+            "gross_loss_r": 36.9708,
+            "mean_r": -0.225746,
+            "net_r": -16.2537,
+            "max_drawdown_r": 18.9919
+          }
+        },
+        {
+          "max_depth": 4,
+          "rounds": 150,
+          "threshold_r": 0.05,
+          "metrics": {
+            "trades": 47,
+            "buys": 35,
+            "sells": 12,
+            "wins": 3,
+            "losses": 23,
+            "timed_out": 21,
+            "resolved_win_rate": 0.115385,
+            "timeout_rate": 0.446809,
+            "profit_factor": 0.3813,
+            "gross_profit_r": 11.028,
+            "gross_loss_r": 28.9221,
+            "mean_r": -0.380725,
+            "net_r": -17.8941,
+            "max_drawdown_r": 20.2213
+          }
+        },
+        {
+          "max_depth": 4,
+          "rounds": 150,
+          "threshold_r": 0.1,
+          "metrics": {
+            "trades": 37,
+            "buys": 28,
+            "sells": 9,
+            "wins": 3,
+            "losses": 17,
+            "timed_out": 17,
+            "resolved_win_rate": 0.15,
+            "timeout_rate": 0.459459,
+            "profit_factor": 0.516891,
+            "gross_profit_r": 11.0107,
+            "gross_loss_r": 21.3018,
+            "mean_r": -0.278137,
+            "net_r": -10.2911,
+            "max_drawdown_r": 12.6183
+          }
+        },
+        {
+          "max_depth": 6,
+          "rounds": 200,
+          "threshold_r": 0.0,
+          "metrics": {
+            "trades": 171,
+            "buys": 115,
+            "sells": 56,
+            "wins": 9,
+            "losses": 56,
+            "timed_out": 106,
+            "resolved_win_rate": 0.138462,
+            "timeout_rate": 0.619883,
+            "profit_factor": 0.519068,
+            "gross_profit_r": 42.8079,
+            "gross_loss_r": 82.4707,
+            "mean_r": -0.231946,
+            "net_r": -39.6628,
+            "max_drawdown_r": 44.0496
+          }
+        },
+        {
+          "max_depth": 6,
+          "rounds": 200,
+          "threshold_r": 0.05,
+          "metrics": {
+            "trades": 112,
+            "buys": 73,
+            "sells": 39,
+            "wins": 7,
+            "losses": 39,
+            "timed_out": 66,
+            "resolved_win_rate": 0.152174,
+            "timeout_rate": 0.589286,
+            "profit_factor": 0.53626,
+            "gross_profit_r": 29.6238,
+            "gross_loss_r": 55.2416,
+            "mean_r": -0.22873,
+            "net_r": -25.6178,
+            "max_drawdown_r": 28.9821
+          }
+        },
+        {
+          "max_depth": 6,
+          "rounds": 200,
+          "threshold_r": 0.1,
+          "metrics": {
+            "trades": 75,
+            "buys": 47,
+            "sells": 28,
+            "wins": 6,
+            "losses": 25,
+            "timed_out": 44,
+            "resolved_win_rate": 0.193548,
+            "timeout_rate": 0.586667,
+            "profit_factor": 0.693491,
+            "gross_profit_r": 24.3973,
+            "gross_loss_r": 35.1804,
+            "mean_r": -0.143775,
+            "net_r": -10.7831,
+            "max_drawdown_r": 14.4084
+          }
+        }
+      ],
+      "selected": null,
+      "inner_model_artifacts": "data/xgboost_lab/fold_1_inner_models",
+      "rejection": "no_inner_candidate_meets_predeclared_gate",
+      "models": {
+        "SELECTOR": {
+          "metrics": {
+            "trades": 0,
+            "buys": 0,
+            "sells": 0,
+            "wins": 0,
+            "losses": 0,
+            "timed_out": 0,
+            "resolved_win_rate": null,
+            "timeout_rate": null,
+            "profit_factor": null,
+            "gross_profit_r": 0,
+            "gross_loss_r": 0,
+            "mean_r": null,
+            "net_r": 0,
+            "max_drawdown_r": 0.0
+          },
+          "decisions": {
+            "WAIT": 18637
+          }
+        },
+        "always_buy": {
+          "metrics": {
+            "trades": 11284,
+            "buys": 11284,
+            "sells": 0,
+            "wins": 495,
+            "losses": 3829,
+            "timed_out": 6960,
+            "resolved_win_rate": 0.114477,
+            "timeout_rate": 0.616803,
+            "profit_factor": 0.473217,
+            "gross_profit_r": 2625.6182,
+            "gross_loss_r": 5548.4452,
+            "mean_r": -0.259024,
+            "net_r": -2922.8271,
+            "max_drawdown_r": 2922.8757
+          },
+          "decisions": {
+            "BUY": 11284
+          }
+        },
+        "always_sell": {
+          "metrics": {
+            "trades": 11308,
+            "buys": 0,
+            "sells": 11308,
+            "wins": 561,
+            "losses": 3832,
+            "timed_out": 6915,
+            "resolved_win_rate": 0.127703,
+            "timeout_rate": 0.611514,
+            "profit_factor": 0.450422,
+            "gross_profit_r": 2578.3193,
+            "gross_loss_r": 5724.233,
+            "mean_r": -0.278202,
+            "net_r": -3145.9137,
+            "max_drawdown_r": 3148.7879
+          },
+          "decisions": {
+            "SELL": 11308
+          }
+        },
+        "previous_bar": {
+          "metrics": {
+            "trades": 11269,
+            "buys": 5759,
+            "sells": 5510,
+            "wins": 544,
+            "losses": 3875,
+            "timed_out": 6850,
+            "resolved_win_rate": 0.123105,
+            "timeout_rate": 0.607862,
+            "profit_factor": 0.443556,
+            "gross_profit_r": 2543.984,
+            "gross_loss_r": 5735.4283,
+            "mean_r": -0.283206,
+            "net_r": -3191.4443,
+            "max_drawdown_r": 3194.3237
+          },
+          "decisions": {
+            "SELL": 5510,
+            "BUY": 5759,
+            "WAIT": 100
+          }
+        },
+        "contrarian_previous_bar": {
+          "metrics": {
+            "trades": 11235,
+            "buys": 5501,
+            "sells": 5734,
+            "wins": 520,
+            "losses": 3785,
+            "timed_out": 6930,
+            "resolved_win_rate": 0.12079,
+            "timeout_rate": 0.616822,
+            "profit_factor": 0.48296,
+            "gross_profit_r": 2663.3657,
+            "gross_loss_r": 5514.6714,
+            "mean_r": -0.253788,
+            "net_r": -2851.3057,
+            "max_drawdown_r": 2851.3543
+          },
+          "decisions": {
+            "BUY": 5501,
+            "SELL": 5734,
+            "WAIT": 92
+          }
+        },
+        "momentum_4bar": {
+          "metrics": {
+            "trades": 11276,
+            "buys": 5800,
+            "sells": 5476,
+            "wins": 605,
+            "losses": 3852,
+            "timed_out": 6819,
+            "resolved_win_rate": 0.135742,
+            "timeout_rate": 0.604736,
+            "profit_factor": 0.46038,
+            "gross_profit_r": 2655.6272,
+            "gross_loss_r": 5768.338,
+            "mean_r": -0.276047,
+            "net_r": -3112.7108,
+            "max_drawdown_r": 3116.5108
+          },
+          "decisions": {
+            "SELL": 5476,
+            "BUY": 5800,
+            "WAIT": 58
+          }
+        },
+        "contrarian_momentum_4bar": {
+          "metrics": {
+            "trades": 11251,
+            "buys": 5483,
+            "sells": 5768,
+            "wins": 449,
+            "losses": 3805,
+            "timed_out": 6997,
+            "resolved_win_rate": 0.105548,
+            "timeout_rate": 0.6219,
+            "profit_factor": 0.465881,
+            "gross_profit_r": 2549.203,
+            "gross_loss_r": 5471.7925,
+            "mean_r": -0.259763,
+            "net_r": -2922.5894,
+            "max_drawdown_r": 2924.0076
+          },
+          "decisions": {
+            "BUY": 5483,
+            "SELL": 5768,
+            "WAIT": 49
+          }
+        }
+      }
+    },
+    {
+      "fold": 2,
+      "evaluation": {
+        "start_index": 177924,
+        "end_index_exclusive": 257002,
+        "start_utc": "2012-07-10T16:15:00+00:00",
+        "end_utc": "2015-11-24T07:15:00+00:00",
+        "bars": 79078
+      },
+      "training_samples": 10179,
+      "last_training_label_index": 177908,
+      "inner": {
+        "train_samples": 7551,
+        "validation_samples": 2627,
+        "last_training_label_index": 133492,
+        "validation_start_index": 133507
+      },
+      "inner_candidates": [
+        {
+          "max_depth": 2,
+          "rounds": 100,
+          "threshold_r": 0.0,
+          "metrics": {
+            "trades": 0,
+            "buys": 0,
+            "sells": 0,
+            "wins": 0,
+            "losses": 0,
+            "timed_out": 0,
+            "resolved_win_rate": null,
+            "timeout_rate": null,
+            "profit_factor": null,
+            "gross_profit_r": 0,
+            "gross_loss_r": 0,
+            "mean_r": null,
+            "net_r": 0,
+            "max_drawdown_r": 0.0
+          }
+        },
+        {
+          "max_depth": 2,
+          "rounds": 100,
+          "threshold_r": 0.05,
+          "metrics": {
+            "trades": 0,
+            "buys": 0,
+            "sells": 0,
+            "wins": 0,
+            "losses": 0,
+            "timed_out": 0,
+            "resolved_win_rate": null,
+            "timeout_rate": null,
+            "profit_factor": null,
+            "gross_profit_r": 0,
+            "gross_loss_r": 0,
+            "mean_r": null,
+            "net_r": 0,
+            "max_drawdown_r": 0.0
+          }
+        },
+        {
+          "max_depth": 2,
+          "rounds": 100,
+          "threshold_r": 0.1,
+          "metrics": {
+            "trades": 0,
+            "buys": 0,
+            "sells": 0,
+            "wins": 0,
+            "losses": 0,
+            "timed_out": 0,
+            "resolved_win_rate": null,
+            "timeout_rate": null,
+            "profit_factor": null,
+            "gross_profit_r": 0,
+            "gross_loss_r": 0,
+            "mean_r": null,
+            "net_r": 0,
+            "max_drawdown_r": 0.0
+          }
+        },
+        {
+          "max_depth": 4,
+          "rounds": 150,
+          "threshold_r": 0.0,
+          "metrics": {
+            "trades": 129,
+            "buys": 91,
+            "sells": 38,
+            "wins": 4,
+            "losses": 35,
+            "timed_out": 90,
+            "resolved_win_rate": 0.102564,
+            "timeout_rate": 0.697674,
+            "profit_factor": 0.749894,
+            "gross_profit_r": 38.9319,
+            "gross_loss_r": 51.9165,
+            "mean_r": -0.100656,
+            "net_r": -12.9846,
+            "max_drawdown_r": 19.7888
+          }
+        },
+        {
+          "max_depth": 4,
+          "rounds": 150,
+          "threshold_r": 0.05,
+          "metrics": {
+            "trades": 64,
+            "buys": 51,
+            "sells": 13,
+            "wins": 1,
+            "losses": 19,
+            "timed_out": 44,
+            "resolved_win_rate": 0.05,
+            "timeout_rate": 0.6875,
+            "profit_factor": 0.651272,
+            "gross_profit_r": 17.847,
+            "gross_loss_r": 27.4033,
+            "mean_r": -0.149317,
+            "net_r": -9.5563,
+            "max_drawdown_r": 11.7511
+          }
+        },
+        {
+          "max_depth": 4,
+          "rounds": 150,
+          "threshold_r": 0.1,
+          "metrics": {
+            "trades": 36,
+            "buys": 29,
+            "sells": 7,
+            "wins": 1,
+            "losses": 9,
+            "timed_out": 26,
+            "resolved_win_rate": 0.1,
+            "timeout_rate": 0.722222,
+            "profit_factor": 0.602464,
+            "gross_profit_r": 8.575,
+            "gross_loss_r": 14.2333,
+            "mean_r": -0.157173,
+            "net_r": -5.6582,
+            "max_drawdown_r": 8.7709
+          }
+        },
+        {
+          "max_depth": 6,
+          "rounds": 200,
+          "threshold_r": 0.0,
+          "metrics": {
+            "trades": 365,
+            "buys": 214,
+            "sells": 151,
+            "wins": 18,
+            "losses": 116,
+            "timed_out": 231,
+            "resolved_win_rate": 0.134328,
+            "timeout_rate": 0.632877,
+            "profit_factor": 0.604814,
+            "gross_profit_r": 103.6709,
+            "gross_loss_r": 171.4095,
+            "mean_r": -0.185585,
+            "net_r": -67.7386,
+            "max_drawdown_r": 74.3412
+          }
+        },
+        {
+          "max_depth": 6,
+          "rounds": 200,
+          "threshold_r": 0.05,
+          "metrics": {
+            "trades": 221,
+            "buys": 128,
+            "sells": 93,
+            "wins": 9,
+            "losses": 79,
+            "timed_out": 133,
+            "resolved_win_rate": 0.102273,
+            "timeout_rate": 0.60181,
+            "profit_factor": 0.513963,
+            "gross_profit_r": 56.5439,
+            "gross_loss_r": 110.0157,
+            "mean_r": -0.241954,
+            "net_r": -53.4718,
+            "max_drawdown_r": 56.4533
+          }
+        },
+        {
+          "max_depth": 6,
+          "rounds": 200,
+          "threshold_r": 0.1,
+          "metrics": {
+            "trades": 147,
+            "buys": 80,
+            "sells": 67,
+            "wins": 6,
+            "losses": 43,
+            "timed_out": 98,
+            "resolved_win_rate": 0.122449,
+            "timeout_rate": 0.666667,
+            "profit_factor": 0.613416,
+            "gross_profit_r": 38.7997,
+            "gross_loss_r": 63.2519,
+            "mean_r": -0.166341,
+            "net_r": -24.4521,
+            "max_drawdown_r": 30.1038
+          }
+        }
+      ],
+      "selected": null,
+      "inner_model_artifacts": "data/xgboost_lab/fold_2_inner_models",
+      "rejection": "no_inner_candidate_meets_predeclared_gate",
+      "models": {
+        "SELECTOR": {
+          "metrics": {
+            "trades": 0,
+            "buys": 0,
+            "sells": 0,
+            "wins": 0,
+            "losses": 0,
+            "timed_out": 0,
+            "resolved_win_rate": null,
+            "timeout_rate": null,
+            "profit_factor": null,
+            "gross_profit_r": 0,
+            "gross_loss_r": 0,
+            "mean_r": null,
+            "net_r": 0,
+            "max_drawdown_r": 0.0
+          },
+          "decisions": {
+            "WAIT": 18891
+          }
+        },
+        "always_buy": {
+          "metrics": {
+            "trades": 11554,
+            "buys": 11554,
+            "sells": 0,
+            "wins": 523,
+            "losses": 4106,
+            "timed_out": 6925,
+            "resolved_win_rate": 0.112983,
+            "timeout_rate": 0.59936,
+            "profit_factor": 0.379583,
+            "gross_profit_r": 2291.2939,
+            "gross_loss_r": 6036.3489,
+            "mean_r": -0.324135,
+            "net_r": -3745.055,
+            "max_drawdown_r": 3746.1379
+          },
+          "decisions": {
+            "BUY": 11554
+          }
+        },
+        "always_sell": {
+          "metrics": {
+            "trades": 11468,
+            "buys": 0,
+            "sells": 11468,
+            "wins": 565,
+            "losses": 3882,
+            "timed_out": 7021,
+            "resolved_win_rate": 0.127052,
+            "timeout_rate": 0.612225,
+            "profit_factor": 0.43148,
+            "gross_profit_r": 2491.8203,
+            "gross_loss_r": 5775.0478,
+            "mean_r": -0.286295,
+            "net_r": -3283.2275,
+            "max_drawdown_r": 3284.6879
+          },
+          "decisions": {
+            "SELL": 11468
+          }
+        },
+        "previous_bar": {
+          "metrics": {
+            "trades": 11456,
+            "buys": 5648,
+            "sells": 5808,
+            "wins": 626,
+            "losses": 3921,
+            "timed_out": 6909,
+            "resolved_win_rate": 0.137673,
+            "timeout_rate": 0.60309,
+            "profit_factor": 0.409113,
+            "gross_profit_r": 2447.1337,
+            "gross_loss_r": 5981.555,
+            "mean_r": -0.308521,
+            "net_r": -3534.4213,
+            "max_drawdown_r": 3536.1604
+          },
+          "decisions": {
+            "SELL": 5808,
+            "BUY": 5648,
+            "WAIT": 92
+          }
+        },
+        "contrarian_previous_bar": {
+          "metrics": {
+            "trades": 11443,
+            "buys": 5796,
+            "sells": 5647,
+            "wins": 476,
+            "losses": 3973,
+            "timed_out": 6994,
+            "resolved_win_rate": 0.10699,
+            "timeout_rate": 0.611203,
+            "profit_factor": 0.403276,
+            "gross_profit_r": 2331.8533,
+            "gross_loss_r": 5782.2832,
+            "mean_r": -0.301532,
+            "net_r": -3450.4299,
+            "max_drawdown_r": 3450.4299
+          },
+          "decisions": {
+            "BUY": 5796,
+            "SELL": 5647,
+            "WAIT": 88
+          }
+        },
+        "momentum_4bar": {
+          "metrics": {
+            "trades": 11491,
+            "buys": 5755,
+            "sells": 5736,
+            "wins": 629,
+            "losses": 3961,
+            "timed_out": 6901,
+            "resolved_win_rate": 0.137037,
+            "timeout_rate": 0.600557,
+            "profit_factor": 0.39788,
+            "gross_profit_r": 2415.1722,
+            "gross_loss_r": 6070.0987,
+            "mean_r": -0.318069,
+            "net_r": -3654.9265,
+            "max_drawdown_r": 3657.7841
+          },
+          "decisions": {
+            "SELL": 5736,
+            "BUY": 5755,
+            "WAIT": 36
+          }
+        },
+        "contrarian_momentum_4bar": {
+          "metrics": {
+            "trades": 11487,
+            "buys": 5700,
+            "sells": 5787,
+            "wins": 477,
+            "losses": 4005,
+            "timed_out": 7005,
+            "resolved_win_rate": 0.106426,
+            "timeout_rate": 0.60982,
+            "profit_factor": 0.413008,
+            "gross_profit_r": 2376.0572,
+            "gross_loss_r": 5753.0502,
+            "mean_r": -0.293984,
+            "net_r": -3376.993,
+            "max_drawdown_r": 3377.4894
+          },
+          "decisions": {
+            "BUY": 5700,
+            "SELL": 5787,
+            "WAIT": 44
+          }
+        }
+      }
+    },
+    {
+      "fold": 3,
+      "evaluation": {
+        "start_index": 257002,
+        "end_index_exclusive": 336079,
+        "start_utc": "2015-11-24T07:30:00+00:00",
+        "end_utc": "2019-04-09T00:00:00+00:00",
+        "bars": 79077
+      },
+      "training_samples": 14902,
+      "last_training_label_index": 256996,
+      "inner": {
+        "train_samples": 11070,
+        "validation_samples": 3832,
+        "last_training_label_index": 192804,
+        "validation_start_index": 192815
+      },
+      "inner_candidates": [
+        {
+          "max_depth": 2,
+          "rounds": 100,
+          "threshold_r": 0.0,
+          "metrics": {
+            "trades": 0,
+            "buys": 0,
+            "sells": 0,
+            "wins": 0,
+            "losses": 0,
+            "timed_out": 0,
+            "resolved_win_rate": null,
+            "timeout_rate": null,
+            "profit_factor": null,
+            "gross_profit_r": 0,
+            "gross_loss_r": 0,
+            "mean_r": null,
+            "net_r": 0,
+            "max_drawdown_r": 0.0
+          }
+        },
+        {
+          "max_depth": 2,
+          "rounds": 100,
+          "threshold_r": 0.05,
+          "metrics": {
+            "trades": 0,
+            "buys": 0,
+            "sells": 0,
+            "wins": 0,
+            "losses": 0,
+            "timed_out": 0,
+            "resolved_win_rate": null,
+            "timeout_rate": null,
+            "profit_factor": null,
+            "gross_profit_r": 0,
+            "gross_loss_r": 0,
+            "mean_r": null,
+            "net_r": 0,
+            "max_drawdown_r": 0.0
+          }
+        },
+        {
+          "max_depth": 2,
+          "rounds": 100,
+          "threshold_r": 0.1,
+          "metrics": {
+            "trades": 0,
+            "buys": 0,
+            "sells": 0,
+            "wins": 0,
+            "losses": 0,
+            "timed_out": 0,
+            "resolved_win_rate": null,
+            "timeout_rate": null,
+            "profit_factor": null,
+            "gross_profit_r": 0,
+            "gross_loss_r": 0,
+            "mean_r": null,
+            "net_r": 0,
+            "max_drawdown_r": 0.0
+          }
+        },
+        {
+          "max_depth": 4,
+          "rounds": 150,
+          "threshold_r": 0.0,
+          "metrics": {
+            "trades": 39,
+            "buys": 24,
+            "sells": 15,
+            "wins": 2,
+            "losses": 15,
+            "timed_out": 22,
+            "resolved_win_rate": 0.117647,
+            "timeout_rate": 0.564103,
+            "profit_factor": 0.46152,
+            "gross_profit_r": 8.8313,
+            "gross_loss_r": 19.1353,
+            "mean_r": -0.264204,
+            "net_r": -10.304,
+            "max_drawdown_r": 11.4505
+          }
+        },
+        {
+          "max_depth": 4,
+          "rounds": 150,
+          "threshold_r": 0.05,
+          "metrics": {
+            "trades": 16,
+            "buys": 9,
+            "sells": 7,
+            "wins": 1,
+            "losses": 7,
+            "timed_out": 8,
+            "resolved_win_rate": 0.125,
+            "timeout_rate": 0.5,
+            "profit_factor": 0.380541,
+            "gross_profit_r": 3.5147,
+            "gross_loss_r": 9.2362,
+            "mean_r": -0.357589,
+            "net_r": -5.7214,
+            "max_drawdown_r": 6.1046
+          }
+        },
+        {
+          "max_depth": 4,
+          "rounds": 150,
+          "threshold_r": 0.1,
+          "metrics": {
+            "trades": 8,
+            "buys": 4,
+            "sells": 4,
+            "wins": 1,
+            "losses": 2,
+            "timed_out": 5,
+            "resolved_win_rate": 0.333333,
+            "timeout_rate": 0.625,
+            "profit_factor": 1.254779,
+            "gross_profit_r": 3.4765,
+            "gross_loss_r": 2.7706,
+            "mean_r": 0.088237,
+            "net_r": 0.7059,
+            "max_drawdown_r": 1.6462
+          }
+        },
+        {
+          "max_depth": 6,
+          "rounds": 200,
+          "threshold_r": 0.0,
+          "metrics": {
+            "trades": 209,
+            "buys": 138,
+            "sells": 71,
+            "wins": 11,
+            "losses": 66,
+            "timed_out": 132,
+            "resolved_win_rate": 0.142857,
+            "timeout_rate": 0.631579,
+            "profit_factor": 0.497847,
+            "gross_profit_r": 48.8707,
+            "gross_loss_r": 98.1641,
+            "mean_r": -0.235854,
+            "net_r": -49.2934,
+            "max_drawdown_r": 49.2934
+          }
+        },
+        {
+          "max_depth": 6,
+          "rounds": 200,
+          "threshold_r": 0.05,
+          "metrics": {
+            "trades": 112,
+            "buys": 76,
+            "sells": 36,
+            "wins": 7,
+            "losses": 41,
+            "timed_out": 64,
+            "resolved_win_rate": 0.145833,
+            "timeout_rate": 0.571429,
+            "profit_factor": 0.453831,
+            "gross_profit_r": 25.8268,
+            "gross_loss_r": 56.9084,
+            "mean_r": -0.277514,
+            "net_r": -31.0816,
+            "max_drawdown_r": 31.4721
+          }
+        },
+        {
+          "max_depth": 6,
+          "rounds": 200,
+          "threshold_r": 0.1,
+          "metrics": {
+            "trades": 59,
+            "buys": 36,
+            "sells": 23,
+            "wins": 6,
+            "losses": 22,
+            "timed_out": 31,
+            "resolved_win_rate": 0.214286,
+            "timeout_rate": 0.525424,
+            "profit_factor": 0.518396,
+            "gross_profit_r": 15.2786,
+            "gross_loss_r": 29.4729,
+            "mean_r": -0.240581,
+            "net_r": -14.1943,
+            "max_drawdown_r": 14.1943
+          }
+        }
+      ],
+      "selected": null,
+      "inner_model_artifacts": "data/xgboost_lab/fold_3_inner_models",
+      "rejection": "no_inner_candidate_meets_predeclared_gate",
+      "models": {
+        "SELECTOR": {
+          "metrics": {
+            "trades": 0,
+            "buys": 0,
+            "sells": 0,
+            "wins": 0,
+            "losses": 0,
+            "timed_out": 0,
+            "resolved_win_rate": null,
+            "timeout_rate": null,
+            "profit_factor": null,
+            "gross_profit_r": 0,
+            "gross_loss_r": 0,
+            "mean_r": null,
+            "net_r": 0,
+            "max_drawdown_r": 0.0
+          },
+          "decisions": {
+            "WAIT": 18897
+          }
+        },
+        "always_buy": {
+          "metrics": {
+            "trades": 11632,
+            "buys": 11632,
+            "sells": 0,
+            "wins": 457,
+            "losses": 4362,
+            "timed_out": 6813,
+            "resolved_win_rate": 0.094833,
+            "timeout_rate": 0.585712,
+            "profit_factor": 0.349511,
+            "gross_profit_r": 2223.6981,
+            "gross_loss_r": 6362.3135,
+            "mean_r": -0.355796,
+            "net_r": -4138.6154,
+            "max_drawdown_r": 4140.1224
+          },
+          "decisions": {
+            "BUY": 11632
+          }
+        },
+        "always_sell": {
+          "metrics": {
+            "trades": 11646,
+            "buys": 0,
+            "sells": 11646,
+            "wins": 458,
+            "losses": 4358,
+            "timed_out": 6830,
+            "resolved_win_rate": 0.0951,
+            "timeout_rate": 0.586467,
+            "profit_factor": 0.342009,
+            "gross_profit_r": 2180.119,
+            "gross_loss_r": 6374.4485,
+            "mean_r": -0.360152,
+            "net_r": -4194.3295,
+            "max_drawdown_r": 4194.7496
+          },
+          "decisions": {
+            "SELL": 11646
+          }
+        },
+        "previous_bar": {
+          "metrics": {
+            "trades": 11552,
+            "buys": 5710,
+            "sells": 5842,
+            "wins": 486,
+            "losses": 4311,
+            "timed_out": 6755,
+            "resolved_win_rate": 0.101313,
+            "timeout_rate": 0.584747,
+            "profit_factor": 0.3458,
+            "gross_profit_r": 2209.6721,
+            "gross_loss_r": 6390.0324,
+            "mean_r": -0.361873,
+            "net_r": -4180.3603,
+            "max_drawdown_r": 4181.5094
+          },
+          "decisions": {
+            "BUY": 5710,
+            "SELL": 5842,
+            "WAIT": 113
+          }
+        },
+        "contrarian_previous_bar": {
+          "metrics": {
+            "trades": 11588,
+            "buys": 5824,
+            "sells": 5764,
+            "wins": 423,
+            "losses": 4345,
+            "timed_out": 6820,
+            "resolved_win_rate": 0.088716,
+            "timeout_rate": 0.58854,
+            "profit_factor": 0.340113,
+            "gross_profit_r": 2138.9426,
+            "gross_loss_r": 6288.9173,
+            "mean_r": -0.358127,
+            "net_r": -4149.9746,
+            "max_drawdown_r": 4149.9746
+          },
+          "decisions": {
+            "SELL": 5764,
+            "BUY": 5824,
+            "WAIT": 121
+          }
+        },
+        "momentum_4bar": {
+          "metrics": {
+            "trades": 11578,
+            "buys": 5842,
+            "sells": 5736,
+            "wins": 501,
+            "losses": 4284,
+            "timed_out": 6793,
+            "resolved_win_rate": 0.104702,
+            "timeout_rate": 0.586716,
+            "profit_factor": 0.348963,
+            "gross_profit_r": 2231.8848,
+            "gross_loss_r": 6395.7642,
+            "mean_r": -0.359637,
+            "net_r": -4163.8794,
+            "max_drawdown_r": 4163.8794
+          },
+          "decisions": {
+            "BUY": 5842,
+            "SELL": 5736,
+            "WAIT": 35
+          }
+        },
+        "contrarian_momentum_4bar": {
+          "metrics": {
+            "trades": 11707,
+            "buys": 5758,
+            "sells": 5949,
+            "wins": 388,
+            "losses": 4538,
+            "timed_out": 6781,
+            "resolved_win_rate": 0.078766,
+            "timeout_rate": 0.579226,
+            "profit_factor": 0.326797,
+            "gross_profit_r": 2107.4007,
+            "gross_loss_r": 6448.6575,
+            "mean_r": -0.370826,
+            "net_r": -4341.2568,
+            "max_drawdown_r": 4341.2568
+          },
+          "decisions": {
+            "SELL": 5949,
+            "BUY": 5758,
+            "WAIT": 43
+          }
+        }
+      }
+    },
+    {
+      "fold": 4,
+      "evaluation": {
+        "start_index": 336079,
+        "end_index_exclusive": 415157,
+        "start_utc": "2019-04-09T00:15:00+00:00",
+        "end_utc": "2022-08-15T15:45:00+00:00",
+        "bars": 79078
+      },
+      "training_samples": 19625,
+      "last_training_label_index": 336068,
+      "inner": {
+        "train_samples": 14612,
+        "validation_samples": 5013,
+        "last_training_label_index": 252116,
+        "validation_start_index": 252123
+      },
+      "inner_candidates": [
+        {
+          "max_depth": 2,
+          "rounds": 100,
+          "threshold_r": 0.0,
+          "metrics": {
+            "trades": 0,
+            "buys": 0,
+            "sells": 0,
+            "wins": 0,
+            "losses": 0,
+            "timed_out": 0,
+            "resolved_win_rate": null,
+            "timeout_rate": null,
+            "profit_factor": null,
+            "gross_profit_r": 0,
+            "gross_loss_r": 0,
+            "mean_r": null,
+            "net_r": 0,
+            "max_drawdown_r": 0.0
+          }
+        },
+        {
+          "max_depth": 2,
+          "rounds": 100,
+          "threshold_r": 0.05,
+          "metrics": {
+            "trades": 0,
+            "buys": 0,
+            "sells": 0,
+            "wins": 0,
+            "losses": 0,
+            "timed_out": 0,
+            "resolved_win_rate": null,
+            "timeout_rate": null,
+            "profit_factor": null,
+            "gross_profit_r": 0,
+            "gross_loss_r": 0,
+            "mean_r": null,
+            "net_r": 0,
+            "max_drawdown_r": 0.0
+          }
+        },
+        {
+          "max_depth": 2,
+          "rounds": 100,
+          "threshold_r": 0.1,
+          "metrics": {
+            "trades": 0,
+            "buys": 0,
+            "sells": 0,
+            "wins": 0,
+            "losses": 0,
+            "timed_out": 0,
+            "resolved_win_rate": null,
+            "timeout_rate": null,
+            "profit_factor": null,
+            "gross_profit_r": 0,
+            "gross_loss_r": 0,
+            "mean_r": null,
+            "net_r": 0,
+            "max_drawdown_r": 0.0
+          }
+        },
+        {
+          "max_depth": 4,
+          "rounds": 150,
+          "threshold_r": 0.0,
+          "metrics": {
+            "trades": 24,
+            "buys": 11,
+            "sells": 13,
+            "wins": 1,
+            "losses": 12,
+            "timed_out": 11,
+            "resolved_win_rate": 0.076923,
+            "timeout_rate": 0.458333,
+            "profit_factor": 0.325325,
+            "gross_profit_r": 5.2218,
+            "gross_loss_r": 16.0511,
+            "mean_r": -0.45122,
+            "net_r": -10.8293,
+            "max_drawdown_r": 11.6293
+          }
+        },
+        {
+          "max_depth": 4,
+          "rounds": 150,
+          "threshold_r": 0.05,
+          "metrics": {
+            "trades": 9,
+            "buys": 6,
+            "sells": 3,
+            "wins": 0,
+            "losses": 3,
+            "timed_out": 6,
+            "resolved_win_rate": 0.0,
+            "timeout_rate": 0.666667,
+            "profit_factor": 0.540071,
+            "gross_profit_r": 2.655,
+            "gross_loss_r": 4.9161,
+            "mean_r": -0.251227,
+            "net_r": -2.261,
+            "max_drawdown_r": 2.812
+          }
+        },
+        {
+          "max_depth": 4,
+          "rounds": 150,
+          "threshold_r": 0.1,
+          "metrics": {
+            "trades": 5,
+            "buys": 4,
+            "sells": 1,
+            "wins": 0,
+            "losses": 2,
+            "timed_out": 3,
+            "resolved_win_rate": 0.0,
+            "timeout_rate": 0.6,
+            "profit_factor": 0.368612,
+            "gross_profit_r": 1.181,
+            "gross_loss_r": 3.204,
+            "mean_r": -0.404599,
+            "net_r": -2.023,
+            "max_drawdown_r": 2.104
+          }
+        },
+        {
+          "max_depth": 6,
+          "rounds": 200,
+          "threshold_r": 0.0,
+          "metrics": {
+            "trades": 136,
+            "buys": 73,
+            "sells": 63,
+            "wins": 7,
+            "losses": 58,
+            "timed_out": 71,
+            "resolved_win_rate": 0.107692,
+            "timeout_rate": 0.522059,
+            "profit_factor": 0.334896,
+            "gross_profit_r": 26.6916,
+            "gross_loss_r": 79.701,
+            "mean_r": -0.389775,
+            "net_r": -53.0094,
+            "max_drawdown_r": 54.9094
+          }
+        },
+        {
+          "max_depth": 6,
+          "rounds": 200,
+          "threshold_r": 0.05,
+          "metrics": {
+            "trades": 66,
+            "buys": 33,
+            "sells": 33,
+            "wins": 4,
+            "losses": 33,
+            "timed_out": 29,
+            "resolved_win_rate": 0.108108,
+            "timeout_rate": 0.439394,
+            "profit_factor": 0.314016,
+            "gross_profit_r": 13.956,
+            "gross_loss_r": 44.4435,
+            "mean_r": -0.461932,
+            "net_r": -30.4875,
+            "max_drawdown_r": 30.4875
+          }
+        },
+        {
+          "max_depth": 6,
+          "rounds": 200,
+          "threshold_r": 0.1,
+          "metrics": {
+            "trades": 28,
+            "buys": 16,
+            "sells": 12,
+            "wins": 2,
+            "losses": 12,
+            "timed_out": 14,
+            "resolved_win_rate": 0.142857,
+            "timeout_rate": 0.5,
+            "profit_factor": 0.495279,
+            "gross_profit_r": 7.8837,
+            "gross_loss_r": 15.9178,
+            "mean_r": -0.28693,
+            "net_r": -8.034,
+            "max_drawdown_r": 8.834
+          }
+        }
+      ],
+      "selected": null,
+      "inner_model_artifacts": "data/xgboost_lab/fold_4_inner_models",
+      "rejection": "no_inner_candidate_meets_predeclared_gate",
+      "models": {
+        "SELECTOR": {
+          "metrics": {
+            "trades": 0,
+            "buys": 0,
+            "sells": 0,
+            "wins": 0,
+            "losses": 0,
+            "timed_out": 0,
+            "resolved_win_rate": null,
+            "timeout_rate": null,
+            "profit_factor": null,
+            "gross_profit_r": 0,
+            "gross_loss_r": 0,
+            "mean_r": null,
+            "net_r": 0,
+            "max_drawdown_r": 0.0
+          },
+          "decisions": {
+            "WAIT": 18896
+          }
+        },
+        "always_buy": {
+          "metrics": {
+            "trades": 11434,
+            "buys": 11434,
+            "sells": 0,
+            "wins": 485,
+            "losses": 3831,
+            "timed_out": 7118,
+            "resolved_win_rate": 0.112373,
+            "timeout_rate": 0.622529,
+            "profit_factor": 0.446967,
+            "gross_profit_r": 2514.6111,
+            "gross_loss_r": 5625.9391,
+            "mean_r": -0.272112,
+            "net_r": -3111.3279,
+            "max_drawdown_r": 3113.2279
+          },
+          "decisions": {
+            "BUY": 11434
+          }
+        },
+        "always_sell": {
+          "metrics": {
+            "trades": 11357,
+            "buys": 0,
+            "sells": 11357,
+            "wins": 561,
+            "losses": 3622,
+            "timed_out": 7174,
+            "resolved_win_rate": 0.134114,
+            "timeout_rate": 0.631681,
+            "profit_factor": 0.458952,
+            "gross_profit_r": 2542.4649,
+            "gross_loss_r": 5539.7129,
+            "mean_r": -0.263912,
+            "net_r": -2997.248,
+            "max_drawdown_r": 2998.8702
+          },
+          "decisions": {
+            "SELL": 11357
+          }
+        },
+        "previous_bar": {
+          "metrics": {
+            "trades": 11368,
+            "buys": 5732,
+            "sells": 5636,
+            "wins": 551,
+            "losses": 3724,
+            "timed_out": 7093,
+            "resolved_win_rate": 0.128889,
+            "timeout_rate": 0.623944,
+            "profit_factor": 0.455984,
+            "gross_profit_r": 2572.9956,
+            "gross_loss_r": 5642.7342,
+            "mean_r": -0.270033,
+            "net_r": -3069.7386,
+            "max_drawdown_r": 3072.7699
+          },
+          "decisions": {
+            "SELL": 5636,
+            "BUY": 5732,
+            "WAIT": 68
+          }
+        },
+        "contrarian_previous_bar": {
+          "metrics": {
+            "trades": 11298,
+            "buys": 5563,
+            "sells": 5735,
+            "wins": 483,
+            "losses": 3634,
+            "timed_out": 7181,
+            "resolved_win_rate": 0.117318,
+            "timeout_rate": 0.635599,
+            "profit_factor": 0.461385,
+            "gross_profit_r": 2501.4853,
+            "gross_loss_r": 5421.6817,
+            "mean_r": -0.25847,
+            "net_r": -2920.1964,
+            "max_drawdown_r": 2922.7554
+          },
+          "decisions": {
+            "BUY": 5563,
+            "SELL": 5735,
+            "WAIT": 66
+          }
+        },
+        "momentum_4bar": {
+          "metrics": {
+            "trades": 11382,
+            "buys": 5761,
+            "sells": 5621,
+            "wins": 548,
+            "losses": 3759,
+            "timed_out": 7075,
+            "resolved_win_rate": 0.127235,
+            "timeout_rate": 0.621596,
+            "profit_factor": 0.430786,
+            "gross_profit_r": 2477.1124,
+            "gross_loss_r": 5750.2099,
+            "mean_r": -0.287568,
+            "net_r": -3273.0975,
+            "max_drawdown_r": 3273.5686
+          },
+          "decisions": {
+            "SELL": 5621,
+            "BUY": 5761,
+            "WAIT": 29
+          }
+        },
+        "contrarian_momentum_4bar": {
+          "metrics": {
+            "trades": 11365,
+            "buys": 5562,
+            "sells": 5803,
+            "wins": 508,
+            "losses": 3716,
+            "timed_out": 7141,
+            "resolved_win_rate": 0.120265,
+            "timeout_rate": 0.628333,
+            "profit_factor": 0.473606,
+            "gross_profit_r": 2587.7094,
+            "gross_loss_r": 5463.849,
+            "mean_r": -0.25307,
+            "net_r": -2876.1396,
+            "max_drawdown_r": 2878.6986
+          },
+          "decisions": {
+            "BUY": 5562,
+            "SELL": 5803,
+            "WAIT": 28
+          }
+        }
+      }
+    },
+    {
+      "fold": 5,
+      "evaluation": {
+        "start_index": 415157,
+        "end_index_exclusive": 494235,
+        "start_utc": "2022-08-15T16:00:00+00:00",
+        "end_utc": "2026-01-30T20:45:00+00:00",
+        "bars": 79078
+      },
+      "training_samples": 24341,
+      "last_training_label_index": 415156,
+      "inner": {
+        "train_samples": 18150,
+        "validation_samples": 6191,
+        "last_training_label_index": 311428,
+        "validation_start_index": 311431
+      },
+      "inner_candidates": [
+        {
+          "max_depth": 2,
+          "rounds": 100,
+          "threshold_r": 0.0,
+          "metrics": {
+            "trades": 0,
+            "buys": 0,
+            "sells": 0,
+            "wins": 0,
+            "losses": 0,
+            "timed_out": 0,
+            "resolved_win_rate": null,
+            "timeout_rate": null,
+            "profit_factor": null,
+            "gross_profit_r": 0,
+            "gross_loss_r": 0,
+            "mean_r": null,
+            "net_r": 0,
+            "max_drawdown_r": 0.0
+          }
+        },
+        {
+          "max_depth": 2,
+          "rounds": 100,
+          "threshold_r": 0.05,
+          "metrics": {
+            "trades": 0,
+            "buys": 0,
+            "sells": 0,
+            "wins": 0,
+            "losses": 0,
+            "timed_out": 0,
+            "resolved_win_rate": null,
+            "timeout_rate": null,
+            "profit_factor": null,
+            "gross_profit_r": 0,
+            "gross_loss_r": 0,
+            "mean_r": null,
+            "net_r": 0,
+            "max_drawdown_r": 0.0
+          }
+        },
+        {
+          "max_depth": 2,
+          "rounds": 100,
+          "threshold_r": 0.1,
+          "metrics": {
+            "trades": 0,
+            "buys": 0,
+            "sells": 0,
+            "wins": 0,
+            "losses": 0,
+            "timed_out": 0,
+            "resolved_win_rate": null,
+            "timeout_rate": null,
+            "profit_factor": null,
+            "gross_profit_r": 0,
+            "gross_loss_r": 0,
+            "mean_r": null,
+            "net_r": 0,
+            "max_drawdown_r": 0.0
+          }
+        },
+        {
+          "max_depth": 4,
+          "rounds": 150,
+          "threshold_r": 0.0,
+          "metrics": {
+            "trades": 31,
+            "buys": 21,
+            "sells": 10,
+            "wins": 2,
+            "losses": 11,
+            "timed_out": 18,
+            "resolved_win_rate": 0.153846,
+            "timeout_rate": 0.580645,
+            "profit_factor": 0.589413,
+            "gross_profit_r": 9.1898,
+            "gross_loss_r": 15.5915,
+            "mean_r": -0.206505,
+            "net_r": -6.4017,
+            "max_drawdown_r": 10.9244
+          }
+        },
+        {
+          "max_depth": 4,
+          "rounds": 150,
+          "threshold_r": 0.05,
+          "metrics": {
+            "trades": 13,
+            "buys": 7,
+            "sells": 6,
+            "wins": 1,
+            "losses": 6,
+            "timed_out": 6,
+            "resolved_win_rate": 0.142857,
+            "timeout_rate": 0.461538,
+            "profit_factor": 0.627021,
+            "gross_profit_r": 4.6576,
+            "gross_loss_r": 7.4281,
+            "mean_r": -0.213117,
+            "net_r": -2.7705,
+            "max_drawdown_r": 6.1413
+          }
+        },
+        {
+          "max_depth": 4,
+          "rounds": 150,
+          "threshold_r": 0.1,
+          "metrics": {
+            "trades": 3,
+            "buys": 1,
+            "sells": 2,
+            "wins": 1,
+            "losses": 0,
+            "timed_out": 2,
+            "resolved_win_rate": 1.0,
+            "timeout_rate": 0.666667,
+            "profit_factor": 4.09845,
+            "gross_profit_r": 3.3708,
+            "gross_loss_r": 0.8225,
+            "mean_r": 0.849453,
+            "net_r": 2.5484,
+            "max_drawdown_r": 0.8225
+          }
+        },
+        {
+          "max_depth": 6,
+          "rounds": 200,
+          "threshold_r": 0.0,
+          "metrics": {
+            "trades": 184,
+            "buys": 112,
+            "sells": 72,
+            "wins": 10,
+            "losses": 56,
+            "timed_out": 118,
+            "resolved_win_rate": 0.151515,
+            "timeout_rate": 0.641304,
+            "profit_factor": 0.504695,
+            "gross_profit_r": 44.0522,
+            "gross_loss_r": 87.2848,
+            "mean_r": -0.23496,
+            "net_r": -43.2326,
+            "max_drawdown_r": 46.3402
+          }
+        },
+        {
+          "max_depth": 6,
+          "rounds": 200,
+          "threshold_r": 0.05,
+          "metrics": {
+            "trades": 89,
+            "buys": 50,
+            "sells": 39,
+            "wins": 4,
+            "losses": 26,
+            "timed_out": 59,
+            "resolved_win_rate": 0.133333,
+            "timeout_rate": 0.662921,
+            "profit_factor": 0.555858,
+            "gross_profit_r": 21.1888,
+            "gross_loss_r": 38.1192,
+            "mean_r": -0.190228,
+            "net_r": -16.9303,
+            "max_drawdown_r": 20.6218
+          }
+        },
+        {
+          "max_depth": 6,
+          "rounds": 200,
+          "threshold_r": 0.1,
+          "metrics": {
+            "trades": 37,
+            "buys": 23,
+            "sells": 14,
+            "wins": 1,
+            "losses": 10,
+            "timed_out": 26,
+            "resolved_win_rate": 0.090909,
+            "timeout_rate": 0.702703,
+            "profit_factor": 0.589493,
+            "gross_profit_r": 9.038,
+            "gross_loss_r": 15.3318,
+            "mean_r": -0.170103,
+            "net_r": -6.2938,
+            "max_drawdown_r": 9.4126
+          }
+        }
+      ],
+      "selected": null,
+      "inner_model_artifacts": "data/xgboost_lab/fold_5_inner_models",
+      "rejection": "no_inner_candidate_meets_predeclared_gate",
+      "models": {
+        "SELECTOR": {
+          "metrics": {
+            "trades": 0,
+            "buys": 0,
+            "sells": 0,
+            "wins": 0,
+            "losses": 0,
+            "timed_out": 0,
+            "resolved_win_rate": null,
+            "timeout_rate": null,
+            "profit_factor": null,
+            "gross_profit_r": 0,
+            "gross_loss_r": 0,
+            "mean_r": null,
+            "net_r": 0,
+            "max_drawdown_r": 0.0
+          },
+          "decisions": {
+            "WAIT": 18895
+          }
+        },
+        "always_buy": {
+          "metrics": {
+            "trades": 11206,
+            "buys": 11206,
+            "sells": 0,
+            "wins": 529,
+            "losses": 3348,
+            "timed_out": 7329,
+            "resolved_win_rate": 0.136446,
+            "timeout_rate": 0.654025,
+            "profit_factor": 0.559013,
+            "gross_profit_r": 2840.4015,
+            "gross_loss_r": 5081.1007,
+            "mean_r": -0.199955,
+            "net_r": -2240.6993,
+            "max_drawdown_r": 2244.9895
+          },
+          "decisions": {
+            "BUY": 11206
+          }
+        },
+        "always_sell": {
+          "metrics": {
+            "trades": 11224,
+            "buys": 0,
+            "sells": 11224,
+            "wins": 547,
+            "losses": 3397,
+            "timed_out": 7280,
+            "resolved_win_rate": 0.138692,
+            "timeout_rate": 0.64861,
+            "profit_factor": 0.507476,
+            "gross_profit_r": 2682.3456,
+            "gross_loss_r": 5285.6595,
+            "mean_r": -0.231942,
+            "net_r": -2603.3139,
+            "max_drawdown_r": 2609.5434
+          },
+          "decisions": {
+            "SELL": 11224
+          }
+        },
+        "previous_bar": {
+          "metrics": {
+            "trades": 11182,
+            "buys": 5701,
+            "sells": 5481,
+            "wins": 587,
+            "losses": 3333,
+            "timed_out": 7262,
+            "resolved_win_rate": 0.149745,
+            "timeout_rate": 0.649437,
+            "profit_factor": 0.541135,
+            "gross_profit_r": 2806.0595,
+            "gross_loss_r": 5185.5118,
+            "mean_r": -0.212793,
+            "net_r": -2379.4522,
+            "max_drawdown_r": 2381.9286
+          },
+          "decisions": {
+            "SELL": 5481,
+            "BUY": 5701,
+            "WAIT": 34
+          }
+        },
+        "contrarian_previous_bar": {
+          "metrics": {
+            "trades": 11201,
+            "buys": 5465,
+            "sells": 5736,
+            "wins": 505,
+            "losses": 3412,
+            "timed_out": 7284,
+            "resolved_win_rate": 0.128925,
+            "timeout_rate": 0.650299,
+            "profit_factor": 0.529923,
+            "gross_profit_r": 2740.1497,
+            "gross_loss_r": 5170.8486,
+            "mean_r": -0.217007,
+            "net_r": -2430.6989,
+            "max_drawdown_r": 2436.0649
+          },
+          "decisions": {
+            "BUY": 5465,
+            "SELL": 5736,
+            "WAIT": 37
+          }
+        },
+        "momentum_4bar": {
+          "metrics": {
+            "trades": 11188,
+            "buys": 5810,
+            "sells": 5378,
+            "wins": 563,
+            "losses": 3330,
+            "timed_out": 7295,
+            "resolved_win_rate": 0.144619,
+            "timeout_rate": 0.652038,
+            "profit_factor": 0.528625,
+            "gross_profit_r": 2749.651,
+            "gross_loss_r": 5201.5183,
+            "mean_r": -0.219152,
+            "net_r": -2451.8672,
+            "max_drawdown_r": 2460.657
+          },
+          "decisions": {
+            "BUY": 5810,
+            "SELL": 5378,
+            "WAIT": 14
+          }
+        },
+        "contrarian_momentum_4bar": {
+          "metrics": {
+            "trades": 11241,
+            "buys": 5368,
+            "sells": 5873,
+            "wins": 513,
+            "losses": 3456,
+            "timed_out": 7272,
+            "resolved_win_rate": 0.129252,
+            "timeout_rate": 0.646918,
+            "profit_factor": 0.533649,
+            "gross_profit_r": 2777.659,
+            "gross_loss_r": 5205.0344,
+            "mean_r": -0.215939,
+            "net_r": -2427.3754,
+            "max_drawdown_r": 2429.8902
+          },
+          "decisions": {
+            "SELL": 5873,
+            "BUY": 5368,
+            "WAIT": 18
+          }
+        }
+      }
+    }
+  ],
+  "overall": {
+    "SELECTOR": {
+      "trades": 0,
+      "buys": 0,
+      "sells": 0,
+      "wins": 0,
+      "losses": 0,
+      "timed_out": 0,
+      "resolved_win_rate": null,
+      "timeout_rate": null,
+      "profit_factor": null,
+      "gross_profit_r": 0,
+      "gross_loss_r": 0,
+      "mean_r": null,
+      "net_r": 0,
+      "max_drawdown_r": 0.0
+    },
+    "always_buy": {
+      "trades": 57110,
+      "buys": 57110,
+      "sells": 0,
+      "wins": 2489,
+      "losses": 19476,
+      "timed_out": 35145,
+      "resolved_win_rate": 0.113317,
+      "timeout_rate": 0.615391,
+      "profit_factor": 0.436084,
+      "gross_profit_r": 12495.6227,
+      "gross_loss_r": 28654.1474,
+      "mean_r": -0.282937,
+      "net_r": -16158.5247,
+      "max_drawdown_r": 16161.9936
+    },
+    "always_sell": {
+      "trades": 57003,
+      "buys": 0,
+      "sells": 57003,
+      "wins": 2692,
+      "losses": 19091,
+      "timed_out": 35220,
+      "resolved_win_rate": 0.123583,
+      "timeout_rate": 0.617862,
+      "profit_factor": 0.434685,
+      "gross_profit_r": 12475.069,
+      "gross_loss_r": 28699.1017,
+      "mean_r": -0.284617,
+      "net_r": -16224.0326,
+      "max_drawdown_r": 16232.1622
+    },
+    "previous_bar": {
+      "trades": 56827,
+      "buys": 28550,
+      "sells": 28277,
+      "wins": 2794,
+      "losses": 19164,
+      "timed_out": 34869,
+      "resolved_win_rate": 0.127243,
+      "timeout_rate": 0.613599,
+      "profit_factor": 0.434758,
+      "gross_profit_r": 12579.8449,
+      "gross_loss_r": 28935.2616,
+      "mean_r": -0.287811,
+      "net_r": -16355.4167,
+      "max_drawdown_r": 16359.793
+    },
+    "contrarian_previous_bar": {
+      "trades": 56765,
+      "buys": 28149,
+      "sells": 28616,
+      "wins": 2407,
+      "losses": 19149,
+      "timed_out": 35209,
+      "resolved_win_rate": 0.111663,
+      "timeout_rate": 0.620259,
+      "profit_factor": 0.439194,
+      "gross_profit_r": 12375.7966,
+      "gross_loss_r": 28178.4022,
+      "mean_r": -0.278386,
+      "net_r": -15802.6056,
+      "max_drawdown_r": 15805.5912
+    },
+    "momentum_4bar": {
+      "trades": 56915,
+      "buys": 28968,
+      "sells": 27947,
+      "wins": 2846,
+      "losses": 19186,
+      "timed_out": 34883,
+      "resolved_win_rate": 0.129176,
+      "timeout_rate": 0.612896,
+      "profit_factor": 0.429298,
+      "gross_profit_r": 12529.4477,
+      "gross_loss_r": 29185.9291,
+      "mean_r": -0.292655,
+      "net_r": -16656.4814,
+      "max_drawdown_r": 16666.3773
+    },
+    "contrarian_momentum_4bar": {
+      "trades": 57051,
+      "buys": 27871,
+      "sells": 29180,
+      "wins": 2335,
+      "losses": 19520,
+      "timed_out": 35196,
+      "resolved_win_rate": 0.106841,
+      "timeout_rate": 0.616922,
+      "profit_factor": 0.437438,
+      "gross_profit_r": 12398.0294,
+      "gross_loss_r": 28342.3837,
+      "mean_r": -0.279475,
+      "net_r": -15944.3543,
+      "max_drawdown_r": 15945.5673
+    }
+  },
+  "gate": {
+    "eligible_for_broker_validation": false,
+    "live_promotion": false,
+    "shadow_enabled": false
+  }
+}

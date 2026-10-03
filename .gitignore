@@ -9,3 +9,5 @@ data/
 checkpoints/
 installer/
 .ramon/
+
+.venv-research/
