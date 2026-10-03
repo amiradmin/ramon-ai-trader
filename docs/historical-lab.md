@@ -186,3 +186,31 @@ VOLATILITY_COMPRESSION, or UNCERTAIN even when aggregate accuracy is weak.
 Regime-conditioned results are descriptive research. Require adequate sample
 counts and consistency across chronological folds before treating any apparent
 edge as meaningful.
+
+
+### Regime trade profitability and fold stability
+
+The lab now reports `regime_trade_matrix` for every model and analysis horizon.
+
+Each market state includes trade-level:
+
+- trade count
+- resolved win rate and timeout rate
+- profit factor
+- mean R and net R
+- max drawdown in R
+- BUY/SELL counts
+
+For each state the report also reruns the same horizon in every chronological
+fold and records:
+
+- profitable folds (PF > 1)
+- folds with positive mean R
+- folds containing trades
+- per-fold trades, PF, mean R, net R and max drawdown
+
+This is the preferred screen for candidate edges. A high directional accuracy
+alone is insufficient; prioritize states with enough trades and consistent
+positive trade metrics across multiple independent folds. These results still
+use assumed external spread and coarse M15 OHLC execution, so they remain
+research evidence rather than a live deployment rule.
