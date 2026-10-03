@@ -68,13 +68,19 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
     ensemble = coordinator(ensemble_dir, model.model_id)
     news_enabled = os.getenv("RAMON_NEWS_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
     timesfm3_shadow = TimesFM3Shadow.from_env()
-    moment_shadow = MomentAnomalyShadow.from_env()
-    finbert_shadow = FinBertNewsShadow.from_env()
+    moment_shadow = MomentAnomalyShadow.from_env(lazy=True)
+    finbert_shadow = FinBertNewsShadow.from_env(lazy=True)
     moment_live_enabled = os.getenv("RAMON_MOMENT_LIVE_ENABLED", "1").strip().lower() in {"1","true","yes","on"}
     moment_live_threshold = float(os.getenv("RAMON_MOMENT_LIVE_THRESHOLD", "2.0"))
     finbert_live_enabled = os.getenv("RAMON_FINBERT_LIVE_ENABLED", "1").strip().lower() in {"1","true","yes","on"}
     finbert_live_threshold = float(os.getenv("RAMON_FINBERT_LIVE_THRESHOLD", "0.35"))
     shadow_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ramon-shadow")
+    # Warm heavyweight external models in the background so /health becomes
+    # available immediately after Chronos is ready.
+    if moment_shadow.enabled:
+        shadow_executor.submit(moment_shadow.load)
+    if finbert_shadow.enabled:
+        shadow_executor.submit(finbert_shadow.load)
     moment_future = None
     finbert_future = None
     latest_moment_payload = {
