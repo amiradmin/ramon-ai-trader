@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import io
 import json
 from pathlib import Path
@@ -16,6 +16,7 @@ DATE_FORMAT = "%Y.%m.%d %H:%M"
 EXPECTED_COLUMNS = ("Date", "Open", "High", "Low", "Close", "Volume")
 TIMEFRAME_MINUTES = {"M15": 15}
 DEFAULT_MEMBER = {"M15": "XAU_15m_data.csv"}
+DEFAULT_SOURCE_UTC_OFFSET_HOURS = 3.0
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,7 @@ class AuditReport:
     first_time: str | None
     last_time: str | None
     expected_interval_seconds: int
+    source_utc_offset_hours: float
     regular_intervals: int
     gap_intervals: int
     largest_gap_seconds: int
@@ -83,8 +85,9 @@ def _open_source(
     return handle, str(path), handle
 
 
-def _parse_row(raw: dict[str, str]) -> ParsedBar:
-    dt = datetime.strptime(raw["Date"].strip(), DATE_FORMAT).replace(tzinfo=timezone.utc)
+def _parse_row(raw: dict[str, str], *, source_utc_offset_hours: float) -> ParsedBar:
+    source_tz = timezone(timedelta(hours=source_utc_offset_hours))
+    dt = datetime.strptime(raw["Date"].strip(), DATE_FORMAT).replace(tzinfo=source_tz)
     values = [float(raw[name]) for name in ("Open", "High", "Low", "Close", "Volume")]
     open_, high, low, close, volume = values
     if min(open_, high, low, close) <= 0:
@@ -96,7 +99,9 @@ def _parse_row(raw: dict[str, str]) -> ParsedBar:
     return ParsedBar(int(dt.timestamp()), open_, high, low, close, volume)
 
 
-def _iter_rows(handle: TextIO) -> Iterator[tuple[ParsedBar | None, str | None]]:
+def _iter_rows(
+    handle: TextIO, *, source_utc_offset_hours: float
+) -> Iterator[tuple[ParsedBar | None, str | None]]:
     reader = csv.DictReader(handle, delimiter=";")
     if reader.fieldnames is None:
         raise ValueError("CSV has no header")
@@ -110,13 +115,19 @@ def _iter_rows(handle: TextIO) -> Iterator[tuple[ParsedBar | None, str | None]]:
             (key or "").strip(): (value or "").strip() for key, value in raw.items()
         }
         try:
-            yield _parse_row(normalized), None
+            yield _parse_row(
+                normalized, source_utc_offset_hours=source_utc_offset_hours
+            ), None
         except (KeyError, TypeError, ValueError) as exc:
             yield None, str(exc)
 
 
 def audit_source(
-    source: str | Path, *, timeframe: str = "M15", member: str | None = None
+    source: str | Path,
+    *,
+    timeframe: str = "M15",
+    member: str | None = None,
+    source_utc_offset_hours: float = DEFAULT_SOURCE_UTC_OFFSET_HOURS,
 ) -> AuditReport:
     interval = TIMEFRAME_MINUTES.get(timeframe)
     if interval is None:
@@ -135,7 +146,9 @@ def audit_source(
     seen: set[int] = set()
 
     try:
-        for bar, _error in _iter_rows(handle):
+        for bar, _error in _iter_rows(
+            handle, source_utc_offset_hours=source_utc_offset_hours
+        ):
             rows += 1
             if bar is None:
                 invalid += 1
@@ -184,6 +197,7 @@ def audit_source(
         first_time=iso(first_ts),
         last_time=iso(last_ts),
         expected_interval_seconds=interval_seconds,
+        source_utc_offset_hours=float(source_utc_offset_hours),
         regular_intervals=regular_intervals,
         gap_intervals=gap_intervals,
         largest_gap_seconds=largest_gap,
@@ -225,13 +239,19 @@ def import_source(
     member: str | None = None,
     require_clean: bool = True,
     batch_size: int = 10_000,
+    source_utc_offset_hours: float = DEFAULT_SOURCE_UTC_OFFSET_HOURS,
 ) -> dict[str, object]:
     if not symbol.upper().startswith("XAUUSD"):
         raise ValueError("only XAUUSD variants are supported")
     if batch_size <= 0:
         raise ValueError("batch_size must be positive")
 
-    audit = audit_source(source, timeframe=timeframe, member=member)
+    audit = audit_source(
+        source,
+        timeframe=timeframe,
+        member=member,
+        source_utc_offset_hours=source_utc_offset_hours,
+    )
     if require_clean and not audit.clean:
         raise ValueError(
             f"dataset audit failed: {json.dumps(asdict(audit), sort_keys=True)}"
@@ -267,7 +287,9 @@ def import_source(
 
     try:
         with sqlite3.connect(path, timeout=30) as conn:
-            for bar, _error in _iter_rows(handle):
+            for bar, _error in _iter_rows(
+                handle, source_utc_offset_hours=source_utc_offset_hours
+            ):
                 if bar is None:
                     if require_clean:
                         raise AssertionError("audit/import mismatch")
@@ -307,6 +329,7 @@ def import_source(
         "symbol": symbol,
         "timeframe": timeframe,
         "spread_points_policy": "zero_unknown_external_dataset",
+        "source_utc_offset_hours": float(source_utc_offset_hours),
     }
 
 
@@ -323,6 +346,12 @@ def main() -> None:
     )
     parser.add_argument("--member", help="CSV member name when source is a zip archive")
     parser.add_argument("--audit-only", action="store_true")
+    parser.add_argument(
+        "--source-utc-offset-hours",
+        type=float,
+        default=DEFAULT_SOURCE_UTC_OFFSET_HOURS,
+        help="source wall-clock offset from UTC; this dataset defaults to UTC+3",
+    )
     parser.add_argument("--db", default="/data/ramon_history.sqlite3")
     parser.add_argument("--symbol", default="XAUUSD_KAGGLE")
     parser.add_argument(
@@ -334,7 +363,12 @@ def main() -> None:
 
     if args.audit_only:
         result: object = asdict(
-            audit_source(args.source, timeframe=args.timeframe, member=args.member)
+            audit_source(
+                args.source,
+                timeframe=args.timeframe,
+                member=args.member,
+                source_utc_offset_hours=args.source_utc_offset_hours,
+            )
         )
     else:
         result = import_source(
@@ -344,6 +378,7 @@ def main() -> None:
             timeframe=args.timeframe,
             member=args.member,
             require_clean=not args.allow_dirty,
+            source_utc_offset_hours=args.source_utc_offset_hours,
         )
     print(json.dumps(result, indent=2, sort_keys=True))
 
