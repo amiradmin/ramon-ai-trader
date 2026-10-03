@@ -137,3 +137,29 @@ research assumption, not a claim about historical Octa or LiteFinance spreads.
 The benchmark remains deliberately separate from RANGE execution, quote-level
 micro context, slippage and live EA exit management. A favorable result here is
 not sufficient evidence for a live configuration change.
+
+
+### Directional accuracy and horizon matrix
+
+The benchmark also separates raw directional skill from trade management.
+
+For each model it reports `directional_accuracy` at M15 horizons `1,4,8,16`.
+This compares the sign of the model forecast with the sign of the future close
+move. It does not use stop loss, take profit, entry filters, or market-state
+routing.
+
+It also reports a `horizon_matrix` for `1,4,8,16` bars. That section replays
+the same model with each holding horizon while keeping the same ATR-based stop
+and target settings. This is intended to reveal whether a high TIMEOUT rate is
+primarily caused by an overly short holding horizon.
+
+Override the analysis horizons when needed:
+
+```bash
+PYTHONPATH=src python3 -m ramon.historical_benchmark \
+  --db data/ramon_kaggle_m15.sqlite3 \
+  --symbol XAUUSD_KAGGLE \
+  --analysis-horizons 1,4,8,16 \
+  --fallback-spread 42 \
+  --output data/ramon_historical_benchmark.json
+```
