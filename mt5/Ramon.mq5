@@ -1,5 +1,5 @@
 #property strict
-#property version "1.549"
+#property version "1.550"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -137,6 +137,16 @@ double LastRiskProbability = -1.0;
 double LastRiskMultiplier = 1.0;
 bool LastNewsSourceReady = false;
 bool LastNewsModelReady = false;
+string LastForecastModelHandler = "chronos-2-small";
+string LastForecastShadowModelHandler = "OFF";
+string LastRegimeModelHandler = "Ramon/BinaryLogisticModel";
+string LastEntryModelHandler = "Ramon/BinaryLogisticModel";
+string LastNewsModelHandler = "Ramon/BinaryLogisticModel";
+string LastMetaModelHandler = "Ramon/BinaryLogisticModel";
+string LastRiskModelHandler = "Ramon/BinaryLogisticModel";
+string LastNewsSourceHandler = "ForexFactoryNewsProvider";
+string LastMarketStateHandler = "market-state-v1";
+string LastTargetModelHandler = "Ramon/TargetStructure";
 double LastNewsSourceAgeSeconds = -1.0;
 string LastNewsSource = "NONE";
 string LastNewsEventTitle = "NONE";
@@ -947,6 +957,16 @@ string RoleProbabilityText(const double probability)
    return (probability<0.0 ? "N/A" : DoubleToString(probability*100.0,0)+"%");
 }
 
+string ModelTag(const string handler)
+{
+   if(StringFind(handler,"BinaryLogisticModel")>=0) return "Logistic";
+   if(StringFind(handler,"chronos")>=0 || StringFind(handler,"Chronos")>=0) return "Chronos-2";
+   if(StringFind(handler,"timesfm")>=0 || StringFind(handler,"TimesFM")>=0) return "TimesFM-3";
+   if(StringFind(handler,"TargetStructure")>=0) return "TargetStructure";
+   if(handler=="") return "N/A";
+   return handler;
+}
+
 void DrawDashboard()
 {
    if(!ShowDashboard)
@@ -1018,9 +1038,10 @@ void DrawDashboard()
    // Tall/narrow panel: summary text first, checklist directly underneath.
    UiRect("PANEL",12,24,560,955,C'15,23,42',C'71,85,105');
 
-   UiLabel("TITLE","RAMON AI TRADER  v0.54.9 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.55.0 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
-   UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
+   UiLabel("SUB",_Symbol+" M15 | Forecast ["+ModelTag(LastForecastModelHandler)
+      +"] | Shadow ["+ModelTag(LastForecastShadowModelHandler)+"] | "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,clrWhite,9);
 
    UiLabel("LIVE","LIVE: "+LiveStateText()
@@ -1042,12 +1063,12 @@ void DrawDashboard()
 
    string role_mark=(LastRoleShadow || !LastEnsembleReady ? "*" : "");
    UiLabel("ROLE_MODELS",(LastRoleShadow ? "*SHADOW* | "+LastShadowRegimeLabel : "ROLE MODELS "+(LastEnsembleReady ? "READY" : "*LEARNING*"))
-      +" R"+role_mark+":"+RoleProbabilityText(LastRegimeProbability)
-      +" E"+role_mark+":"+RoleProbabilityText(LastEntryProbability)
-      +" N"+role_mark+":"+RoleProbabilityText(LastNewsProbability)
-      +" M"+role_mark+":"+RoleProbabilityText(LastMetaProbability)
-      +" SL"+role_mark+":"+RoleProbabilityText(LastRoleShadow ? LastShadowRiskProbability : LastRiskProbability),
-      28,200,clrWhite,9);
+      +" R["+ModelTag(LastRegimeModelHandler)+"]"+role_mark+":"+RoleProbabilityText(LastRegimeProbability)
+      +" E["+ModelTag(LastEntryModelHandler)+"]"+role_mark+":"+RoleProbabilityText(LastEntryProbability)
+      +" N["+ModelTag(LastNewsModelHandler)+"]"+role_mark+":"+RoleProbabilityText(LastNewsProbability)
+      +" M["+ModelTag(LastMetaModelHandler)+"]"+role_mark+":"+RoleProbabilityText(LastMetaProbability)
+      +" SL["+ModelTag(LastRiskModelHandler)+"]"+role_mark+":"+RoleProbabilityText(LastRoleShadow ? LastShadowRiskProbability : LastRiskProbability),
+      28,200,clrWhite,8);
    ObjectSetString(0,UiPrefix+"ROLE_MODELS",OBJPROP_TOOLTIP,
       "حالت سایه: فقط نمایش؛ بدون دخالت در معامله\n"
       "R: احتمال رونددار بودن، نه صعودی یا نزولی\n"
@@ -1064,11 +1085,11 @@ void DrawDashboard()
       : "");
    color news_color=(!LastNewsSourceReady ? clrTomato : clrWhite);
 
-   UiLabel("NEWS","NEWS "+LastNewsSource
-      +" "+(LastNewsSourceReady ? "READY" : "OFFLINE")
-      +" | model "+(LastNewsModelReady ? "READY" : "*LEARNING*")
+   UiLabel("NEWS","NEWS ["+ModelTag(LastNewsModelHandler)+"] via "+LastNewsSourceHandler
+      +" | "+LastNewsSource+" "+(LastNewsSourceReady ? "READY" : "OFFLINE")
+      +" | "+(LastNewsModelReady ? "MODEL READY" : "*LEARNING*")
       +" | "+LastNewsEventImpact+" "+LastNewsEventCountry+" "+news_title+news_delta,
-      28,222,news_color,9);
+      28,222,news_color,8);
 
    UiLabel("ACCOUNT","Account: "+AccountTypeText()+" (configured)"
       +"   Currency: "+AccountInfoString(ACCOUNT_CURRENCY)
@@ -1128,8 +1149,8 @@ void DrawDashboard()
          (r%2==0 ? C'20,31,52' : C'15,24,42'),C'38,50,68');
 
    string cvals[10];
-   cvals[0]=LastModelDecision+" | "+LastModelReason;
-   cvals[1]=checklist_market_trend+" | AI "+LastAiTrendDirection;
+   cvals[0]=LastModelDecision+" | "+LastModelReason+" | "+ModelTag(LastForecastModelHandler);
+   cvals[1]=checklist_market_trend+" | AI "+LastAiTrendDirection+" | "+ModelTag(LastMarketStateHandler);
    cvals[2]=DoubleToString(LastSignalStrength,3)+" / "+DoubleToString(LastMinimumStrength,3);
    cvals[3]=dominant+" "+DoubleToString(dominant_edge,2)+" / "+DoubleToString(LastMinimumEdge,2);
    cvals[4]=LastIntrabarDirection+" | move "+DoubleToString(LastIntrabarMoveAtr,3)
@@ -1139,14 +1160,15 @@ void DrawDashboard()
       +" | cons "+DoubleToString(LastAiTrendConsistency,2);
    cvals[6]=(LastTargetStructureReady
       ? LastTargetMethod+" | "+LastTargetDirection
-      : "target structure learning");
+      : "target structure learning")+" | "+ModelTag(LastTargetModelHandler);
    cvals[7]="ATR "+DoubleToString(LastAtr,2)
       +" | SL "+DoubleToString(LastStopDistance,2)
       +" | TP "+DoubleToString(LastTargetDistance,2);
    cvals[8]="spread "+IntegerToString(spread_points)+" / max "+IntegerToString(MaxSpreadPoints);
    cvals[9]="SL "+DoubleToString(LastStopDistance,2)
       +" | TP "+DoubleToString(LastTargetDistance,2)
-      +" | RR "+DoubleToString(checklist_rr,2);
+      +" | RR "+DoubleToString(checklist_rr,2)
+      +" | "+ModelTag(LastRiskModelHandler);
 
    string cnames[10]={"Direction","Market trend","Trend strength","Model edge",
       "Intrabar timing","AI trend","Market structure","Volatility","Entry cost","Risk / exit"};
@@ -3958,6 +3980,17 @@ void OnTimer()
    LastNewsSource=news_source;
    LastNewsSourceReady=(news_source_ready>=0.5);
    LastNewsModelReady=(news_model_ready>=0.5);
+   // Optional model identity telemetry. Older servers remain compatible.
+   JsonText(reply,"forecast_model_handler",LastForecastModelHandler);
+   JsonText(reply,"forecast_shadow_model_handler",LastForecastShadowModelHandler);
+   JsonText(reply,"regime_model_handler",LastRegimeModelHandler);
+   JsonText(reply,"entry_model_handler",LastEntryModelHandler);
+   JsonText(reply,"news_model_handler",LastNewsModelHandler);
+   JsonText(reply,"meta_model_handler",LastMetaModelHandler);
+   JsonText(reply,"risk_model_handler",LastRiskModelHandler);
+   JsonText(reply,"news_source_handler",LastNewsSourceHandler);
+   JsonText(reply,"market_state_handler",LastMarketStateHandler);
+   JsonText(reply,"target_model_handler",LastTargetModelHandler);
    LastNewsSourceAgeSeconds=news_source_age_seconds;
    LastNewsEventTitle=news_event_title;
    LastNewsEventCountry=news_event_country;
