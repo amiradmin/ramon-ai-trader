@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
+import hashlib
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 import json
 from math import sqrt
+import sqlite3
+import struct
 from pathlib import Path
 from statistics import mean, pstdev
 from typing import Sequence
@@ -53,6 +56,75 @@ class ContrarianBaseline:
         high = max(low, anchor - (base.low - anchor))
         median = min(max(median, low), high)
         return Forecast(low, median, high, path)
+
+
+class PersistentForecastCache:
+    """Persistent research cache so expensive model forecasts can resume safely."""
+
+    def __init__(self, model, db: str | Path, identity: str) -> None:
+        self.model = model
+        self.identity = identity
+        self.path = Path(db).expanduser().resolve()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.conn = sqlite3.connect(self.path)
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("""CREATE TABLE IF NOT EXISTS forecast_cache (
+            cache_key TEXT PRIMARY KEY,
+            model_identity TEXT NOT NULL,
+            horizon INTEGER NOT NULL,
+            low REAL NOT NULL,
+            median REAL NOT NULL,
+            high REAL NOT NULL,
+            median_path TEXT NOT NULL
+        )""")
+        self.pending = 0
+        self.hits = 0
+        self.misses = 0
+
+    def _key(self, closes: Sequence[float], horizon: int) -> str:
+        digest = hashlib.sha256()
+        digest.update(self.identity.encode("utf-8") + b"\0")
+        digest.update(str(horizon).encode("ascii") + b"\0")
+        for value in closes:
+            digest.update(struct.pack("!d", float(value)))
+        return digest.hexdigest()
+
+    def forecast(self, closes: Sequence[float], horizon: int) -> Forecast:
+        key = self._key(closes, horizon)
+        row = self.conn.execute(
+            "SELECT low,median,high,median_path FROM forecast_cache WHERE cache_key=?",
+            (key,),
+        ).fetchone()
+        if row:
+            self.hits += 1
+            return Forecast(float(row[0]), float(row[1]), float(row[2]),
+                            tuple(float(v) for v in json.loads(row[3])))
+        forecast = self.model.forecast(closes, horizon)
+        self.conn.execute(
+            """INSERT OR REPLACE INTO forecast_cache
+               (cache_key,model_identity,horizon,low,median,high,median_path)
+               VALUES (?,?,?,?,?,?,?)""",
+            (key, self.identity, horizon, forecast.low, forecast.median, forecast.high,
+             json.dumps(list(forecast.median_path), separators=(",", ":"))),
+        )
+        self.misses += 1
+        self.pending += 1
+        if self.pending >= 100:
+            self.conn.commit()
+            self.pending = 0
+        return forecast
+
+    def stats(self) -> dict[str, object]:
+        return {
+            "path": str(self.path),
+            "identity": self.identity,
+            "hits": self.hits,
+            "misses": self.misses,
+        }
+
+    def close(self) -> None:
+        self.conn.commit()
+        self.conn.close()
 
 
 @dataclass(frozen=True, slots=True)
@@ -501,6 +573,7 @@ def benchmark_model(
 
     return {
         "model": model_name,
+        "stride": stride,
         "evaluation_window": _window_iso(bars, warmup, len(bars)),
         **counters,
         "metrics": _metrics(all_trades),
@@ -543,6 +616,7 @@ def benchmark_database(
     fallback_spread_points: int = 42,
     roundtrip_cost_r: float = 0.0,
     analysis_horizons: Sequence[int] = (1, 4, 8, 16),
+    additional_models: Sequence[tuple[str, object, int]] = (),
 ) -> dict[str, object]:
     bars, spreads = load_bars(db, symbol)
     if len(bars) < 1200:
@@ -557,11 +631,14 @@ def benchmark_database(
     previous = PreviousBarBaseline()
     momentum = MomentumBaseline()
     models = (
-        ("previous_bar", previous),
-        ("momentum_4bar", momentum),
-        ("contrarian_previous_bar", ContrarianBaseline(previous)),
-        ("contrarian_momentum_4bar", ContrarianBaseline(momentum)),
+        ("previous_bar", previous, stride),
+        ("momentum_4bar", momentum, stride),
+        ("contrarian_previous_bar", ContrarianBaseline(previous), stride),
+        ("contrarian_momentum_4bar", ContrarianBaseline(momentum), stride),
+        *additional_models,
     )
+    if any(model_stride < 1 for _, _, model_stride in models):
+        raise ValueError("model strides must be positive")
     return {
         "schema_version": 1,
         "dataset": {
@@ -597,12 +674,12 @@ def benchmark_database(
         "models": {
             name: benchmark_model(
                 bars, spreads, model, model_name=name, symbol=symbol, point=point,
-                settings=settings, folds=folds, stride=stride,
+                settings=settings, folds=folds, stride=model_stride,
                 fallback_spread_points=fallback_spread_points,
                 roundtrip_cost_r=roundtrip_cost_r,
                 analysis_horizons=analysis_horizons,
             )
-            for name, model in models
+            for name, model, model_stride in models
         },
         "limitations": [
             "External broker OHLC is not LiteFinance execution history.",
@@ -625,9 +702,32 @@ def main() -> None:
     parser.add_argument("--cost-r", type=float, default=0.0)
     parser.add_argument("--analysis-horizons", default="1,4,8,16",
                         help="Comma-separated M15 horizons for raw direction and holding-period matrix")
+    parser.add_argument("--include-chronos", action="store_true",
+                        help="Also benchmark the project's Chronos-2 forecaster")
+    parser.add_argument("--chronos-model", default="autogluon/chronos-2-small")
+    parser.add_argument("--chronos-device", default="cpu")
+    parser.add_argument("--chronos-stride", type=int, default=64,
+                        help="Chronos screening stride; use --stride value for strict same-density comparison")
+    parser.add_argument("--chronos-cache", default="data/chronos_historical_forecasts.sqlite3")
     parser.add_argument("--output", default="")
     args = parser.parse_args()
     horizons = tuple(int(value) for value in args.analysis_horizons.split(",") if value.strip())
+    additional_models = []
+    chronos_cache = None
+    chronos_metadata = None
+    if args.include_chronos:
+        from .model import ChronosForecaster, model_name
+        chronos = ChronosForecaster(model_name(args.chronos_model), args.chronos_device)
+        identity = f"{args.chronos_model}@{chronos.revision or 'unknown-revision'}"
+        chronos_cache = PersistentForecastCache(chronos, args.chronos_cache, identity)
+        additional_models.append(("chronos", chronos_cache, args.chronos_stride))
+        chronos_metadata = {
+            "model": args.chronos_model,
+            "revision": chronos.revision,
+            "device": args.chronos_device,
+            "stride": args.chronos_stride,
+            "cache": args.chronos_cache,
+        }
     report = benchmark_database(
         args.db,
         symbol=args.symbol,
@@ -637,7 +737,17 @@ def main() -> None:
         fallback_spread_points=args.fallback_spread,
         roundtrip_cost_r=args.cost_r,
         analysis_horizons=horizons,
+        additional_models=additional_models,
     )
+    if chronos_cache is not None:
+        chronos_metadata["cache_stats"] = chronos_cache.stats()
+        chronos_cache.close()
+        report["chronos"] = chronos_metadata
+        if args.chronos_stride != args.stride:
+            report["limitations"].append(
+                "Chronos used a different screening stride from the baselines; rerun promising candidates "
+                "with --chronos-stride equal to --stride before direct performance comparison."
+            )
     payload = json.dumps(report, indent=2, allow_nan=False)
     if args.output:
         Path(args.output).write_text(payload + "\n", encoding="utf-8")
