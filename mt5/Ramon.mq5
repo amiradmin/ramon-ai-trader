@@ -1,5 +1,5 @@
 #property strict
-#property version "1.551"
+#property version "1.552"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -156,6 +156,13 @@ string LastMomentAnomalyLabel = "UNAVAILABLE";
 bool LastFinbertShadowReady = false;
 string LastFinbertSentimentLabel = "UNAVAILABLE";
 double LastFinbertDirectionalScore = 0.0;
+bool LastMomentLiveActive = false;
+bool LastMomentLiveFresh = false;
+bool LastMomentLiveVeto = false;
+double LastMomentLiveThreshold = 2.0;
+bool LastFinbertLiveActive = false;
+bool LastFinbertLiveVeto = false;
+double LastFinbertLiveThreshold = 0.35;
 double LastNewsSourceAgeSeconds = -1.0;
 string LastNewsSource = "NONE";
 string LastNewsEventTitle = "NONE";
@@ -540,7 +547,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.55.1\n"
+      +"EA version: 0.55.2\n"
       +"Range MAIN: "+BoolText(EnableRangeMain)+" | quick 5-unit TP, boundary SL, RR >=1.2, 30min maximum\n"
       +"AccountLossLimits: "+AccountLossLimitStatus+" | enabled="+BoolText(EnableAccountLossLimits)
       +" daily="+DoubleToString(DailyLossLimitPercent,2)+"% drawdown="+DoubleToString(MaximumEquityDrawdownPercent,2)+"%\n"
@@ -576,6 +583,16 @@ string BuildDiagnosticText()
       +"  RiskReady: "+BoolText(LastRiskModelReady)
       +"  RiskP: "+DoubleToString(LastRiskProbability,3)
       +"  RiskMult: "+DoubleToString(LastRiskMultiplier,2)+"x\n"
+      +"MOMENT LIVE: "+BoolText(LastMomentLiveActive)
+      +" Fresh: "+BoolText(LastMomentLiveFresh)
+      +" Veto: "+BoolText(LastMomentLiveVeto)
+      +" Ratio: "+DoubleToString(LastMomentAnomalyRatio,3)
+      +" Threshold: "+DoubleToString(LastMomentLiveThreshold,2)+"\n"
+      +"FinBERT LIVE: "+BoolText(LastFinbertLiveActive)
+      +" Veto: "+BoolText(LastFinbertLiveVeto)
+      +" Sentiment: "+LastFinbertSentimentLabel
+      +" Score: "+DoubleToString(LastFinbertDirectionalScore,3)
+      +" Threshold: "+DoubleToString(LastFinbertLiveThreshold,2)+"\n"
       +"News: "+LastNewsSource
       +"  SourceReady: "+BoolText(LastNewsSourceReady)
       +"  ModelReady: "+BoolText(LastNewsModelReady)
@@ -1050,7 +1067,7 @@ void DrawDashboard()
    // Tall/narrow panel: summary text first, checklist directly underneath.
    UiRect("PANEL",12,24,560,955,C'15,23,42',C'71,85,105');
 
-   UiLabel("TITLE","RAMON AI TRADER  v0.55.1 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.55.2 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+" M15 | Forecast ["+ModelTag(LastForecastModelHandler)
       +"] | Shadow ["+ModelTag(LastForecastShadowModelHandler)+"] | "
@@ -1095,11 +1112,20 @@ void DrawDashboard()
    string finbert_state=(LastFinbertShadowReady
       ? LastFinbertSentimentLabel+" "+DoubleToString(LastFinbertDirectionalScore,2)
       : "OFF");
-   UiLabel("SHADOW_AI","ANOMALY ["+ModelTag(LastAnomalyModelHandler)+"] "+moment_state
-      +" | SENTIMENT ["+ModelTag(LastNewsSentimentModelHandler)+"] "+finbert_state,
-      28,222,clrWhite,8);
-   ObjectSetString(0,UiPrefix+"SHADOW_AI",OBJPROP_TOOLTIP,
-      "Shadow only: این دو مدل هیچ تغییری در BUY/SELL/WAIT، حجم، SL یا TP ایجاد نمی‌کنند.");
+   string moment_gate=(LastMomentLiveActive
+      ? (LastMomentLiveVeto ? "VETO" : (LastMomentLiveFresh ? "PASS" : "WARMING"))
+      : "OFF");
+   string finbert_gate=(LastFinbertLiveActive
+      ? (LastFinbertLiveVeto ? "VETO" : "PASS")
+      : "OFF");
+   color ai_gate_color=(LastMomentLiveVeto || LastFinbertLiveVeto ? clrTomato : clrWhite);
+   UiLabel("LIVE_AI","ANOMALY ["+ModelTag(LastAnomalyModelHandler)+"] "+moment_state
+      +" {LIVE "+moment_gate+"}"
+      +" | SENTIMENT ["+ModelTag(LastNewsSentimentModelHandler)+"] "+finbert_state
+      +" {LIVE "+finbert_gate+"}",
+      28,222,ai_gate_color,8);
+   ObjectSetString(0,UiPrefix+"LIVE_AI",OBJPROP_TOOLTIP,
+      "LIVE GATE: MOMENT و FinBERT می‌توانند ورود BUY/SELL را به WAIT تبدیل کنند؛ خودشان معامله جدید ایجاد نمی‌کنند.");
 
    string news_title=(StringLen(LastNewsEventTitle)>28
       ? StringSubstr(LastNewsEventTitle,0,28)+"..." : LastNewsEventTitle);
@@ -4034,6 +4060,22 @@ void OnTimer()
    LastFinbertShadowReady=(finbert_ready>=0.5);
    LastFinbertSentimentLabel=finbert_label;
    LastFinbertDirectionalScore=finbert_directional;
+   double moment_live_active=0.0,moment_live_fresh=0.0,moment_live_veto=0.0,moment_live_threshold=2.0;
+   double finbert_live_active=0.0,finbert_live_veto=0.0,finbert_live_threshold=0.35;
+   JsonNumber(reply,"moment_live_active",moment_live_active);
+   JsonNumber(reply,"moment_live_fresh",moment_live_fresh);
+   JsonNumber(reply,"moment_live_veto",moment_live_veto);
+   JsonNumber(reply,"moment_live_threshold",moment_live_threshold);
+   JsonNumber(reply,"finbert_live_active",finbert_live_active);
+   JsonNumber(reply,"finbert_live_veto",finbert_live_veto);
+   JsonNumber(reply,"finbert_live_threshold",finbert_live_threshold);
+   LastMomentLiveActive=(moment_live_active>=0.5);
+   LastMomentLiveFresh=(moment_live_fresh>=0.5);
+   LastMomentLiveVeto=(moment_live_veto>=0.5);
+   LastMomentLiveThreshold=moment_live_threshold;
+   LastFinbertLiveActive=(finbert_live_active>=0.5);
+   LastFinbertLiveVeto=(finbert_live_veto>=0.5);
+   LastFinbertLiveThreshold=finbert_live_threshold;
    LastNewsSourceAgeSeconds=news_source_age_seconds;
    LastNewsEventTitle=news_event_title;
    LastNewsEventCountry=news_event_country;
