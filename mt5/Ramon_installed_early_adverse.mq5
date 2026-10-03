@@ -4295,6 +4295,10 @@ void OnTimer()
    double range_execution=0.0,range_stop=0.0,range_target=0.0,range_low=0.0,range_high=0.0;
    JsonNumber(reply,"range_execution",range_execution);
    bool range_trade=(range_execution>=0.5);
+   if(!range_trade && (intrabar_confirmed<0.5 || ai_trend_confirmed<0.5
+      || intrabar_direction!=decision || ai_trend_direction!=decision))
+   { StatusLine="DIRECTION GUARD: normal entry needs aligned confirmations"; ShowStatus(); return; }
+
    if(range_trade)
    {
       if(!EnableRangeMain || SmallOnlyMode || small_profit

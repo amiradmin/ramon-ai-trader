@@ -1,0 +1,143 @@
+{
+  "rows": 241,
+  "unique_signal_bars": 10,
+  "holdout_start_broker": 1790847900,
+  "purge_seconds": 3600,
+  "states": {
+    "BREAKOUT_UP": 38,
+    "BREAKOUT_RETEST_UP": 29,
+    "TREND_UP": 49,
+    "PULLBACK_UP": 64,
+    "REGIME_TRANSITION": 61
+  },
+  "decision_pairs": {
+    "WAIT → WAIT": 240,
+    "BUY → WAIT": 1
+  },
+  "development": {
+    "rows": 92,
+    "unique_signal_bars": 4,
+    "blocked_winners": 0,
+    "blocked_losers": 0,
+    "blocked_unpriced": 0,
+    "blocked_flat": 0,
+    "base": {
+      "trades": 0,
+      "wins": 0,
+      "losses": 0,
+      "net_r": 0.0,
+      "mean_r": null,
+      "max_drawdown_r": 0.0,
+      "unpriced": 0,
+      "overlapping_skipped": 0
+    },
+    "new": {
+      "trades": 0,
+      "wins": 0,
+      "losses": 0,
+      "net_r": 0.0,
+      "mean_r": null,
+      "max_drawdown_r": 0.0,
+      "unpriced": 0,
+      "overlapping_skipped": 0
+    }
+  },
+  "holdout": {
+    "rows": 33,
+    "unique_signal_bars": 2,
+    "blocked_winners": 0,
+    "blocked_losers": 1,
+    "blocked_unpriced": 0,
+    "blocked_flat": 0,
+    "base": {
+      "trades": 1,
+      "wins": 0,
+      "losses": 1,
+      "net_r": -1.0,
+      "mean_r": -1.0,
+      "max_drawdown_r": 1.0,
+      "unpriced": 0,
+      "overlapping_skipped": 0
+    },
+    "new": {
+      "trades": 0,
+      "wins": 0,
+      "losses": 0,
+      "net_r": 0.0,
+      "mean_r": null,
+      "max_drawdown_r": 0.0,
+      "unpriced": 0,
+      "overlapping_skipped": 0
+    }
+  },
+  "promotion_eligible": false,
+  "limitations": [
+    "recorded forecasts reused; not independent model generalization",
+    "M15 full bars omit entry-bucket and intrabar TP-stage/early-adverse behavior",
+    "news, broker lots, account loss locks and actual range quick target are not simulated",
+    "spread included; commission/slippage beyond adverse open gaps require cost stress",
+    "small number of distinct contexts cannot establish market-wide validity"
+  ],
+  "source_fingerprint": "eb842c5b7ca99057de342e2a87c46db73eda2301860c1eb3680669d084175f6b",
+  "schema_version": 1,
+  "policy": "market-state-v1",
+  "settings": {
+    "horizon": 4,
+    "context": 256,
+    "max_spread_points": 50,
+    "minimum_edge_atr": 0.12,
+    "minimum_edge_spreads": 1.5,
+    "require_direction_confirmation": true,
+    "maximum_entry_extension_atr": 3.0,
+    "minimum_strength": 0.2,
+    "intrabar_min_strength": 0.05,
+    "allow_weak_intrabar_entries": true,
+    "intrabar_min_move_atr": 0.06,
+    "intrabar_min_rebound_atr": 0.08,
+    "trend_min_path_atr": 0.15,
+    "trend_min_consistency": 0.75,
+    "trend_min_edge_fraction": 0.25,
+    "trend_min_micro_move_atr": 0.03,
+    "trend_conflict_lookback": 12,
+    "trend_conflict_atr": 3.0,
+    "strong_entry_min_intrabar_move_atr": -0.03,
+    "stop_atr": 1.5,
+    "target_atr": 3.0,
+    "market_state_policy_enabled": true
+  },
+  "recorded_inputs": 241,
+  "skipped_inputs": {},
+  "coverage": {
+    "samples": 23966,
+    "classified": 19476,
+    "states": {
+      "RANGE_MIDDLE": 4218,
+      "RANGE_HIGH": 715,
+      "RANGE_LOW": 520,
+      "TREND_DOWN": 952,
+      "PULLBACK_DOWN": 702,
+      "BREAKOUT_DOWN": 1713,
+      "UNCERTAIN": 126,
+      "REGIME_TRANSITION": 2835,
+      "BREAKOUT_RETEST_DOWN": 608,
+      "FALSE_BREAKOUT_DOWN": 326,
+      "CONFLICTING_STRUCTURE": 64,
+      "BREAKOUT_UP": 1552,
+      "BREAKOUT_RETEST_UP": 213,
+      "FALSE_BREAKOUT_UP": 281,
+      "TREND_UP": 1280,
+      "PULLBACK_UP": 1160,
+      "PRICE_GAP": 63,
+      "VOLATILITY_SHOCK": 295,
+      "LOW_LIQUIDITY": 1406,
+      "DISORDERLY_MARKET": 420,
+      "VOLATILITY_COMPRESSION": 27
+    },
+    "skipped": {
+      "missing_audit_or_quote": 4490
+    }
+  },
+  "execution": "offline_read_only",
+  "source_db": "ramon_history.sqlite3",
+  "cost_r": 0.0
+}

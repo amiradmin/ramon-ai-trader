@@ -3,11 +3,12 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import asdict, dataclass
-from typing import Sequence
+from typing import Mapping, Sequence
 
 from .core import Bar, Forecaster, Market, Settings, evaluate
 from .history import load_bars
 from .model import ChronosForecaster, model_name
+from .market_state import assess_market, apply_market_policy
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,6 +22,8 @@ class ReplayResult:
     timed_out: int
     net_r: float
     max_drawdown_r: float
+    policy_waits: int = 0
+    missing_micro_context: int = 0
 
 
 def replay(
@@ -35,8 +38,15 @@ def replay(
     fallback_spread_points: int = 42,
     require_recorded_spreads: bool = False,
     roundtrip_cost_r: float = 0.0,
+    micro_history: Mapping[int, tuple[Bar, ...]] | None = None,
 ) -> ReplayResult:
-    """One-position historical replay with next-bar entry and conservative fills."""
+    """One-position replay of normal entries with the final market-policy veto.
+
+    Recorded micro_history is optional; never synthesize it from M15. Strict
+    settings yield WAIT without confirmations. This coarse next-bar benchmark
+    excludes RANGE execution and live EA exit logic; use policy_replay for
+    quote-level recorded inputs and report both coverage and limitations.
+    """
     if (len(bars) != len(spreads) or stride < 1 or point <= 0
             or fallback_spread_points <= 0 or roundtrip_cost_r < 0):
         raise ValueError("invalid replay input")
@@ -45,6 +55,7 @@ def replay(
         raise ValueError("holdout contains missing recorded spreads; cannot price execution")
     i = start_at
     decisions = buys = sells = wins = losses = timed_out = 0
+    policy_waits = missing_micro_context = 0
     net_r = 0.0
     peak_r = 0.0
     max_drawdown_r = 0.0
@@ -60,10 +71,20 @@ def replay(
             ask=bars[i].close + spread,
             point=point,
             bars=tuple(bars[max(0, i - 255) : i + 1]),
+            micro_bars=(micro_history or {}).get(bars[i].time, ()),
         )
+        if any(b.time+60>bars[i].time+900 for b in market.micro_bars):
+            raise ValueError("micro history contains future or uncompleted bars")
         result = evaluate(market, model, settings)
         decisions += 1
-        if result.decision == "WAIT":
+        if not market.micro_bars:
+            missing_micro_context += 1
+        response = result.to_dict()
+        if settings.market_state_policy_enabled:
+            apply_market_policy(response, assess_market(market, max_spread_points=settings.max_spread_points))
+        if result.decision != "WAIT" and response["decision"] == "WAIT":
+            policy_waits += 1
+        if response["decision"] == "WAIT":
             i += 1
             continue
         buys += result.decision == "BUY"
@@ -112,7 +133,7 @@ def replay(
         i = closed_at + 1  # no overlapping positions
     return ReplayResult(
         len(bars), decisions, buys, sells, wins, losses, timed_out,
-        round(net_r, 4), round(max_drawdown_r, 4)
+        round(net_r, 4), round(max_drawdown_r, 4), policy_waits, missing_micro_context
     )
 
 

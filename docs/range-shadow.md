@@ -41,3 +41,9 @@ Chronos forecast retained in audit metadata; they are excluded by the model-ID
 filter from Chronos role training. Shadow observations remain hypothetical and
 are not used as evidence of live fills. Live activation is an experimental trial,
 not validated profitability. Service health exposes range_main_enabled.
+
+## هدف اجرایی فعلی رنج — نسخهٔ ۰٫۵۴٫۹
+
+midpoint، هدف نامزد در سرویس و paper/shadow است. اکسپرت MAIN پس از انتخاب حجم، هدف سریع ۵ واحد حساب قبل از midpoint را انتخاب می‌کند و سود/ریسک ناخالص همان TP واقعی را با SL مرزی دوباره کنترل می‌کند؛ کمتر از ۱٫۲ ورود را متوقف می‌کند. سقف SL همچنان ۵ واحد حساب است و حجم برای رسیدن به هدف افزایش نمی‌یابد. تبدیل پنج واحد به پنج سنت فقط با ۱۰۰ واحد حساب در هر دلار درست است.
+
+WAITهای مجاز برای بررسی نامزد عبارت‌اند از `insufficient_model_strength`، `insufficient_model_edge`، `adverse_intrabar_timing` و `direction_confirmation_required`. سیاست نهایی حالت بازار پس از این مرحله اعمال می‌شود و نامزد رنج اجازهٔ عبور از قفل آن را ندارد.

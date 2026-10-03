@@ -33,6 +33,22 @@ REASONS = {
 }
 
 
+MARKET_STATES = {
+    "trend_up": "روند صعودی", "trend_down": "روند نزولی",
+    "pullback_up": "پولبک روند صعودی", "pullback_down": "پولبک روند نزولی",
+    "range_low": "لبهٔ پایین رنج", "range_high": "لبهٔ بالای رنج", "range_middle": "وسط رنج",
+    "breakout_up": "شکست صعودی", "breakout_down": "شکست نزولی",
+    "breakout_retest_up": "آزمون مجدد شکست صعودی", "breakout_retest_down": "آزمون مجدد شکست نزولی",
+    "false_breakout_up": "شکست کاذب سقف", "false_breakout_down": "شکست کاذب کف",
+    "regime_transition": "تغییر رژیم", "price_gap": "جهش قیمت",
+    "volatility_shock": "شوک نوسان", "low_liquidity": "اسپرد زیاد نسبت به نوسان",
+    "flat_market": "بازار تخت", "disorderly_market": "بازار نامنظم",
+    "volatility_compression": "فشردگی نوسان", "uncertain": "حالت نامشخص",
+    "conflicting_structure": "ساختارهای متعارض",
+}
+REASONS.update({"market_state_wait_"+k: "سیاست بازار ورود را متوقف کرد: "+v for k,v in MARKET_STATES.items()})
+
+
 def number(value):
     try:
         result = float(value)
@@ -153,6 +169,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
     joined = bool(sample.get("sample_key") and diag.get("sample_key") == sample.get("sample_key"))
     decision = final.get("decision") or sample.get("final_decision") or "UNKNOWN"
     reason = final.get("reason") or "UNKNOWN"
+    assessment = metadata.get("market_assessment") or {}
     ea_status = diag.get("Status", "وضعیت اکسپرت در دسترس نیست")
     nodes = []
 
@@ -171,7 +188,8 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
                  "Ask": number(match(diag.get("Bid"), r"Ask: ([\d.]+)")),
                  "اسپرد، point": number(match(diag.get("Bid"), r"Spread\(points\): ([\d.]+)")),
                  "اتصال ترمینال": match(diag.get("Market"), r"TerminalConnected: (\w+)"),
-                 "زمان آخرین درخواست": diag.get("Snapshot cadence")})
+                 "زمان آخرین درخواست": diag.get("Snapshot cadence"),
+                 "حالت بازار و واکنش": metadata.get("market_assessment") or "در نسخهٔ این تصمیم ثبت نشده"})
     node("service", "سرویس تصمیم‌گیری", "pass" if health and health.get("ready") else "unknown",
          "سرویس پاسخ می‌دهد؛ تازگی پیش‌بینی جدا بررسی می‌شود" if health and health.get("ready") else "پاسخ سلامت سرویس در دسترس نیست",
          source="health", values={"مدل": (health or {}).get("model"), "حالت نقش‌ها": (health or {}).get("ensemble_mode")})
@@ -215,7 +233,11 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
                  "نقش‌های فعال": final.get("ensemble_active"), "توجه": "RANGE/UNCLEAR رنج قطعی نیست"})
     node("decision", "تصمیم نهایی مدل", "blocked" if decision == "WAIT" else "pass" if decision in {"BUY", "SELL"} else "unknown",
          REASONS.get(reason, reason), values={"تصمیم": decision, "دلیل": reason, "شناسه": sample.get("sample_key"),
-                                             "مسیر": "RANGE" if range_execution else "CHRONOS"})
+                                             "مسیر": "RANGE" if range_execution else "CHRONOS",
+                                             "حالت بازار": assessment.get("state", "ثبت نشده"),
+                                             "واکنش مجاز": assessment.get("route", "ثبت نشده"),
+                                             "شرایط هم‌زمان": assessment.get("conditions", []),
+                                             "شواهد تشخیص": assessment.get("evidence", {})})
     # These are terminal observations, not a replay of gates that short-circuit.
     node("news", "قفل خبر", "blocked" if "NEWS GUARD" in ea_status else "observed" if diag.get("News") else "unknown",
          "ورود ±۱۵ دقیقهٔ خبر پراثر؛ خروج از ۵ دقیقه قبل؛ تقویم نامعتبر مانع ورود است",
@@ -229,13 +251,13 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
                  "مجوز اکسپرت": match(permissions, r"ea=(\w+)"),
                  "مجوز حساب": match(permissions, r"account=(\w+)"),
                  "واحد حساب در هر دلار": number(match(diag.get("MoneyUnitsConfirmed"), r"MoneyUnitsPerUSD: ([\d.]+)"))})
-    cooldown_block = any(x in ea_status for x in ("cooldown", "Daily trade limit", "Entry already used", "history unavailable"))
-    node("limits", "تعداد ورود و وقفهٔ ضرر", "blocked" if cooldown_block else "unknown",
+    cooldown_block = any(x in ea_status for x in ("cooldown", "Daily trade limit", "Entry already used", "history unavailable", "ACCOUNT LOSS LIMITS"))
+    node("limits", "محدودیت ورود و زیان حساب", "blocked" if cooldown_block else "unknown",
          ea_status if cooldown_block else "بعد از دو SL زیان‌دهٔ پیاپی هم‌جهت: ۳۰ دقیقه وقفه؛ یک ورود MAIN در هر M15",
-         source="ea", values={"ورودهای امروز": diag.get("Trades today"), "وقفهٔ رنج": "۵ دقیقه پس از بسته‌شدن",
+         source="ea", values={"ورودهای امروز": diag.get("Trades today"), "قفل زیان حساب": diag.get("AccountLossLimits"), "وقفهٔ رنج": "۵ دقیقه پس از بسته‌شدن",
                                "نتیجهٔ اجرای گیت": "ثبت نشده" if not cooldown_block else ea_status})
     risk = diag.get("RiskGate", "")
-    node("risk", "حجم، ریسک و مارجین", "blocked" if "BLOCK" in risk or any(x in ea_status for x in ("risk >", "hard risk cap", "Insufficient margin", "SL risk >", "TP not inside")) else "observed" if risk else "unknown",
+    node("risk", "حجم، ریسک و مارجین", "blocked" if "BLOCK" in risk or any(x in ea_status for x in ("risk >", "hard risk cap", "Insufficient margin", "SL risk >", "TP not inside", "reward/risk <")) else "observed" if risk else "unknown",
          "پیش‌نمایش ریسک با تأیید نهایی هنگام سفارش فرق دارد", source="ea",
          values={"پیش‌نمایش ریسک": risk or None,
                  "بودجهٔ ترجیحی، دلار": number(match(diag.get("RiskPerTradeUSD"), r"^([\d.]+)")),

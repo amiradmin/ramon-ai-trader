@@ -107,6 +107,7 @@ class Settings:
     max_spread_points: int = 50
     minimum_edge_atr: float = 0.12
     minimum_edge_spreads: float = 1.5
+    require_direction_confirmation: bool = True
     maximum_entry_extension_atr: float = 3.0
     minimum_strength: float = 0.20
     intrabar_min_strength: float = 0.05
@@ -122,6 +123,7 @@ class Settings:
     strong_entry_min_intrabar_move_atr: float = -0.03
     stop_atr: float = 1.5
     target_atr: float = 3.0
+    market_state_policy_enabled: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -399,6 +401,11 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
         ):
             # Weak forecasts need all three independent observations aligned.
             reason = "insufficient_model_strength"
+        elif settings.require_direction_confirmation and strong_entry and not (
+            intrabar_confirmed and ai_trend_confirmed
+            and ai_trend_direction == intrabar_direction
+        ):
+            reason = "direction_confirmation_required"
         elif dominant_buy and buy_edge >= minimum and buy_strength >= settings.minimum_strength:
             side, edge, reason = "BUY", buy_edge, "forecast_up"
         elif not dominant_buy and sell_edge >= minimum and sell_strength >= settings.minimum_strength:

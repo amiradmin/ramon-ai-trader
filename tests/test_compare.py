@@ -4,6 +4,7 @@ import json
 import sys
 
 import pytest
+from ramon.core import Settings
 
 from ramon.compare import MomentumBaseline, compare, holdout_metadata, main, observed_cost_r
 from ramon.core import Forecast
@@ -50,8 +51,8 @@ def test_compare_requires_actual_holdout_spreads(tmp_path):
 def test_compare_distinguishes_spread_only_and_explicit_fees(tmp_path):
     db = tmp_path / "history.sqlite3"
     seed(db)
-    spread_only = compare(db, RisingForecast(), stride=4)
-    with_fees = compare(db, RisingForecast(), stride=4, cost_r=0.1)
+    spread_only = compare(db, RisingForecast(), stride=4, settings=Settings(require_direction_confirmation=False, market_state_policy_enabled=False))
+    with_fees = compare(db, RisingForecast(), stride=4, cost_r=0.1, settings=Settings(require_direction_confirmation=False, market_state_policy_enabled=False))
     assert spread_only["cost"]["roundtrip_r"] is None
     assert spread_only["holdout"]["bars"] == 124
     assert "start_utc" not in spread_only["holdout"]

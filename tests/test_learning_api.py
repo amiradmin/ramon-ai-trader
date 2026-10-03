@@ -31,7 +31,7 @@ def learning_server(tmp_path, monkeypatch):
         return server
 
     monkeypatch.setattr(service, "HTTPServer", factory)
-    thread = Thread(target=service.serve, args=("127.0.0.1", 0, FixedModel(), Settings()), daemon=True)
+    thread = Thread(target=service.serve, args=("127.0.0.1", 0, FixedModel(), Settings(require_direction_confirmation=False, market_state_policy_enabled=False)), daemon=True)
     thread.start()
     assert ready.wait(5)
     server = servers[0]
@@ -115,7 +115,7 @@ def test_decision_metadata_and_enriched_outcome_round_trip(learning_server):
         assert audit['base']['reason'] == decision['base_reason']
         assert audit['final']['reason'] == decision['reason']
         assert audit['base']['signal_strength'] == decision['signal_strength']
-        assert audit['settings'] == asdict(Settings())
+        assert audit['settings'] == asdict(Settings(require_direction_confirmation=False, market_state_policy_enabled=False))
         assert audit['final']['decision'] == payload['direction']
         assert con.execute('SELECT COUNT(*),fee_units,exit_detail,actual_fill_price FROM trade_outcomes').fetchone() == (1, -.1, 'maximum_hold_bars', 100.41)
     assert len(load_trade_examples(db, 'XAUUSD_l', 'test/fake')) == 1

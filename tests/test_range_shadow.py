@@ -65,7 +65,7 @@ def test_http_range_protocol_and_sample_provenance(tmp_path,monkeypatch):
   def forecast(self,closes,horizon):return Forecast(90,100,110)
  with socket.socket() as s:
   s.bind(('127.0.0.1',0));port=s.getsockname()[1]
- threading.Thread(target=serve,args=('127.0.0.1',port,Fake(),Settings()),daemon=True).start()
+ threading.Thread(target=serve,args=('127.0.0.1',port,Fake(),Settings(market_state_policy_enabled=False)),daemon=True).start()
  m=market();m=replace(m,bars=tuple(Bar(m.bars[0].time-(108-i)*900,100,100.5,99.5,100) for i in range(108))+m.bars);quote=m.bars[-1].time+900
  payload={'symbol':m.symbol,'timeframe':'M15','bid':m.bid,'ask':m.ask,'point':m.point,'quote_time':quote,
           'bars':[{'time':b.time,'open':b.open,'high':b.high,'low':b.low,'close':b.close} for b in m.bars],
@@ -87,3 +87,12 @@ def test_http_range_protocol_and_sample_provenance(tmp_path,monkeypatch):
   row=c.execute('select chronos_model,direction,stop_distance,model_metadata from decision_samples where sample_key=?',(result['sample_key'],)).fetchone()
   assert row[0]=='range-reversal-v1' and row[1]=='BUY' and row[2]>0
   assert json.loads(row[3])['execution_strategy']=='range-reversal-v1'
+
+
+def test_direction_guard_only_blocks_normal_strategy():
+ from ramon.range_strategy import live_candidate
+ m=market()
+ kwargs=dict(enabled=True,capable=True,quote_time=1800021000,max_spread_points=50)
+ response={'decision':'WAIT','reason':'direction_confirmation_required'}
+ assert live_candidate(m,response,**kwargs)['direction']=='BUY'
+ assert live_candidate(replace(m,bid=100,ask=100.1),response,**kwargs) is None

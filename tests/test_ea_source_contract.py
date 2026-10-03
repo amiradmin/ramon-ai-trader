@@ -13,10 +13,10 @@ def source() -> str:
 
 def test_ea_038_keeps_sizing_telemetry_observational():
     text = source()
-    assert '#property version "1.542"' in text
-    assert 'EA version: 0.54.2' in text
-    assert 'RAMON AI TRADER  v0.54.2' in text
-    assert 'version="0.54.2";' in text
+    assert '#property version "1.549"' in text
+    assert 'EA version: 0.54.9' in text
+    assert 'RAMON AI TRADER  v0.54.9' in text
+    assert 'version="0.54.9";' in text
     # Telemetry staging is deliberately not a trade gate.
     assert 'if(!StageEntrySizing' not in text
     assert re.search(
@@ -87,3 +87,12 @@ def test_news_guard_applies_to_normal_and_range_positions_before_entry():
     assert 'NewsGuardWindow(5)' in text
     assert '"news_guard_exit"' in text
     assert 'news_high_event_time' in text
+
+
+def test_ea_defends_normal_entry_against_older_server_response():
+    text=source()
+    guard=text.split('bool range_trade=(range_execution>=0.5);',1)[1].split('if(range_trade)',1)[0]
+    assert '!range_trade' in guard
+    assert 'intrabar_confirmed<0.5 || ai_trend_confirmed<0.5' in guard
+    assert 'intrabar_direction!=decision || ai_trend_direction!=decision' in guard
+    assert 'return;' in guard

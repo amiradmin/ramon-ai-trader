@@ -685,6 +685,17 @@ current intrabar movement (`late_entry_extension`). This initial fixed threshold
 requires forward validation; range strategy remains independent. NewsGuard
 continues to govern both strategies in the EA.
 
+EA 0.54.8 restores mandatory direction confirmation for normal MAIN entries:
+strong as well as weak forecasts require aligned confirmed intrabar and AI model
+path observations. The EA independently rejects normal orders lacking either
+confirmation, including replies from an older service. RANGE retains its own
+boundary reversal rules, five-unit target/risk cap, and the general executable
+risk override remains USD 0.35. A normal direction veto may yield to a separately
+valid RANGE setup; it does not relax RANGE confirmation. Health reports
+`require_direction_confirmation=true`. Historical transport/accounting tests
+explicitly opt out when they provide no micro data; live service uses the strict
+default. Reload the EA after installing the new compiled binary.
+
 ## فلوچارت زندهٔ تصمیم‌گیری
 
 با اجرای `./scripts/monitor_ramon.sh`، [داشبورد محلی](http://127.0.0.1:8013)
@@ -694,3 +705,20 @@ continues to govern both strategies in the EA.
 و اطلاعات ثبت‌نشده را جدا مشخص می‌کند و تصمیم یا معاملهٔ جدیدی ایجاد نمی‌کند.
 [راهنمای مانیتور](docs/decision-flow-monitor.md) و
 [گزارش پوشش بازار و قفل‌ها](docs/market-coverage-audit.md) جزئیات را توضیح می‌دهند.
+
+### سیاست حالت‌های بازار و اصلاح خروج ۰٫۵۴٫۹
+
+سرویس اکنون تشخیص چندشرطی بازار و واکنش محافظه‌کارانهٔ ورود را ثبت و اعمال می‌کند؛ جزئیات، حدود اعتبار و تفاوت با بازپخش در [market-state-policy.md](docs/market-state-policy.md) است. MAIN پاسخ‌های ضعف TP را فقط یک بار برای هر پاسخ تازه می‌شمارد، سقف `MaximumHoldBars` را اعمال می‌کند و گزینهٔ خاموشِ پیش‌فرض `EnableMainFastProfit` به مدیریت وصل شده است. فعال شدن این نسخه روی ترمینال به نصب و بارگذاری اکسپرت جدید و راه‌اندازی دوبارهٔ سرویس نیاز دارد.
+
+### ارزیابی آفلاین سیاست بازار
+
+گزارش این snapshot در [market-policy-evaluation.md](docs/market-policy-evaluation.md) و نتایج قابل بازتولید در [market-policy-evaluation.json](docs/market-policy-evaluation.json) ذخیره شده‌اند. فرمان زیر فقط پایگاه داده را می‌خواند و هیچ تصمیمی به MT5 نمی‌فرستد:
+
+```sh
+PYTHONPATH=src .venv/bin/python -m ramon.policy_replay \
+  --db data/ramon_history.sqlite3 \
+  --json-output /tmp/market-policy-evaluation.json \
+  --report-output /tmp/market-policy-evaluation.md
+```
+
+`--cost-r 0.1` یک سناریوی حساسیت به هزینهٔ اضافی ۰٫۱R در هر معامله است؛ هزینهٔ واقعی کارگزار نیست. محدودیت داده، پاسخ‌های تکراری، جداسازی زمانی و شبیه‌سازی ناقص خروج‌ها در گزارش مشخص‌اند. قفل زیان روزانه و افت سرمایه قابل تنظیم اضافه شده‌اند اما پیش‌فرض خاموش‌اند؛ برای فعال‌سازی باید درصدها تعیین و روی حساب آزمایشی بررسی شوند.

@@ -13,7 +13,7 @@ from uuid import uuid4
 from .core import Forecast, Market, Settings, evaluate
 from .ensemble import EnsembleCoordinator, dominant_direction
 from .shadow_roles import ShadowCoordinator
-from .history import persist_decision_sample, persist_market, persist_trade_outcome
+from .history import persist_decision_sample, persist_market, persist_trade_outcome, persist_replay_input
 from .model import ChronosForecaster, model_name
 from .news import DEFAULT_FOREX_FACTORY_JSON, ForexFactoryNewsProvider
 from .target_learning import build_target_structure
@@ -21,6 +21,7 @@ from .target_outcomes import backfill_target_outcomes
 from .timesfm_shadow import TimesFM3Shadow
 from .range_shadow import observe as observe_range_shadow
 from .range_strategy import live_candidate
+from .market_state import assess_market, apply_market_policy
 
 
 def persist_market_safely(db: str, market: Market) -> str:
@@ -86,6 +87,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 200,
                 {
                     "ready": True,
+                    "market_state_policy_enabled": settings.market_state_policy_enabled,
+                    "replay_inputs_enabled": bool(history_db),
                     "model": model.model_id,
                     "forecast_context": "completed_m15_cached",
                     "live_quote_decisions": True,
@@ -93,6 +96,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     "allow_weak_intrabar_entries": settings.allow_weak_intrabar_entries,
                     "minimum_strength": settings.minimum_strength,
                     "weak_entry_policy": "forecast_intrabar_ai_trend_agreement",
+                    "require_direction_confirmation": settings.require_direction_confirmation,
                     "maximum_entry_extension_atr": settings.maximum_entry_extension_atr,
                     "range_shadow_mode": "OBSERVE_ONLY" if history_db else "DISABLED",
                     "range_main_enabled": range_live_enabled,
@@ -158,6 +162,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 news_snapshot = news_provider.snapshot()
                 with guard:
                     result = evaluate(market, cached_model, settings)
+                    audit_forecast = cached_model._forecast if result.forecast_median>0 else None
                     ensemble_payload, feature_snapshot = ensemble.assess(
                         market, result, news_snapshot.features
                     )
@@ -229,6 +234,14 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     target_payload = {"ready": 0, "method": "range_midpoint",
                                       "direction": range_setup["direction"],
                                       "legacy_target": range_setup["target"]}
+                market_assessment = assess_market(market, max_spread_points=settings.max_spread_points)
+                if settings.market_state_policy_enabled:
+                    apply_market_policy(response, market_assessment)
+                else:
+                    response.update(market_state=market_assessment["state"], market_state_route="OBSERVE",
+                                    market_state_policy=market_assessment["version"])
+                if not response["range_execution"]:
+                    range_setup = None
                 sample_key = uuid4().hex[:16]
                 response["sample_key"] = sample_key
                 response["sample_saved"] = 0
@@ -262,12 +275,15 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                                 "role_manifest": ensemble.manifest,
                                 "execution_strategy": "range-reversal-v1" if range_setup else "chronos",
                                 "range_setup": range_setup,
+                                "market_assessment": market_assessment,
                                 "decision_audit": {
                                     "schema_version": 2,
                                     "base": result.to_dict(),
                                     "final": {**ensemble_payload, "decision": response["decision"],
                                               "reason": response["reason"],
-                                              "range_execution": response["range_execution"]},
+                                              "range_execution": response["range_execution"],
+                                              "market_state": response["market_state"],
+                                              "market_state_route": response["market_state_route"]},
                                     "settings": asdict(settings),
                                     "shadow_forecasts": {
                                         "timesfm3": timesfm3_payload,
@@ -287,6 +303,14 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                             },
                         )
                         response["sample_saved"] = int(saved)
+                        response["replay_input_saved"] = 0
+                        if saved and audit_forecast is not None:
+                            try:
+                                response["replay_input_saved"] = int(persist_replay_input(
+                                    history_db, sample_key=sample_key, market=market, quote_time=quote_time,
+                                    forecast=audit_forecast, settings=settings, response={**response, "replay_input_saved": 1}))
+                            except Exception as exc:
+                                print(f"Ramon replay-input warning: {type(exc).__name__}: {exc}", flush=True)
                     except Exception as exc:
                         print(
                             f"Ramon decision-sample persistence warning: {type(exc).__name__}: {exc}",

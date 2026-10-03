@@ -452,3 +452,36 @@ def validate_trade_telemetry(payload: dict[str, object], net: float) -> dict[str
             if minimum_risk <= budget or minimum_risk > cap_units + 0.0001:
                 raise ValueError("inconsistent minimum-lot override telemetry")
     return extra
+
+
+def persist_replay_input(db: str | Path, *, sample_key: str, market: Market,
+                         quote_time: int | None, forecast, settings, response: dict) -> bool:
+    """Store exact price inputs for later offline replay, deduplicating M15 bars.
+
+    Contains no credentials/account identifiers. This is best-effort telemetry;
+    callers must not turn a telemetry failure into permission to trade.
+    """
+    import hashlib
+    import time
+    import zlib
+    from dataclasses import asdict
+
+    context = {"symbol": market.symbol, "timeframe": market.timeframe,
+               "bars": [asdict(b) for b in market.bars]}
+    encoded = json.dumps(context, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    digest = hashlib.sha256(encoded).hexdigest()
+    provenance = {"schema_version": 1, "settings": asdict(settings), "forecast": asdict(forecast),
+                  "request": {"symbol": market.symbol, "timeframe": market.timeframe,
+                              "bid": market.bid, "ask": market.ask, "point": market.point,
+                              "quote_time": quote_time, "micro_bars": [asdict(b) for b in market.micro_bars]},
+                  "policy_replay_scope": "price_only; no account or execution reconstruction"}
+    with sqlite3.connect(Path(db), timeout=.25) as con:
+        con.execute("CREATE TABLE IF NOT EXISTS input_blobs (sha256 TEXT PRIMARY KEY, codec TEXT NOT NULL, body BLOB NOT NULL)")
+        con.execute("""CREATE TABLE IF NOT EXISTS inference_audit (
+            sample_key TEXT PRIMARY KEY, input_sha256 TEXT NOT NULL,
+            recorded_utc REAL NOT NULL, response_json TEXT NOT NULL, provenance_json TEXT NOT NULL)""")
+        con.execute("INSERT OR IGNORE INTO input_blobs VALUES (?,?,?)", (digest, "zlib-json-v1", zlib.compress(encoded)))
+        cursor=con.execute("INSERT OR IGNORE INTO inference_audit VALUES (?,?,?,?,?)", (
+            sample_key, digest, time.time(), json.dumps(response, allow_nan=False),
+            json.dumps(provenance, allow_nan=False)))
+        return cursor.rowcount==1

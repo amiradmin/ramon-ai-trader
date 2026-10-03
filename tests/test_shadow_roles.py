@@ -139,7 +139,7 @@ def test_http_default_shadow_preserves_base_with_ready_models(tmp_path, monkeypa
         ready.set()
         return server
     monkeypatch.setattr(service, "HTTPServer", factory)
-    thread = Thread(target=service.serve, args=("127.0.0.1", 0, FixedModel(), Settings()), daemon=True)
+    thread = Thread(target=service.serve, args=("127.0.0.1", 0, FixedModel(), Settings(require_direction_confirmation=False, market_state_policy_enabled=False)), daemon=True)
     thread.start()
     assert ready.wait(5)
     server = servers[0]

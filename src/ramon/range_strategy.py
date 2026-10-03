@@ -41,6 +41,7 @@ def live_candidate(market: Market, response: dict, *, enabled: bool, capable: bo
         'insufficient_model_strength',
         'insufficient_model_edge',
         'adverse_intrabar_timing',
+        'direction_confirmation_required',
     }:
         return None
     if (market.ask-market.bid)/market.point > max_spread_points:

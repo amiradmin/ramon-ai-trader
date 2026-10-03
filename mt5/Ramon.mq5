@@ -1,5 +1,5 @@
 #property strict
-#property version "1.547"
+#property version "1.549"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -42,6 +42,9 @@ const double MaxExecutableRiskUSD = 0.35; // Hard fixed cap; MT5 chart inputs ca
 input int MaxSpreadPoints = 50;
 input int MaxTradesPerDay = 400;
 input int MaximumHoldBars = 4;
+input bool EnableAccountLossLimits = false; // Entry-only account guard; configure and validate before activation.
+input double DailyLossLimitPercent = 0.0; // 0 disables this limit; include realized costs and floating loss.
+input double MaximumEquityDrawdownPercent = 0.0; // 0 disables; peak persists per account/server.
 input bool EnableMainFastProfit = false; // Optional MAIN-only early profit exit; off by default until explicitly enabled.
 const int MainFastProfitMinAgeBars = 2; // Evaluate only after at least 2 M15 bars (~30 min).
 const double MainFastProfitMinProfitUnits = 0.20; // Never close a losing MAIN trade through this feature.
@@ -104,6 +107,7 @@ input bool EnableImprovementShadowPack = true; // Observe-only: never blocks/ope
 input string ShadowCsvFileName = "Ramon_Shadow_Improvements.csv";
 
 CTrade Trade;
+string AccountLossLimitStatus = "DISABLED";
 datetime LastDecisionRequestTime = 0;
 datetime LastModelSnapshotTime = 0;
 datetime LastEntrySignalBar = 0;
@@ -232,6 +236,7 @@ double TPStageTP3 = 0.0;
 int TPStage = 0;
 datetime TPStageHitTime = 0;
 int TPStageWeakSnapshots = 0;
+datetime TPStageLastDecisionTime = 0;
 double TPStageProgress = 0.0;
 string TPStageStatus = "INACTIVE";
 double TPStageLockedSL = 0.0;
@@ -516,8 +521,10 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.54.7\n"
-      +"Range MAIN: "+BoolText(EnableRangeMain)+" | midpoint TP, boundary SL, 30min maximum\n"
+      +"EA version: 0.54.9\n"
+      +"Range MAIN: "+BoolText(EnableRangeMain)+" | quick 5-unit TP, boundary SL, RR >=1.2, 30min maximum\n"
+      +"AccountLossLimits: "+AccountLossLimitStatus+" | enabled="+BoolText(EnableAccountLossLimits)
+      +" daily="+DoubleToString(DailyLossLimitPercent,2)+"% drawdown="+DoubleToString(MaximumEquityDrawdownPercent,2)+"%\n"
       +"NewsGuard: ACTIVE | entries -15/+15min; close -5min; calendar required\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
@@ -599,7 +606,7 @@ string BuildDiagnosticText()
       +" / "+DoubleToString(LastTargetTP2,_Digits)
       +" / "+DoubleToString(LastTargetTP3,_Digits)
       +"  LegacyTP: "+DoubleToString(LastLegacyTargetPrice,_Digits)+"\n"
-      +"ExecutionTargetMode: MAIN_TP3_BROKER_FAILSAFE_WHEN_VALID\n"      +"MainExitMode: TP1_TP2_TP3 + EARLY_ADVERSE (60% risk, 2 weak snapshots)\n\n"
+      +"ExecutionTargetMode: MAIN_TP3_BROKER_FAILSAFE_WHEN_VALID\n"      +"MainExitMode: TP1_TP2_TP3 + EARLY_ADVERSE + MAX_HOLD (60% risk, 2 weak snapshots)\n\n"
       +"=== * V0.50 IMPROVEMENT SHADOWS (OBSERVE ONLY) ===\n"
       +"*ShadowPack: "+BoolText(EnableImprovementShadowPack)
       +"  Reason: "+ShadowReason+"\n"
@@ -1011,7 +1018,7 @@ void DrawDashboard()
    // Tall/narrow panel: summary text first, checklist directly underneath.
    UiRect("PANEL",12,24,560,955,C'15,23,42',C'71,85,105');
 
-   UiLabel("TITLE","RAMON AI TRADER  v0.54.7 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.54.9 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+"  M15  |  Chronos-2  |  live snapshot "
       +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,clrWhite,9);
@@ -1601,6 +1608,15 @@ bool SmallProfitTarget(const ENUM_ORDER_TYPE side,const double entry,
          return gain<=SmallProfitTargetUnits+0.25;
    }
    return false;
+}
+
+bool RangeMainRewardRiskValid(const ENUM_ORDER_TYPE side,const double entry,
+   const double volume,const double stop,const double target)
+{
+   double loss=0.0,gain=0.0;
+   return OrderCalcProfit(side,_Symbol,volume,entry,stop,loss)
+      && OrderCalcProfit(side,_Symbol,volume,entry,target,gain)
+      && loss<0.0 && gain>0.0 && gain+0.00001>=1.2*(-loss);
 }
 
 bool RangeMainProfitTarget(const ENUM_ORDER_TYPE side,const double entry,
@@ -2291,7 +2307,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.54.7";
+      version="0.54.9";
    }
    if(close_detail!="") detail=close_detail;
 
@@ -2678,6 +2694,7 @@ void ResetTPStageRuntime()
    TPStage=0;
    TPStageHitTime=0;
    TPStageWeakSnapshots=0;
+   TPStageLastDecisionTime=LastModelSnapshotTime;
    TPStageProgress=0.0;
    TPStageStatus="INACTIVE";
    TPStageLockedSL=0.0;
@@ -2737,6 +2754,7 @@ bool LoadTPStagePlan(const ulong ticket)
    TPStageHitTime=(GlobalVariableCheck(TPPlanGlobalKey(sample_key,"HIT"))
       ? (datetime)GlobalVariableGet(TPPlanGlobalKey(sample_key,"HIT")) : 0);
    TPStageWeakSnapshots=0;
+   TPStageLastDecisionTime=LastModelSnapshotTime;
    TPStageProgress=0.0;
    TPStageStatus="ACTIVE";
    return true;
@@ -2752,6 +2770,7 @@ void MarkTPStageReached(const int stage,const datetime now,const ulong ticket)
    TPStage=stage;
    TPStageHitTime=now;
    TPStageWeakSnapshots=0;
+   TPStageLastDecisionTime=LastModelSnapshotTime;
    GlobalVariableSet(TPPlanGlobalKey(TPStageSampleKey,"STAGE"),(double)stage);
    GlobalVariableSet(TPPlanGlobalKey(TPStageSampleKey,"HIT"),(double)now);
    Print("Ramon TP STAGE ",stage," hit ticket=",ticket,
@@ -3106,11 +3125,20 @@ bool ManageTPStages(const ulong ticket)
    double next_target=(TPStage==1 ? TPStageTP2 : TPStageTP3);
    double base_target=(TPStage==1 ? TPStageTP1 : TPStageTP2);
    TPStageProgress=DirectionalProgress(TPStageDirection,base_target,next_target,exit_price);
-   bool supportive=TPStageModelSupportive();
-   if(supportive)
+   bool fresh_model=(LastModelSnapshotTime>0
+      && LastModelSnapshotTime>=TPStageHitTime
+      && LastModelSnapshotTime<=now
+      && now-LastModelSnapshotTime<=SnapshotIntervalSeconds*2+15
+      && (LastModelDecision=="BUY" || LastModelDecision=="SELL" || LastModelDecision=="WAIT"));
+   bool supportive=(fresh_model && TPStageModelSupportive());
+   if(!fresh_model)
       TPStageWeakSnapshots=0;
-   else
-      TPStageWeakSnapshots++;
+   else if(TPStageLastDecisionTime!=LastModelSnapshotTime)
+   {
+      TPStageLastDecisionTime=LastModelSnapshotTime;
+      if(supportive) TPStageWeakSnapshots=0;
+      else TPStageWeakSnapshots++;
+   }
 
    int grace=(TPStage==1 ? TP1GraceSeconds : TP2GraceSeconds);
    double retrace_fraction=(TPStage==1 ? TP1RetraceFraction : TP2RetraceFraction);
@@ -3122,6 +3150,7 @@ bool ManageTPStages(const ulong ticket)
    bool grace_over=(TPStageHitTime>0 && now-TPStageHitTime>=grace);
    bool weak_exit=(
       grace_over
+      && fresh_model
       && TPStageWeakSnapshots>=TPStageWeakSnapshotsRequired
       && (TPStage==2 || TPStageProgress<TP1HealthyProgressFraction)
    );
@@ -3217,16 +3246,17 @@ bool ManageMainFastProfit(const ulong ticket,const datetime opened)
    }
 
    datetime now=TimeCurrent();
-   if(LastDecisionRequestTime<=0
-      || now-LastDecisionRequestTime>SnapshotIntervalSeconds*2+15)
+   if(LastModelSnapshotTime<=0 || LastModelSnapshotTime<opened || LastModelSnapshotTime>now
+      || now-LastModelSnapshotTime>SnapshotIntervalSeconds*2+15)
    {
+      MainFastProfitWeakSnapshots=0;
       MainFastProfitStatus="STALE_MODEL";
       return false;
    }
 
-   if(MainFastProfitLastDecisionTime!=LastDecisionRequestTime)
+   if(MainFastProfitLastDecisionTime!=LastModelSnapshotTime)
    {
-      MainFastProfitLastDecisionTime=LastDecisionRequestTime;
+      MainFastProfitLastDecisionTime=LastModelSnapshotTime;
       bool model_support=(LastModelDecision==direction);
       bool intrabar_support=(LastIntrabarConfirmed && LastIntrabarDirection==direction);
       bool trend_support=(LastAiTrendConfirmed && LastAiTrendDirection==direction);
@@ -3591,6 +3621,96 @@ bool ManageRangeMainPosition(const ulong ticket,const datetime opened)
    return true;
 }
 
+// Account-wide, entry-only limits. Existing positions keep their exit management.
+// Peak tracks equity minus cash transfers, so deposits cannot erase trading loss
+// and withdrawals do not create fictitious drawdown. Persistent across restarts.
+bool AccountLossLimitsBlocked(string &reason)
+{
+   reason="";
+   if(!EnableAccountLossLimits)
+   { AccountLossLimitStatus="DISABLED"; return false; }
+   if(!MathIsValidNumber(DailyLossLimitPercent) || !MathIsValidNumber(MaximumEquityDrawdownPercent)
+      || DailyLossLimitPercent<0.0 || DailyLossLimitPercent>=100.0
+      || MaximumEquityDrawdownPercent<0.0 || MaximumEquityDrawdownPercent>=100.0
+      || (DailyLossLimitPercent==0.0 && MaximumEquityDrawdownPercent==0.0))
+   { reason="ACCOUNT LOSS LIMITS: invalid/unconfigured"; AccountLossLimitStatus=reason; return true; }
+   datetime now=TimeCurrent();
+   datetime day=now-now%86400;
+   double balance=AccountInfoDouble(ACCOUNT_BALANCE);
+   double equity=AccountInfoDouble(ACCOUNT_EQUITY);
+   if(!MathIsValidNumber(balance) || !MathIsValidNumber(equity)
+      || !MathIsValidNumber(AccountInfoDouble(ACCOUNT_CREDIT))
+      || balance<=0.0 || equity<=0.0 || !HistorySelect(0,now))
+   { reason="ACCOUNT LOSS LIMITS: account/history unavailable"; AccountLossLimitStatus=reason; return true; }
+   double cash=0.0,today_cash=0.0,today_net=0.0;
+   for(int i=0;i<HistoryDealsTotal();i++)
+   {
+      ulong deal=HistoryDealGetTicket(i);
+      if(deal==0)
+      { reason="ACCOUNT LOSS LIMITS: incomplete history"; AccountLossLimitStatus=reason; return true; }
+      long type=HistoryDealGetInteger(deal,DEAL_TYPE);
+      double net=HistoryDealGetDouble(deal,DEAL_PROFIT)
+         +HistoryDealGetDouble(deal,DEAL_COMMISSION)
+         +HistoryDealGetDouble(deal,DEAL_SWAP)+HistoryDealGetDouble(deal,DEAL_FEE);
+      if(!MathIsValidNumber(net))
+      { reason="ACCOUNT LOSS LIMITS: invalid deal values"; AccountLossLimitStatus=reason; return true; }
+      bool transfer=(type==DEAL_TYPE_BALANCE || type==DEAL_TYPE_CREDIT);
+      bool today=((datetime)HistoryDealGetInteger(deal,DEAL_TIME)>=day);
+      if(transfer) { cash+=net; if(today && type==DEAL_TYPE_BALANCE) today_cash+=net; }
+      else if(today) today_net+=net;
+   }
+   string prefix="RamonRisk:"+IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN))+":"
+      +StringSubstr(AccountInfoString(ACCOUNT_SERVER),0,24)+":";
+   string peak_key=prefix+"PEAK";
+   string day_key=prefix+"DAY";
+   double adjusted=equity-cash;
+   if(!GlobalVariableCheck(peak_key) && GlobalVariableSet(peak_key,adjusted)==0)
+   { reason="ACCOUNT LOSS LIMITS: peak persistence failed"; AccountLossLimitStatus=reason; return true; }
+   double peak=GlobalVariableGet(peak_key);
+   if(!MathIsValidNumber(peak))
+   { reason="ACCOUNT LOSS LIMITS: invalid peak"; AccountLossLimitStatus=reason; return true; }
+   if(adjusted>peak)
+   {
+      if(!GlobalVariableSetOnCondition(peak_key,adjusted,peak))
+         peak=GlobalVariableGet(peak_key);
+      else peak=adjusted;
+   }
+   double high_water=peak+cash;
+   double start_balance=balance-today_net-today_cash;
+   double floating=equity-balance-AccountInfoDouble(ACCOUNT_CREDIT);
+   double day_loss=MathMax(0.0,-(today_net+floating));
+   bool day_latched=(GlobalVariableCheck(day_key) && GlobalVariableGet(day_key)==(double)day);
+   if(DailyLossLimitPercent>0.0 && (start_balance<=0.0 || day_latched
+      || day_loss>=start_balance*DailyLossLimitPercent/100.0))
+   {
+      GlobalVariableSet(day_key,(double)day);
+      GlobalVariablesFlush();
+      reason="ACCOUNT LOSS LIMITS: daily loss entry lock"; AccountLossLimitStatus=reason; return true;
+   }
+   if(MaximumEquityDrawdownPercent>0.0 && (high_water<=0.0
+      || high_water-equity>=high_water*MaximumEquityDrawdownPercent/100.0))
+   { reason="ACCOUNT LOSS LIMITS: equity drawdown entry lock"; AccountLossLimitStatus=reason; return true; }
+   GlobalVariablesFlush();
+   AccountLossLimitStatus="READY";
+   return false;
+}
+
+bool ManageMainMaximumHold(const ulong ticket,const datetime opened)
+{
+   int age=iBarShift(_Symbol,PERIOD_M15,opened,false);
+   if(age<MaximumHoldBars) return false;
+   if(ManagedExitPausedForMarketClosed(ticket))
+   { StatusLine="EXIT PAUSED: MARKET CLOSED"; return true; }
+   if(Trade.PositionClose(ticket,MaxDeviationPoints))
+   {
+      ResetMarketClosedExitPause();
+      RecordDealTelemetry(Trade.ResultDeal(),"maximum_hold_bars");
+      StatusLine="MAIN MAXIMUM HOLD EXIT";
+   }
+   else HandleManagedExitFailure(ticket,"MAIN MAXIMUM HOLD EXIT");
+   return true;
+}
+
 void ManageOpenPosition()
 {
    ulong ticket;
@@ -3615,7 +3735,9 @@ void ManageOpenPosition()
          return;
       if(ManageEarlyAdverseExit(ticket,opened))
          return;
-      StatusLine="Managed MAIN OPEN | exit mode TP1/TP2/TP3 + EARLY ADVERSE";
+      if(ManageMainFastProfit(ticket,opened)) return;
+      if(ManageMainMaximumHold(ticket,opened)) return;
+      StatusLine="Managed MAIN OPEN | TP stages + EARLY ADVERSE + MAX HOLD";
       return;
    }
 
@@ -3683,6 +3805,8 @@ void OnTimer()
    { StatusLine="Terminal disconnected"; ShowStatus(); return; }
    ulong ticket;
    datetime opened;
+   if(EnableAccountLossLimits)
+   { string observed_loss_reason=""; AccountLossLimitsBlocked(observed_loss_reason); }
    bool has_managed=ManagedPosition(ticket,opened);
    if(has_managed) ManageOpenPosition(); // Exits always run before network telemetry.
    datetime closed=iTime(_Symbol,PERIOD_M15,1);
@@ -3955,6 +4079,9 @@ void OnTimer()
    { StatusLine="Trade permission denied"; ShowStatus(); return; }
    if(SymbolInfoInteger(_Symbol,SYMBOL_TRADE_MODE)!=SYMBOL_TRADE_MODE_FULL)
    { StatusLine="Symbol trading disabled"; ShowStatus(); return; }
+   string account_loss_reason="";
+   if(AccountLossLimitsBlocked(account_loss_reason))
+   { StatusLine=account_loss_reason; ShowStatus(); return; }
    string cooldown_reason="";
    if(LocalLossCooldownBlocked(decision,cooldown_reason))
    { StatusLine=cooldown_reason; ShowStatus(); return; }
@@ -3970,6 +4097,10 @@ void OnTimer()
    double range_execution=0.0,range_stop=0.0,range_target=0.0,range_low=0.0,range_high=0.0;
    JsonNumber(reply,"range_execution",range_execution);
    bool range_trade=(range_execution>=0.5);
+   if(!range_trade && (intrabar_confirmed<0.5 || ai_trend_confirmed<0.5
+      || intrabar_direction!=decision || ai_trend_direction!=decision))
+   { StatusLine="DIRECTION GUARD: normal entry needs aligned confirmations"; ShowStatus(); return; }
+
    if(range_trade)
    {
       if(!EnableRangeMain || SmallOnlyMode || small_profit
@@ -4044,6 +4175,9 @@ void OnTimer()
          return;
       }
    }
+
+   if(range_trade && !RangeMainRewardRiskValid(side,entry,volume,stop,target))
+   { StatusLine="Range MAIN blocked: actual quick TP reward/risk <1.2"; ShowStatus(); return; }
 
    if(small_profit)
    {

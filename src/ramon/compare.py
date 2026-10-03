@@ -85,7 +85,7 @@ def holdout_metadata(db: str | Path, symbol: str, bars, start: int, stride: int)
 
 def compare(db: str | Path, chronos, *, symbol: str = "XAUUSD_l",
             point: float = 0.01, stride: int = 4,
-            cost_r: float | None = None) -> dict[str, object]:
+            cost_r: float | None = None, settings: Settings = Settings()) -> dict[str, object]:
     bars, spreads = load_bars(db, symbol)
     if len(bars) < 600:
         raise ValueError("need >=600 completed bars for the chronological holdout")
@@ -102,7 +102,6 @@ def compare(db: str | Path, chronos, *, symbol: str = "XAUUSD_l",
         cost_source = "user supplied R per round trip"
     # The holdout boundary and all settings are identical. Positions evolve separately;
     # therefore the two models can trade at different timestamps.
-    settings = Settings()
     kwargs = dict(point=point, settings=settings, start=start, stride=stride,
                   require_recorded_spreads=True, roundtrip_cost_r=cost_r or 0.0)
     baseline_result = replay(bars, spreads, MomentumBaseline(), **kwargs)

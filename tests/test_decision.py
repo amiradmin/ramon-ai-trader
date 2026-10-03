@@ -63,7 +63,7 @@ class DecisionTests(unittest.TestCase):
         self.market = Market("XAUUSD_l", "M15", 100.0, 100.4, 0.01, bars())
 
     def test_buy_is_model_led_and_pays_spread(self) -> None:
-        result = evaluate(self.market, self.model)
+        result = evaluate(self.market, self.model, Settings(require_direction_confirmation=False, market_state_policy_enabled=False))
         self.assertEqual(result.decision, "BUY")
         self.assertAlmostEqual(result.edge, 2.6)
         self.assertAlmostEqual(result.signal_bid, 100.0)
@@ -79,7 +79,7 @@ class DecisionTests(unittest.TestCase):
 
     def test_sell_and_wait(self) -> None:
         self.model.value = Forecast(95.0, 97.0, 101.0)
-        self.assertEqual(evaluate(self.market, self.model).decision, "SELL")
+        self.assertEqual(evaluate(self.market, self.model, Settings(require_direction_confirmation=False, market_state_policy_enabled=False)).decision, "SELL")
         self.model.value = Forecast(98.0, 100.0, 102.0)
         self.assertEqual(evaluate(self.market, self.model).decision, "WAIT")
 
@@ -128,8 +128,8 @@ class DecisionTests(unittest.TestCase):
 
         result = evaluate(market, self.model)
 
-        self.assertEqual(result.decision, "BUY")
-        self.assertEqual(result.reason, "forecast_up")
+        self.assertEqual(result.decision, "WAIT")
+        self.assertEqual(result.reason, "direction_confirmation_required")
         self.assertEqual(result.strong_entry_guard_active, 0)
 
     def test_weak_intrabar_entry_waits_unless_explicitly_enabled(self) -> None:
@@ -284,7 +284,7 @@ class DecisionTests(unittest.TestCase):
     def test_replay_enters_next_bar_and_counts_ambiguous_stop_first(self) -> None:
         history = list(bars(262))
         history[257] = Bar(history[257].time, 100.0, 105.0, 98.0, 100.0)
-        result = replay(history, [40] * 262, self.model, start=256, settings=Settings(horizon=4))
+        result = replay(history, [40] * 262, self.model, start=256, settings=Settings(horizon=4, require_direction_confirmation=False, market_state_policy_enabled=False))
         self.assertEqual((result.buys, result.wins, result.losses), (1, 0, 1))
         self.assertEqual(result.net_r, -1.0)
 
@@ -316,7 +316,7 @@ class DecisionTests(unittest.TestCase):
             temporary.bind(("127.0.0.1", 0))
             port = temporary.getsockname()[1]
         worker = threading.Thread(
-            target=serve, args=("127.0.0.1", port, self.model, Settings()), daemon=True
+            target=serve, args=("127.0.0.1", port, self.model, Settings(require_direction_confirmation=False, market_state_policy_enabled=False)), daemon=True
         )
         worker.start()
         url = f"http://127.0.0.1:{port}"
@@ -361,3 +361,26 @@ class DecisionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_last_losing_buy_without_confirmation_is_rejected():
+    # Recorded entry: BUY strength .316, intrabar false, model path SELL.
+    history=tuple(Bar(1800000000+i*900,4160.86,4169.28,4152.44,4160.86) for i in range(256))
+    micro=tuple(Bar(1800300000+i*60,v,v+.1,v-.1,v) for i,v in enumerate((4147.49,4147.43,4147.43)))
+    market=Market('XAUUSD_l','M15',4147.43,4147.85,.01,history,micro)
+    model=FixedModel(Forecast(4143.54736328125,4156.888671875,4172.171875,
+                              (4160,4159,4158,4156.888671875)))
+    result=evaluate(market,model)
+    assert result.signal_strength > .3
+    assert not result.intrabar_confirmed
+    assert result.ai_trend_direction=='SELL'
+    assert result.decision=='WAIT'
+    assert result.reason=='direction_confirmation_required'
+
+
+def test_confirmed_strong_buy_remains_allowed():
+    micro=tuple(Bar(1800300000+i*60,v,v+.1,v-.1,v) for i,v in enumerate((99.8,99.7,99.9,100)))
+    market=Market('XAUUSD_l','M15',100,100.4,.01,bars(),micro)
+    result=evaluate(market,FixedModel(Forecast(99,103,105,(100.5,101,102,103))))
+    assert result.decision=='BUY'
+    assert result.intrabar_confirmed and result.ai_trend_confirmed
