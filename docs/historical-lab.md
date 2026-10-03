@@ -268,3 +268,18 @@ docker compose --profile tools run --rm \
 
 A coarse Chronos screen is exploratory. External OHLC, assumed spread, different
 sampling density and M15 execution limitations still apply.
+
+
+### Terminal progress
+
+Long historical benchmark runs now show a live progress bar on stderr by default.
+It reports percentage, completed work units, elapsed time, ETA and the current
+stage/model. JSON output remains clean on stdout and in `--output` files.
+
+Example:
+
+```text
+[#########---------------]  37.42% | 3742/10000 | elapsed 12:41 | ETA 21:13 | chronos: regime directional H=8
+```
+
+Use `--no-progress` only when machine-readable stderr is required.
