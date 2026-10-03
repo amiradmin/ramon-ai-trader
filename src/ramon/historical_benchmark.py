@@ -821,6 +821,8 @@ def main() -> None:
                         help="Also benchmark the project's Chronos-2 forecaster")
     parser.add_argument("--chronos-model", default="autogluon/chronos-2-small")
     parser.add_argument("--chronos-device", default="cpu")
+    parser.add_argument("--cpu-workers", type=int, default=2,
+                        help="CPU thread count for Chronos/PyTorch/BLAS")
     parser.add_argument("--chronos-stride", type=int, default=64,
                         help="Chronos screening stride; use --stride value for strict same-density comparison")
     parser.add_argument("--chronos-cache", default="data/chronos_historical_forecasts.sqlite3")
@@ -832,9 +834,15 @@ def main() -> None:
     additional_models = []
     chronos_cache = None
     chronos_metadata = None
+    if args.cpu_workers < 1:
+        parser.error("--cpu-workers must be >=1")
     if args.include_chronos:
         from .model import ChronosForecaster, model_name
-        chronos = ChronosForecaster(model_name(args.chronos_model), args.chronos_device)
+        chronos = ChronosForecaster(
+            model_name(args.chronos_model),
+            args.chronos_device,
+            cpu_workers=args.cpu_workers if args.chronos_device == "cpu" else None,
+        )
         identity = f"{args.chronos_model}@{chronos.revision or 'unknown-revision'}"
         chronos_cache = PersistentForecastCache(chronos, args.chronos_cache, identity)
         additional_models.append(("chronos", chronos_cache, args.chronos_stride))
@@ -844,6 +852,7 @@ def main() -> None:
             "device": args.chronos_device,
             "stride": args.chronos_stride,
             "cache": args.chronos_cache,
+            "cpu_workers": chronos.cpu_workers,
         }
     report = benchmark_database(
         args.db,
