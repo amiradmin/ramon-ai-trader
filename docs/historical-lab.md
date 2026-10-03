@@ -163,3 +163,26 @@ PYTHONPATH=src python3 -m ramon.historical_benchmark \
   --fallback-spread 42 \
   --output data/ramon_historical_benchmark.json
 ```
+
+
+### Contrarian baselines and regime-conditioned direction
+
+The lab now includes mirrored versions of both reference forecasts:
+
+- `contrarian_previous_bar`
+- `contrarian_momentum_4bar`
+
+A contrarian forecast mirrors the original forecast around the latest completed
+close. This tests whether a persistently sub-50% directional signal contains a
+stable mean-reversion clue after costs; it is not assumed to be profitable.
+
+Each model also reports `regime_directional_accuracy`. Ramon's existing
+price-only `assess_market()` classification is computed using only bars and
+spread information available at the signal time, then raw forecast direction is
+scored separately inside each state and horizon. This helps identify whether a
+signal has conditional skill in states such as TREND, RANGE, BREAKOUT,
+VOLATILITY_COMPRESSION, or UNCERTAIN even when aggregate accuracy is weak.
+
+Regime-conditioned results are descriptive research. Require adequate sample
+counts and consistency across chronological folds before treating any apparent
+edge as meaningful.
