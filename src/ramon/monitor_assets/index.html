@@ -32,6 +32,16 @@
         <div class="audit-note"><span class="eyebrow">پوشش بازار</span><strong>دو مسیر اجرایی اصلی</strong><p>پیش‌بینی جهت‌دار و برگشت لبهٔ رنج. سیاست جدید روند، پولبک، رنج، شکست و شکست کاذب، تغییر رژیم و شرایط غیرعادی را تشخیص می‌دهد و مسیر ورود یا انتظار را محدود می‌کند.</p><p>این سیاست تنها برای تصمیم‌های نسخهٔ جدید ثبت می‌شود. تشخیص حالت، مجوز ورود نیست؛ قفل‌های مدل و اکسپرت همچنان لازم‌اند.</p></div>
       </aside>
     </section>
+    <section class="model-map-panel" aria-label="نقشهٔ مدل‌ها و هندلرها">
+      <header class="panel-heading"><div><span class="eyebrow">MODEL / HANDLER MAP</span><h2>مدل‌ها و مسئول هر بخش</h2></div><span class="muted">روی هر ردیف نگه دار تا دادهٔ همان تصمیم را ببینی</span></header>
+      <div class="model-map-wrap">
+        <table class="model-map-table">
+          <thead><tr><th>بخش</th><th>Model / Handler</th><th>وضعیت</th><th>Decision ID</th></tr></thead>
+          <tbody id="model-map-body"></tbody>
+        </table>
+      </div>
+    </section>
+    <div id="model-map-tooltip" class="model-map-tooltip" role="tooltip" hidden></div>
     <section class="history-grid">
       <div class="history-panel"><header class="panel-heading"><div><span class="eyebrow">RECORDED DECISIONS</span><h2>آخرین تصمیم‌های مدل</h2></div><span class="muted">زمان دریافت توسط سرویس</span></header><div id="timeline" class="timeline"></div></div>
       <div class="history-panel"><header class="panel-heading"><div><span class="eyebrow">CLOSED TRADES</span><h2>نتیجهٔ معاملات ثبت‌شده</h2></div><span class="muted">واحد حساب</span></header><div id="trades" class="trades"></div></div>
