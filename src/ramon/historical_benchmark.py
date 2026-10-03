@@ -20,6 +20,7 @@ from typing import Sequence
 from .compare import MomentumBaseline
 from .core import Bar, Forecast, Market, Settings, evaluate
 from .history import load_bars
+from .market_state import assess_market
 
 
 class PreviousBarBaseline:
@@ -34,6 +35,24 @@ class PreviousBarBaseline:
         path = tuple(closes[-1] + move * n for n in range(1, horizon + 1))
         median = path[-1]
         return Forecast(max(1e-6, median - width), median, median + width, path)
+
+
+class ContrarianBaseline:
+    """Mirror another forecaster around the latest completed close."""
+
+    def __init__(self, base) -> None:
+        self.base = base
+
+    def forecast(self, closes: Sequence[float], horizon: int) -> Forecast:
+        base = self.base.forecast(closes, horizon)
+        anchor = closes[-1]
+        path = tuple(anchor - (value - anchor) for value in base.median_path)
+        median = anchor - (base.median - anchor)
+        # Mirror the interval and keep low <= median <= high.
+        low = max(1e-6, anchor - (base.high - anchor))
+        high = max(low, anchor - (base.low - anchor))
+        median = min(max(median, low), high)
+        return Forecast(low, median, high, path)
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,6 +252,74 @@ def directional_accuracy(
     return out
 
 
+def regime_directional_accuracy(
+    bars: Sequence[Bar],
+    spreads: Sequence[int],
+    model,
+    *,
+    symbol: str,
+    point: float,
+    start: int,
+    end: int,
+    horizons: Sequence[int],
+    stride: int,
+    fallback_spread_points: int,
+) -> dict[str, dict[str, dict[str, object]]]:
+    """Raw forecast direction grouped by Ramon's price-only market state."""
+    if stride < 1 or point <= 0 or fallback_spread_points <= 0:
+        raise ValueError("invalid regime directional input")
+    out: dict[str, dict[str, dict[str, object]]] = {}
+    for horizon in horizons:
+        grouped: dict[str, dict[str, object]] = defaultdict(
+            lambda: {"correct": 0, "wrong": 0, "flat_forecast": 0, "flat_actual": 0, "signed_moves": []}
+        )
+        for i in range(max(256, start), end - horizon, stride):
+            spread_points = spreads[i] if spreads[i] > 0 else fallback_spread_points
+            market = Market(
+                symbol=symbol,
+                timeframe="M15",
+                bid=bars[i].close,
+                ask=bars[i].close + spread_points * point,
+                point=point,
+                bars=tuple(bars[max(0, i - 255): i + 1]),
+            )
+            state = assess_market(market)["state"]
+            closes = [bar.close for bar in market.bars]
+            forecast = model.forecast(closes, horizon)
+            predicted_move = forecast.median - bars[i].close
+            actual_move = bars[i + horizon].close - bars[i].close
+            bucket = grouped[state]
+            if predicted_move == 0:
+                bucket["flat_forecast"] += 1
+                continue
+            if actual_move == 0:
+                bucket["flat_actual"] += 1
+                continue
+            predicted_sign = 1 if predicted_move > 0 else -1
+            actual_sign = 1 if actual_move > 0 else -1
+            bucket["signed_moves"].append(actual_move * predicted_sign)
+            if predicted_sign == actual_sign:
+                bucket["correct"] += 1
+            else:
+                bucket["wrong"] += 1
+
+        horizon_report: dict[str, dict[str, object]] = {}
+        for state, values in sorted(grouped.items()):
+            resolved = int(values["correct"]) + int(values["wrong"])
+            moves = values["signed_moves"]
+            horizon_report[state] = {
+                "samples": resolved,
+                "correct": values["correct"],
+                "wrong": values["wrong"],
+                "flat_forecast": values["flat_forecast"],
+                "flat_actual": values["flat_actual"],
+                "accuracy": round(int(values["correct"]) / resolved, 6) if resolved else None,
+                "mean_signed_move": round(mean(moves), 6) if moves else None,
+            }
+        out[str(horizon)] = horizon_report
+    return out
+
+
 def horizon_matrix(
     bars: Sequence[Bar],
     spreads: Sequence[int],
@@ -319,6 +406,11 @@ def benchmark_model(
             bars, model, start=warmup, end=len(bars),
             horizons=analysis_horizons, stride=stride,
         ),
+        "regime_directional_accuracy": regime_directional_accuracy(
+            bars, spreads, model, symbol=symbol, point=point,
+            start=warmup, end=len(bars), horizons=analysis_horizons, stride=stride,
+            fallback_spread_points=fallback_spread_points,
+        ),
         "horizon_matrix": horizon_matrix(
             bars, spreads, model, symbol=symbol, point=point,
             base_settings=settings, start=warmup, end=len(bars),
@@ -350,9 +442,13 @@ def benchmark_database(
         require_direction_confirmation=False,
         market_state_policy_enabled=False,
     )
+    previous = PreviousBarBaseline()
+    momentum = MomentumBaseline()
     models = (
-        ("previous_bar", PreviousBarBaseline()),
-        ("momentum_4bar", MomentumBaseline()),
+        ("previous_bar", previous),
+        ("momentum_4bar", momentum),
+        ("contrarian_previous_bar", ContrarianBaseline(previous)),
+        ("contrarian_momentum_4bar", ContrarianBaseline(momentum)),
     )
     return {
         "schema_version": 1,
@@ -382,6 +478,8 @@ def benchmark_database(
             "note": "These reference models are not trained. Trainable models must fit only on data before each fold.",
             "analysis_horizons": list(analysis_horizons),
             "directional_accuracy": "raw forecast sign vs future close; no SL/TP or entry filters",
+            "regime_directional_accuracy": "same raw direction metric grouped by price-only market state assessed from past/current bars only",
+            "contrarian": "mirror each baseline forecast around the latest completed close; no fitting",
         },
         "models": {
             name: benchmark_model(
