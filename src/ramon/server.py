@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 from threading import Lock
+from concurrent.futures import ThreadPoolExecutor
 import time
 from uuid import uuid4
 
@@ -69,6 +70,25 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
     timesfm3_shadow = TimesFM3Shadow.from_env()
     moment_shadow = MomentAnomalyShadow.from_env()
     finbert_shadow = FinBertNewsShadow.from_env()
+    shadow_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ramon-shadow")
+    moment_future = None
+    finbert_future = None
+    latest_moment_payload = {
+        **moment_shadow.status(),
+        "moment_anomaly_score": -1.0,
+        "moment_anomaly_ratio": -1.0,
+        "moment_anomaly_label": "WARMING" if moment_shadow.enabled else "UNAVAILABLE",
+    }
+    latest_finbert_payload = {
+        **finbert_shadow.status(),
+        "finbert_sentiment_label": "WARMING" if finbert_shadow.enabled else "UNAVAILABLE",
+        "finbert_positive": -1.0,
+        "finbert_negative": -1.0,
+        "finbert_neutral": -1.0,
+        "finbert_directional_score": 0.0,
+    }
+    last_shadow_bar = 0
+    last_finbert_event_key = ""
     news_provider = ForexFactoryNewsProvider(
         enabled=news_enabled,
         url=os.getenv("RAMON_NEWS_URL", DEFAULT_FOREX_FACTORY_JSON).strip() or DEFAULT_FOREX_FACTORY_JSON,
@@ -146,6 +166,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
             )
 
         def do_POST(self) -> None:
+            nonlocal moment_future, finbert_future, latest_moment_payload
+            nonlocal latest_finbert_payload, last_shadow_bar, last_finbert_event_key
             if self.path not in {"/decision", "/trades"}:
                 self.send_error(404)
                 return
@@ -205,18 +227,62 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     timesfm3_payload = timesfm3_shadow.assess(
                         market, result, settings.horizon
                     )
-                    moment_payload = moment_shadow.assess(market)
-                    finbert_payload = finbert_shadow.assess(
+
+                # Heavy shadow inference must never delay the trading response.
+                # Collect completed results, then schedule at most one new job per input.
+                if moment_future is not None and moment_future.done():
+                    try:
+                        latest_moment_payload = moment_future.result()
+                    except Exception as exc:
+                        latest_moment_payload = {
+                            **moment_shadow.status(),
+                            "moment_shadow_ready": 0,
+                            "moment_shadow_error": f"{type(exc).__name__}: {exc}",
+                            "moment_anomaly_score": -1.0,
+                            "moment_anomaly_ratio": -1.0,
+                            "moment_anomaly_label": "ERROR",
+                        }
+                    moment_future = None
+                current_bar = market.bars[-1].time
+                if moment_shadow.ready and moment_future is None and current_bar != last_shadow_bar:
+                    moment_future = shadow_executor.submit(moment_shadow.assess, market)
+                    last_shadow_bar = current_bar
+
+                if finbert_future is not None and finbert_future.done():
+                    try:
+                        latest_finbert_payload = finbert_future.result()
+                    except Exception as exc:
+                        latest_finbert_payload = {
+                            **finbert_shadow.status(),
+                            "finbert_shadow_ready": 0,
+                            "finbert_shadow_error": f"{type(exc).__name__}: {exc}",
+                            "finbert_sentiment_label": "ERROR",
+                            "finbert_positive": -1.0,
+                            "finbert_negative": -1.0,
+                            "finbert_neutral": -1.0,
+                            "finbert_directional_score": 0.0,
+                        }
+                    finbert_future = None
+                event_key = f"{news_snapshot.event_time}:{news_snapshot.event_title}"
+                if (
+                    finbert_shadow.ready
+                    and finbert_future is None
+                    and news_snapshot.event_title != "NONE"
+                    and event_key != last_finbert_event_key
+                ):
+                    finbert_future = shadow_executor.submit(
+                        finbert_shadow.assess,
                         title=news_snapshot.event_title,
                         country=news_snapshot.event_country,
                         impact=news_snapshot.event_impact,
                     )
+                    last_finbert_event_key = event_key
 
                 response = result.to_dict()
                 response.update(ensemble_payload)
                 response.update(timesfm3_payload)
-                response.update(moment_payload)
-                response.update(finbert_payload)
+                response.update(latest_moment_payload)
+                response.update(latest_finbert_payload)
                 if history_db:
                     try:
                         response.update(observe_range_shadow(history_db, market, quote_time))
