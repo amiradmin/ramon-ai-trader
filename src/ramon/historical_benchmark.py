@@ -183,6 +183,84 @@ def _direction_metrics(trades: Sequence[TradeRecord]) -> dict[str, dict[str, obj
     }
 
 
+
+def directional_accuracy(
+    bars: Sequence[Bar],
+    model,
+    *,
+    start: int,
+    end: int,
+    horizons: Sequence[int],
+    stride: int,
+) -> dict[str, dict[str, object]]:
+    """Measure raw forecast direction against future closes, without trade exits."""
+    if stride < 1:
+        raise ValueError("stride must be positive")
+    out: dict[str, dict[str, object]] = {}
+    for horizon in horizons:
+        if horizon < 1:
+            raise ValueError("directional horizons must be positive")
+        correct = wrong = flat_forecast = flat_actual = 0
+        signed_moves: list[float] = []
+        for i in range(max(256, start), end - horizon, stride):
+            closes = [bar.close for bar in bars[max(0, i - 255):i + 1]]
+            forecast = model.forecast(closes, horizon)
+            predicted_move = forecast.median - bars[i].close
+            actual_move = bars[i + horizon].close - bars[i].close
+            if predicted_move == 0:
+                flat_forecast += 1
+                continue
+            if actual_move == 0:
+                flat_actual += 1
+                continue
+            predicted_sign = 1 if predicted_move > 0 else -1
+            actual_sign = 1 if actual_move > 0 else -1
+            signed_moves.append(actual_move * predicted_sign)
+            if predicted_sign == actual_sign:
+                correct += 1
+            else:
+                wrong += 1
+        resolved = correct + wrong
+        out[str(horizon)] = {
+            "samples": resolved,
+            "correct": correct,
+            "wrong": wrong,
+            "flat_forecast": flat_forecast,
+            "flat_actual": flat_actual,
+            "accuracy": round(correct / resolved, 6) if resolved else None,
+            "mean_signed_move": round(mean(signed_moves), 6) if signed_moves else None,
+        }
+    return out
+
+
+def horizon_matrix(
+    bars: Sequence[Bar],
+    spreads: Sequence[int],
+    model,
+    *,
+    symbol: str,
+    point: float,
+    base_settings: Settings,
+    start: int,
+    end: int,
+    horizons: Sequence[int],
+    stride: int,
+    fallback_spread_points: int,
+    roundtrip_cost_r: float,
+) -> dict[str, dict[str, object]]:
+    """Replay identical signal model with several holding horizons."""
+    report: dict[str, dict[str, object]] = {}
+    for horizon in horizons:
+        settings = replace(base_settings, horizon=horizon)
+        trades, counters = simulate(
+            bars, spreads, model, symbol=symbol, point=point, settings=settings,
+            start=start, end=end, stride=stride,
+            fallback_spread_points=fallback_spread_points,
+            roundtrip_cost_r=roundtrip_cost_r,
+        )
+        report[str(horizon)] = {**counters, "metrics": _metrics(trades)}
+    return report
+
 def benchmark_model(
     bars: Sequence[Bar],
     spreads: Sequence[int],
@@ -196,6 +274,7 @@ def benchmark_model(
     stride: int,
     fallback_spread_points: int,
     roundtrip_cost_r: float,
+    analysis_horizons: Sequence[int],
 ) -> dict[str, object]:
     if folds < 2:
         raise ValueError("folds must be >=2")
@@ -236,6 +315,17 @@ def benchmark_model(
         "by_direction": _direction_metrics(all_trades),
         "by_year": _by_year(all_trades),
         "folds": fold_reports,
+        "directional_accuracy": directional_accuracy(
+            bars, model, start=warmup, end=len(bars),
+            horizons=analysis_horizons, stride=stride,
+        ),
+        "horizon_matrix": horizon_matrix(
+            bars, spreads, model, symbol=symbol, point=point,
+            base_settings=settings, start=warmup, end=len(bars),
+            horizons=analysis_horizons, stride=stride,
+            fallback_spread_points=fallback_spread_points,
+            roundtrip_cost_r=roundtrip_cost_r,
+        ),
     }
 
 
@@ -248,10 +338,13 @@ def benchmark_database(
     stride: int = 4,
     fallback_spread_points: int = 42,
     roundtrip_cost_r: float = 0.0,
+    analysis_horizons: Sequence[int] = (1, 4, 8, 16),
 ) -> dict[str, object]:
     bars, spreads = load_bars(db, symbol)
     if len(bars) < 1200:
         raise ValueError("need >=1200 M15 bars for the historical benchmark")
+    if not analysis_horizons or any(h < 1 for h in analysis_horizons):
+        raise ValueError("analysis horizons must be positive")
     settings = replace(
         Settings(),
         require_direction_confirmation=False,
@@ -287,6 +380,8 @@ def benchmark_database(
             "folds": folds,
             "fold_type": "chronological_non_overlapping_evaluation_windows",
             "note": "These reference models are not trained. Trainable models must fit only on data before each fold.",
+            "analysis_horizons": list(analysis_horizons),
+            "directional_accuracy": "raw forecast sign vs future close; no SL/TP or entry filters",
         },
         "models": {
             name: benchmark_model(
@@ -294,6 +389,7 @@ def benchmark_database(
                 settings=settings, folds=folds, stride=stride,
                 fallback_spread_points=fallback_spread_points,
                 roundtrip_cost_r=roundtrip_cost_r,
+                analysis_horizons=analysis_horizons,
             )
             for name, model in models
         },
@@ -316,8 +412,11 @@ def main() -> None:
     parser.add_argument("--stride", type=int, default=4)
     parser.add_argument("--fallback-spread", type=int, default=42)
     parser.add_argument("--cost-r", type=float, default=0.0)
+    parser.add_argument("--analysis-horizons", default="1,4,8,16",
+                        help="Comma-separated M15 horizons for raw direction and holding-period matrix")
     parser.add_argument("--output", default="")
     args = parser.parse_args()
+    horizons = tuple(int(value) for value in args.analysis_horizons.split(",") if value.strip())
     report = benchmark_database(
         args.db,
         symbol=args.symbol,
@@ -326,6 +425,7 @@ def main() -> None:
         stride=args.stride,
         fallback_spread_points=args.fallback_spread,
         roundtrip_cost_r=args.cost_r,
+        analysis_horizons=horizons,
     )
     payload = json.dumps(report, indent=2, allow_nan=False)
     if args.output:
