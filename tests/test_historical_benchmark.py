@@ -112,3 +112,24 @@ def test_regime_accuracy_has_no_future_dependency(tmp_path):
         regimes = model["regime_directional_accuracy"]["1"]
         assert regimes
         assert sum(v["samples"] for v in regimes.values()) > 0
+
+
+def test_contrarian_never_emits_nonpositive_path():
+    class ExtremeUp:
+        def forecast(self, closes, horizon):
+            anchor = closes[-1]
+            path = tuple(anchor + 1000.0 * (i + 1) for i in range(horizon))
+            return __import__("ramon.core", fromlist=["Forecast"]).Forecast(
+                anchor + 900.0,
+                anchor + 1000.0,
+                anchor + 1100.0,
+                path,
+            )
+
+    closes = [100.0 + i for i in range(16)]
+    forecast = ContrarianBaseline(ExtremeUp()).forecast(closes, 4)
+    assert forecast.low > 0
+    assert forecast.median > 0
+    assert forecast.high > 0
+    assert all(value > 0 for value in forecast.median_path)
+    assert forecast.low <= forecast.median <= forecast.high
