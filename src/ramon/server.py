@@ -72,6 +72,28 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
         timeout_seconds=float(os.getenv("RAMON_NEWS_TIMEOUT_SECONDS", "2.0")),
         max_stale_seconds=int(os.getenv("RAMON_NEWS_MAX_STALE_SECONDS", "1800")),
     )
+
+    def role_handler_name(role: str) -> str:
+        role_model = getattr(ensemble, role, None)
+        class_name = type(role_model).__name__ if role_model is not None else "BinaryLogisticModel"
+        return f"Ramon/{class_name}"
+
+    def model_handlers() -> dict[str, str]:
+        return {
+            "forecast_model_handler": model.model_id.split("/")[-1],
+            "forecast_shadow_model_handler": (
+                timesfm3_shadow.checkpoint.split("/")[-1]
+                if timesfm3_shadow.enabled else "OFF"
+            ),
+            "regime_model_handler": role_handler_name("regime"),
+            "entry_model_handler": role_handler_name("entry"),
+            "news_model_handler": role_handler_name("news"),
+            "meta_model_handler": role_handler_name("meta"),
+            "risk_model_handler": role_handler_name("risk"),
+            "news_source_handler": "ForexFactoryNewsProvider",
+            "market_state_handler": "market-state-v1",
+            "target_model_handler": "Ramon/TargetStructure",
+        }
     last_persisted_bar: dict[str, int] = {}
     history_status: dict[str, object] = {
         "last_error": "",
@@ -105,6 +127,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     **ensemble.status(),
                     **timesfm3_shadow.status(),
                     **news_provider.status(),
+                    **model_handlers(),
                 },
             )
 
@@ -185,6 +208,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
 
                 response.update(news_snapshot.payload())
                 response["news_model_ready"] = int(ensemble.news_ready)
+                response.update(model_handlers())
 
                 target_direction = (
                     str(response["decision"])
