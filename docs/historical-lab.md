@@ -214,3 +214,57 @@ alone is insufficient; prioritize states with enough trades and consistent
 positive trade metrics across multiple independent folds. These results still
 use assumed external spread and coarse M15 OHLC execution, so they remain
 research evidence rather than a live deployment rule.
+
+
+### Chronos-2 screening in the same lab
+
+Chronos can now be added to the same historical report without changing the live
+EA:
+
+```bash
+python -m ramon.historical_benchmark \
+  --db /data/ramon_kaggle_m15.sqlite3 \
+  --symbol XAUUSD_KAGGLE \
+  --folds 5 \
+  --stride 4 \
+  --fallback-spread 42 \
+  --analysis-horizons 1,4,8,16 \
+  --include-chronos \
+  --chronos-model autogluon/chronos-2-small \
+  --chronos-device cpu \
+  --chronos-stride 128 \
+  --chronos-cache /data/chronos_historical_forecasts.sqlite3 \
+  --output /data/ramon_historical_benchmark_chronos.json
+```
+
+Chronos uses the project's existing `ChronosForecaster`. The default research
+workflow may use a coarser `--chronos-stride` than the baseline stride for an
+initial screen. The report records each model's stride and explicitly warns when
+the Chronos stride differs. Any promising Chronos result should be rerun with
+`--chronos-stride` equal to `--stride` before direct performance comparison.
+
+Expensive forecasts are stored in a persistent SQLite cache keyed by model
+identity, horizon and the exact historical close context. Re-running or resuming
+the same experiment reuses cached forecasts. A model revision is part of the
+cache identity so different checkpoint revisions are not silently mixed.
+
+For the Docker setup, the tools image already contains the model dependencies and
+shares the Hugging Face cache. The current checkout can be mounted into the tools
+container so a rebuild is not required just to run new research code:
+
+```bash
+docker compose --profile tools run --rm \
+  -v "$PWD:/workspace" -w /workspace \
+  -e PYTHONPATH=/workspace/src \
+  tools -m ramon.historical_benchmark \
+  --db /data/ramon_kaggle_m15.sqlite3 \
+  --symbol XAUUSD_KAGGLE \
+  --folds 5 --stride 4 --fallback-spread 42 \
+  --analysis-horizons 1,4,8,16 \
+  --include-chronos --chronos-device cpu --chronos-stride 128 \
+  --chronos-cache /data/chronos_historical_forecasts.sqlite3 \
+  --output /data/ramon_historical_benchmark_chronos.json
+```
+
+A coarse Chronos screen is exploratory. External OHLC, assumed spread, different
+sampling density and M15 execution limitations still apply.
