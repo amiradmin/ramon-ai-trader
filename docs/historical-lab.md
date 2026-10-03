@@ -86,3 +86,54 @@ Use this database for Ramon-only M15 experiments and walk-forward comparisons.
 Do not change the live EA or production decision thresholds based solely on
 in-sample results from this external broker dataset. Final validation should
 still include held-out LiteFinance data and realistic execution assumptions.
+
+
+## Historical benchmark lab
+
+The external M15 database can be evaluated without changing the live EA:
+
+```bash
+PYTHONPATH=src python3 -m ramon.historical_benchmark \
+  --db data/ramon_kaggle_m15.sqlite3 \
+  --symbol XAUUSD_KAGGLE \
+  --folds 5 \
+  --stride 4 \
+  --fallback-spread 42 \
+  --output data/ramon_historical_benchmark.json
+```
+
+The first benchmark intentionally compares only two simple, non-trained reference
+forecasters:
+
+- `previous_bar`: projects the most recent completed M15 bar move.
+- `momentum_4bar`: projects the mean of the last four completed-bar changes.
+
+The first 20% of bars are excluded from scored results and remain available only
+as historical context. The remaining 80% is reported both as one continuous
+evaluation and as chronological, non-overlapping folds.
+
+Each model report includes:
+
+- trades, BUY and SELL counts
+- wins, losses and timeouts
+- resolved win rate
+- timeout rate
+- gross positive/negative R
+- profit factor
+- mean R and net R
+- max drawdown in R
+- BUY/SELL metrics separately
+- calendar-year metrics
+- fold-by-fold metrics
+
+These baseline models are not fitted, so the folds are chronological evaluation
+windows rather than train/test fits. When a trainable model is added, it must be
+trained only on observations strictly earlier than the evaluated fold.
+
+For this external dataset, `spread_points=0` means unknown. The benchmark therefore
+requires an explicit fallback spread (42 points in the example). This is a
+research assumption, not a claim about historical Octa or LiteFinance spreads.
+
+The benchmark remains deliberately separate from RANGE execution, quote-level
+micro context, slippage and live EA exit management. A favorable result here is
+not sufficient evidence for a live configuration change.
