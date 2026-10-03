@@ -24,8 +24,47 @@ function route(a,b){const [ax,ay]=coords[a],[bx,by]=coords[b],w=206,h=127;
  return {d:`M ${ax+w/2} ${ay+h} V ${by-20} H ${bx+w/2} V ${by}`,x:(ax+bx+w)/2,y:by-28};}
 function renderEdges(changed){const svg=$("edges");svg.replaceChildren();const defs=svgEl("defs",{});const marker=svgEl("marker",{id:"arrow",viewBox:"0 0 10 10",refX:"9",refY:"5",markerWidth:"6",markerHeight:"6",orient:"auto-start-reverse"});marker.append(svgEl("path",{d:"M 0 0 L 10 5 L 0 10 z",fill:"#71829a"}));defs.append(marker);svg.append(defs);
  const fresh=snapshot.model_freshness.state==="fresh";for(const edge of snapshot.edges){const n=snapshot.nodes.find(n=>n.id===edge.to);let state=n?.state||"unknown";const branchOff=(edge.from==="base"&&edge.to==="range"&&snapshot.decision!=="WAIT"&&snapshot.nodes.find(n=>n.id==="range")?.observed_state!=="pass")||(edge.from==="base"&&edge.to==="decision"&&snapshot.nodes.find(n=>n.id==="range")?.observed_state==="pass");if(branchOff)state="idle";const r=route(edge.from,edge.to);const pulse=changed&&fresh&&n?.source==="model"&&state==="pass"&&!branchOff?" pulse":"";svg.append(svgEl("path",{d:r.d,class:`flow ${state}${pulse}`,"marker-end":"url(#arrow)"}));const t=svgEl("text",{x:r.x,y:r.y,"text-anchor":"middle"});t.textContent=edge.label;svg.append(t);}}
+function modelMapTooltipText(row){
+  const lines=[`${row.name} · ${row.handler}`,`Status: ${row.status}`,`Decision ID: ${row.sample_key||"ثبت نشده"}`];
+  if(row.observed_at)lines.push(`Observed: ${formattedTime(row.observed_at,true)}`);
+  lines.push("");
+  for(const [k,v] of Object.entries(row.values||{}))lines.push(`${k}: ${valueText(v)}`);
+  return lines.join("\n");
+}
+function renderModelMap(){
+  const body=$("model-map-body"),tip=$("model-map-tooltip");
+  if(!body||!tip)return;
+  body.replaceChildren();
+  for(const row of snapshot.model_handler_map||[]){
+    const tr=el("tr","model-map-row");
+    const tdName=el("td","model-map-name",row.name);
+    const tdHandler=el("td","model-map-handler",row.handler||"ثبت نشده");
+    const tdStatus=el("td","model-map-status",row.status||"ثبت نشده");
+    const tdSample=el("td","model-map-sample",row.sample_key||"—");
+    tr.append(tdName,tdHandler,tdStatus,tdSample);
+    const show=e=>{
+      tip.textContent=modelMapTooltipText(row);
+      tip.hidden=false;
+      const x=Math.min(window.innerWidth-430,e.clientX+16);
+      const y=Math.min(window.innerHeight-260,e.clientY+16);
+      tip.style.left=`${Math.max(8,x)}px`;
+      tip.style.top=`${Math.max(8,y)}px`;
+    };
+    tr.addEventListener("mouseenter",show);
+    tr.addEventListener("mousemove",show);
+    tr.addEventListener("mouseleave",()=>{tip.hidden=true;});
+    tr.addEventListener("focusin",e=>show(e));
+    tr.addEventListener("focusout",()=>{tip.hidden=true;});
+    tr.tabIndex=0;
+    body.append(tr);
+  }
+  if(!(snapshot.model_handler_map||[]).length){
+    const tr=el("tr");const td=el("td","empty","هنوز دادهٔ Model / Handler ثبت نشده است");
+    td.colSpan=4;tr.append(td);body.append(tr);
+  }
+}
 function renderHistory(){const list=$("timeline");list.replaceChildren();for(const x of snapshot.timeline){const r=el("div","history-row");r.append(el("time",null,formattedTime(x.at,true)),el("strong",null,x.decision));const d=el("div","row-detail",x.detail);d.append(el("small",null,`${x.strategy} · ${x.sample_key||"شناسه نامشخص"}`));r.append(d);list.append(r);}if(!snapshot.timeline.length)list.append(el("p","empty","هنوز تصمیمی ثبت نشده است"));const trades=$("trades");trades.replaceChildren();for(const x of snapshot.trades){const r=el("div","history-row");r.append(el("time",null,formattedTime(x.at,true)),el("strong",null,x.direction||"—"));const d=el("div","row-detail",x.exit||"علت خروج ثبت نشده");d.append(el("small",null,`${x.role||"نقش نامشخص"} · ${x.strategy||"مسیر نامشخص"}`));const n=typeof x.net_units==="number"?x.net_units:null;r.append(d,el("span",`profit ${n>=0?"positive":"negative"}`,n===null?"—":`${n>=0?"+":""}${n.toFixed(2)}`));trades.append(r);}if(!snapshot.trades.length)trades.append(el("p","empty","هنوز معاملهٔ بسته‌شده‌ای ثبت نشده است"));}
 function resize(){const width=$("viewport").clientWidth;const scale=zoomed?1:Math.min(1,Math.max(.3,width/1020));$("canvas").style.setProperty("--zoom",scale);$("canvas-space").style.width=`${1020*scale}px`;$("canvas-space").style.height=`${1000*scale}px`;}
-function render(){const changed=lastKey!==snapshot.sample_key;$("decision").textContent=snapshot.decision;$("reason").textContent=snapshot.reason_fa;const state=snapshot.nodes.find(n=>n.id==="decision")?.values["حالت بازار"];$("market-state").textContent=`حالت بازار: ${marketStates[state]||state||"ثبت نشده"}`;$("strategy").textContent=snapshot.nodes.find(n=>n.id==="decision")?.values["مسیر"]||"—";$("model-age").textContent=age(snapshot.model_freshness);$("model-time").textContent=formattedTime(snapshot.model_freshness.at,true);$("ea-age").textContent=age(snapshot.ea_freshness);$("ea-status").textContent=snapshot.ea_status;$("service-status").textContent=snapshot.nodes.find(n=>n.id==="service")?.state==="pass"?"پاسخ‌گو":"در دسترس نیست";$("source-link").textContent=snapshot.joined?`شناسهٔ مدل و اکسپرت یکسان · نسخه ${snapshot.ea_version||"—"}`:"شناسهٔ مدل و اکسپرت قابل تطبیق نیست";$("warning").hidden=snapshot.warnings.length===0;$("warning").textContent=snapshot.warnings.join(" · ");$("updated").textContent=`بازخوانی ${formattedTime(snapshot.generated_at)}`;$("sample-id").textContent=`DECISION ID ${snapshot.sample_key||"—"}`;renderNodes();renderEdges(changed);detail();renderHistory();resize();lastKey=snapshot.sample_key;}
+function render(){const changed=lastKey!==snapshot.sample_key;$("decision").textContent=snapshot.decision;$("reason").textContent=snapshot.reason_fa;const state=snapshot.nodes.find(n=>n.id==="decision")?.values["حالت بازار"];$("market-state").textContent=`حالت بازار: ${marketStates[state]||state||"ثبت نشده"}`;$("strategy").textContent=snapshot.nodes.find(n=>n.id==="decision")?.values["مسیر"]||"—";$("model-age").textContent=age(snapshot.model_freshness);$("model-time").textContent=formattedTime(snapshot.model_freshness.at,true);$("ea-age").textContent=age(snapshot.ea_freshness);$("ea-status").textContent=snapshot.ea_status;$("service-status").textContent=snapshot.nodes.find(n=>n.id==="service")?.state==="pass"?"پاسخ‌گو":"در دسترس نیست";$("source-link").textContent=snapshot.joined?`شناسهٔ مدل و اکسپرت یکسان · نسخه ${snapshot.ea_version||"—"}`:"شناسهٔ مدل و اکسپرت قابل تطبیق نیست";$("warning").hidden=snapshot.warnings.length===0;$("warning").textContent=snapshot.warnings.join(" · ");$("updated").textContent=`بازخوانی ${formattedTime(snapshot.generated_at)}`;$("sample-id").textContent=`DECISION ID ${snapshot.sample_key||"—"}`;renderNodes();renderEdges(changed);detail();renderModelMap();renderHistory();resize();lastKey=snapshot.sample_key;}
 async function refresh(){if(busy)return;busy=true;clearTimeout(timer);const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),5000);try{const response=await fetch("/api/snapshot",{cache:"no-store",signal:controller.signal});if(!response.ok)throw Error("monitor unavailable");snapshot=await response.json();render();$("connection").textContent="داشبورد متصل";$("connection").className="connection connected";}catch{ $("connection").textContent="اتصال قطع است؛ تلاش مجدد";$("connection").className="connection error";$("warning").hidden=false;$("warning").textContent="ارتباط با داشبورد قطع شده است؛ داده‌های روی صفحه مربوط به آخرین دریافت هستند.";document.querySelectorAll(".node").forEach(e=>{e.className="node stale";const b=e.querySelector(".state-badge");b.className="state-badge stale";b.textContent="دادهٔ قدیمی";});if(snapshot){snapshot.nodes.forEach(n=>n.state="stale");detail();renderEdges(false);}}finally{clearTimeout(timeout);busy=false;timer=setTimeout(refresh,3000);}}
 $("zoom").addEventListener("click",()=>{zoomed=!zoomed;$("zoom").textContent=zoomed?"−":"＋";$("zoom").setAttribute("aria-label",zoomed?"نمای کلی فلوچارت":"بزرگ‌نمایی فلوچارت");resize();});$("refresh").addEventListener("click",refresh);new ResizeObserver(resize).observe($("viewport"));document.addEventListener("visibilitychange",()=>{if(!document.hidden)void refresh();});void refresh();
