@@ -28,6 +28,8 @@ def test_audit_and_import_clean_m15_archive(tmp_path: Path) -> None:
     audit = audit_source(source)
     assert audit.clean is True
     assert audit.valid_rows == 3
+    assert audit.source_utc_offset_hours == 3.0
+    assert audit.first_time == "2026-01-02T07:00:00Z"
     assert audit.regular_intervals == 1
     assert audit.gap_intervals == 1
     assert audit.largest_gap_seconds == 1800
