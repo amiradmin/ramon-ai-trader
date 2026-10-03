@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 import hashlib
+import os
 import json
 from pathlib import Path
 
@@ -11,10 +12,44 @@ from .core import Forecast
 SUPPORTED_CHRONOS_MODELS = frozenset({"autogluon/chronos-2-small", "amazon/chronos-2"})
 
 
+def configure_cpu_workers(workers: int) -> dict[str, int]:
+    """Configure CPU inference thread pools before loading Chronos."""
+    if workers < 1:
+        raise ValueError("cpu workers must be >=1")
+
+    value = str(int(workers))
+    for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+        os.environ[name] = value
+
+    import torch
+
+    torch.set_num_threads(workers)
+    # PyTorch only allows changing inter-op threads before parallel work starts.
+    try:
+        torch.set_num_interop_threads(max(1, min(workers, 2)))
+    except RuntimeError:
+        pass
+
+    return {
+        "requested": workers,
+        "torch_intraop": int(torch.get_num_threads()),
+        "torch_interop": int(torch.get_num_interop_threads()),
+    }
+
+
 class ChronosForecaster:
     """Load a real Chronos-2 checkpoint; model failures never produce orders."""
 
-    def __init__(self, model_id: str = "autogluon/chronos-2-small", device: str = "cpu") -> None:
+    def __init__(
+        self,
+        model_id: str = "autogluon/chronos-2-small",
+        device: str = "cpu",
+        cpu_workers: int | None = None,
+    ) -> None:
+        self.cpu_workers = None
+        if device == "cpu" and cpu_workers is not None:
+            self.cpu_workers = configure_cpu_workers(cpu_workers)
+
         import numpy as np
         from chronos import Chronos2Pipeline
 
