@@ -283,3 +283,31 @@ Example:
 ```
 
 Use `--no-progress` only when machine-readable stderr is required.
+
+
+### Two-core Chronos CPU execution
+
+The historical benchmark accepts `--cpu-workers N`. For CPU Chronos runs this
+configures PyTorch intra-op threads plus OMP/MKL/OpenBLAS/NumExpr thread counts
+before the model is loaded. The default is 2 workers.
+
+For Docker, combine the application setting with a matching container CPU limit:
+
+```bash
+docker compose --profile tools run --rm --cpus=2 \
+  -v "$PWD:/workspace" -w /workspace \
+  -e PYTHONPATH=/workspace/src \
+  tools -m ramon.historical_benchmark \
+  --db /data/ramon_kaggle_m15.sqlite3 \
+  --symbol XAUUSD_KAGGLE \
+  --folds 5 --stride 4 --fallback-spread 42 \
+  --analysis-horizons 1,4,8,16 \
+  --include-chronos --chronos-device cpu --cpu-workers 2 \
+  --chronos-stride 128 \
+  --chronos-cache /data/chronos_historical_forecasts.sqlite3 \
+  --output /data/ramon_historical_benchmark_chronos.json
+```
+
+The report records requested and actual PyTorch intra/inter-op thread counts
+under `chronos.cpu_workers`. More threads are not assumed to be faster; benchmark
+wall-clock time before increasing beyond two.
