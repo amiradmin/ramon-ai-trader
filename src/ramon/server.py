@@ -450,6 +450,11 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                                               "market_state": response["market_state"],
                                               "market_state_route": response["market_state_route"]},
                                     "settings": asdict(settings),
+                                    "handlers": model_handlers(),
+                                    "external_models": {
+                                        "moment": dict(latest_moment_payload),
+                                        "finbert": dict(latest_finbert_payload),
+                                    },
                                     "shadow_forecasts": {
                                         "timesfm3": timesfm3_payload,
                                         "direction_quality": {
