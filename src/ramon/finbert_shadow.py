@@ -12,7 +12,8 @@ DEFAULT_FINBERT_CHECKPOINT = "ProsusAI/finbert"
 
 
 class FinBertNewsShadow:
-    def __init__(self, *, enabled: bool = False, checkpoint: str = DEFAULT_FINBERT_CHECKPOINT, classifier: Any | None = None):
+    def __init__(self, *, enabled: bool = False, checkpoint: str = DEFAULT_FINBERT_CHECKPOINT,
+                 classifier: Any | None = None, lazy: bool = False):
         self.enabled = bool(enabled)
         self.checkpoint = checkpoint
         self.classifier = classifier
@@ -22,25 +23,42 @@ class FinBertNewsShadow:
             return
         if self.classifier is not None:
             return
+        if lazy:
+            self.error = "warming"
+            return
+        self.load()
+
+    def load(self) -> bool:
+        """Load FinBERT in-place; safe to call from a background startup worker."""
+        if not self.enabled:
+            self.error = "disabled"
+            return False
+        if self.classifier is not None:
+            return True
         try:
             from transformers import pipeline
-            self.classifier = pipeline(
+            classifier = pipeline(
                 "text-classification",
-                model=checkpoint,
-                tokenizer=checkpoint,
+                model=self.checkpoint,
+                tokenizer=self.checkpoint,
                 device=-1,
                 top_k=None,
             )
+            self.classifier = classifier
+            self.error = ""
+            return True
         except Exception as exc:
             self.classifier = None
             self.error = f"{type(exc).__name__}: {exc}"
+            return False
 
     @classmethod
-    def from_env(cls) -> "FinBertNewsShadow":
+    def from_env(cls, *, lazy: bool = False) -> "FinBertNewsShadow":
         enabled = os.getenv("RAMON_FINBERT_SHADOW_ENABLED", "0").strip().lower() in {"1","true","yes","on"}
         return cls(
             enabled=enabled,
             checkpoint=os.getenv("RAMON_FINBERT_CHECKPOINT", DEFAULT_FINBERT_CHECKPOINT).strip() or DEFAULT_FINBERT_CHECKPOINT,
+            lazy=lazy,
         )
 
     @property
