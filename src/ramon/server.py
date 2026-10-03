@@ -19,6 +19,8 @@ from .news import DEFAULT_FOREX_FACTORY_JSON, ForexFactoryNewsProvider
 from .target_learning import build_target_structure
 from .target_outcomes import backfill_target_outcomes
 from .timesfm_shadow import TimesFM3Shadow
+from .moment_shadow import MomentAnomalyShadow
+from .finbert_shadow import FinBertNewsShadow
 from .range_shadow import observe as observe_range_shadow
 from .range_strategy import live_candidate
 from .market_state import assess_market, apply_market_policy
@@ -65,6 +67,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
     ensemble = coordinator(ensemble_dir, model.model_id)
     news_enabled = os.getenv("RAMON_NEWS_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
     timesfm3_shadow = TimesFM3Shadow.from_env()
+    moment_shadow = MomentAnomalyShadow.from_env()
+    finbert_shadow = FinBertNewsShadow.from_env()
     news_provider = ForexFactoryNewsProvider(
         enabled=news_enabled,
         url=os.getenv("RAMON_NEWS_URL", DEFAULT_FOREX_FACTORY_JSON).strip() or DEFAULT_FOREX_FACTORY_JSON,
@@ -84,6 +88,14 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
             "forecast_shadow_model_handler": (
                 timesfm3_shadow.checkpoint.split("/")[-1]
                 if timesfm3_shadow.enabled else "OFF"
+            ),
+            "anomaly_model_handler": (
+                moment_shadow.checkpoint.split("/")[-1]
+                if moment_shadow.enabled else "OFF"
+            ),
+            "news_sentiment_model_handler": (
+                finbert_shadow.checkpoint.split("/")[-1]
+                if finbert_shadow.enabled else "OFF"
             ),
             "regime_model_handler": role_handler_name("regime"),
             "entry_model_handler": role_handler_name("entry"),
@@ -126,6 +138,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     "history_last_persisted_bar": int(history_status["last_persisted_bar"]),
                     **ensemble.status(),
                     **timesfm3_shadow.status(),
+                    **moment_shadow.status(),
+                    **finbert_shadow.status(),
                     **news_provider.status(),
                     **model_handlers(),
                 },
@@ -191,10 +205,18 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     timesfm3_payload = timesfm3_shadow.assess(
                         market, result, settings.horizon
                     )
+                    moment_payload = moment_shadow.assess(market)
+                    finbert_payload = finbert_shadow.assess(
+                        title=news_snapshot.event_title,
+                        country=news_snapshot.event_country,
+                        impact=news_snapshot.event_impact,
+                    )
 
                 response = result.to_dict()
                 response.update(ensemble_payload)
                 response.update(timesfm3_payload)
+                response.update(moment_payload)
+                response.update(finbert_payload)
                 if history_db:
                     try:
                         response.update(observe_range_shadow(history_db, market, quote_time))
