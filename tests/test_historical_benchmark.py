@@ -1,7 +1,7 @@
 import hashlib
 import sqlite3
 
-from ramon.historical_benchmark import PreviousBarBaseline, benchmark_database
+from ramon.historical_benchmark import ContrarianBaseline, PreviousBarBaseline, benchmark_database
 from ramon.history import ensure_history_db
 
 
@@ -43,7 +43,10 @@ def test_benchmark_reports_chronological_folds_years_and_directions(tmp_path):
     report = benchmark_database(db, folds=5, stride=4, fallback_spread_points=42)
 
     assert report["dataset"]["bars"] == 2400
-    assert set(report["models"]) == {"previous_bar", "momentum_4bar"}
+    assert set(report["models"]) == {
+        "previous_bar", "momentum_4bar",
+        "contrarian_previous_bar", "contrarian_momentum_4bar",
+    }
     assert report["execution_assumptions"]["fallback_spread_points"] == 42
 
     for model in report["models"].values():
@@ -59,12 +62,17 @@ def test_benchmark_reports_chronological_folds_years_and_directions(tmp_path):
         assert "timeout_rate" in model["metrics"]
         assert set(model["directional_accuracy"]) == {"1", "4", "8", "16"}
         assert set(model["horizon_matrix"]) == {"1", "4", "8", "16"}
+        assert set(model["regime_directional_accuracy"]) == {"1", "4", "8", "16"}
         for horizon in ("1", "4", "8", "16"):
             directional = model["directional_accuracy"][horizon]
             assert directional["samples"] > 0
             assert 0 <= directional["accuracy"] <= 1
             assert "mean_signed_move" in directional
             assert "timeout_rate" in model["horizon_matrix"][horizon]["metrics"]
+            assert model["regime_directional_accuracy"][horizon]
+            for state_metrics in model["regime_directional_accuracy"][horizon].values():
+                if state_metrics["samples"]:
+                    assert 0 <= state_metrics["accuracy"] <= 1
 
 
 def test_benchmark_is_read_only(tmp_path):
@@ -83,3 +91,24 @@ def test_custom_analysis_horizons_are_respected(tmp_path):
     for model in report["models"].values():
         assert set(model["directional_accuracy"]) == {"1", "8"}
         assert set(model["horizon_matrix"]) == {"1", "8"}
+
+
+def test_contrarian_mirrors_direction():
+    closes = [100.0 + i * 0.1 for i in range(16)]
+    base = PreviousBarBaseline()
+    contra = ContrarianBaseline(base)
+    normal = base.forecast(closes, 4)
+    flipped = contra.forecast(closes, 4)
+    assert normal.median > closes[-1]
+    assert flipped.median < closes[-1]
+    assert len(flipped.median_path) == 4
+
+
+def test_regime_accuracy_has_no_future_dependency(tmp_path):
+    db = tmp_path / "external.sqlite3"
+    seed(db, rows=1600)
+    report = benchmark_database(db, folds=3, stride=16, analysis_horizons=(1,))
+    for model in report["models"].values():
+        regimes = model["regime_directional_accuracy"]["1"]
+        assert regimes
+        assert sum(v["samples"] for v in regimes.values()) > 0
