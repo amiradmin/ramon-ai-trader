@@ -178,6 +178,18 @@ def _window_iso(bars: Sequence[Bar], start: int, end: int) -> dict[str, object]:
     }
 
 
+def m15_gap_prefix(bars: Sequence[Bar]) -> list[int]:
+    """Cumulative discontinuities; weekends also break a fixed M15 horizon."""
+    prefix = [0] * len(bars)
+    for i in range(1, len(bars)):
+        prefix[i] = prefix[i - 1] + int(bars[i].time - bars[i - 1].time != 900)
+    return prefix
+
+
+def horizon_is_contiguous(prefix: Sequence[int], index: int, horizon: int) -> bool:
+    return prefix[index + horizon] == prefix[index]
+
+
 def simulate(
     bars: Sequence[Bar],
     spreads: Sequence[int],
@@ -202,7 +214,8 @@ def simulate(
 
     start_at = max(256, start)
     i = start_at
-    decisions = waits = 0
+    decisions = waits = gap_skipped = 0
+    gaps = m15_gap_prefix(bars)
     trades: list[TradeRecord] = []
     span = max(1, end - settings.horizon - start_at)
     local_progress = (
@@ -213,6 +226,12 @@ def simulate(
         if local_progress is not None:
             local_progress.update(i - start_at, stage=progress_stage)
         if (i - start_at) % stride:
+            i += 1
+            continue
+        # Dataset eligibility only: never issue a forecast or simulate a trade
+        # whose entry/outcome interval crosses a missing M15 candle.
+        if not horizon_is_contiguous(gaps, i, settings.horizon):
+            gap_skipped += 1
             i += 1
             continue
         spread_points = spreads[i] if spreads[i] > 0 else fallback_spread_points
@@ -271,7 +290,7 @@ def simulate(
 
     if local_progress is not None:
         local_progress.finish(stage=progress_stage)
-    return trades, {"decisions": decisions, "waits": waits}
+    return trades, {"decisions": decisions, "waits": waits, "gap_skipped": gap_skipped}
 
 
 def _by_year(trades: Sequence[TradeRecord]) -> dict[str, dict[str, object]]:
@@ -321,15 +340,19 @@ def directional_accuracy(
         if progress is not None else None
     )
     done_points = 0
+    gaps = m15_gap_prefix(bars)
     for horizon, indices in zip(horizons, ranges):
         if horizon < 1:
             raise ValueError("directional horizons must be positive")
-        correct = wrong = flat_forecast = flat_actual = 0
+        correct = wrong = flat_forecast = flat_actual = gap_skipped = 0
         signed_moves: list[float] = []
         for i in indices:
             if local_progress is not None:
                 local_progress.update(done_points, stage=f"{progress_stage} H={horizon}")
             done_points += 1
+            if not horizon_is_contiguous(gaps, i, horizon):
+                gap_skipped += 1
+                continue
             closes = [bar.close for bar in bars[max(0, i - 255):i + 1]]
             forecast = model.forecast(closes, horizon)
             predicted_move = forecast.median - bars[i].close
@@ -349,6 +372,7 @@ def directional_accuracy(
                 wrong += 1
         resolved = correct + wrong
         out[str(horizon)] = {
+            "gap_skipped": gap_skipped,
             "samples": resolved,
             "correct": correct,
             "wrong": wrong,
@@ -391,6 +415,7 @@ def regime_directional_accuracy(
         if progress is not None else None
     )
     done_points = 0
+    gaps = m15_gap_prefix(bars)
     for horizon, indices in zip(horizons, ranges):
         grouped: dict[str, dict[str, object]] = defaultdict(
             lambda: {"correct": 0, "wrong": 0, "flat_forecast": 0, "flat_actual": 0, "signed_moves": []}
@@ -399,6 +424,8 @@ def regime_directional_accuracy(
             if local_progress is not None:
                 local_progress.update(done_points, stage=f"{progress_stage} H={horizon}")
             done_points += 1
+            if not horizon_is_contiguous(gaps, i, horizon):
+                continue
             spread_points = spreads[i] if spreads[i] > 0 else fallback_spread_points
             market = Market(
                 symbol=symbol,
@@ -745,7 +772,7 @@ def benchmark_database(
         min_interval=1.0,
     )
     report = {
-        "schema_version": 2,
+        "schema_version": 3,
         "dataset": {
             "db": str(db),
             "symbol": symbol,
@@ -761,6 +788,8 @@ def benchmark_database(
             "roundtrip_cost_r": roundtrip_cost_r,
             "unknown_intrabar_order": "stop_first_if_stop_and_target_touch_same_M15_bar",
             "positions": "one_at_a_time_non_overlapping",
+            "gap_guard": "exclude signal-to-horizon intervals with any delta != 900 seconds, including weekends",
+            "gap_guard_scope": "offline dataset eligibility only; historical context may contain gaps",
             "micro_bars": "unavailable_external_OHLC",
             "market_state_policy": False,
             "direction_confirmation": False,
@@ -783,6 +812,7 @@ def benchmark_database(
             "M15 OHLC cannot reconstruct slippage, quote-level timing, or exact intrabar hit order.",
             "This lab does not reproduce RANGE execution or live EA exit management.",
             "Do not change live thresholds from this report alone.",
+            "Gap exclusion uses future timestamps for offline sample eligibility, not a deployable entry filter; results describe contiguous intervals only.",
         ],
     }
     model_count = max(1, len(models))

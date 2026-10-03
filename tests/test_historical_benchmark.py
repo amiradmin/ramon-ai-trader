@@ -242,3 +242,47 @@ def test_chronos_cpu_workers_cli_flag_is_validated(monkeypatch, tmp_path):
     ])
     with pytest.raises(SystemExit):
         hb.main()
+
+
+def test_gap_guard_excludes_entry_and_outcome_intervals(monkeypatch):
+    from dataclasses import replace
+    import ramon.historical_benchmark as lab
+    from ramon.core import Bar, Settings
+
+    contiguous = [Bar(i * 900, 100, 101, 99, 100) for i in range(270)]
+    # The first sample is 256. A break at 258 invalidates H=4 samples
+    # 256 and 257, while 258 onward is eligible again.
+    bars = [replace(b, time=b.time + (900 if i >= 258 else 0))
+            for i, b in enumerate(contiguous)]
+    prefix = lab.m15_gap_prefix(bars)
+    assert not lab.horizon_is_contiguous(prefix, 256, 4)
+    assert not lab.horizon_is_contiguous(prefix, 257, 4)
+    assert lab.horizon_is_contiguous(prefix, 258, 4)
+    calls = []
+
+    class NoForecast:
+        def forecast(self, closes, horizon):
+            calls.append(len(closes))
+            return lab.Forecast(99, 101, 102)
+
+    accuracy = lab.directional_accuracy(bars, NoForecast(), start=256,
+                                       end=270, horizons=[4], stride=1)['4']
+    assert accuracy['gap_skipped'] == 2
+    assert len(calls) == 8
+    calls.clear()
+    lab.regime_directional_accuracy(bars, [42]*270, NoForecast(),
+        symbol='X', point=.01, start=256, end=270, horizons=[4], stride=1,
+        fallback_spread_points=42)
+    assert len(calls) == 8
+    decisions = []
+    from types import SimpleNamespace
+    monkeypatch.setattr(lab, 'evaluate', lambda market, model, settings:
+        decisions.append(market.bars[-1].time) or SimpleNamespace(decision='WAIT'))
+    _, counts = lab.simulate(bars, [42]*270, NoForecast(), symbol='X', point=.01,
+        settings=replace(Settings(), horizon=4), start=256, end=270,
+        stride=1, fallback_spread_points=42, roundtrip_cost_r=0)
+    assert counts == {'decisions': 8, 'waits': 8, 'gap_skipped': 2}
+    assert decisions[0] == bars[258].time
+    # Non-increasing timestamps and weekends are discontinuities too.
+    assert lab.m15_gap_prefix([contiguous[0], contiguous[0]]) == [0, 1]
+    assert lab.m15_gap_prefix([contiguous[0], replace(contiguous[1], time=172800)]) == [0, 1]
