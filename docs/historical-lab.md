@@ -21,6 +21,15 @@ uv run python -m ramon.kaggle_history /path/to/archive.zip --audit-only
 
 Expected archive member for Ramon is `XAU_15m_data.csv`.
 
+The archive timestamps are treated as source wall-clock time. This dataset defaults
+to `UTC+3`, and the importer converts them to canonical UTC epoch seconds before
+storage. Override only when auditing a source with a different documented offset:
+
+```bash
+uv run python -m ramon.kaggle_history /path/to/archive.zip \
+  --audit-only --source-utc-offset-hours 3
+```
+
 The audit reports:
 
 - invalid OHLC/date rows
@@ -61,8 +70,9 @@ The supplied archive was checked locally before this importer was committed:
 - non-monotonic rows: 0
 - misaligned timestamps: 0
 - zero-volume rows: 0
-- first bar: 2004-06-11 07:15
-- last bar: 2026-01-30 23:45
+- source timezone used: UTC+3
+- first bar after UTC normalization: 2004-06-11 04:15Z
+- last bar after UTC normalization: 2026-01-30 20:45Z
 - regular 15-minute intervals: 485,714
 - larger gaps: 8,520
 - largest gap: 2,793,600 seconds
