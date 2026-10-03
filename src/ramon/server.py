@@ -142,9 +142,20 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
         "last_error": "",
         "last_persisted_bar": 0,
     }
+    latest_decision: dict[str, object] = {}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
+            if self.path == "/latest":
+                self.reply(
+                    200,
+                    {
+                        "available": bool(latest_decision),
+                        "captured": int(latest_decision.get("_dashboard_captured", 0)) if latest_decision else 0,
+                        "decision": latest_decision,
+                    },
+                )
+                return
             if self.path != "/health":
                 self.send_error(404)
                 return
@@ -182,7 +193,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
 
         def do_POST(self) -> None:
             nonlocal moment_future, finbert_future, latest_moment_payload
-            nonlocal latest_finbert_payload, last_shadow_bar, last_finbert_event_key
+            nonlocal latest_finbert_payload, last_shadow_bar, last_finbert_event_key, latest_decision
             if self.path not in {"/decision", "/trades"}:
                 self.send_error(404)
                 return
@@ -487,6 +498,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     response["decision"] = "WAIT"
                     response["reason"] = "range_sample_not_saved"
                     response["range_execution"] = 0
+                latest_decision = dict(response)
+                latest_decision["_dashboard_captured"] = int(time.time())
                 self.reply(200, response)
             except (ValueError, TypeError, KeyError, OverflowError, json.JSONDecodeError) as exc:
                 self.reply(400, {"error": str(exc)})
