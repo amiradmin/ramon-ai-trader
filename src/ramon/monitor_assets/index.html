@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark"><title>رامون · مسیر زندهٔ تصمیم</title>
+  <link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand" dir="ltr"><span class="brand-icon">R</span><strong>RAMON</strong><span class="brand-divider"></span><span class="brand-caption">DECISION FLOW</span></div>
+    <div class="top-actions"><span class="readonly">فقط مشاهده</span><span id="connection" role="status" class="connection">در حال اتصال</span></div>
+  </header>
+  <main>
+    <section class="page-heading"><div><span class="eyebrow">از مشاهدهٔ بازار تا اجرای معامله</span><h1>رامون چطور تصمیم می‌گیرد؟</h1><p>هر مرحله را انتخاب کن؛ شرط، مقدار و دلیل توقف را ببین.</p></div><div class="instrument" dir="ltr"><strong>XAUUSD_l</strong><span>M15 · CHRONOS-2</span></div></section>
+    <section class="summary" aria-label="آخرین وضعیت">
+      <article class="summary-card decision-card"><span>آخرین تصمیم ثبت‌شده</span><div><strong id="decision">—</strong><span id="strategy" class="mini-badge">—</span></div><p id="reason">در انتظار داده</p></article>
+      <article class="summary-card"><span>تازگی تصمیم مدل</span><strong id="model-age">—</strong><p id="model-time">—</p></article>
+      <article class="summary-card"><span>تازگی وضعیت اکسپرت</span><strong id="ea-age">—</strong><p id="ea-status">—</p></article>
+      <article class="summary-card"><span>اتصال سرویس مدل</span><strong id="service-status">—</strong><p id="source-link">انتظار برای بررسی منبع</p></article>
+    </section>
+    <div id="warning" class="warning" role="status" hidden></div>
+    <section class="workspace">
+      <div class="flow-panel">
+        <header class="panel-heading"><div><span class="eyebrow">DECISION PATH</span><h2>فلوچارت تصمیم‌گیری</h2></div><div class="flow-controls"><span id="updated">—</span><button id="zoom" type="button" aria-label="بزرگ‌نمایی فلوچارت">＋</button><button id="refresh" type="button" aria-label="به‌روزرسانی وضعیت">↻</button></div></header>
+        <div class="legend"><span><i class="dot pass"></i>شرط برقرار</span><span><i class="dot blocked"></i>شرط ردشده</span><span><i class="dot active"></i>پوزیشن باز</span><span><i class="dot shadow"></i>ناظر</span><span><i class="dot stale"></i>قدیمی</span><span><i class="dot unknown"></i>نامشخص</span></div>
+        <div class="canvas-viewport" id="viewport"><div id="canvas-space"><div id="canvas" class="canvas" dir="rtl"><svg id="edges" viewBox="0 0 1020 1000" aria-hidden="true"></svg><div id="nodes"></div><div class="flow-note"><strong>سیگنال ≠ سفارش</strong><p>خط سبز شرط ثبت‌شده را نشان می‌دهد. عبور واقعی از تمام قفل‌ها فقط با شواهد اکسپرت تأیید می‌شود.</p><span>اتصال، تصمیم مدل و وضعیت اجرا سه منبع جدا هستند.</span></div></div></div></div>
+        <footer class="flow-footer"><span>بازخوانی هر ۳ ثانیه · بدون ارسال درخواست معامله</span><span id="sample-id" dir="ltr">DECISION ID —</span></footer>
+      </div>
+      <aside class="detail-panel" aria-label="جزئیات مرحله">
+        <div class="detail-top"><span class="eyebrow">INSPECT A STEP</span><h2 id="detail-title">تصمیم نهایی مدل</h2><span id="detail-state" class="state-badge unknown">در انتظار</span></div>
+        <p id="detail-description" class="detail-description">یک مرحله را در فلوچارت انتخاب کن.</p><dl id="detail-values"></dl><div id="detail-source" class="detail-source"></div>
+        <div class="audit-note"><span class="eyebrow">پوشش بازار</span><strong>دو مسیر اجرایی اصلی</strong><p>پیش‌بینی جهت‌دار و برگشت لبهٔ رنج. شکست کاذب، شکست رنج و تغییر رژیم، مسیر مستقل ندارند.</p><p>رژیم «RANGE/UNCLEAR» یک خروجی ناظر است؛ به معنی اجازهٔ معامله در رنج نیست.</p></div>
+      </aside>
+    </section>
+    <section class="history-grid">
+      <div class="history-panel"><header class="panel-heading"><div><span class="eyebrow">RECORDED DECISIONS</span><h2>آخرین تصمیم‌های مدل</h2></div><span class="muted">زمان دریافت توسط سرویس</span></header><div id="timeline" class="timeline"></div></div>
+      <div class="history-panel"><header class="panel-heading"><div><span class="eyebrow">CLOSED TRADES</span><h2>نتیجهٔ معاملات ثبت‌شده</h2></div><span class="muted">واحد حساب</span></header><div id="trades" class="trades"></div></div>
+    </section>
+    <footer class="page-footer"><span>RAMON OBSERVABILITY</span><p>داده‌های موجود خوانده می‌شوند. شرطی که ثبت نشده، تأییدشده نمایش داده نمی‌شود.</p></footer>
+  </main>
+</body></html>

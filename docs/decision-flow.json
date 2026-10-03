@@ -1,0 +1,189 @@
+{
+  "version": 2,
+  "title": "Ramon decision flow",
+  "description": "Structural topology only. The live dashboard uses observed telemetry and freshness.",
+  "diagrams": [
+    {
+      "id": "ramon_decision",
+      "title": "Ramon decision flow",
+      "kind": "flowchart",
+      "data": {
+        "direction": "TB",
+        "nodes": [
+          {
+            "id": "market",
+            "label": "دادهٔ بازار و قیمت"
+          },
+          {
+            "id": "service",
+            "label": "سرویس تصمیم‌گیری"
+          },
+          {
+            "id": "forecast",
+            "label": "پیش‌بینی Chronos"
+          },
+          {
+            "id": "edge",
+            "label": "مزیت پس از اسپرد"
+          },
+          {
+            "id": "strength",
+            "label": "قدرت پیش‌بینی"
+          },
+          {
+            "id": "confirmation",
+            "label": "تأیید جهت و زمان ورود"
+          },
+          {
+            "id": "timing",
+            "label": "قفل تعارض و ورود دیرهنگام"
+          },
+          {
+            "id": "base",
+            "label": "تصمیم مسیر عادی"
+          },
+          {
+            "id": "range",
+            "label": "مسیر جایگزین: برگشت رنج"
+          },
+          {
+            "id": "shadow",
+            "label": "تشخیص رژیم و مدل‌های ناظر"
+          },
+          {
+            "id": "decision",
+            "label": "تصمیم نهایی مدل"
+          },
+          {
+            "id": "news",
+            "label": "قفل خبر"
+          },
+          {
+            "id": "account",
+            "label": "حساب، مجوز و حالت زنده"
+          },
+          {
+            "id": "limits",
+            "label": "تعداد ورود و وقفهٔ ضرر"
+          },
+          {
+            "id": "risk",
+            "label": "حجم، ریسک و مارجین"
+          },
+          {
+            "id": "order",
+            "label": "اجرا در MT5"
+          },
+          {
+            "id": "position",
+            "label": "مدیریت پوزیشن و خروج"
+          }
+        ],
+        "edges": [
+          {
+            "from": "market",
+            "to": "forecast",
+            "label": "بازار",
+            "arrow": "-->"
+          },
+          {
+            "from": "service",
+            "to": "forecast",
+            "label": "آماده",
+            "arrow": "-->"
+          },
+          {
+            "from": "forecast",
+            "to": "timing",
+            "label": "قفل",
+            "arrow": "-->"
+          },
+          {
+            "from": "timing",
+            "to": "edge",
+            "label": "مزیت",
+            "arrow": "-->"
+          },
+          {
+            "from": "edge",
+            "to": "strength",
+            "label": "قدرت",
+            "arrow": "-->"
+          },
+          {
+            "from": "strength",
+            "to": "confirmation",
+            "label": "تأیید",
+            "arrow": "-->"
+          },
+          {
+            "from": "confirmation",
+            "to": "base",
+            "label": "تصمیم",
+            "arrow": "-->"
+          },
+          {
+            "from": "base",
+            "to": "decision",
+            "label": "عادی",
+            "arrow": "-->"
+          },
+          {
+            "from": "forecast",
+            "to": "shadow",
+            "label": "ناظر",
+            "arrow": "-.->"
+          },
+          {
+            "from": "base",
+            "to": "range",
+            "label": "WAIT",
+            "arrow": "-->"
+          },
+          {
+            "from": "range",
+            "to": "decision",
+            "label": "برگشت رنج",
+            "arrow": "-->"
+          },
+          {
+            "from": "decision",
+            "to": "news",
+            "label": "سیگنال",
+            "arrow": "-->"
+          },
+          {
+            "from": "news",
+            "to": "account",
+            "label": "مجوز",
+            "arrow": "-->"
+          },
+          {
+            "from": "account",
+            "to": "limits",
+            "label": "سقف",
+            "arrow": "-->"
+          },
+          {
+            "from": "limits",
+            "to": "risk",
+            "label": "حجم",
+            "arrow": "-->"
+          },
+          {
+            "from": "risk",
+            "to": "order",
+            "label": "سفارش",
+            "arrow": "-->"
+          },
+          {
+            "from": "order",
+            "to": "position",
+            "label": "پوزیشن",
+            "arrow": "-->"
+          }
+        ]
+      }
+    }
+  ]
+}

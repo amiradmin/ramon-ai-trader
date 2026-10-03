@@ -1,0 +1,355 @@
+"""Independent, read-only decision flow monitor. Never calls /decision or MT5."""
+from __future__ import annotations
+
+import argparse
+from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
+import math
+from pathlib import Path
+import re
+import sqlite3
+import time
+from urllib.request import urlopen
+
+
+ASSETS = Path(__file__).with_name("monitor_assets")
+REASONS = {
+    "insufficient_model_strength": "قدرت پیش‌بینی کافی نیست",
+    "insufficient_model_edge": "مزیت پس از هزینهٔ اسپرد کافی نیست",
+    "direction_confirmation_required": "جهت ورود هنوز تأیید نشده",
+    "adverse_intrabar_timing": "حرکت کوتاه‌مدت خلاف جهت ورود است",
+    "late_entry_extension": "قیمت بیش از حد در جهت ورود حرکت کرده",
+    "trend_conflict": "پیش‌بینی خلاف حرکت شدید اخیر است",
+    "spread_or_atr": "اسپرد یا ATR خارج از شرط ورود است",
+    "forecast_up": "پیش‌بینی صعودی تأیید شده",
+    "forecast_down": "پیش‌بینی نزولی تأیید شده",
+    "range_reversal_buy": "برگشت از کف رنج؛ نامزد خرید",
+    "range_reversal_sell": "برگشت از سقف رنج؛ نامزد فروش",
+    "range_sample_not_saved": "تصمیم رنج ذخیره نشده؛ ورود متوقف است",
+    "intrabar_reversal_up": "برگشت صعودی با تأیید مدل",
+    "intrabar_reversal_down": "برگشت نزولی با تأیید مدل",
+    "regime_range_wait": "انتظار در رنج در نسخهٔ قبلی سیاست",
+}
+
+
+def number(value):
+    try:
+        result = float(value)
+        return result if math.isfinite(result) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def object_json(raw):
+    try:
+        result = json.loads(raw or "{}")
+        return result if isinstance(result, dict) else {}
+    except (TypeError, ValueError):
+        return {}
+
+
+def utc_time(value):
+    try:
+        return datetime.fromtimestamp(float(value), timezone.utc).isoformat()
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+
+
+def freshness(timestamp, now, threshold=90):
+    stamp = number(timestamp)
+    if stamp is None:
+        return {"state": "unknown", "age_seconds": None, "at": None}
+    age = now - stamp
+    return {"state": "clock_error" if age < -5 else "fresh" if age <= threshold else "stale",
+            "age_seconds": round(max(0, age), 1), "at": utc_time(stamp)}
+
+
+def default_diagnostic():
+    root = Path.home() / ".mt5/drive_c/users"
+    candidates = sorted(root.glob("*/AppData/Roaming/MetaQuotes/Terminal/Common/Files/Ramon_Diagnostic.txt"))
+    return candidates[0] if candidates else None
+
+
+def read_diagnostic(path):
+    if path is None:
+        return {}, "فایل وضعیت اکسپرت مشخص نشده است"
+    try:
+        raw = Path(path).read_bytes()
+        if len(raw) > 100_000:
+            raise ValueError("diagnostic exceeds size limit")
+        text = raw.decode("utf-16" if raw.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8-sig", errors="replace")
+        lines = text.splitlines()
+        result = {}
+        for line in lines:
+            if ": " in line:
+                key, value = line.split(": ", 1)
+                # The first Range MAIN line contains the execution opt-in flag.
+                result.setdefault(key, value.strip())
+        if "RAMON DIAGNOSTIC" not in text or not result.get("EA role", "").startswith("PRIMARY"):
+            raise ValueError("expected a PRIMARY Ramon diagnostic")
+        captured = result.get("Captured", "")
+        result["captured_epoch"] = datetime.strptime(captured, "%Y.%m.%d %H:%M:%S UTC").replace(tzinfo=timezone.utc).timestamp()
+        result["sample_key"] = result.get("DecisionID", "").split(" ")[0]
+        return result, None
+    except (OSError, ValueError) as exc:
+        return {}, f"وضعیت اکسپرت خوانده نشد: {type(exc).__name__}"
+
+
+def read_history(path, symbol, sample_key=""):
+    """Bounded queries, one read transaction, no schema migration or writable DB."""
+    p = Path(path).expanduser().resolve()
+    if not p.is_file():
+        return {}, [], [], "تاریخچه هنوز در دسترس نیست"
+    try:
+        with sqlite3.connect(p.as_uri() + "?mode=ro", uri=True, timeout=.3) as con:
+            con.row_factory = sqlite3.Row
+            con.execute("PRAGMA query_only=ON")
+            con.execute("BEGIN")
+            tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            rows = []
+            if "decision_samples" in tables:
+                rows = [dict(r) for r in con.execute(
+                    "SELECT * FROM decision_samples WHERE symbol=? ORDER BY id DESC LIMIT 24", (symbol,))]
+            sample = next((r for r in rows if sample_key and r.get("sample_key") == sample_key), {})
+            if sample_key and not sample and "decision_samples" in tables:
+                cols = {r[1] for r in con.execute("PRAGMA table_info(decision_samples)")}
+                if "sample_key" in cols:
+                    row = con.execute("SELECT * FROM decision_samples WHERE symbol=? AND sample_key=? LIMIT 1",
+                                      (symbol, sample_key)).fetchone()
+                    sample = dict(row) if row else {}
+            if not sample:
+                sample = rows[0] if rows else {}
+            trades = [dict(r) for r in con.execute(
+                "SELECT * FROM trade_outcomes WHERE symbol=? ORDER BY closed DESC LIMIT 8", (symbol,))] if "trade_outcomes" in tables else []
+            return sample, rows, trades, None
+    except sqlite3.Error as exc:
+        return {}, [], [], f"تاریخچه خوانده نشد: {type(exc).__name__}"
+
+
+def match(text, pattern):
+    found = re.search(pattern, text or "")
+    return found.group(1) if found else None
+
+
+def metric(value):
+    n = number(value)
+    return "—" if n is None else f"{n:.3f}"
+
+
+def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=None):
+    now = time.time() if now is None else now
+    diag, diag_error = read_diagnostic(diagnostic)
+    sample, recent, trades, db_error = read_history(db, symbol, diag.get("sample_key", ""))
+    metadata = object_json(sample.get("model_metadata"))
+    audit = metadata.get("decision_audit") if isinstance(metadata.get("decision_audit"), dict) else {}
+    base = audit.get("base") if isinstance(audit.get("base"), dict) else {}
+    final = audit.get("final") if isinstance(audit.get("final"), dict) else {}
+    settings = audit.get("settings") if isinstance(audit.get("settings"), dict) else {}
+    if diag and not diag.get("Symbol", "").startswith(symbol + " "):
+        diag, diag_error = {}, "نماد فایل وضعیت با نماد داشبورد یکسان نیست"
+    model_time = freshness(sample.get("captured"), now)
+    ea_time = freshness(diag.get("captured_epoch"), now, 20)
+    joined = bool(sample.get("sample_key") and diag.get("sample_key") == sample.get("sample_key"))
+    decision = final.get("decision") or sample.get("final_decision") or "UNKNOWN"
+    reason = final.get("reason") or "UNKNOWN"
+    ea_status = diag.get("Status", "وضعیت اکسپرت در دسترس نیست")
+    nodes = []
+
+    def node(id, title, status, detail, *, source="model", values=None):
+        stamp = ea_time if source == "ea" else model_time
+        if source == "health":
+            stamp = {"state": "fresh" if health and health.get("ready") else "unknown", "at": utc_time(now), "age_seconds": 0}
+        effective = status if stamp["state"] == "fresh" else "stale" if stamp["state"] in {"stale", "clock_error"} else "unknown"
+        nodes.append({"id": id, "title": title, "state": effective, "observed_state": status,
+                      "detail": detail, "source": source, "observed_at": stamp["at"],
+                      "age_seconds": stamp["age_seconds"], "values": values or {}})
+
+    market_status = "blocked" if any(x in ea_status.lower() for x in ("stale", "disconnected", "symbol trading disabled")) else "observed" if diag else "unknown"
+    node("market", "دادهٔ بازار و قیمت", market_status, ea_status, source="ea",
+         values={"Bid": number(match(diag.get("Bid"), r"^([\d.]+)")),
+                 "Ask": number(match(diag.get("Bid"), r"Ask: ([\d.]+)")),
+                 "اسپرد، point": number(match(diag.get("Bid"), r"Spread\(points\): ([\d.]+)")),
+                 "اتصال ترمینال": match(diag.get("Market"), r"TerminalConnected: (\w+)"),
+                 "زمان آخرین درخواست": diag.get("Snapshot cadence")})
+    node("service", "سرویس تصمیم‌گیری", "pass" if health and health.get("ready") else "unknown",
+         "سرویس پاسخ می‌دهد؛ تازگی پیش‌بینی جدا بررسی می‌شود" if health and health.get("ready") else "پاسخ سلامت سرویس در دسترس نیست",
+         source="health", values={"مدل": (health or {}).get("model"), "حالت نقش‌ها": (health or {}).get("ensemble_mode")})
+    node("forecast", "پیش‌بینی Chronos", "observed" if base.get("forecast_median", 0) else "unknown",
+         "پیش‌بینی از کندل‌های بستهٔ M15؛ بازهٔ عدم‌قطعیت همراه آن",
+         values={"کف / میانه / سقف": " / ".join(metric(base.get(k)) for k in ("forecast_low", "forecast_median", "forecast_high")),
+                 "ATR": base.get("atr"), "مدل ثبت‌شده": sample.get("chronos_model")})
+    edge, minimum = number(max(number(base.get("buy_edge")) or 0, number(base.get("sell_edge")) or 0)), number(base.get("minimum_edge"))
+    node("edge", "مزیت پس از اسپرد", "pass" if minimum is not None and edge >= minimum else "blocked" if minimum is not None else "unknown",
+         "مزیت جهت برتر باید به حداقل برسد",
+         values={"مزیت خرید": base.get("buy_edge"), "مزیت فروش": base.get("sell_edge"), "حداقل مزیت": minimum})
+    strength, floor = number(base.get("signal_strength")), number(base.get("minimum_strength"))
+    node("strength", "قدرت پیش‌بینی", "pass" if strength is not None and floor is not None and strength >= floor else "blocked" if strength is not None and floor is not None else "unknown",
+         "قدرت پایین فقط با تأیید هم‌زمان برگشت و مسیر مدل می‌تواند پذیرفته شود",
+         values={"قدرت": strength, "حداقل قدرت عادی": floor, "ورود ضعیف مجاز": settings.get("allow_weak_intrabar_entries")})
+    confirms = base.get("intrabar_confirmed") == 1 and base.get("ai_trend_confirmed") == 1 and base.get("intrabar_direction") == base.get("ai_trend_direction")
+    node("confirmation", "تأیید جهت و زمان ورود", "pass" if confirms else "blocked" if base else "unknown",
+         "ورود عادی نیازمند هم‌جهتی پیش‌بینی، حرکت کوتاه‌مدت و مسیر مدل است",
+         values={"تأیید کوتاه‌مدت": base.get("intrabar_confirmed"), "تأیید مسیر مدل": base.get("ai_trend_confirmed"),
+                 "حرکت / حداقل ATR": f"{metric(base.get('intrabar_move_atr'))} / {metric(base.get('intrabar_min_move_atr'))}",
+                 "سازگاری مسیر / حداقل": f"{metric(base.get('ai_trend_consistency'))} / {metric(base.get('trend_min_consistency'))}"})
+    veto = base.get("reason") in {"trend_conflict", "late_entry_extension", "adverse_intrabar_timing", "spread_or_atr"}
+    node("timing", "قفل تعارض و ورود دیرهنگام", "blocked" if veto else "observed" if base else "unknown",
+         REASONS.get(base.get("reason")) if veto else "این قفل علت توقفِ تصمیم ذخیره‌شده نیست؛ عبور مستقل آن ثبت نشده",
+         values={"دلیل پایه": base.get("reason"), "حد امتداد ATR": settings.get("maximum_entry_extension_atr")})
+    node("base", "تصمیم مسیر عادی", "blocked" if base.get("decision") == "WAIT" else "pass" if base.get("decision") in {"BUY", "SELL"} else "unknown",
+         REASONS.get(base.get("reason"), base.get("reason", "تصمیم پایه ثبت نشده")),
+         values={"تصمیم پایه": base.get("decision"), "دلیل پایه": base.get("reason")})
+    range_execution = final.get("range_execution") == 1
+    range_setup = metadata.get("range_setup") if isinstance(metadata.get("range_setup"), dict) else {}
+    range_disabled = (health or {}).get("range_main_enabled") is False or diag.get("Range MAIN", "").startswith("NO")
+    node("range", "مسیر جایگزین: برگشت رنج", "pass" if range_execution else "idle" if range_disabled else "unknown" if decision == "WAIT" else "idle",
+         "برگشت رنج تأیید شده؛ اکسپرت سقف ریسک و هدف را دوباره بررسی می‌کند" if range_execution else
+         "علت رد هر شرط رنج در تاریخچهٔ این نسخه ذخیره نشده؛ نتیجه را حدس نمی‌زنیم",
+         values={"فعال در سرویس": (health or {}).get("range_main_enabled"), "فعال در اکسپرت": diag.get("Range MAIN"),
+                 "مجاز برای WAIT": "قدرت / مزیت ناکافی، حرکت مخالف، نبود تأیید جهت", "Setup ثبت‌شده": range_setup or None})
+    shadow = final.get("role_shadow") == 1 or metadata.get("ensemble_mode") == "shadow"
+    node("shadow", "تشخیص رژیم و مدل‌های ناظر", "shadow" if shadow else "observed" if final else "unknown",
+         "در حالت ناظر روی ورود، خروج و حجم اثر ندارد" if shadow else "حالت فعال نقش‌ها فقط از دادهٔ ثبت‌شده تعیین می‌شود",
+         values={"رژیم ناظر": final.get("shadow_regime_label"), "احتمال رژیم": final.get("regime_probability"),
+                 "نقش‌های فعال": final.get("ensemble_active"), "توجه": "RANGE/UNCLEAR رنج قطعی نیست"})
+    node("decision", "تصمیم نهایی مدل", "blocked" if decision == "WAIT" else "pass" if decision in {"BUY", "SELL"} else "unknown",
+         REASONS.get(reason, reason), values={"تصمیم": decision, "دلیل": reason, "شناسه": sample.get("sample_key"),
+                                             "مسیر": "RANGE" if range_execution else "CHRONOS"})
+    # These are terminal observations, not a replay of gates that short-circuit.
+    node("news", "قفل خبر", "blocked" if "NEWS GUARD" in ea_status else "observed" if diag.get("News") else "unknown",
+         "ورود ±۱۵ دقیقهٔ خبر پراثر؛ خروج از ۵ دقیقه قبل؛ تقویم نامعتبر مانع ورود است",
+         source="ea", values={"آخرین خبر": diag.get("News"), "وضعیت اکسپرت": ea_status if "NEWS GUARD" in ea_status else "عبور از این گیت در هر تصمیم ثبت نشده"})
+    live = match(diag.get("Live"), r"^(\w+)")
+    permissions = diag.get("Trade permissions", "")
+    node("account", "حساب، مجوز و حالت زنده", "blocked" if live in {"BLOCKED", "OFF", "OBSERVE"} or "NO" in permissions or "AccountLock: FAIL" in diag.get("Live", "") else "observed" if live else "unknown",
+         "وضعیت مشاهده‌شدهٔ مجوزها؛ مجوز به معنی ارسال سفارش نیست", source="ea",
+         values={"حالت": live, "قفل حساب": match(diag.get("Live"), r"AccountLock: (\w+)"),
+                 "مجوز ترمینال": match(permissions, r"terminal=(\w+)"),
+                 "مجوز اکسپرت": match(permissions, r"ea=(\w+)"),
+                 "مجوز حساب": match(permissions, r"account=(\w+)"),
+                 "واحد حساب در هر دلار": number(match(diag.get("MoneyUnitsConfirmed"), r"MoneyUnitsPerUSD: ([\d.]+)"))})
+    cooldown_block = any(x in ea_status for x in ("cooldown", "Daily trade limit", "Entry already used", "history unavailable"))
+    node("limits", "تعداد ورود و وقفهٔ ضرر", "blocked" if cooldown_block else "unknown",
+         ea_status if cooldown_block else "بعد از دو SL زیان‌دهٔ پیاپی هم‌جهت: ۳۰ دقیقه وقفه؛ یک ورود MAIN در هر M15",
+         source="ea", values={"ورودهای امروز": diag.get("Trades today"), "وقفهٔ رنج": "۵ دقیقه پس از بسته‌شدن",
+                               "نتیجهٔ اجرای گیت": "ثبت نشده" if not cooldown_block else ea_status})
+    risk = diag.get("RiskGate", "")
+    node("risk", "حجم، ریسک و مارجین", "blocked" if "BLOCK" in risk or any(x in ea_status for x in ("risk >", "hard risk cap", "Insufficient margin", "SL risk >", "TP not inside")) else "observed" if risk else "unknown",
+         "پیش‌نمایش ریسک با تأیید نهایی هنگام سفارش فرق دارد", source="ea",
+         values={"پیش‌نمایش ریسک": risk or None,
+                 "بودجهٔ ترجیحی، دلار": number(match(diag.get("RiskPerTradeUSD"), r"^([\d.]+)")),
+                 "سقف اجرای لات حداقل، دلار": number(match(diag.get("MinLotOverride"), r"MaxExecutableRiskUSD: ([\d.]+)")),
+                 "ریسک تخمینی SL، دلار": number(match(diag.get("EstimatedSLAccountUnits"), r"EstimatedSLUSD: ([\d.]+)")),
+                 "حجم پیش‌نمایش، لات": number(match(diag.get("SizingSide"), r"PlannedVolume: ([\d.]+)")),
+                 "سقف رنج": "۵ واحد حساب؛ با تبدیل ۱۰۰ واحد/دلار = ۵ سنت"})
+    position = diag.get("Managed position", "")
+    has_position = bool(position and position != "NONE")
+    order_seen = ea_status.startswith("Order sent")
+    order_block = any(x in ea_status for x in ("Order rejected", "TRADE BLOCKED", "Range MAIN blocked", "Another robot", "Quote changed", "DIRECTION GUARD"))
+    node("order", "اجرا در MT5", "active" if has_position else "pass" if order_seen else "blocked" if order_block else "idle" if diag else "unknown",
+         ea_status, source="ea", values={"پوزیشن": position or None, "اتصال به تصمیم مدل": joined,
+                                        "شواهد": "وضعیت زندهٔ اکسپرت؛ سیگنال مدل به‌تنهایی سفارش نیست"})
+    node("position", "مدیریت پوزیشن و خروج", "active" if has_position else "idle" if position == "NONE" else "unknown",
+         "مدیریت رنج: TP سریع، SL مرزی و ۳۰ دقیقه؛ MAIN: مراحل TP و خروج زودهنگام زیان",
+         source="ea", values={"پوزیشن": position or None, "مرحلهٔ TP": diag.get("TPStage"), "قفل سود": diag.get("TPStageLock"),
+                              "خروج زیان": diag.get("EarlyAdverseExit"), "توقف خروج بازار بسته": diag.get("MarketClosedExitPause")})
+    edges = [
+        ("market", "forecast", "بازار"), ("service", "forecast", "آماده"),
+        ("forecast", "timing", "قفل"), ("timing", "edge", "مزیت"), ("edge", "strength", "قدرت"),
+        ("strength", "confirmation", "تأیید"), ("confirmation", "base", "تصمیم"),
+        ("base", "decision", "عادی"), ("forecast", "shadow", "ناظر"),
+        ("base", "range", "WAIT"), ("range", "decision", "برگشت رنج"),
+        ("decision", "news", "سیگنال"), ("news", "account", "مجوز"),
+        ("account", "limits", "سقف"), ("limits", "risk", "حجم"),
+        ("risk", "order", "سفارش"), ("order", "position", "پوزیشن"),
+    ]
+    timeline = []
+    for row in recent:
+        a = object_json(row.get("model_metadata")).get("decision_audit") or {}
+        f = a.get("final", {}) if isinstance(a, dict) else {}
+        timeline.append({"sample_key": row.get("sample_key"), "at": utc_time(row.get("captured")),
+                         "decision": f.get("decision") or row.get("final_decision") or "UNKNOWN",
+                         "reason": f.get("reason", "UNKNOWN"), "detail": REASONS.get(f.get("reason"), f.get("reason", "دلیل ثبت نشده")),
+                         "strategy": "RANGE" if row.get("chronos_model") == "range-reversal-v1" else "CHRONOS"})
+    outcomes = []
+    for row in trades:
+        offset = row.get("closed_utc_offset_seconds")
+        outcomes.append({"direction": row.get("direction"), "net_units": row.get("net_units"),
+                         "exit": row.get("exit_detail") or row.get("exit_reason"),
+                         "at": utc_time(row["closed"] - offset) if offset is not None else None,
+                         "time_basis": "UTC" if offset is not None else "broker time unknown offset",
+                         "strategy": row.get("entry_strategy"), "role": row.get("trade_role")})
+    warnings = [x for x in (diag_error, db_error) if x]
+    if model_time["state"] != "fresh":
+        warnings.append("تصمیم مدل تازه نیست؛ آخرین تصمیم ثبت‌شده نمایش داده می‌شود")
+    if ea_time["state"] != "fresh":
+        warnings.append("وضعیت اکسپرت تازه نیست؛ از آن نتیجهٔ زنده نمی‌گیریم")
+    if diag and sample and not joined:
+        warnings.append("شناسهٔ اکسپرت و تصمیم مدل متفاوت است؛ عبور مسیر اجرا قابل تأیید نیست")
+    if model_time["state"] == "clock_error" or ea_time["state"] == "clock_error":
+        warnings.append("زمان منبع در آینده است؛ ساعت نیاز به بررسی دارد")
+    return {"schema_version": 1, "generated_at": utc_time(now), "symbol": symbol, "read_only": True,
+            "model_freshness": model_time, "ea_freshness": ea_time, "joined": joined,
+            "sample_key": sample.get("sample_key"), "decision": decision, "reason": reason,
+            "reason_fa": REASONS.get(reason, reason), "ea_status": ea_status,
+            "ea_version": diag.get("EA version"), "nodes": nodes,
+            "edges": [{"from": a, "to": b, "label": label} for a, b, label in edges],
+            "timeline": timeline, "trades": outcomes, "warnings": warnings}
+
+
+def handler_for(db, diagnostic, symbol, health_url):
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            route = self.path.split("?", 1)[0]
+            if route == "/api/snapshot":
+                health = None
+                try:
+                    with urlopen(health_url, timeout=.7) as response:
+                        health = object_json(response.read(100_000))
+                except (OSError, ValueError):
+                    pass
+                data = build_snapshot(db, diagnostic, symbol=symbol, health=health)
+                self.reply(json.dumps(data, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
+            elif route in {"/", "/monitor", "/app.js", "/style.css"}:
+                filename = {"/": "index.html", "/monitor": "index.html", "/app.js": "app.js", "/style.css": "style.css"}[route]
+                content_type = {"index.html": "text/html", "app.js": "text/javascript", "style.css": "text/css"}[filename]
+                self.reply((ASSETS / filename).read_bytes(), content_type + "; charset=utf-8")
+            else:
+                self.send_error(404)
+
+        def reply(self, body, content_type):
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'self'")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, fmt, *args):
+            pass
+
+    return Handler
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--db", default="data/ramon_history.sqlite3")
+    parser.add_argument("--diagnostic", type=Path, default=default_diagnostic())
+    parser.add_argument("--symbol", default="XAUUSD_l")
+    parser.add_argument("--port", type=int, default=8013)
+    args = parser.parse_args()
+    server = ThreadingHTTPServer(("127.0.0.1", args.port), handler_for(args.db, args.diagnostic, args.symbol, "http://127.0.0.1:8012/health"))
+    print(f"Ramon read-only flow monitor: http://127.0.0.1:{server.server_port}", flush=True)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+
+
+if __name__ == "__main__":
+    main()

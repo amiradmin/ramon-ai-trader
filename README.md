@@ -684,3 +684,13 @@ blocked after >=3 ATR of aligned movement over the last 12 completed bars or
 current intrabar movement (`late_entry_extension`). This initial fixed threshold
 requires forward validation; range strategy remains independent. NewsGuard
 continues to govern both strategies in the EA.
+
+## فلوچارت زندهٔ تصمیم‌گیری
+
+با اجرای `./scripts/monitor_ramon.sh`، [داشبورد محلی](http://127.0.0.1:8013)
+مسیر پیش‌بینی، تأیید جهت، برگشت رنج، قفل‌های اجرا و مدیریت پوزیشن را نشان می‌دهد.
+هر مرحله قابل انتخاب است و مقدار شرط، دلیل توقف، زمان و منبع مشاهده را نمایش می‌دهد.
+مانیتور هر سه ثانیه تاریخچه و Diagnostic اکسپرت MAIN را فقط می‌خواند؛ دادهٔ قدیمی
+و اطلاعات ثبت‌نشده را جدا مشخص می‌کند و تصمیم یا معاملهٔ جدیدی ایجاد نمی‌کند.
+[راهنمای مانیتور](docs/decision-flow-monitor.md) و
+[گزارش پوشش بازار و قفل‌ها](docs/market-coverage-audit.md) جزئیات را توضیح می‌دهند.
