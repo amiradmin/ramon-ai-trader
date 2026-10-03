@@ -136,6 +136,26 @@ def ensure_history_db(db: str | Path) -> Path:
             "CREATE INDEX IF NOT EXISTS idx_decision_samples_symbol_time "
             "ON decision_samples(symbol,captured)"
         )
+        conn.execute("""CREATE TABLE IF NOT EXISTS shadow_votes (
+            vote_key TEXT PRIMARY KEY,
+            captured INTEGER NOT NULL,
+            symbol TEXT NOT NULL,
+            signal_bar_time INTEGER NOT NULL,
+            advisor TEXT NOT NULL,
+            decision TEXT NOT NULL,
+            confidence REAL,
+            regime TEXT,
+            metadata TEXT NOT NULL,
+            source_version TEXT NOT NULL
+        )""")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_shadow_votes_symbol_time "
+            "ON shadow_votes(symbol,captured)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_shadow_votes_advisor_time "
+            "ON shadow_votes(advisor,captured)"
+        )
         conn.execute("""CREATE TABLE IF NOT EXISTS target_outcomes (
             sample_key TEXT PRIMARY KEY,
             trade_key TEXT NOT NULL,
@@ -268,6 +288,81 @@ def persist_decision_sample(
             ),
         )
         return cursor.rowcount == 1
+
+
+def persist_shadow_vote(
+    db: str | Path,
+    *,
+    vote_key: str,
+    captured: int,
+    symbol: str,
+    signal_bar_time: int,
+    advisor: str,
+    decision: str,
+    confidence: float | None = None,
+    regime: str | None = None,
+    metadata: dict[str, object] | None = None,
+    source_version: str = "",
+) -> bool:
+    """Persist one observe-only advisor vote; this table never authorizes execution."""
+    if not re.fullmatch(r"[A-Za-z0-9_.:-]{8,128}", vote_key):
+        raise ValueError("invalid shadow vote key")
+    if decision not in {"BUY", "SELL", "WAIT"}:
+        raise ValueError("invalid shadow decision")
+    if confidence is not None and (not isfinite(confidence) or not 0.0 <= confidence <= 1.0):
+        raise ValueError("invalid shadow confidence")
+    if not advisor or len(advisor) > 128 or not symbol.startswith("XAUUSD"):
+        raise ValueError("invalid shadow vote identity")
+    path = ensure_history_db(db)
+    payload = json.dumps(metadata or {}, allow_nan=False, separators=(",", ":"))
+    with sqlite3.connect(path, timeout=10) as conn:
+        cursor = conn.execute(
+            """INSERT OR IGNORE INTO shadow_votes
+               (vote_key,captured,symbol,signal_bar_time,advisor,decision,
+                confidence,regime,metadata,source_version)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (
+                vote_key, int(captured), symbol, int(signal_bar_time), advisor, decision,
+                confidence, regime, payload, str(source_version),
+            ),
+        )
+        return cursor.rowcount == 1
+
+
+def load_shadow_votes(
+    db: str | Path,
+    *,
+    symbol: str = "XAUUSD_l",
+    since: int = 0,
+) -> list[dict[str, object]]:
+    """Read shadow advisor votes for research/reporting."""
+    path = Path(db)
+    if not path.is_file():
+        return []
+    with sqlite3.connect(path) as conn:
+        rows = conn.execute(
+            """SELECT vote_key,captured,symbol,signal_bar_time,advisor,decision,
+                      confidence,regime,metadata,source_version
+               FROM shadow_votes
+               WHERE symbol=? AND captured>=?
+               ORDER BY captured,advisor""",
+            (symbol, int(since)),
+        ).fetchall()
+    return [
+        {
+            "vote_key": row[0],
+            "captured": int(row[1]),
+            "symbol": row[2],
+            "signal_bar_time": int(row[3]),
+            "advisor": row[4],
+            "decision": row[5],
+            "confidence": row[6],
+            "regime": row[7],
+            "metadata": json.loads(row[8] or "{}"),
+            "source_version": row[9],
+        }
+        for row in rows
+    ]
 
 
 def decision_sample_count(db: str | Path, symbol: str = "XAUUSD_l") -> int:
