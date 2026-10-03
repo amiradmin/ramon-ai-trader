@@ -1,5 +1,5 @@
 #property strict
-#property version "1.552"
+#property version "1.553"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -547,7 +547,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.55.2\n"
+      +"EA version: 0.55.3\n"
       +"Range MAIN: "+BoolText(EnableRangeMain)+" | quick 5-unit TP, boundary SL, RR >=1.2, 30min maximum\n"
       +"AccountLossLimits: "+AccountLossLimitStatus+" | enabled="+BoolText(EnableAccountLossLimits)
       +" daily="+DoubleToString(DailyLossLimitPercent,2)+"% drawdown="+DoubleToString(MaximumEquityDrawdownPercent,2)+"%\n"
@@ -1065,9 +1065,9 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    // Tall/narrow panel: summary text first, checklist directly underneath.
-   UiRect("PANEL",12,24,560,1125,C'15,23,42',C'71,85,105');
+   UiRect("PANEL",12,24,560,1015,C'15,23,42',C'71,85,105');
 
-   UiLabel("TITLE","RAMON AI TRADER  v0.55.2 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.55.3 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+" M15 | Forecast ["+ModelTag(LastForecastModelHandler)
       +"] | Shadow ["+ModelTag(LastForecastShadowModelHandler)+"] | "
@@ -1081,11 +1081,12 @@ void DrawDashboard()
       28,108,state_color,11);
    UiLabel("ATTRIBUTION",AttributionSummary(),28,130,clrWhite,9);
 
-   UiLabel("SIGNAL","Signal: "+UTCText(LastSignalBarTime,TIME_DATE|TIME_MINUTES),
-      28,154,clrWhite,9);
-   UiLabel("SIGNAL_PRICE","Signal Bid/Ask: "+DoubleToString(LastSignalBid,_Digits)
-      +" / "+DoubleToString(LastSignalAsk,_Digits),
-      28,176,clrWhite,9);
+   string compact_signal=(LastSignalBarTime>0 && LastSignalBid>0.0 && LastSignalAsk>LastSignalBid
+      ? "Signal: "+UTCText(LastSignalBarTime,TIME_DATE|TIME_MINUTES)
+         +" | Bid/Ask "+DoubleToString(LastSignalBid,_Digits)+"/"+DoubleToString(LastSignalAsk,_Digits)
+      : "Signal: waiting for valid snapshot");
+   UiLabel("SIGNAL",compact_signal,28,154,clrWhite,9);
+   ObjectDelete(0,UiPrefix+"SIGNAL_PRICE");
 
    // The old Forecast / Edge / Strength / Intrabar / AI Trend rows were removed here
    // because the same live values now appear once in the checklist below.
@@ -1097,7 +1098,7 @@ void DrawDashboard()
       +" N["+ModelTag(LastNewsModelHandler)+"]"+role_mark+":"+RoleProbabilityText(LastNewsProbability)
       +" M["+ModelTag(LastMetaModelHandler)+"]"+role_mark+":"+RoleProbabilityText(LastMetaProbability)
       +" SL["+ModelTag(LastRiskModelHandler)+"]"+role_mark+":"+RoleProbabilityText(LastRoleShadow ? LastShadowRiskProbability : LastRiskProbability),
-      28,200,clrWhite,8);
+      28,178,clrWhite,8);
    ObjectSetString(0,UiPrefix+"ROLE_MODELS",OBJPROP_TOOLTIP,
       "حالت سایه: فقط نمایش؛ بدون دخالت در معامله\n"
       "R: احتمال رونددار بودن، نه صعودی یا نزولی\n"
@@ -1123,7 +1124,7 @@ void DrawDashboard()
       +" {LIVE "+moment_gate+"}"
       +" | SENTIMENT ["+ModelTag(LastNewsSentimentModelHandler)+"] "+finbert_state
       +" {LIVE "+finbert_gate+"}",
-      28,222,ai_gate_color,8);
+      28,200,ai_gate_color,8);
    ObjectSetString(0,UiPrefix+"LIVE_AI",OBJPROP_TOOLTIP,
       "LIVE GATE: MOMENT و FinBERT می‌توانند ورود BUY/SELL را به WAIT تبدیل کنند؛ خودشان معامله جدید ایجاد نمی‌کنند.");
 
@@ -1139,23 +1140,22 @@ void DrawDashboard()
       +" | "+LastNewsSource+" "+(LastNewsSourceReady ? "READY" : "OFFLINE")
       +" | "+(LastNewsModelReady ? "MODEL READY" : "*LEARNING*")
       +" | "+LastNewsEventImpact+" "+LastNewsEventCountry+" "+news_title+news_delta,
-      28,244,news_color,8);
+      28,222,news_color,8);
 
-   UiLabel("ACCOUNT","Account: "+AccountTypeText()+" (configured)"
-      +"   Currency: "+AccountInfoString(ACCOUNT_CURRENCY)
-      +"   Trades: "+(today<0 ? "?" : IntegerToString(today))
+   UiLabel("ACCOUNT","Account: "+AccountTypeText()
+      +" | "+AccountInfoString(ACCOUNT_CURRENCY)
+      +" | Balance "+DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),2)+"u"
+      +" (~$"+DoubleToString(AccountUnitsToUSD(AccountInfoDouble(ACCOUNT_BALANCE)),2)+")"
+      +" | Trades "+(today<0 ? "?" : IntegerToString(today))
       +"/"+(SmallOnlyMode ? "unlimited" : IntegerToString(MaxTradesPerDay)),
-      28,266,clrWhite,9);
-
-   UiLabel("BALANCE_USD","Balance: "+DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),2)+" units"
-      +"   ~= $"+DoubleToString(AccountUnitsToUSD(AccountInfoDouble(ACCOUNT_BALANCE)),2),
-      28,288,clrWhite,9);
+      28,244,clrWhite,9);
+   ObjectDelete(0,UiPrefix+"BALANCE_USD");
 
    UiLabel("LIVE_PNL",
       has_managed_position
          ? "LIVE P/L: "+pnl_units+" units   ~= "+pnl_usd
          : "LIVE P/L: --   (no Ramon position)",
-      28,310,clrWhite,10);
+      28,266,clrWhite,10);
 
    UiLabel("SIZING","Sizing: "+LastSizingSide
       +"   Vol: "+DoubleToString(LastPlannedVolume,2)
@@ -1163,22 +1163,15 @@ void DrawDashboard()
       +" x"+DoubleToString(LastRiskMultiplier,2)
       +" = $"+DoubleToString(EffectiveRiskPerTradeUSD(),3)
       +"   Cap: $"+DoubleToString(MaxExecutableRiskUSD,2),
-      28,332,sizing_color,9);
+      28,288,sizing_color,9);
 
-   UiLabel("MIN_RISK","Min executable risk: $"
-      +DoubleToString(AccountUnitsToUSD(LastMinimumLotStopLossUnits),4)
-      +" ("+DoubleToString(LastMinimumLotStopLossUnits,2)+" units)",
-      28,354,risk_gate_color,9);
-
-   UiLabel("RISK_GATE",RiskGateText(),28,376,risk_gate_color,10);
-
-   UiLabel("MONEY_CONFIRM","MoneyUnits/USD: "+DoubleToString(MoneyUnitsPerUSD,2)
-      +"   Confirmed: "+BoolText(ConfirmMoneyUnitsPerUSD)
-      +(EnableLiveTrading && !live_ready ? "   "+live_reason : ""),
-      28,400,(live_ready || !EnableLiveTrading ? clrWhite : clrTomato),9);
+   // Detailed min-risk/gate/money-unit values remain in Trade Check + Diagnostic.
+   ObjectDelete(0,UiPrefix+"MIN_RISK");
+   ObjectDelete(0,UiPrefix+"RISK_GATE");
+   ObjectDelete(0,UiPrefix+"MONEY_CONFIRM");
 
    // ---------------------- checklist ----------------------
-   int tx=24, ty=432, tw=520, th=366, row_h=28;
+   int tx=24, ty=320, tw=520, th=366, row_h=28;
    UiRect("CHECK_TABLE_BG",tx,ty,tw,th,C'17,27,46',C'71,85,105');
    UiRect("CHECK_TABLE_HEAD",tx+4,ty+4,tw-8,28,C'30,41,59',C'71,85,105');
 
@@ -1261,7 +1254,7 @@ void DrawDashboard()
       tx+12,ty+346,clrWhite,8);
 
    // ---------------------- model / handler map ----------------------
-   int mx=24, my=812, mw=520, mh=244;
+   int mx=24, my=700, mw=520, mh=244;
    UiRect("MODEL_MAP_BG",mx,my,mw,mh,C'17,27,46',C'71,85,105');
    UiRect("MODEL_MAP_HEAD",mx+4,my+4,mw-8,26,C'30,41,59',C'71,85,105');
    UiLabel("MODEL_MAP_TITLE","MODEL / HANDLER MAP",mx+12,my+9,clrWhite,10);
@@ -1291,17 +1284,17 @@ void DrawDashboard()
       UiLabel("MODEL_HANDLER_"+IntegerToString(mi),"-> "+mhandlers[mi],mx+170,mrow,clrWhite,8);
    }
 
-   UiButton("COPY","COPY DIAGNOSTIC",28,1070,176,30);
-   UiButton("CLOSE","CLOSE TRADE",218,1070,110,30);
+   UiButton("COPY","COPY DIAGNOSTIC",28,958,176,30);
+   UiButton("CLOSE","CLOSE TRADE",218,958,110,30);
    ObjectSetInteger(0,UiPrefix+"CLOSE",OBJPROP_BGCOLOR,
       has_managed_position ? C'153,27,27' : C'55,65,81');
    ObjectSetInteger(0,UiPrefix+"CLOSE",OBJPROP_BORDER_COLOR,
       has_managed_position ? C'248,113,113' : C'75,85,99');
 
-   UiLabel("COPY_STATUS",LastCopyStatus,340,1070,
+   UiLabel("COPY_STATUS",LastCopyStatus,340,958,
       (StringFind(LastCopyStatus,"failed")>=0 || StringFind(LastCopyStatus,"disabled")>=0
          ? clrTomato : clrWhite),8);
-   UiLabel("CLOSE_STATUS",LastCloseStatus,340,1086,
+   UiLabel("CLOSE_STATUS",LastCloseStatus,340,974,
       (StringFind(LastCloseStatus,"FAILED")>=0 ? clrTomato : clrWhite),8);
 
    ChartRedraw();
