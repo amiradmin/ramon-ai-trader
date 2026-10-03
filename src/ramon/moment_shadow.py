@@ -1,6 +1,7 @@
-"""Shadow-only MOMENT anomaly detector for Ramon.
+"""MOMENT anomaly detector for Ramon.
 
-Never changes BUY/SELL/WAIT, sizing, SL/TP, or execution gates.
+Inference is isolated from the latency-critical path. The server may use a fresh
+completed result as a conservative live entry veto; it never creates a trade.
 """
 from __future__ import annotations
 
@@ -66,6 +67,7 @@ class MomentAnomalyShadow:
             "moment_anomaly_score": -1.0,
             "moment_anomaly_ratio": -1.0,
             "moment_anomaly_label": "UNAVAILABLE",
+            "moment_anomaly_bar_time": int(market.bars[-1].time) if market.bars else 0,
         }
         if not self.ready:
             return payload
