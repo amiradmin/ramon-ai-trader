@@ -57,6 +57,14 @@ def test_benchmark_reports_chronological_folds_years_and_directions(tmp_path):
         assert "mean_r" in model["metrics"]
         assert "resolved_win_rate" in model["metrics"]
         assert "timeout_rate" in model["metrics"]
+        assert set(model["directional_accuracy"]) == {"1", "4", "8", "16"}
+        assert set(model["horizon_matrix"]) == {"1", "4", "8", "16"}
+        for horizon in ("1", "4", "8", "16"):
+            directional = model["directional_accuracy"][horizon]
+            assert directional["samples"] > 0
+            assert 0 <= directional["accuracy"] <= 1
+            assert "mean_signed_move" in directional
+            assert "timeout_rate" in model["horizon_matrix"][horizon]["metrics"]
 
 
 def test_benchmark_is_read_only(tmp_path):
@@ -66,3 +74,12 @@ def test_benchmark_is_read_only(tmp_path):
     benchmark_database(db, folds=3, stride=8)
     after = hashlib.sha256(db.read_bytes()).hexdigest()
     assert after == before
+
+
+def test_custom_analysis_horizons_are_respected(tmp_path):
+    db = tmp_path / "external.sqlite3"
+    seed(db)
+    report = benchmark_database(db, folds=3, stride=8, analysis_horizons=(1, 8))
+    for model in report["models"].values():
+        assert set(model["directional_accuracy"]) == {"1", "8"}
+        assert set(model["horizon_matrix"]) == {"1", "8"}
