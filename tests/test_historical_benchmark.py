@@ -1,3 +1,4 @@
+import pytest
 import hashlib
 import sqlite3
 
@@ -225,3 +226,19 @@ def test_additional_model_can_use_independent_stride(tmp_path):
     assert report["models"]["previous_bar"]["stride"] == 4
     assert report["models"]["fake_model"]["stride"] == 32
     assert set(report["models"]["fake_model"]["directional_accuracy"]) == {"1", "4"}
+
+
+def test_chronos_cpu_workers_cli_flag_is_validated(monkeypatch, tmp_path):
+    # Lightweight parser-level validation via direct argv; Chronos is not loaded.
+    import sys
+    from ramon import historical_benchmark as hb
+
+    db = tmp_path / "external.sqlite3"
+    seed(db, rows=1200)
+    monkeypatch.setattr(sys, "argv", [
+        "historical_benchmark",
+        "--db", str(db),
+        "--cpu-workers", "0",
+    ])
+    with pytest.raises(SystemExit):
+        hb.main()
