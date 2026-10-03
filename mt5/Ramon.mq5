@@ -1,5 +1,5 @@
 #property strict
-#property version "1.550"
+#property version "1.551"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -147,6 +147,15 @@ string LastRiskModelHandler = "Ramon/BinaryLogisticModel";
 string LastNewsSourceHandler = "ForexFactoryNewsProvider";
 string LastMarketStateHandler = "market-state-v1";
 string LastTargetModelHandler = "Ramon/TargetStructure";
+string LastAnomalyModelHandler = "OFF";
+string LastNewsSentimentModelHandler = "OFF";
+bool LastMomentShadowReady = false;
+double LastMomentAnomalyScore = -1.0;
+double LastMomentAnomalyRatio = -1.0;
+string LastMomentAnomalyLabel = "UNAVAILABLE";
+bool LastFinbertShadowReady = false;
+string LastFinbertSentimentLabel = "UNAVAILABLE";
+double LastFinbertDirectionalScore = 0.0;
 double LastNewsSourceAgeSeconds = -1.0;
 string LastNewsSource = "NONE";
 string LastNewsEventTitle = "NONE";
@@ -531,7 +540,7 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.54.9\n"
+      +"EA version: 0.55.1\n"
       +"Range MAIN: "+BoolText(EnableRangeMain)+" | quick 5-unit TP, boundary SL, RR >=1.2, 30min maximum\n"
       +"AccountLossLimits: "+AccountLossLimitStatus+" | enabled="+BoolText(EnableAccountLossLimits)
       +" daily="+DoubleToString(DailyLossLimitPercent,2)+"% drawdown="+DoubleToString(MaximumEquityDrawdownPercent,2)+"%\n"
@@ -963,6 +972,9 @@ string ModelTag(const string handler)
    if(StringFind(handler,"chronos")>=0 || StringFind(handler,"Chronos")>=0) return "Chronos-2";
    if(StringFind(handler,"timesfm")>=0 || StringFind(handler,"TimesFM")>=0) return "TimesFM-3";
    if(StringFind(handler,"TargetStructure")>=0) return "TargetStructure";
+   if(StringFind(handler,"MOMENT")>=0 || StringFind(handler,"moment")>=0) return "MOMENT-1-small";
+   if(StringFind(handler,"finbert")>=0 || StringFind(handler,"FinBERT")>=0) return "FinBERT";
+   if(handler=="OFF") return "OFF";
    if(handler=="") return "N/A";
    return handler;
 }
@@ -1038,7 +1050,7 @@ void DrawDashboard()
    // Tall/narrow panel: summary text first, checklist directly underneath.
    UiRect("PANEL",12,24,560,955,C'15,23,42',C'71,85,105');
 
-   UiLabel("TITLE","RAMON AI TRADER  v0.55.0 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.55.1 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+" M15 | Forecast ["+ModelTag(LastForecastModelHandler)
       +"] | Shadow ["+ModelTag(LastForecastShadowModelHandler)+"] | "
@@ -1077,6 +1089,18 @@ void DrawDashboard()
       "N/A: پیش‌بینی معتبر موجود نیست. درصدها دقت مدل نیستند.\n"
       "* = SHADOW / LEARNING / COLLECTING؛ هنوز Live نیست.");
 
+   string moment_state=(LastMomentShadowReady
+      ? LastMomentAnomalyLabel+" x"+DoubleToString(LastMomentAnomalyRatio,2)
+      : "OFF");
+   string finbert_state=(LastFinbertShadowReady
+      ? LastFinbertSentimentLabel+" "+DoubleToString(LastFinbertDirectionalScore,2)
+      : "OFF");
+   UiLabel("SHADOW_AI","ANOMALY ["+ModelTag(LastAnomalyModelHandler)+"] "+moment_state
+      +" | SENTIMENT ["+ModelTag(LastNewsSentimentModelHandler)+"] "+finbert_state,
+      28,222,clrWhite,8);
+   ObjectSetString(0,UiPrefix+"SHADOW_AI",OBJPROP_TOOLTIP,
+      "Shadow only: این دو مدل هیچ تغییری در BUY/SELL/WAIT، حجم، SL یا TP ایجاد نمی‌کنند.");
+
    string news_title=(StringLen(LastNewsEventTitle)>28
       ? StringSubstr(LastNewsEventTitle,0,28)+"..." : LastNewsEventTitle);
    string news_delta=(LastNewsEventTime>0
@@ -1089,13 +1113,13 @@ void DrawDashboard()
       +" | "+LastNewsSource+" "+(LastNewsSourceReady ? "READY" : "OFFLINE")
       +" | "+(LastNewsModelReady ? "MODEL READY" : "*LEARNING*")
       +" | "+LastNewsEventImpact+" "+LastNewsEventCountry+" "+news_title+news_delta,
-      28,222,news_color,8);
+      28,244,news_color,8);
 
    UiLabel("ACCOUNT","Account: "+AccountTypeText()+" (configured)"
       +"   Currency: "+AccountInfoString(ACCOUNT_CURRENCY)
       +"   Trades: "+(today<0 ? "?" : IntegerToString(today))
       +"/"+(SmallOnlyMode ? "unlimited" : IntegerToString(MaxTradesPerDay)),
-      28,244,clrWhite,9);
+      28,288,clrWhite,9);
 
    UiLabel("BALANCE_USD","Balance: "+DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),2)+" units"
       +"   ~= $"+DoubleToString(AccountUnitsToUSD(AccountInfoDouble(ACCOUNT_BALANCE)),2),
@@ -1105,7 +1129,7 @@ void DrawDashboard()
       has_managed_position
          ? "LIVE P/L: "+pnl_units+" units   ~= "+pnl_usd
          : "LIVE P/L: --   (no Ramon position)",
-      28,288,clrWhite,10);
+      28,310,clrWhite,10);
 
    UiLabel("SIZING","Sizing: "+LastSizingSide
       +"   Vol: "+DoubleToString(LastPlannedVolume,2)
@@ -1113,22 +1137,22 @@ void DrawDashboard()
       +" x"+DoubleToString(LastRiskMultiplier,2)
       +" = $"+DoubleToString(EffectiveRiskPerTradeUSD(),3)
       +"   Cap: $"+DoubleToString(MaxExecutableRiskUSD,2),
-      28,310,sizing_color,9);
+      28,332,sizing_color,9);
 
    UiLabel("MIN_RISK","Min executable risk: $"
       +DoubleToString(AccountUnitsToUSD(LastMinimumLotStopLossUnits),4)
       +" ("+DoubleToString(LastMinimumLotStopLossUnits,2)+" units)",
-      28,332,risk_gate_color,9);
+      28,354,risk_gate_color,9);
 
-   UiLabel("RISK_GATE",RiskGateText(),28,354,risk_gate_color,10);
+   UiLabel("RISK_GATE",RiskGateText(),28,376,risk_gate_color,10);
 
    UiLabel("MONEY_CONFIRM","MoneyUnits/USD: "+DoubleToString(MoneyUnitsPerUSD,2)
       +"   Confirmed: "+BoolText(ConfirmMoneyUnitsPerUSD)
       +(EnableLiveTrading && !live_ready ? "   "+live_reason : ""),
-      28,378,(live_ready || !EnableLiveTrading ? clrWhite : clrTomato),9);
+      28,400,(live_ready || !EnableLiveTrading ? clrWhite : clrTomato),9);
 
    // ---------------------- checklist ----------------------
-   int tx=24, ty=410, tw=520, th=366, row_h=28;
+   int tx=24, ty=432, tw=520, th=366, row_h=28;
    UiRect("CHECK_TABLE_BG",tx,ty,tw,th,C'17,27,46',C'71,85,105');
    UiRect("CHECK_TABLE_HEAD",tx+4,ty+4,tw-8,28,C'30,41,59',C'71,85,105');
 
@@ -3991,6 +4015,25 @@ void OnTimer()
    JsonText(reply,"news_source_handler",LastNewsSourceHandler);
    JsonText(reply,"market_state_handler",LastMarketStateHandler);
    JsonText(reply,"target_model_handler",LastTargetModelHandler);
+   JsonText(reply,"anomaly_model_handler",LastAnomalyModelHandler);
+   JsonText(reply,"news_sentiment_model_handler",LastNewsSentimentModelHandler);
+   double moment_ready=0.0,moment_score=-1.0,moment_ratio=-1.0;
+   double finbert_ready=0.0,finbert_directional=0.0;
+   string moment_label="UNAVAILABLE",finbert_label="UNAVAILABLE";
+   JsonNumber(reply,"moment_shadow_ready",moment_ready);
+   JsonNumber(reply,"moment_anomaly_score",moment_score);
+   JsonNumber(reply,"moment_anomaly_ratio",moment_ratio);
+   JsonText(reply,"moment_anomaly_label",moment_label);
+   JsonNumber(reply,"finbert_shadow_ready",finbert_ready);
+   JsonText(reply,"finbert_sentiment_label",finbert_label);
+   JsonNumber(reply,"finbert_directional_score",finbert_directional);
+   LastMomentShadowReady=(moment_ready>=0.5);
+   LastMomentAnomalyScore=moment_score;
+   LastMomentAnomalyRatio=moment_ratio;
+   LastMomentAnomalyLabel=moment_label;
+   LastFinbertShadowReady=(finbert_ready>=0.5);
+   LastFinbertSentimentLabel=finbert_label;
+   LastFinbertDirectionalScore=finbert_directional;
    LastNewsSourceAgeSeconds=news_source_age_seconds;
    LastNewsEventTitle=news_event_title;
    LastNewsEventCountry=news_event_country;
