@@ -1065,7 +1065,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    // Tall/narrow panel: summary text first, checklist directly underneath.
-   UiRect("PANEL",12,24,560,955,C'15,23,42',C'71,85,105');
+   UiRect("PANEL",12,24,560,1125,C'15,23,42',C'71,85,105');
 
    UiLabel("TITLE","RAMON AI TRADER  v0.55.2 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
@@ -1257,20 +1257,51 @@ void DrawDashboard()
       UiLabel("CXS_"+IntegerToString(i),cstats[i],tx+442,cy,ccolors[i],8);
    }
 
-   UiLabel("CHECK_NOTE","DISPLAY ONLY - execution logic unchanged.   * = SHADOW / LEARNING",
+   UiLabel("CHECK_NOTE","TRADE CHECK | * = SHADOW / LEARNING",
       tx+12,ty+346,clrWhite,8);
 
-   UiButton("COPY","COPY DIAGNOSTIC",28,812,176,30);
-   UiButton("CLOSE","CLOSE TRADE",218,812,110,30);
+   // ---------------------- model / handler map ----------------------
+   int mx=24, my=812, mw=520, mh=244;
+   UiRect("MODEL_MAP_BG",mx,my,mw,mh,C'17,27,46',C'71,85,105');
+   UiRect("MODEL_MAP_HEAD",mx+4,my+4,mw-8,26,C'30,41,59',C'71,85,105');
+   UiLabel("MODEL_MAP_TITLE","MODEL / HANDLER MAP",mx+12,my+9,clrWhite,10);
+
+   string mnames[12]={"Forecast","Forecast Shadow","Regime","Anomaly Detection",
+      "Entry","News Calendar","News Model","News Sentiment",
+      "Meta","Risk / SL","Market State","TP Structure"};
+   string mhandlers[12]={
+      ModelTag(LastForecastModelHandler),
+      ModelTag(LastForecastShadowModelHandler),
+      ModelTag(LastRegimeModelHandler),
+      ModelTag(LastAnomalyModelHandler)+" [LIVE GATE]",
+      ModelTag(LastEntryModelHandler),
+      LastNewsSourceHandler,
+      ModelTag(LastNewsModelHandler),
+      ModelTag(LastNewsSentimentModelHandler)+" [LIVE GATE]",
+      ModelTag(LastMetaModelHandler),
+      ModelTag(LastRiskModelHandler),
+      ModelTag(LastMarketStateHandler),
+      ModelTag(LastTargetModelHandler)
+   };
+
+   for(int mi=0;mi<12;mi++)
+   {
+      int mrow=my+36+mi*16;
+      UiLabel("MODEL_NAME_"+IntegerToString(mi),mnames[mi],mx+12,mrow,clrWhite,8);
+      UiLabel("MODEL_HANDLER_"+IntegerToString(mi),"-> "+mhandlers[mi],mx+170,mrow,clrWhite,8);
+   }
+
+   UiButton("COPY","COPY DIAGNOSTIC",28,1070,176,30);
+   UiButton("CLOSE","CLOSE TRADE",218,1070,110,30);
    ObjectSetInteger(0,UiPrefix+"CLOSE",OBJPROP_BGCOLOR,
       has_managed_position ? C'153,27,27' : C'55,65,81');
    ObjectSetInteger(0,UiPrefix+"CLOSE",OBJPROP_BORDER_COLOR,
       has_managed_position ? C'248,113,113' : C'75,85,99');
 
-   UiLabel("COPY_STATUS",LastCopyStatus,340,812,
+   UiLabel("COPY_STATUS",LastCopyStatus,340,1070,
       (StringFind(LastCopyStatus,"failed")>=0 || StringFind(LastCopyStatus,"disabled")>=0
          ? clrTomato : clrWhite),8);
-   UiLabel("CLOSE_STATUS",LastCloseStatus,340,828,
+   UiLabel("CLOSE_STATUS",LastCloseStatus,340,1086,
       (StringFind(LastCloseStatus,"FAILED")>=0 ? clrTomato : clrWhite),8);
 
    ChartRedraw();
