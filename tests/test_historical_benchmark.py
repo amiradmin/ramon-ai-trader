@@ -71,9 +71,13 @@ def test_benchmark_reports_chronological_folds_years_and_directions(tmp_path):
             assert "mean_signed_move" in directional
             assert "timeout_rate" in model["horizon_matrix"][horizon]["metrics"]
             assert model["regime_directional_accuracy"][horizon]
-            assert model["regime_trade_matrix"][horizon]["by_regime"]
-            assert model["regime_trade_matrix"][horizon]["stability"]
-            for state, stability in model["regime_trade_matrix"][horizon]["stability"].items():
+            regime_matrix = model["regime_trade_matrix"][horizon]
+            horizon_trades = model["horizon_matrix"][horizon]["metrics"]["trades"]
+            assert sum(m["trades"] for m in regime_matrix["by_regime"].values()) == horizon_trades
+            if horizon_trades:
+                assert regime_matrix["by_regime"]
+                assert regime_matrix["stability"]
+            for state, stability in regime_matrix["stability"].items():
                 assert "overall" in stability
                 assert "profitable_folds" in stability
                 assert "positive_mean_r_folds" in stability
