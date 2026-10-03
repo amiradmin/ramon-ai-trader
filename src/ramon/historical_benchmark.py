@@ -24,6 +24,7 @@ from .compare import MomentumBaseline
 from .core import Bar, Forecast, Market, Settings, evaluate
 from .history import load_bars
 from .market_state import assess_market
+from .progress import ProgressReporter, ProgressSlice
 
 
 class PreviousBarBaseline:
@@ -190,6 +191,8 @@ def simulate(
     stride: int,
     fallback_spread_points: int,
     roundtrip_cost_r: float,
+    progress: ProgressSlice | None = None,
+    progress_stage: str = "replay",
 ) -> tuple[list[TradeRecord], dict[str, int]]:
     """Replay one non-overlapping position stream and preserve per-trade R."""
     if len(bars) != len(spreads) or stride < 1 or point <= 0 or fallback_spread_points <= 0:
@@ -201,7 +204,10 @@ def simulate(
     i = start_at
     decisions = waits = 0
     trades: list[TradeRecord] = []
+    span = max(1, end - settings.horizon - start_at)
     while i + settings.horizon < end:
+        if progress is not None:
+            progress.update(i - start_at, stage=progress_stage)
         if (i - start_at) % stride:
             i += 1
             continue
@@ -259,6 +265,8 @@ def simulate(
         trades.append(TradeRecord(bars[i].time, result.decision, outcome, trade_r, regime))
         i = closed_at + 1
 
+    if progress is not None:
+        progress.finish(stage=progress_stage)
     return trades, {"decisions": decisions, "waits": waits}
 
 
@@ -292,17 +300,28 @@ def directional_accuracy(
     end: int,
     horizons: Sequence[int],
     stride: int,
+    progress: ProgressSlice | None = None,
+    progress_stage: str = "directional accuracy",
 ) -> dict[str, dict[str, object]]:
     """Measure raw forecast direction against future closes, without trade exits."""
     if stride < 1:
         raise ValueError("stride must be positive")
     out: dict[str, dict[str, object]] = {}
-    for horizon in horizons:
+    ranges = [
+        range(max(256, start), end - horizon, stride)
+        for horizon in horizons
+    ]
+    total_points = max(1, sum(len(rng) for rng in ranges))
+    done_points = 0
+    for horizon, indices in zip(horizons, ranges):
         if horizon < 1:
             raise ValueError("directional horizons must be positive")
         correct = wrong = flat_forecast = flat_actual = 0
         signed_moves: list[float] = []
-        for i in range(max(256, start), end - horizon, stride):
+        for i in indices:
+            if progress is not None:
+                progress.update(done_points, stage=f"{progress_stage} H={horizon}")
+            done_points += 1
             closes = [bar.close for bar in bars[max(0, i - 255):i + 1]]
             forecast = model.forecast(closes, horizon)
             predicted_move = forecast.median - bars[i].close
@@ -330,6 +349,8 @@ def directional_accuracy(
             "accuracy": round(correct / resolved, 6) if resolved else None,
             "mean_signed_move": round(mean(signed_moves), 6) if signed_moves else None,
         }
+    if progress is not None:
+        progress.finish(stage=progress_stage)
     return out
 
 
@@ -345,16 +366,27 @@ def regime_directional_accuracy(
     horizons: Sequence[int],
     stride: int,
     fallback_spread_points: int,
+    progress: ProgressSlice | None = None,
+    progress_stage: str = "regime directional",
 ) -> dict[str, dict[str, dict[str, object]]]:
     """Raw forecast direction grouped by Ramon's price-only market state."""
     if stride < 1 or point <= 0 or fallback_spread_points <= 0:
         raise ValueError("invalid regime directional input")
     out: dict[str, dict[str, dict[str, object]]] = {}
-    for horizon in horizons:
+    ranges = [
+        range(max(256, start), end - horizon, stride)
+        for horizon in horizons
+    ]
+    total_points = max(1, sum(len(rng) for rng in ranges))
+    done_points = 0
+    for horizon, indices in zip(horizons, ranges):
         grouped: dict[str, dict[str, object]] = defaultdict(
             lambda: {"correct": 0, "wrong": 0, "flat_forecast": 0, "flat_actual": 0, "signed_moves": []}
         )
-        for i in range(max(256, start), end - horizon, stride):
+        for i in indices:
+            if progress is not None:
+                progress.update(done_points, stage=f"{progress_stage} H={horizon}")
+            done_points += 1
             spread_points = spreads[i] if spreads[i] > 0 else fallback_spread_points
             market = Market(
                 symbol=symbol,
@@ -398,6 +430,8 @@ def regime_directional_accuracy(
                 "mean_signed_move": round(mean(moves), 6) if moves else None,
             }
         out[str(horizon)] = horizon_report
+    if progress is not None:
+        progress.finish(stage=progress_stage)
     return out
 
 
@@ -415,18 +449,32 @@ def horizon_matrix(
     stride: int,
     fallback_spread_points: int,
     roundtrip_cost_r: float,
+    progress: ProgressSlice | None = None,
+    progress_stage: str = "horizon matrix",
 ) -> dict[str, dict[str, object]]:
     """Replay identical signal model with several holding horizons."""
     report: dict[str, dict[str, object]] = {}
-    for horizon in horizons:
+    count = max(1, len(horizons))
+    for pos, horizon in enumerate(horizons):
         settings = replace(base_settings, horizon=horizon)
+        child = None
+        if progress is not None:
+            child = ProgressSlice(progress.parent,
+                                  progress.start + (progress.end-progress.start)*pos//count,
+                                  progress.start + (progress.end-progress.start)*(pos+1)//count,
+                                  max(1, end-start),
+                                  f"{progress_stage} H={horizon}")
         trades, counters = simulate(
             bars, spreads, model, symbol=symbol, point=point, settings=settings,
             start=start, end=end, stride=stride,
             fallback_spread_points=fallback_spread_points,
             roundtrip_cost_r=roundtrip_cost_r,
+            progress=child,
+            progress_stage=f"{progress_stage} H={horizon}",
         )
         report[str(horizon)] = {**counters, "metrics": _metrics(trades)}
+    if progress is not None:
+        progress.finish(stage=progress_stage)
     return report
 
 def regime_trade_matrix(
@@ -444,22 +492,31 @@ def regime_trade_matrix(
     stride: int,
     fallback_spread_points: int,
     roundtrip_cost_r: float,
+    progress: ProgressSlice | None = None,
+    progress_stage: str = "regime trade matrix",
 ) -> dict[str, dict[str, object]]:
     """Trade metrics by market state, including independent chronological folds."""
     usable = end - start
     report: dict[str, dict[str, object]] = {}
+    total_runs = max(1, len(horizons) * (folds + 1))
+    run_no = 0
     for horizon in horizons:
         settings = replace(base_settings, horizon=horizon)
+        if progress is not None:
+            progress.update(run_no, stage=f"{progress_stage} H={horizon} overall")
         all_trades, _ = simulate(
             bars, spreads, model, symbol=symbol, point=point, settings=settings,
             start=start, end=end, stride=stride,
             fallback_spread_points=fallback_spread_points,
             roundtrip_cost_r=roundtrip_cost_r,
         )
+        run_no += 1
         by_regime = _regime_metrics(all_trades)
 
         fold_rows = []
         for fold in range(folds):
+            if progress is not None:
+                progress.update(run_no, stage=f"{progress_stage} H={horizon} fold={fold+1}/{folds}")
             fold_start = start + usable * fold // folds
             fold_end = start + usable * (fold + 1) // folds
             fold_trades, _ = simulate(
@@ -468,6 +525,7 @@ def regime_trade_matrix(
                 fallback_spread_points=fallback_spread_points,
                 roundtrip_cost_r=roundtrip_cost_r,
             )
+            run_no += 1
             fold_rows.append({
                 "fold": fold + 1,
                 "window": _window_iso(bars, fold_start, fold_end),
@@ -522,6 +580,8 @@ def regime_trade_matrix(
             "by_regime": by_regime,
             "stability": stability,
         }
+    if progress is not None:
+        progress.finish(stage=progress_stage)
     return report
 
 
@@ -539,6 +599,7 @@ def benchmark_model(
     fallback_spread_points: int,
     roundtrip_cost_r: float,
     analysis_horizons: Sequence[int],
+    progress: ProgressSlice | None = None,
 ) -> dict[str, object]:
     if folds < 2:
         raise ValueError("folds must be >=2")
@@ -547,15 +608,28 @@ def benchmark_model(
     if usable < folds * (settings.horizon + 2):
         raise ValueError("not enough bars for requested folds")
 
+    phase = lambda a, b, name: (
+        ProgressSlice(progress.parent,
+                      progress.start + (progress.end-progress.start)*a//100,
+                      progress.start + (progress.end-progress.start)*b//100,
+                      max(1, len(bars)-warmup),
+                      f"{model_name}: {name}")
+        if progress is not None else None
+    )
     all_trades, counters = simulate(
         bars, spreads, model, symbol=symbol, point=point, settings=settings,
         start=warmup, end=len(bars), stride=stride,
         fallback_spread_points=fallback_spread_points,
         roundtrip_cost_r=roundtrip_cost_r,
+        progress=phase(0, 12, "base replay"),
+        progress_stage=f"{model_name}: base replay",
     )
 
     fold_reports = []
     for fold in range(folds):
+        if progress is not None:
+            progress.update(int(progress.total * (12 + 13 * fold / max(1, folds)) / 100),
+                            stage=f"{model_name}: fold {fold+1}/{folds}")
         start = warmup + usable * fold // folds
         end = warmup + usable * (fold + 1) // folds
         trades, fold_counters = simulate(
@@ -583,11 +657,15 @@ def benchmark_model(
         "directional_accuracy": directional_accuracy(
             bars, model, start=warmup, end=len(bars),
             horizons=analysis_horizons, stride=stride,
+            progress=phase(25, 43, "directional accuracy"),
+            progress_stage=f"{model_name}: directional accuracy",
         ),
         "regime_directional_accuracy": regime_directional_accuracy(
             bars, spreads, model, symbol=symbol, point=point,
             start=warmup, end=len(bars), horizons=analysis_horizons, stride=stride,
             fallback_spread_points=fallback_spread_points,
+            progress=phase(43, 61, "regime directional"),
+            progress_stage=f"{model_name}: regime directional",
         ),
         "horizon_matrix": horizon_matrix(
             bars, spreads, model, symbol=symbol, point=point,
@@ -595,6 +673,8 @@ def benchmark_model(
             horizons=analysis_horizons, stride=stride,
             fallback_spread_points=fallback_spread_points,
             roundtrip_cost_r=roundtrip_cost_r,
+            progress=phase(61, 78, "horizon matrix"),
+            progress_stage=f"{model_name}: horizon matrix",
         ),
         "regime_trade_matrix": regime_trade_matrix(
             bars, spreads, model, symbol=symbol, point=point,
@@ -602,6 +682,8 @@ def benchmark_model(
             horizons=analysis_horizons, stride=stride,
             fallback_spread_points=fallback_spread_points,
             roundtrip_cost_r=roundtrip_cost_r,
+            progress=phase(78, 100, "regime trade matrix"),
+            progress_stage=f"{model_name}: regime trade matrix",
         ),
     }
 
@@ -617,6 +699,7 @@ def benchmark_database(
     roundtrip_cost_r: float = 0.0,
     analysis_horizons: Sequence[int] = (1, 4, 8, 16),
     additional_models: Sequence[tuple[str, object, int]] = (),
+    show_progress: bool = False,
 ) -> dict[str, object]:
     bars, spreads = load_bars(db, symbol)
     if len(bars) < 1200:
@@ -639,8 +722,13 @@ def benchmark_database(
     )
     if any(model_stride < 1 for _, _, model_stride in models):
         raise ValueError("model strides must be positive")
-    return {
-        "schema_version": 1,
+    reporter = ProgressReporter(
+        total=10_000,
+        label="historical benchmark",
+        enabled=show_progress,
+        min_interval=1.0,
+    )
+    report = {
         "dataset": {
             "db": str(db),
             "symbol": symbol,
@@ -671,16 +759,7 @@ def benchmark_database(
             "regime_trade_matrix": "trade-level PF/MeanR/NetR/DD by market state and horizon, with independent chronological fold replays",
             "contrarian": "mirror each baseline forecast around the latest completed close; no fitting",
         },
-        "models": {
-            name: benchmark_model(
-                bars, spreads, model, model_name=name, symbol=symbol, point=point,
-                settings=settings, folds=folds, stride=model_stride,
-                fallback_spread_points=fallback_spread_points,
-                roundtrip_cost_r=roundtrip_cost_r,
-                analysis_horizons=analysis_horizons,
-            )
-            for name, model, model_stride in models
-        },
+        "models": {},
         "limitations": [
             "External broker OHLC is not LiteFinance execution history.",
             "Spread is assumed where the external dataset has spread_points=0.",
@@ -689,6 +768,25 @@ def benchmark_database(
             "Do not change live thresholds from this report alone.",
         ],
     }
+    model_count = max(1, len(models))
+    for pos, (name, model, model_stride) in enumerate(models):
+        child = ProgressSlice(
+            reporter,
+            10_000 * pos // model_count,
+            10_000 * (pos + 1) // model_count,
+            10_000,
+            name,
+        )
+        report["models"][name] = benchmark_model(
+            bars, spreads, model, model_name=name, symbol=symbol, point=point,
+            settings=settings, folds=folds, stride=model_stride,
+            fallback_spread_points=fallback_spread_points,
+            roundtrip_cost_r=roundtrip_cost_r,
+            analysis_horizons=analysis_horizons,
+            progress=child,
+        )
+    reporter.finish(stage="historical benchmark complete")
+    return report
 
 
 def main() -> None:
@@ -709,6 +807,8 @@ def main() -> None:
     parser.add_argument("--chronos-stride", type=int, default=64,
                         help="Chronos screening stride; use --stride value for strict same-density comparison")
     parser.add_argument("--chronos-cache", default="data/chronos_historical_forecasts.sqlite3")
+    parser.add_argument("--no-progress", action="store_true",
+                        help="Disable stderr progress bar")
     parser.add_argument("--output", default="")
     args = parser.parse_args()
     horizons = tuple(int(value) for value in args.analysis_horizons.split(",") if value.strip())
@@ -738,6 +838,7 @@ def main() -> None:
         roundtrip_cost_r=args.cost_r,
         analysis_horizons=horizons,
         additional_models=additional_models,
+        show_progress=not args.no_progress,
     )
     if chronos_cache is not None:
         chronos_metadata["cache_stats"] = chronos_cache.stats()
