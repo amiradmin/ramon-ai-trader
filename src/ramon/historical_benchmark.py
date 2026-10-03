@@ -61,6 +61,7 @@ class TradeRecord:
     direction: str
     outcome: str
     r: float
+    regime: str
 
 
 def _metrics(trades: Sequence[TradeRecord]) -> dict[str, object]:
@@ -142,6 +143,7 @@ def simulate(
             point=point,
             bars=tuple(bars[max(0, i - 255): i + 1]),
         )
+        regime = assess_market(market)["state"]
         result = evaluate(market, model, settings)
         decisions += 1
         if result.decision == "WAIT":
@@ -182,7 +184,7 @@ def simulate(
             trade_r = delta / result.stop_distance
 
         trade_r -= roundtrip_cost_r
-        trades.append(TradeRecord(bars[i].time, result.decision, outcome, trade_r))
+        trades.append(TradeRecord(bars[i].time, result.decision, outcome, trade_r, regime))
         i = closed_at + 1
 
     return trades, {"decisions": decisions, "waits": waits}
@@ -200,6 +202,13 @@ def _direction_metrics(trades: Sequence[TradeRecord]) -> dict[str, dict[str, obj
         direction: _metrics([t for t in trades if t.direction == direction])
         for direction in ("BUY", "SELL")
     }
+
+
+def _regime_metrics(trades: Sequence[TradeRecord]) -> dict[str, dict[str, object]]:
+    grouped: dict[str, list[TradeRecord]] = defaultdict(list)
+    for trade in trades:
+        grouped[trade.regime].append(trade)
+    return {state: _metrics(grouped[state]) for state in sorted(grouped)}
 
 
 
@@ -348,6 +357,102 @@ def horizon_matrix(
         report[str(horizon)] = {**counters, "metrics": _metrics(trades)}
     return report
 
+def regime_trade_matrix(
+    bars: Sequence[Bar],
+    spreads: Sequence[int],
+    model,
+    *,
+    symbol: str,
+    point: float,
+    base_settings: Settings,
+    start: int,
+    end: int,
+    folds: int,
+    horizons: Sequence[int],
+    stride: int,
+    fallback_spread_points: int,
+    roundtrip_cost_r: float,
+) -> dict[str, dict[str, object]]:
+    """Trade metrics by market state, including independent chronological folds."""
+    usable = end - start
+    report: dict[str, dict[str, object]] = {}
+    for horizon in horizons:
+        settings = replace(base_settings, horizon=horizon)
+        all_trades, _ = simulate(
+            bars, spreads, model, symbol=symbol, point=point, settings=settings,
+            start=start, end=end, stride=stride,
+            fallback_spread_points=fallback_spread_points,
+            roundtrip_cost_r=roundtrip_cost_r,
+        )
+        by_regime = _regime_metrics(all_trades)
+
+        fold_rows = []
+        for fold in range(folds):
+            fold_start = start + usable * fold // folds
+            fold_end = start + usable * (fold + 1) // folds
+            fold_trades, _ = simulate(
+                bars, spreads, model, symbol=symbol, point=point, settings=settings,
+                start=fold_start, end=fold_end, stride=stride,
+                fallback_spread_points=fallback_spread_points,
+                roundtrip_cost_r=roundtrip_cost_r,
+            )
+            fold_rows.append({
+                "fold": fold + 1,
+                "window": _window_iso(bars, fold_start, fold_end),
+                "by_regime": _regime_metrics(fold_trades),
+            })
+
+        states = sorted(set(by_regime) | {
+            state
+            for fold in fold_rows
+            for state in fold["by_regime"]
+        })
+        stability = {}
+        for state in states:
+            fold_metrics = []
+            profitable_folds = 0
+            positive_mean_r_folds = 0
+            for fold in fold_rows:
+                metrics = fold["by_regime"].get(state)
+                if metrics is None:
+                    fold_metrics.append({
+                        "fold": fold["fold"],
+                        "trades": 0,
+                        "profit_factor": None,
+                        "mean_r": None,
+                        "net_r": 0.0,
+                        "max_drawdown_r": 0.0,
+                    })
+                    continue
+                pf = metrics["profit_factor"]
+                mean_r = metrics["mean_r"]
+                if pf is not None and pf > 1.0:
+                    profitable_folds += 1
+                if mean_r is not None and mean_r > 0:
+                    positive_mean_r_folds += 1
+                fold_metrics.append({
+                    "fold": fold["fold"],
+                    "trades": metrics["trades"],
+                    "profit_factor": pf,
+                    "mean_r": mean_r,
+                    "net_r": metrics["net_r"],
+                    "max_drawdown_r": metrics["max_drawdown_r"],
+                })
+            stability[state] = {
+                "overall": by_regime.get(state, _metrics([])),
+                "profitable_folds": profitable_folds,
+                "positive_mean_r_folds": positive_mean_r_folds,
+                "folds_with_trades": sum(row["trades"] > 0 for row in fold_metrics),
+                "folds": fold_metrics,
+            }
+
+        report[str(horizon)] = {
+            "by_regime": by_regime,
+            "stability": stability,
+        }
+    return report
+
+
 def benchmark_model(
     bars: Sequence[Bar],
     spreads: Sequence[int],
@@ -418,6 +523,13 @@ def benchmark_model(
             fallback_spread_points=fallback_spread_points,
             roundtrip_cost_r=roundtrip_cost_r,
         ),
+        "regime_trade_matrix": regime_trade_matrix(
+            bars, spreads, model, symbol=symbol, point=point,
+            base_settings=settings, start=warmup, end=len(bars), folds=folds,
+            horizons=analysis_horizons, stride=stride,
+            fallback_spread_points=fallback_spread_points,
+            roundtrip_cost_r=roundtrip_cost_r,
+        ),
     }
 
 
@@ -479,6 +591,7 @@ def benchmark_database(
             "analysis_horizons": list(analysis_horizons),
             "directional_accuracy": "raw forecast sign vs future close; no SL/TP or entry filters",
             "regime_directional_accuracy": "same raw direction metric grouped by price-only market state assessed from past/current bars only",
+            "regime_trade_matrix": "trade-level PF/MeanR/NetR/DD by market state and horizon, with independent chronological fold replays",
             "contrarian": "mirror each baseline forecast around the latest completed close; no fitting",
         },
         "models": {
