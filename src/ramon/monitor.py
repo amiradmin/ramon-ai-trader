@@ -302,6 +302,193 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
                          "at": utc_time(row["closed"] - offset) if offset is not None else None,
                          "time_basis": "UTC" if offset is not None else "broker time unknown offset",
                          "strategy": row.get("entry_strategy"), "role": row.get("trade_role")})
+    handlers = audit.get("handlers") if isinstance(audit.get("handlers"), dict) else {}
+    external_models = audit.get("external_models") if isinstance(audit.get("external_models"), dict) else {}
+    moment_snapshot = external_models.get("moment") if isinstance(external_models.get("moment"), dict) else {}
+    finbert_snapshot = external_models.get("finbert") if isinstance(external_models.get("finbert"), dict) else {}
+    shadow_forecasts = audit.get("shadow_forecasts") if isinstance(audit.get("shadow_forecasts"), dict) else {}
+    timesfm_snapshot = shadow_forecasts.get("timesfm3") if isinstance(shadow_forecasts.get("timesfm3"), dict) else {}
+    news_snapshot = audit.get("news_snapshot") if isinstance(audit.get("news_snapshot"), dict) else {}
+    target_snapshot = metadata.get("target_structure") if isinstance(metadata.get("target_structure"), dict) else {}
+
+    def handler(name, fallback):
+        return handlers.get(name) or (health or {}).get(name) or fallback
+
+    def model_row(name, handler_name, status, values, *, live=False):
+        return {
+            "name": name,
+            "handler": handler_name,
+            "status": status,
+            "live": bool(live),
+            "sample_key": sample.get("sample_key"),
+            "observed_at": model_time.get("at"),
+            "values": values,
+        }
+
+    model_handler_map = [
+        model_row(
+            "Forecast",
+            handler("forecast_model_handler", sample.get("chronos_model") or "Chronos"),
+            decision if base else "NO SAMPLE",
+            {
+                "Decision": decision,
+                "Reason": reason,
+                "Low / Median / High": " / ".join(metric(base.get(k)) for k in ("forecast_low", "forecast_median", "forecast_high")),
+                "BUY edge": base.get("buy_edge"),
+                "SELL edge": base.get("sell_edge"),
+                "Signal strength": base.get("signal_strength"),
+                "Minimum strength": base.get("minimum_strength"),
+            },
+            live=True,
+        ),
+        model_row(
+            "Forecast Shadow",
+            handler("forecast_shadow_model_handler", "OFF"),
+            "READY" if timesfm_snapshot.get("timesfm3_shadow_ready") == 1 else "OFF" if (health or {}).get("timesfm3_shadow_enabled") == 0 else "NO SNAPSHOT",
+            {
+                "Direction": timesfm_snapshot.get("timesfm3_shadow_direction"),
+                "Low / Median / High": " / ".join(metric(timesfm_snapshot.get(k)) for k in ("timesfm3_shadow_low", "timesfm3_shadow_median", "timesfm3_shadow_high")),
+                "Move ATR": timesfm_snapshot.get("timesfm3_shadow_move_atr"),
+                "Agrees Chronos": timesfm_snapshot.get("timesfm3_shadow_agrees_chronos"),
+                "Effect": "SHADOW / display only",
+            },
+        ),
+        model_row(
+            "Regime",
+            handler("regime_model_handler", "Ramon/BinaryLogisticModel"),
+            "SHADOW" if final.get("role_shadow") == 1 or metadata.get("ensemble_mode") == "shadow" else "ACTIVE" if final else "NO SAMPLE",
+            {
+                "Probability": final.get("regime_probability"),
+                "Label": final.get("shadow_regime_label"),
+                "Ensemble active": final.get("ensemble_active"),
+                "Market state": assessment.get("state"),
+                "Route": assessment.get("route"),
+            },
+        ),
+        model_row(
+            "Anomaly Detection",
+            handler("anomaly_model_handler", "OFF") + " [LIVE GATE]",
+            "VETO" if moment_snapshot.get("moment_live_veto") == 1 else "READY" if moment_snapshot.get("moment_shadow_ready") == 1 else "NO SNAPSHOT",
+            {
+                "Label": moment_snapshot.get("moment_anomaly_label"),
+                "Score": moment_snapshot.get("moment_anomaly_score"),
+                "Ratio": moment_snapshot.get("moment_anomaly_ratio"),
+                "Threshold": moment_snapshot.get("moment_live_threshold") or (health or {}).get("moment_live_threshold"),
+                "Fresh": moment_snapshot.get("moment_live_fresh"),
+                "LIVE veto": moment_snapshot.get("moment_live_veto"),
+            },
+            live=True,
+        ),
+        model_row(
+            "Entry",
+            handler("entry_model_handler", "Ramon/BinaryLogisticModel"),
+            "SHADOW" if metadata.get("ensemble_mode") == "shadow" else "ACTIVE" if final else "NO SAMPLE",
+            {
+                "Entry probability": final.get("entry_probability"),
+                "Signal strength": base.get("signal_strength"),
+                "Minimum strength": base.get("minimum_strength"),
+                "BUY edge": base.get("buy_edge"),
+                "SELL edge": base.get("sell_edge"),
+                "Intrabar confirmed": base.get("intrabar_confirmed"),
+                "Intrabar direction": base.get("intrabar_direction"),
+                "AI trend confirmed": base.get("ai_trend_confirmed"),
+                "AI trend direction": base.get("ai_trend_direction"),
+            },
+        ),
+        model_row(
+            "News Calendar",
+            handler("news_source_handler", "ForexFactoryNewsProvider"),
+            "READY" if (health or {}).get("news_source_ready") else "NO SNAPSHOT",
+            {
+                "Source": news_snapshot.get("news_source"),
+                "Ready": news_snapshot.get("news_source_ready"),
+                "Country": news_snapshot.get("news_event_country"),
+                "Impact": news_snapshot.get("news_event_impact"),
+                "Event": news_snapshot.get("news_event_title"),
+                "Delta minutes": news_snapshot.get("news_event_delta_minutes"),
+            },
+        ),
+        model_row(
+            "News Model",
+            handler("news_model_handler", "Ramon/BinaryLogisticModel"),
+            "SHADOW" if metadata.get("ensemble_mode") == "shadow" else "ACTIVE" if final else "NO SAMPLE",
+            {
+                "News probability": final.get("news_probability"),
+                "Model ready": final.get("news_model_ready"),
+                "Event": news_snapshot.get("news_event_title"),
+                "Impact": news_snapshot.get("news_event_impact"),
+            },
+        ),
+        model_row(
+            "News Sentiment",
+            handler("news_sentiment_model_handler", "OFF") + " [LIVE GATE]",
+            "VETO" if finbert_snapshot.get("finbert_live_veto") == 1 else "READY" if finbert_snapshot.get("finbert_shadow_ready") == 1 else "NO SNAPSHOT",
+            {
+                "Sentiment": finbert_snapshot.get("finbert_sentiment_label"),
+                "Directional score": finbert_snapshot.get("finbert_directional_score"),
+                "Positive": finbert_snapshot.get("finbert_positive"),
+                "Negative": finbert_snapshot.get("finbert_negative"),
+                "Neutral": finbert_snapshot.get("finbert_neutral"),
+                "Threshold": finbert_snapshot.get("finbert_live_threshold") or (health or {}).get("finbert_live_threshold"),
+                "LIVE veto": finbert_snapshot.get("finbert_live_veto"),
+            },
+            live=True,
+        ),
+        model_row(
+            "Meta",
+            handler("meta_model_handler", "Ramon/BinaryLogisticModel"),
+            "SHADOW" if metadata.get("ensemble_mode") == "shadow" else "ACTIVE" if final else "NO SAMPLE",
+            {
+                "Meta probability": final.get("meta_probability"),
+                "Base decision": base.get("decision"),
+                "Base reason": base.get("reason"),
+                "Final decision": decision,
+                "Final reason": reason,
+                "Ensemble active": final.get("ensemble_active"),
+            },
+        ),
+        model_row(
+            "Risk / SL",
+            handler("risk_model_handler", "Ramon/BinaryLogisticModel"),
+            "SHADOW" if metadata.get("ensemble_mode") == "shadow" else "ACTIVE" if final else "NO SAMPLE",
+            {
+                "Risk probability": final.get("risk_probability"),
+                "Risk multiplier": final.get("risk_multiplier"),
+                "Risk target": final.get("risk_target"),
+                "Stop distance": base.get("stop_distance"),
+                "Target distance": base.get("target_distance"),
+            },
+        ),
+        model_row(
+            "Market State",
+            handler("market_state_handler", "market-state-v1"),
+            assessment.get("state") or "NO SNAPSHOT",
+            {
+                "State": assessment.get("state"),
+                "Route": assessment.get("route"),
+                "Policy": assessment.get("version"),
+                "Conditions": assessment.get("conditions"),
+                "Evidence": assessment.get("evidence"),
+                "ATR": base.get("atr"),
+            },
+            live=True,
+        ),
+        model_row(
+            "TP Structure",
+            handler("target_model_handler", "Ramon/TargetStructure"),
+            "READY" if target_snapshot.get("ready") else "FALLBACK" if target_snapshot else "NO SNAPSHOT",
+            {
+                "Method": target_snapshot.get("method"),
+                "Direction": target_snapshot.get("direction"),
+                "Impulse ATR": target_snapshot.get("impulse_atr"),
+                "TP1": target_snapshot.get("tp1"),
+                "TP2": target_snapshot.get("tp2"),
+                "TP3": target_snapshot.get("tp3"),
+                "Legacy target": target_snapshot.get("legacy_target"),
+            },
+        ),
+    ]
+
     warnings = [x for x in (diag_error, db_error) if x]
     if model_time["state"] != "fresh":
         warnings.append("تصمیم مدل تازه نیست؛ آخرین تصمیم ثبت‌شده نمایش داده می‌شود")
@@ -317,7 +504,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
             "reason_fa": REASONS.get(reason, reason), "ea_status": ea_status,
             "ea_version": diag.get("EA version"), "nodes": nodes,
             "edges": [{"from": a, "to": b, "label": label} for a, b, label in edges],
-            "timeline": timeline, "trades": outcomes, "warnings": warnings}
+            "timeline": timeline, "trades": outcomes, "model_handler_map": model_handler_map, "warnings": warnings}
 
 
 def handler_for(db, diagnostic, symbol, health_url):
