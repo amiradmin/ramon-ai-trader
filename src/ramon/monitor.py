@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import math
+import os
 from pathlib import Path
 import re
 import sqlite3
@@ -82,7 +83,7 @@ def freshness(timestamp, now, threshold=90):
 
 
 def default_diagnostic():
-    root = Path.home() / ".mt5/drive_c/users"
+    root = Path(os.getenv("RAMON_MT5_USERS_ROOT", str(Path.home() / ".mt5/drive_c/users")))
     candidates = sorted(root.glob("*/AppData/Roaming/MetaQuotes/Terminal/Common/Files/Ramon_Diagnostic.txt"))
     return candidates[0] if candidates else None
 
@@ -549,8 +550,10 @@ def main():
     parser.add_argument("--diagnostic", type=Path, default=default_diagnostic())
     parser.add_argument("--symbol", default="XAUUSD_l")
     parser.add_argument("--port", type=int, default=8013)
+    parser.add_argument("--host", default=os.getenv("RAMON_MONITOR_HOST", "127.0.0.1"))
+    parser.add_argument("--health-url", default=os.getenv("RAMON_MONITOR_HEALTH_URL", "http://127.0.0.1:8012/health"))
     args = parser.parse_args()
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), handler_for(args.db, args.diagnostic, args.symbol, "http://127.0.0.1:8012/health"))
+    server = ThreadingHTTPServer((args.host, args.port), handler_for(args.db, args.diagnostic, args.symbol, args.health_url))
     print(f"Ramon read-only flow monitor: http://127.0.0.1:{server.server_port}", flush=True)
     try:
         server.serve_forever()
