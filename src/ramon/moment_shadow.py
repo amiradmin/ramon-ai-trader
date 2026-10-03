@@ -15,7 +15,8 @@ DEFAULT_MOMENT_CHECKPOINT = "AutonLab/MOMENT-1-small"
 
 
 class MomentAnomalyShadow:
-    def __init__(self, *, enabled: bool = False, checkpoint: str = DEFAULT_MOMENT_CHECKPOINT, model: Any | None = None):
+    def __init__(self, *, enabled: bool = False, checkpoint: str = DEFAULT_MOMENT_CHECKPOINT,
+                 model: Any | None = None, lazy: bool = False):
         self.enabled = bool(enabled)
         self.checkpoint = checkpoint
         self.model = model
@@ -26,26 +27,43 @@ class MomentAnomalyShadow:
             return
         if self.model is not None:
             return
+        if lazy:
+            self.error = "warming"
+            return
+        self.load()
+
+    def load(self) -> bool:
+        """Load MOMENT in-place; safe to call from a background startup worker."""
+        if not self.enabled:
+            self.error = "disabled"
+            return False
+        if self.model is not None:
+            return True
         try:
             import torch
             from momentfm import MOMENTPipeline
             self._torch = torch
-            self.model = MOMENTPipeline.from_pretrained(
-                checkpoint,
+            model = MOMENTPipeline.from_pretrained(
+                self.checkpoint,
                 model_kwargs={"task_name": "reconstruction"},
             )
-            self.model.init()
-            self.model.eval()
+            model.init()
+            model.eval()
+            self.model = model
+            self.error = ""
+            return True
         except Exception as exc:
             self.model = None
             self.error = f"{type(exc).__name__}: {exc}"
+            return False
 
     @classmethod
-    def from_env(cls) -> "MomentAnomalyShadow":
+    def from_env(cls, *, lazy: bool = False) -> "MomentAnomalyShadow":
         enabled = os.getenv("RAMON_MOMENT_SHADOW_ENABLED", "0").strip().lower() in {"1","true","yes","on"}
         return cls(
             enabled=enabled,
             checkpoint=os.getenv("RAMON_MOMENT_CHECKPOINT", DEFAULT_MOMENT_CHECKPOINT).strip() or DEFAULT_MOMENT_CHECKPOINT,
+            lazy=lazy,
         )
 
     @property
