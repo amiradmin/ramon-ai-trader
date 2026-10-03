@@ -205,9 +205,13 @@ def simulate(
     decisions = waits = 0
     trades: list[TradeRecord] = []
     span = max(1, end - settings.horizon - start_at)
+    local_progress = (
+        ProgressSlice(progress.parent, progress.start, progress.end, span, progress_stage)
+        if progress is not None else None
+    )
     while i + settings.horizon < end:
-        if progress is not None:
-            progress.update(i - start_at, stage=progress_stage)
+        if local_progress is not None:
+            local_progress.update(i - start_at, stage=progress_stage)
         if (i - start_at) % stride:
             i += 1
             continue
@@ -265,8 +269,8 @@ def simulate(
         trades.append(TradeRecord(bars[i].time, result.decision, outcome, trade_r, regime))
         i = closed_at + 1
 
-    if progress is not None:
-        progress.finish(stage=progress_stage)
+    if local_progress is not None:
+        local_progress.finish(stage=progress_stage)
     return trades, {"decisions": decisions, "waits": waits}
 
 
@@ -312,6 +316,10 @@ def directional_accuracy(
         for horizon in horizons
     ]
     total_points = max(1, sum(len(rng) for rng in ranges))
+    local_progress = (
+        ProgressSlice(progress.parent, progress.start, progress.end, total_points, progress_stage)
+        if progress is not None else None
+    )
     done_points = 0
     for horizon, indices in zip(horizons, ranges):
         if horizon < 1:
@@ -319,8 +327,8 @@ def directional_accuracy(
         correct = wrong = flat_forecast = flat_actual = 0
         signed_moves: list[float] = []
         for i in indices:
-            if progress is not None:
-                progress.update(done_points, stage=f"{progress_stage} H={horizon}")
+            if local_progress is not None:
+                local_progress.update(done_points, stage=f"{progress_stage} H={horizon}")
             done_points += 1
             closes = [bar.close for bar in bars[max(0, i - 255):i + 1]]
             forecast = model.forecast(closes, horizon)
@@ -349,8 +357,8 @@ def directional_accuracy(
             "accuracy": round(correct / resolved, 6) if resolved else None,
             "mean_signed_move": round(mean(signed_moves), 6) if signed_moves else None,
         }
-    if progress is not None:
-        progress.finish(stage=progress_stage)
+    if local_progress is not None:
+        local_progress.finish(stage=progress_stage)
     return out
 
 
@@ -378,14 +386,18 @@ def regime_directional_accuracy(
         for horizon in horizons
     ]
     total_points = max(1, sum(len(rng) for rng in ranges))
+    local_progress = (
+        ProgressSlice(progress.parent, progress.start, progress.end, total_points, progress_stage)
+        if progress is not None else None
+    )
     done_points = 0
     for horizon, indices in zip(horizons, ranges):
         grouped: dict[str, dict[str, object]] = defaultdict(
             lambda: {"correct": 0, "wrong": 0, "flat_forecast": 0, "flat_actual": 0, "signed_moves": []}
         )
         for i in indices:
-            if progress is not None:
-                progress.update(done_points, stage=f"{progress_stage} H={horizon}")
+            if local_progress is not None:
+                local_progress.update(done_points, stage=f"{progress_stage} H={horizon}")
             done_points += 1
             spread_points = spreads[i] if spreads[i] > 0 else fallback_spread_points
             market = Market(
@@ -430,8 +442,8 @@ def regime_directional_accuracy(
                 "mean_signed_move": round(mean(moves), 6) if moves else None,
             }
         out[str(horizon)] = horizon_report
-    if progress is not None:
-        progress.finish(stage=progress_stage)
+    if local_progress is not None:
+        local_progress.finish(stage=progress_stage)
     return out
 
 
@@ -499,11 +511,15 @@ def regime_trade_matrix(
     usable = end - start
     report: dict[str, dict[str, object]] = {}
     total_runs = max(1, len(horizons) * (folds + 1))
+    local_progress = (
+        ProgressSlice(progress.parent, progress.start, progress.end, total_runs, progress_stage)
+        if progress is not None else None
+    )
     run_no = 0
     for horizon in horizons:
         settings = replace(base_settings, horizon=horizon)
-        if progress is not None:
-            progress.update(run_no, stage=f"{progress_stage} H={horizon} overall")
+        if local_progress is not None:
+            local_progress.update(run_no, stage=f"{progress_stage} H={horizon} overall")
         all_trades, _ = simulate(
             bars, spreads, model, symbol=symbol, point=point, settings=settings,
             start=start, end=end, stride=stride,
@@ -580,8 +596,8 @@ def regime_trade_matrix(
             "by_regime": by_regime,
             "stability": stability,
         }
-    if progress is not None:
-        progress.finish(stage=progress_stage)
+    if local_progress is not None:
+        local_progress.finish(stage=progress_stage)
     return report
 
 
@@ -729,6 +745,7 @@ def benchmark_database(
         min_interval=1.0,
     )
     report = {
+        "schema_version": 2,
         "dataset": {
             "db": str(db),
             "symbol": symbol,
