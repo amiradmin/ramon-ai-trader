@@ -17,9 +17,12 @@ def train_checkpoint(
     device: str,
     out: str | Path,
     steps: int,
+    bars_snapshot: tuple | None = None,
 ) -> Path:
     """Fine-tune one versioned Chronos-2 LoRA challenger and return its model path."""
-    bars, _ = load_bars(db, symbol)
+    bars = bars_snapshot
+    if bars is None:
+        bars, _ = load_bars(db, symbol)
     if len(bars) < 4000:
         raise ValueError("need >=4000 completed M15 bars before fine-tuning")
     if not 10 <= steps <= 5000:

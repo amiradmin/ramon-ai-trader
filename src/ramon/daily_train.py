@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .core import Bar
-from .history import history_count, load_bars
+from .history import history_count, load_bars, load_completed_micro_history
 from .model import ChronosForecaster, model_name
 from .replay import ReplayResult, replay
 from .train import train_checkpoint
@@ -20,11 +20,13 @@ def _evaluate(
     spreads: Sequence[int],
     model_value: str,
     device: str,
+    *, micro_history=None, roundtrip_cost_r: float = 0.1,
 ) -> ReplayResult:
     """Evaluate one model against an immutable in-memory market snapshot."""
     model = ChronosForecaster(model_name(model_value), device)
     try:
-        return replay(bars, spreads, model, stride=4)
+        return replay(bars, spreads, model, stride=4, micro_history=micro_history,
+                      require_recorded_spreads=True, roundtrip_cost_r=roundtrip_cost_r)
     finally:
         del model
         gc.collect()
@@ -72,6 +74,7 @@ def main() -> None:
     parser.add_argument("--minimum-trades", type=int, default=20)
     parser.add_argument("--minimum-improvement-r", type=float, default=0.5)
     parser.add_argument("--maximum-drawdown-r", type=float, default=8.0)
+    parser.add_argument("--roundtrip-cost-r", type=float, default=0.1)
     parser.add_argument("--auto-promote", action="store_true")
     args = parser.parse_args()
 
@@ -88,6 +91,21 @@ def main() -> None:
     # the same holdout even while the live service appends completed bars.
     bars, spreads = load_bars(args.db, args.symbol)
     latest_bar = bars[-1].time
+    if not 0 <= args.roundtrip_cost_r < float("inf"):
+        raise ValueError("roundtrip cost must be finite and nonnegative")
+    micro_history = load_completed_micro_history(args.db, args.symbol, bars)
+    start = max(256, len(bars)*4//5)
+    eligible = [i for i in range(start, len(bars)-4, 4)
+                if bars[i].time in micro_history
+                and all(b.time-a.time == 900 for a,b in zip(bars[i:i+4], bars[i+1:i+5]))
+                and all(x > 0 for x in spreads[i:i+5])]
+    missing_spreads = sum(value <= 0 for value in spreads[start:])
+    if len(eligible) < args.minimum_trades or missing_spreads:
+        print(json.dumps({"status": "waiting_for_evaluation_context", "eligible_contexts": len(eligible),
+                          "minimum_contexts": args.minimum_trades, "missing_holdout_spreads": missing_spreads,
+                          "reason": "need recorded M1, positive spreads and contiguous M15 holdout"}))
+        return
+
     root = Path(args.checkpoints_root).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
     state_file = root / "daily_learning_state.json"
@@ -116,10 +134,11 @@ def main() -> None:
         device=args.device,
         out=out,
         steps=args.steps,
+        bars_snapshot=bars,
     )
 
-    incumbent_result = _evaluate(bars, spreads, incumbent_model, args.device)
-    challenger_result = _evaluate(bars, spreads, str(checkpoint), args.device)
+    incumbent_result = _evaluate(bars, spreads, incumbent_model, args.device, micro_history=micro_history, roundtrip_cost_r=args.roundtrip_cost_r)
+    challenger_result = _evaluate(bars, spreads, str(checkpoint), args.device, micro_history=micro_history, roundtrip_cost_r=args.roundtrip_cost_r)
     promote, reasons = _promotion_gate(
         incumbent_result,
         challenger_result,
@@ -134,6 +153,9 @@ def main() -> None:
 
     report = {
         "status": "trained",
+        "roundtrip_cost_r": args.roundtrip_cost_r,
+        "eligible_contexts": len(eligible),
+        "limitations": "completed M1 boundary replay; excludes forming-bar quotes, RANGE and EA exit management",
         "latest_bar_time": latest_bar,
         "bars": bars_count,
         "base": args.base,

@@ -100,6 +100,23 @@ class Market:
         self._validate_bar_sequence(self.micro_bars, label="micro_bars", completed=False)
 
 
+    def validate_quote_context(self, quote_time: int | None) -> None:
+        """Broker timestamps share one clock; live M1 may include its forming bar."""
+        if quote_time is None:
+            if self.micro_bars:
+                raise ValueError("quote_time is required with micro bars")
+            return
+        if not self.bars[-1].time + 900 <= quote_time <= self.bars[-1].time + 1830:
+            raise ValueError("quote time is inconsistent with completed M15 bars")
+        if self.micro_bars:
+            if self.micro_bars[-1].time > quote_time:
+                raise ValueError("micro bars contain future timestamps")
+            if quote_time - self.micro_bars[-1].time > 120:
+                raise ValueError("micro bars are stale")
+            if any(b.time - a.time != 60 for a, b in zip(self.micro_bars, self.micro_bars[1:])):
+                raise ValueError("micro bars must be contiguous M1 candles")
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     horizon: int = 4

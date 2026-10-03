@@ -134,8 +134,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     return
                 market = Market.from_dict(payload)
                 quote_time = int(payload["quote_time"]) if "quote_time" in payload else None
-                if quote_time is not None and not market.bars[-1].time + 900 <= quote_time <= market.bars[-1].time + 1830:
-                    raise ValueError("quote time is inconsistent with completed M15 bars")
+                market.validate_quote_context(quote_time)
 
                 if history_db:
                     key = f"{market.symbol}:{market.timeframe}"

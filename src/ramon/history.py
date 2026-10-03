@@ -580,3 +580,16 @@ def persist_replay_input(db: str | Path, *, sample_key: str, market: Market,
             sample_key, digest, time.time(), json.dumps(response, allow_nan=False),
             json.dumps(provenance, allow_nan=False)))
         return cursor.rowcount==1
+
+
+def load_completed_micro_history(db: str | Path, symbol: str, bars: tuple[Bar, ...]) -> dict[int, tuple[Bar, ...]]:
+    """Four recorded completed M1 candles at each M15 closing boundary; no synthesis."""
+    with sqlite3.connect(Path(db).resolve().as_uri()+"?mode=ro", uri=True) as conn:
+        rows = conn.execute("SELECT time,open,high,low,close FROM history_bars WHERE symbol=? AND timeframe='M1' ORDER BY time", (symbol,)).fetchall()
+    micro = {int(t): Bar(int(t), float(o), float(h), float(l), float(c)) for t,o,h,l,c in rows}
+    result = {}
+    for bar in bars:
+        times = tuple(bar.time+900-240+i*60 for i in range(4))
+        if all(t in micro for t in times):
+            result[bar.time] = tuple(micro[t] for t in times)
+    return result

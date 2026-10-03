@@ -110,3 +110,15 @@ def test_legacy_replay_rejects_future_micro_candles():
     model=RecordedForecast(Forecast(100.8,101.2,101.6,(100.3,100.6,100.9,101.2)))
     with pytest.raises(ValueError,match='future'):
         replay(bars,[10]*262,model,start=256,micro_history={bars[256].time:micro})
+
+
+def test_replay_skips_future_session_gap_before_inference():
+    from ramon.core import Bar
+    from ramon.replay import replay
+    candles = tuple(Bar(1700000000+i*900+(172800 if i>256 else 0),100,101,99,100) for i in range(262))
+    class NoForecast:
+        def forecast(self,*args):
+            raise AssertionError("must skip gap before inference")
+    result = replay(candles, [10]*262, NoForecast(), start=256, stride=20)
+    assert result.gap_skipped == 1
+    assert result.decisions == 0

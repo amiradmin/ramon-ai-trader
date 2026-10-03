@@ -24,6 +24,7 @@ class ReplayResult:
     max_drawdown_r: float
     policy_waits: int = 0
     missing_micro_context: int = 0
+    gap_skipped: int = 0
 
 
 def replay(
@@ -53,6 +54,7 @@ def replay(
     start_at = max(256, start if start is not None else len(bars) * 4 // 5)
     if require_recorded_spreads and any(value <= 0 for value in spreads[start_at:]):
         raise ValueError("holdout contains missing recorded spreads; cannot price execution")
+    gap_skipped = 0
     i = start_at
     decisions = buys = sells = wins = losses = timed_out = 0
     policy_waits = missing_micro_context = 0
@@ -61,6 +63,11 @@ def replay(
     max_drawdown_r = 0.0
     while i + settings.horizon < len(bars):
         if (i - start_at) % stride:
+            i += 1
+            continue
+        if any(b.time-a.time != 900 for a,b in zip(
+                bars[i:i+settings.horizon], bars[i+1:i+settings.horizon+1])):
+            gap_skipped += 1
             i += 1
             continue
         spread = (spreads[i] if spreads[i] > 0 else fallback_spread_points) * point
@@ -75,6 +82,7 @@ def replay(
         )
         if any(b.time+60>bars[i].time+900 for b in market.micro_bars):
             raise ValueError("micro history contains future or uncompleted bars")
+        market.validate_quote_context(bars[i].time+900)
         result = evaluate(market, model, settings)
         decisions += 1
         if not market.micro_bars:
@@ -133,7 +141,7 @@ def replay(
         i = closed_at + 1  # no overlapping positions
     return ReplayResult(
         len(bars), decisions, buys, sells, wins, losses, timed_out,
-        round(net_r, 4), round(max_drawdown_r, 4), policy_waits, missing_micro_context
+        round(net_r, 4), round(max_drawdown_r, 4), policy_waits, missing_micro_context, gap_skipped
     )
 
 

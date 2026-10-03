@@ -119,3 +119,25 @@ def test_decision_metadata_and_enriched_outcome_round_trip(learning_server):
         assert audit['final']['decision'] == payload['direction']
         assert con.execute('SELECT COUNT(*),fee_units,exit_detail,actual_fill_price FROM trade_outcomes').fetchone() == (1, -.1, 'maximum_hold_bars', 100.41)
     assert len(load_trade_examples(db, 'XAUUSD_l', 'test/fake')) == 1
+
+
+@pytest.mark.parametrize("offsets", [(60,120,180),(-360,-300,-240),(-180,-120,0)])
+def test_server_rejects_future_stale_or_gapped_micro(learning_server, offsets):
+    from urllib.error import HTTPError
+    db, post = learning_server
+    candles = bars(); quote = candles[-1].time+905
+    payload = {"symbol":"XAUUSD_l", "timeframe":"M15", "bid":100., "ask":100.4,
+               "point":.01, "quote_time":quote, "bars":[asdict(b) for b in candles],
+               "micro_bars":[{"time":quote+t,"open":100.,"high":100.5,"low":99.5,"close":100.} for t in offsets]}
+    with pytest.raises(HTTPError) as error:
+        post("/decision", payload)
+    assert error.value.code == 400
+
+
+def test_server_accepts_forming_m1_candle(learning_server):
+    db, post = learning_server
+    candles = bars(); quote = candles[-1].time+905
+    response = post("/decision", {"symbol":"XAUUSD_l", "timeframe":"M15", "bid":100., "ask":100.4,
+         "point":.01, "quote_time":quote, "bars":[asdict(b) for b in candles],
+         "micro_bars":[{"time":quote+t,"open":100.,"high":100.5,"low":99.5,"close":100.} for t in (-125,-65,-5)]})
+    assert response["sample_saved"] == 1
