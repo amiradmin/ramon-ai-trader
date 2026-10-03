@@ -18,10 +18,10 @@ import sqlite3
 import struct
 from pathlib import Path
 from statistics import mean, pstdev
-from typing import Sequence
+from typing import Callable, Sequence
 
 from .compare import MomentumBaseline
-from .core import Bar, Forecast, Market, Settings, evaluate
+from .core import Bar, Decision, Forecast, Forecaster, Market, Settings, evaluate
 from .history import load_bars
 from .market_state import assess_market
 from .progress import ProgressReporter, ProgressSlice
@@ -205,6 +205,8 @@ def simulate(
     roundtrip_cost_r: float,
     progress: ProgressSlice | None = None,
     progress_stage: str = "replay",
+    market_forecaster: Callable[[Market], Forecaster] | None = None,
+    decision_observer: Callable[[Market, Decision], None] | None = None,
 ) -> tuple[list[TradeRecord], dict[str, int]]:
     """Replay one non-overlapping position stream and preserve per-trade R."""
     if len(bars) != len(spreads) or stride < 1 or point <= 0 or fallback_spread_points <= 0:
@@ -245,7 +247,10 @@ def simulate(
             bars=tuple(bars[max(0, i - 255): i + 1]),
         )
         regime = assess_market(market)["state"]
-        result = evaluate(market, model, settings)
+        active_model = market_forecaster(market) if market_forecaster is not None else model
+        result = evaluate(market, active_model, settings)
+        if decision_observer is not None:
+            decision_observer(market, result)
         decisions += 1
         if result.decision == "WAIT":
             waits += 1

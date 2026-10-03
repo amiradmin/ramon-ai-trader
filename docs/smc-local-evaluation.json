@@ -1,0 +1,1251 @@
+{
+  "schema_version": 1,
+  "advisor": "SMC_LOCAL",
+  "dataset": {
+    "db": "data/ramon_kaggle_m15.sqlite3",
+    "symbol": "XAUUSD_KAGGLE",
+    "bars": 494235,
+    "timestamp_gaps": 8520,
+    "fingerprint_sha256": "e491f8fc1e7defd48b240aa06694212a683f47bec8f0c0e2ac40ed0321bba5ec",
+    "window": {
+      "start_index": 0,
+      "end_index_exclusive": 494235,
+      "start_utc": "2004-06-11T04:15:00+00:00",
+      "end_utc": "2026-01-30T20:45:00+00:00",
+      "bars": 494235
+    },
+    "known_spread_bars": 0
+  },
+  "method": {
+    "folds": 5,
+    "horizon": 4,
+    "evaluation_stride": 4,
+    "training_stride": 16,
+    "l2": 1.0,
+    "cost_r": 0.1,
+    "fallback_spread_points": 42,
+    "point": 0.01,
+    "training": "expanding past-only, label_end < evaluation_start",
+    "feature_schema": "smc-local-atr-v1",
+    "features": [
+      "Open",
+      "High",
+      "Low",
+      "Close",
+      "SMA_20",
+      "SMA_50",
+      "EMA_12",
+      "EMA_26",
+      "BB_upper",
+      "BB_middle",
+      "BB_lower",
+      "Close_lag1",
+      "Close_lag2",
+      "Close_lag3",
+      "MACD",
+      "MACD_signal",
+      "MACD_hist",
+      "FVG_Size",
+      "RSI",
+      "FVG_Type",
+      "OB_Type",
+      "Recovery_Type"
+    ],
+    "scaling": "training fold only; price levels anchored to current close/ATR",
+    "target": "future close minus signal close divided by signal ATR",
+    "uncertainty": "80th percentile absolute training residual, uncalibrated",
+    "gap_guard": "future horizon deltas must be 900s; prior context may contain gaps",
+    "settings": {
+      "horizon": 4,
+      "context": 256,
+      "max_spread_points": 50,
+      "minimum_edge_atr": 0.12,
+      "minimum_edge_spreads": 1.5,
+      "require_direction_confirmation": false,
+      "maximum_entry_extension_atr": 3.0,
+      "minimum_strength": 0.2,
+      "intrabar_min_strength": 0.05,
+      "allow_weak_intrabar_entries": true,
+      "intrabar_min_move_atr": 0.06,
+      "intrabar_min_rebound_atr": 0.08,
+      "trend_min_path_atr": 0.15,
+      "trend_min_consistency": 0.75,
+      "trend_min_edge_fraction": 0.25,
+      "trend_min_micro_move_atr": 0.03,
+      "trend_conflict_lookback": 12,
+      "trend_conflict_atr": 3.0,
+      "strong_entry_min_intrabar_move_atr": -0.03,
+      "stop_atr": 1.5,
+      "target_atr": 3.0,
+      "market_state_policy_enabled": false
+    },
+    "settings_sha256": "3bf6a8a936bfa43777063e73cd00c51578e03127009e48e94c91f621a29a8e15",
+    "positions": "non-overlapping within each independent fold",
+    "hyperparameter_search": false,
+    "live_changes": false,
+    "implementation_sha256": {
+      "smc_local_lab.py": "2cb382d087232d67419bc9f18f0d1c1ba0ad0eb9c136780a4fb94aa806aeef10",
+      "smc_features.py": "af608d222035f364cb58b08406fee0139dadf2ac410022c256e460624256d0ab",
+      "core.py": "b7fcb7735d4d198cdb6375a7a15a77ccccfa71324d10ebfd677552ecc65e199e",
+      "historical_benchmark.py": "4c34a1c520653e009bf6514a04486641b95f3e32230e8e25e92fa355276f854a",
+      "compare.py": "34a07806a85f3bf74f454ba8889d0cd70c0b0435358b1dd41d724f51fce780d4"
+    }
+  },
+  "limitations": [
+    "External OHLC and assumed spreads do not reproduce broker execution.",
+    "Stop-first M15 simulator; no tick fills, slippage or live EA exit management.",
+    "Future timestamps used only for offline eligibility, not live entry filtering.",
+    "Closed-trade drawdown only; excludes intratrade equity drawdown.",
+    "Order block and recovery features are local price proxies, not vendor equivalents."
+  ],
+  "folds": [
+    {
+      "fold": 1,
+      "evaluation": {
+        "start_index": 98847,
+        "end_index_exclusive": 177924,
+        "start_utc": "2008-12-18T12:30:00+00:00",
+        "end_utc": "2012-07-10T16:00:00+00:00",
+        "bars": 79077
+      },
+      "training": {
+        "feature_schema": "smc-local-atr-v1",
+        "horizon": 4,
+        "l2": 1.0,
+        "training_samples": 5497,
+        "training_last_signal_index": 98832,
+        "training_last_label_index": 98836,
+        "evaluation_start_index": 98847,
+        "dataset_sha256": "e491f8fc1e7defd48b240aa06694212a683f47bec8f0c0e2ac40ed0321bba5ec"
+      },
+      "model_artifact": "data/smc_local_lab/fold_1_model.json",
+      "models": {
+        "SMC_LOCAL": {
+          "metrics": {
+            "trades": 0,
+            "buys": 0,
+            "sells": 0,
+            "wins": 0,
+            "losses": 0,
+            "timed_out": 0,
+            "resolved_win_rate": null,
+            "timeout_rate": null,
+            "profit_factor": null,
+            "gross_profit_r": 0,
+            "gross_loss_r": 0,
+            "mean_r": null,
+            "net_r": 0,
+            "max_drawdown_r": 0.0
+          },
+          "decisions": 18637,
+          "waits": 18637,
+          "gap_skipped": 1132,
+          "decision_reasons": {
+            "trend_conflict": 1075,
+            "late_entry_extension": 2117,
+            "insufficient_model_edge": 15443,
+            "insufficient_model_strength": 2
+          },
+          "forecast_diagnostics": {
+            "wrong": 9229,
+            "correct": 9306,
+            "flat": 102,
+            "samples": 18535,
+            "accuracy": 0.5020771513353116,
+            "rmse_atr": 1.5955863857972252,
+            "sample_policy": "evaluated decisions with forecast; skips bars while a trade is open"
+          }
+        },
+        "previous_bar": {
+          "metrics": {
+            "trades": 7439,
+            "buys": 3706,
+            "sells": 3733,
+            "wins": 387,
+            "losses": 2553,
+            "timed_out": 4499,
+            "resolved_win_rate": 0.131633,
+            "timeout_rate": 0.604786,
+            "profit_factor": 0.45792,
+            "gross_profit_r": 1730.096,
+            "gross_loss_r": 3778.1585,
+            "mean_r": -0.275314,
+            "net_r": -2048.0625,
+            "max_drawdown_r": 2051.1295
+          },
+          "decisions": 13846,
+          "waits": 6407,
+          "gap_skipped": 862,
+          "decision_reasons": {
+            "late_entry_extension": 1800,
+            "trend_conflict": 931,
+            "forecast_up": 3706,
+            "insufficient_model_strength": 982,
+            "insufficient_model_edge": 2694,
+            "forecast_down": 3733
+          },
+          "forecast_diagnostics": {
+            "correct": 6647,
+            "wrong": 6998,
+            "flat": 201,
+            "samples": 13645,
+            "accuracy": 0.4871381458409674,
+            "rmse_atr": 3.4049007209778965,
+            "sample_policy": "evaluated decisions with forecast; skips bars while a trade is open"
+          }
+        },
+        "momentum_4bar": {
+          "metrics": {
+            "trades": 5211,
+            "buys": 2648,
+            "sells": 2563,
+            "wins": 312,
+            "losses": 1834,
+            "timed_out": 3065,
+            "resolved_win_rate": 0.145387,
+            "timeout_rate": 0.588179,
+            "profit_factor": 0.471574,
+            "gross_profit_r": 1281.1168,
+            "gross_loss_r": 2716.6844,
+            "mean_r": -0.275488,
+            "net_r": -1435.5676,
+            "max_drawdown_r": 1437.5542
+          },
+          "decisions": 15324,
+          "waits": 10113,
+          "gap_skipped": 963,
+          "decision_reasons": {
+            "late_entry_extension": 2351,
+            "forecast_up": 2648,
+            "insufficient_model_strength": 1815,
+            "forecast_down": 2563,
+            "insufficient_model_edge": 5562,
+            "trend_conflict": 385
+          },
+          "forecast_diagnostics": {
+            "correct": 7238,
+            "wrong": 7926,
+            "flat": 160,
+            "samples": 15164,
+            "accuracy": 0.4773146926932208,
+            "rmse_atr": 2.185611609196629,
+            "sample_policy": "evaluated decisions with forecast; skips bars while a trade is open"
+          }
+        },
+        "contrarian_previous_bar": {
+          "metrics": {
+            "trades": 7392,
+            "buys": 3673,
+            "sells": 3719,
+            "wins": 351,
+            "losses": 2553,
+            "timed_out": 4488,
+            "resolved_win_rate": 0.120868,
+            "timeout_rate": 0.607143,
+            "profit_factor": 0.480254,
+            "gross_profit_r": 1759.5022,
+            "gross_loss_r": 3663.6928,
+            "mean_r": -0.257602,
+            "net_r": -1904.1906,
+            "max_drawdown_r": 1904.2392
+          },
+          "decisions": 13877,
+          "waits": 6485,
+          "gap_skipped": 870,
+          "decision_reasons": {
+            "trend_conflict": 1843,
+            "late_entry_extension": 962,
+            "forecast_down": 3719,
+            "insufficient_model_strength": 977,
+            "insufficient_model_edge": 2703,
+            "forecast_up": 3673
+          },
+          "forecast_diagnostics": {
+            "wrong": 6652,
+            "correct": 7031,
+            "flat": 194,
+            "samples": 13683,
+            "accuracy": 0.5138493020536432,
+            "rmse_atr": 3.3407175015692556,
+            "sample_policy": "evaluated decisions with forecast; skips bars while a trade is open"
+          }
+        },
+        "contrarian_momentum_4bar": {
+          "metrics": {
+            "trades": 4985,
+            "buys": 2468,
+            "sells": 2517,
+            "wins": 224,
+            "losses": 1687,
+            "timed_out": 3074,
+            "resolved_win_rate": 0.117216,
+            "timeout_rate": 0.61665,
+            "profit_factor": 0.514906,
+            "gross_profit_r": 1223.7368,
+            "gross_loss_r": 2376.6224,
+            "mean_r": -0.231271,
+            "net_r": -1152.8857,
+            "max_drawdown_r": 1154.0121
+          },
+          "decisions": 15397,
+          "waits": 10412,
+          "gap_skipped": 960,
+          "decision_reasons": {
+            "trend_conflict": 2541,
+            "forecast_down": 2517,
+            "insufficient_model_strength": 1849,
+            "forecast_up": 2468,
+            "insufficient_model_edge": 5657,
+            "late_entry_extension": 365
+          },
+          "forecast_diagnostics": {
+            "wrong": 7218,
+            "correct": 8018,
+            "flat": 161,
+            "samples": 15236,
+            "accuracy": 0.5262536098713573,
+            "rmse_atr": 2.1348475954364994,
+            "sample_policy": "evaluated decisions with forecast; skips bars while a trade is open"
+          }
+        }
+      }
+    },
+    {
+      "fold": 2,
+      "evaluation": {
+        "start_index": 177924,
+        "end_index_exclusive": 257002,
+        "start_utc": "2012-07-10T16:15:00+00:00",
+        "end_utc": "2015-11-24T07:15:00+00:00",
+        "bars": 79078
+      },
+      "training": {
+        "feature_schema": "smc-local-atr-v1",
+        "horizon": 4,
+        "l2": 1.0,
+        "training_samples": 10179,
+        "training_last_signal_index": 177904,
+        "training_last_label_index": 177908,
+        "evaluation_start_index": 177924,
+        "dataset_sha256": "e491f8fc1e7defd48b240aa06694212a683f47bec8f0c0e2ac40ed0321bba5ec"
+      },
+      "model_artifact": "data/smc_local_lab/fold_2_model.json",
+      "models": {
+        "SMC_LOCAL": {
+          "metrics": {
+            "trades": 0,
+            "buys": 0,
+            "sells": 0,
+            "wins": 0,
+            "losses": 0,
+            "timed_out": 0,
+            "resolved_win_rate": null,
+            "timeout_rate": null,
+            "profit_factor": null,
+            "gross_profit_r": 0,
+            "gross_loss_r": 0,
+            "mean_r": null,
+            "net_r": 0,
+            "max_drawdown_r": 0.0
+          },
+          "decisions": 18891,
+          "waits": 18891,
+          "gap_skipped": 878,
+          "decision_reasons": {
+            "trend_conflict": 1476,
+            "insufficient_model_edge": 15992,
+            "late_entry_extension": 1423
+          },
+          "forecast_diagnostics": {
+            "wrong": 9404,
+            "correct": 9423,
+            "flat": 64,
+            "samples": 18827,
+            "accuracy": 0.5005045944653954,
+            "rmse_atr": 1.6487199280224587,
+            "sample_policy": "evaluated decisions with forecast; skips bars while a trade is open"
+          }
+        },
+        "previous_bar": {
+          "metrics": {
+            "trades": 7374,
+            "buys": 3633,
+            "sells": 3741,
+            "wins": 406,
+            "losses": 2571,
+            "timed_out": 4397,
+            "resolved_win_rate": 0.136379,
+            "timeout_rate": 0.596284,
+            "profit_factor": 0.410795,
+            "gross_profit_r": 1596.4388,
+            "gross_loss_r": 3886.2189,
+            "mean_r": -0.310521,
+            "net_r": -2289.7802,
+            "max_drawdown_r": 2291.0897
+          },
+          "decisions": 14238,
+          "waits": 6864,
+          "gap_skipped": 608,
+          "decision_reasons": {
+            "late_entry_extension": 1662,
+            "forecast_down": 3741,
+            "trend_conflict": 813,
+            "forecast_up": 3633,
+            "insufficient_model_edge": 3570,
+            "insufficient_model_strength": 819
+          },
+          "forecast_diagnostics": {
+            "correct": 6782,
+            "wrong": 7299,
+            "flat": 157,
+            "samples": 14081,
+            "accuracy": 0.48164192884028123,
+            "rmse_atr": 3.315051588767586,
+            "sample_policy": "evaluated decisions with forecast; skips bars while a trade is open"
+          }
+        },
+        "momentum_4bar": {
+          "metrics": {
+            "trades": 4814,
+            "buys": 2368,
+            "sells": 2446,
+            "wins": 318,
+            "losses": 1694,
+            "timed_out": 2802,
+            "resolved_win_rate": 0.158052,
+            "timeout_rate": 0.582052,
+            "profit_factor": 0.435431,
+            "gross_profit_r": 1118.7194,
+            "gross_loss_r": 2569.2211,
+            "mean_r": -0.301309,
+            "net_r": -1450.5017,
+            "max_drawdown_r": 1451.8112
+          },
+          "decisions": 15897,
+          "waits": 11083,
+          "gap_skipped": 722,
+          "decision_reasons": {
+            "late_entry_extension": 2162,
+            "forecast_down": 2446,
+            "insufficient_model_edge": 7106,
+            "forecast_up": 2368,
+            "trend_conflict": 352,
+            "insufficient_model_strength": 1463
+          },
+          "forecast_diagnostics": {
+            "correct": 7533,
+            "wrong": 8258,
+            "flat": 106,
+            "samples": 15791,
+            "accuracy": 0.47704388575771006,
+            "rmse_atr": 2.174083034142514,
+            "sample_policy": "evaluated decisions with forecast; skips bars while a trade is open"
+          }
+        },
+        "contrarian_previous_bar": {
+          "metrics": {
+            "trades": 7345,
+            "buys": 3712,
+            "sells": 3633,
+            "wins": 320,
+            "losses": 2630,
+            "timed_out": 4395,
+            "resolved_win_rate": 0.108475,
+            "timeout_rate": 0.598366,
+            "profit_factor": 0.398647,
+            "gross_profit_r": 1489.7664,
+            "gross_loss_r": 3737.0588,
+            "mean_r": -0.305962,
+            "net_r": -2247.2923,
+            "max_drawdown_r": 2248.9106
+          },
+          "decisions": 14267,
+          "waits": 6922,
+          "gap_skipped": 602,
+          "decision_reasons": {
+            "trend_conflict": 1707,
+            "forecast_up": 3712,
+            "late_entry_extension": 824,
+            "forecast_down": 3633,
+            "insufficient_model_edge": 3559,
+            "insufficient_model_strength": 832
+          },
+          "forecast_diagnostics": {
+            "wrong": 6735,
+            "correct": 7374,
+            "flat": 158,
+            "samples": 14109,
+            "accuracy": 0.5226451201360833,
+            "rmse_atr": 3.2642488874970033,
+            "sample_policy": "evaluated decisions with forecast; skips bars while a trade is open"
+          }
+        },
+        "contrarian_momentum_4bar": {
+          "metrics": {
+            "trades": 4575,
+            "buys": 2318,
+            "sells": 2257,
+            "wins": 204,
+            "losses": 1616,
+            "timed_out": 2755,
+            "resolved_win_rate": 0.112088,
+            "timeout_rate": 0.602186,
+            "profit_factor": 0.45687,
+            "gross_profit_r": 1030.2356,
+            "gross_loss_r": 2254.9852,
+            "mean_r": -0.267705,
+            "net_r": -1224.7496,
+            "max_drawdown_r": 1224.7496
+          },
+          "decisions": 15985,
+          "waits": 11410,
+          "gap_skipped": 727,
+          "decision_reasons": {
+            "trend_conflict": 2340,
+            "forecast_up": 2318,
+            "insufficient_model_edge": 7262,
+            "forecast_down": 2257,
+            "late_entry_extension": 333,
+            "insufficient_model_strength": 1475
+          },
+          "forecast_diagnostics": {
+            "wrong": 7533,
+            "correct": 8345,
+            "flat": 107,
+            "samples": 15878,
+            "accuracy": 0.5255699710290969,
+            "rmse_atr": 2.1270750094434754,
+            "sample_policy": "evaluated decisions with forecast; skips bars while a trade is open"
+          }
+        }
+      }
+    },
+    {
+      "fold": 3,
+      "evaluation": {
+        "start_index": 257002,
+        "end_index_exclusive": 336079,
+        "start_utc": "2015-11-24T07:30:00+00:00",
+        "end_utc": "2019-04-09T00:00:00+00:00",
+        "bars": 79077
+      },
+      "training": {
+        "feature_schema": "smc-local-atr-v1",
+        "horizon": 4,
+        "l2": 1.0,
+        "training_samples": 14902,
+        "training_last_signal_index": 256992,
+        "training_last_label_index": 256996,
+        "evaluation_start_index": 257002,
+        "dataset_sha256": "e491f8fc1e7defd48b240aa06694212a683f47bec8f0c0e2ac40ed0321bba5ec"
+      },
+      "model_artifact": "data/smc_local_lab/fold_3_model.json",
+      "models": {
+        "SMC_LOCAL": {
+          "metrics": {
+            "trades": 0,
+            "buys": 0,
+            "sells": 0,
+            "wins": 0,
+            "losses": 0,
+            "timed_out": 0,
+            "resolved_win_rate": null,
+            "timeout_rate": null,
+            "profit_factor": null,
+            "gross_profit_r": 0,
+            "gross_loss_r": 0,
+            "mean_r": null,
+            "net_r": 0,
+            "max_drawdown_r": 0.0
+          },
+          "decisions": 18897,
+          "waits": 18897,
+          "gap_skipped": 872,
+          "decision_reasons": {
+            "insufficient_model_edge": 15962,
+            "late_entry_extension": 1966,
+            "trend_conflict": 969
+          },
+          "forecast_diagnostics": {
+            "correct": 9652,
+            "wrong": 9171,
+            "flat": 74,
+            "samples": 18823,
+            "accuracy": 0.512776921850927,
+            "rmse_atr": 1.5617926931833317,
+            "sample_policy": "evaluated decisions with forecast; skips bars while a trade is open"
+          }
+        },
+        "previous_bar": {
+          "metrics": {
+            "trades": 7238,
+            "buys": 3679,
+            "sells": 3559,
+            "wins": 311,
+            "losses": 2684,
+            "timed_out": 4243,
+            "resolved_win_rate": 0.10384,
+            "timeout_rate": 0.586212,
+            "profit_factor": 0.349914,
+            "gross_profit_r": 1400.0432,
+            "gross_loss_r": 4001.108,
+            "mean_r": -0.359362,
+            "net_r": -2601.0648,
+            "max_drawdown_r": 2601.5098
+          },
+          "decisions": 14343,
+          "waits": 7105,
+          "gap_skipped": 622,
+          "decision_reasons": {
+            "forecast_up": 3679,
+            "forecast_down": 3559,
+            "insufficient_model_edge": 4132,
+            "late_entry_extension": 1676,
+            "trend_conflict": 845,
+            "insufficient_model_strength": 452
+          },
+          "forecast_diagnostics": {
+            "correct": 6850,
+            "wrong": 7296,
+            "flat": 197,
+            "samples": 14146,
+            "accuracy": 0.4842358263820161,
+            "rmse_atr": 3.2363482672621267,
+            "sample_policy": "evaluated decisions with forecast; skips bars while a trade is open"
+          }
+        },
+        "momentum_4bar": {
+          "metrics": {
+            "trades": 4371,
+            "buys": 2221,
+            "sells": 2150,
+            "wins": 212,
+            "losses": 1617,
+            "timed_out": 2542,
+            "resolved_win_rate": 0.11591,
+            "timeout_rate": 0.58156,
+            "profit_factor": 0.362637,
+            "gross_profit_r": 878.2759,
+            "gross_loss_r": 2421.9119,
+            "mean_r": -0.353154,
+            "net_r": -1543.6361,
+            "max_drawdown_r": 1545.5635
+          },
+          "decisions": 16149,
+          "waits": 11778,
+          "gap_skipped": 727,
+          "decision_reasons": {
+            "forecast_up": 2221,
+            "insufficient_model_edge": 8406,
+            "forecast_down": 2150,
+            "late_entry_extension": 2237,
+            "trend_conflict": 313,
+            "insufficient_model_strength": 822
+          },
+          "forecast_diagnostics": {
+            "correct": 7836,
+            "wrong": 8183,
+            "flat": 130,
+            "samples": 16019,
+            "accuracy": 0.48916911167988014,
+            "rmse_atr": 2.079358009507562,
+            "sample_policy": "evaluated decisions with forecast; skips bars while a trade is open"
+          }
+        },
+        "contrarian_previous_bar": {
+          "metrics": {
+            "trades": 7249,
+            "buys": 3587,
+            "sells": 3662,
+            "wins": 280,
+            "losses": 2737,
+            "timed_out": 4232,
+            "resolved_win_rate": 0.092807,
+            "timeout_rate": 0.583805,
+            "profit_factor": 0.364488,
+            "gross_profit_r": 1421.1451,
+            "gross_loss_r": 3899.0152,
+            "mean_r": -0.341822,
+            "net_r": -2477.8701,
+            "max_drawdown_r": 2477.8701
+          },
+          "decisions": 14413,
+          "waits": 7164,
+          "gap_skipped": 628,
+          "decision_reasons": {
+            "forecast_down": 3662,
+            "forecast_up": 3587,
+            "insufficient_model_edge": 4120,
+            "late_entry_extension": 861,
+            "trend_conflict": 1727,
+            "insufficient_model_strength": 456
+          },
+          "forecast_diagnostics": {
+            "wrong": 6837,
+            "correct": 7366,
+            "flat": 210,
+            "samples": 14203,
+            "accuracy": 0.5186228261634865,
+            "rmse_atr": 3.2436235691980757,
+            "sample_policy": "evaluated decisions with forecast; skips bars while a trade is open"
+          }
+        },
+        "contrarian_momentum_4bar": {
+          "metrics": {
+            "trades": 4196,
+            "buys": 2085,
+            "sells": 2111,
+            "wins": 142,
+            "losses": 1611,
+            "timed_out": 2443,
+            "resolved_win_rate": 0.081004,
+            "timeout_rate": 0.582221,
+            "profit_factor": 0.37071,
+            "gross_profit_r": 829.7277,
+            "gross_loss_r": 2238.2123,
+            "mean_r": -0.335673,
+            "net_r": -1408.4846,
+            "max_drawdown_r": 1409.2846
+          },
+          "decisions": 16308,
+          "waits": 12112,
+          "gap_skipped": 747,
+          "decision_reasons": {
+            "forecast_down": 2111,
+            "insufficient_model_edge": 8549,
+            "forecast_up": 2085,
+            "trend_conflict": 2424,
+            "late_entry_extension": 298,
+            "insufficient_model_strength": 841
+          },
+          "forecast_diagnostics": {
+            "wrong": 7899,
+            "correct": 8277,
+            "flat": 132,
+            "samples": 16176,
+            "accuracy": 0.5116839762611276,
+            "rmse_atr": 2.0776580141058667,
+            "sample_policy": "evaluated decisions with forecast; skips bars while a trade is open"
+          }
+        }
+      }
+    },
+    {
+      "fold": 4,
+      "evaluation": {
+        "start_index": 336079,
+        "end_index_exclusive": 415157,
+        "start_utc": "2019-04-09T00:15:00+00:00",
+        "end_utc": "2022-08-15T15:45:00+00:00",
+        "bars": 79078
+      },
+      "training": {
+        "feature_schema": "smc-local-atr-v1",
+        "horizon": 4,
+        "l2": 1.0,
+        "training_samples": 19625,
+        "training_last_signal_index": 336064,
+        "training_last_label_index": 336068,
+        "evaluation_start_index": 336079,
+        "dataset_sha256": "e491f8fc1e7defd48b240aa06694212a683f47bec8f0c0e2ac40ed0321bba5ec"
+      },
+      "model_artifact": "data/smc_local_lab/fold_4_model.json",
+      "models": {
+        "SMC_LOCAL": {
+          "metrics": {
+            "trades": 0,
+            "buys": 0,
+            "sells": 0,
+            "wins": 0,
+            "losses": 0,
+            "timed_out": 0,
+            "resolved_win_rate": null,
+            "timeout_rate": null,
+            "profit_factor": null,
+            "gross_profit_r": 0,
+            "gross_loss_r": 0,
+            "mean_r": null,
+            "net_r": 0,
+            "max_drawdown_r": 0.0
+          },
+          "decisions": 18896,
+          "waits": 18896,
+          "gap_skipped": 873,
+          "decision_reasons": {
+            "insufficient_model_edge": 16139,
+            "late_entry_extension": 1798,
+            "trend_conflict": 959
+          },
+          "forecast_diagnostics": {
+            "correct": 9595,
+            "wrong": 9254,
+            "flat": 47,
+            "samples": 18849,
+            "accuracy": 0.5090455727094275,
+            "rmse_atr": 1.5358641892853622,
+            "sample_policy": "evaluated decisions with forecast; skips bars while a trade is open"
+          }
+        },
+        "previous_bar": {
+          "metrics": {
+            "trades": 7818,
+            "buys": 3955,
+            "sells": 3863,
+            "wins": 394,
+            "losses": 2527,
+            "timed_out": 4897,
+            "resolved_win_rate": 0.134885,
+            "timeout_rate": 0.626375,
+            "profit_factor": 0.473352,
+            "gross_profit_r": 1824.8495,
+            "gross_loss_r": 3855.164,
+            "mean_r": -0.259697,
+            "net_r": -2030.3146,
+            "max_drawdown_r": 2031.3071
+          },
+          "decisions": 13719,
+          "waits": 5901,
+          "gap_skipped": 595,
+          "decision_reasons": {
+            "forecast_down": 3863,
+            "forecast_up": 3955,
+            "insufficient_model_edge": 2546,
+            "late_entry_extension": 1523,
+            "trend_conflict": 752,
+            "insufficient_model_strength": 1080
+          },
+          "forecast_diagnostics": {
+            "wrong": 6889,
+            "correct": 6713,
+            "flat": 117,
+            "samples": 13602,
+            "accuracy": 0.49353036318188503,
+            "rmse_atr": 3.269356988273784,
+            "sample_policy": "evaluated decisions with forecast; skips bars while a trade is open"
+          }
+        },
+        "momentum_4bar": {
+          "metrics": {
+            "trades": 5452,
+            "buys": 2735,
+            "sells": 2717,
+            "wins": 281,
+            "losses": 1797,
+            "timed_out": 3374,
+            "resolved_win_rate": 0.135226,
+            "timeout_rate": 0.618855,
+            "profit_factor": 0.462951,
+            "gross_profit_r": 1272.4942,
+            "gross_loss_r": 2748.6555,
+            "mean_r": -0.270756,
+            "net_r": -1476.1613,
+            "max_drawdown_r": 1479.3722
+          },
+          "decisions": 15347,
+          "waits": 9895,
+          "gap_skipped": 652,
+          "decision_reasons": {
+            "forecast_down": 2717,
+            "forecast_up": 2735,
+            "insufficient_model_edge": 5496,
+            "late_entry_extension": 2037,
+            "trend_conflict": 290,
+            "insufficient_model_strength": 2072
+          },
+          "forecast_diagnostics": {
+            "wrong": 7937,
+            "correct": 7335,
+            "flat": 75,
+            "samples": 15272,
+            "accuracy": 0.48029072812991097,
+            "rmse_atr": 2.0797344951817127,
+            "sample_policy": "evaluated decisions with forecast; skips bars while a trade is open"
+          }
+        },
+        "contrarian_previous_bar": {
+          "metrics": {
+            "trades": 7751,
+            "buys": 3796,
+            "sells": 3955,
+            "wins": 325,
+            "losses": 2483,
+            "timed_out": 4943,
+            "resolved_win_rate": 0.115741,
+            "timeout_rate": 0.637724,
+            "profit_factor": 0.462451,
+            "gross_profit_r": 1711.1155,
+            "gross_loss_r": 3700.1029,
+            "mean_r": -0.25661,
+            "net_r": -1988.9874,
+            "max_drawdown_r": 1991.5464
+          },
+          "decisions": 13709,
+          "waits": 5958,
+          "gap_skipped": 586,
+          "decision_reasons": {
+            "forecast_up": 3796,
+            "forecast_down": 3955,
+            "insufficient_model_edge": 2500,
+            "late_entry_extension": 778,
+            "trend_conflict": 1590,
+            "insufficient_model_strength": 1090
+          },
+          "forecast_diagnostics": {
+            "correct": 6952,
+            "wrong": 6642,
+            "flat": 115,
+            "samples": 13594,
+            "accuracy": 0.511402089156981,
+            "rmse_atr": 3.202526903371372,
+            "sample_policy": "evaluated decisions with forecast; skips bars while a trade is open"
+          }
+        },
+        "contrarian_momentum_4bar": {
+          "metrics": {
+            "trades": 5294,
+            "buys": 2624,
+            "sells": 2670,
+            "wins": 206,
+            "losses": 1780,
+            "timed_out": 3308,
+            "resolved_win_rate": 0.103726,
+            "timeout_rate": 0.624858,
+            "profit_factor": 0.470379,
+            "gross_profit_r": 1194.7384,
+            "gross_loss_r": 2539.9509,
+            "mean_r": -0.254101,
+            "net_r": -1345.2125,
+            "max_drawdown_r": 1348.1355
+          },
+          "decisions": 15446,
+          "waits": 10152,
+          "gap_skipped": 651,
+          "decision_reasons": {
+            "forecast_up": 2624,
+            "forecast_down": 2670,
+            "insufficient_model_edge": 5574,
+            "trend_conflict": 2194,
+            "late_entry_extension": 268,
+            "insufficient_model_strength": 2116
+          },
+          "forecast_diagnostics": {
+            "correct": 8020,
+            "wrong": 7343,
+            "flat": 83,
+            "samples": 15363,
+            "accuracy": 0.5220334570070949,
+            "rmse_atr": 2.039172206997865,
+            "sample_policy": "evaluated decisions with forecast; skips bars while a trade is open"
+          }
+        }
+      }
+    },
+    {
+      "fold": 5,
+      "evaluation": {
+        "start_index": 415157,
+        "end_index_exclusive": 494235,
+        "start_utc": "2022-08-15T16:00:00+00:00",
+        "end_utc": "2026-01-30T20:45:00+00:00",
+        "bars": 79078
+      },
+      "training": {
+        "feature_schema": "smc-local-atr-v1",
+        "horizon": 4,
+        "l2": 1.0,
+        "training_samples": 24341,
+        "training_last_signal_index": 415152,
+        "training_last_label_index": 415156,
+        "evaluation_start_index": 415157,
+        "dataset_sha256": "e491f8fc1e7defd48b240aa06694212a683f47bec8f0c0e2ac40ed0321bba5ec"
+      },
+      "model_artifact": "data/smc_local_lab/fold_5_model.json",
+      "models": {
+        "SMC_LOCAL": {
+          "metrics": {
+            "trades": 1,
+            "buys": 1,
+            "sells": 0,
+            "wins": 0,
+            "losses": 1,
+            "timed_out": 0,
+            "resolved_win_rate": 0.0,
+            "timeout_rate": 0.0,
+            "profit_factor": 0.0,
+            "gross_profit_r": 0.0,
+            "gross_loss_r": 1.1,
+            "mean_r": -1.1,
+            "net_r": -1.1,
+            "max_drawdown_r": 1.1
+          },
+          "decisions": 18894,
+          "waits": 18893,
+          "gap_skipped": 874,
+          "decision_reasons": {
+            "insufficient_model_edge": 15850,
+            "trend_conflict": 1048,
+            "late_entry_extension": 1984,
+            "forecast_up": 1,
+            "insufficient_model_strength": 11
+          },
+          "forecast_diagnostics": {
+            "wrong": 9330,
+            "correct": 9533,
+            "flat": 31,
+            "samples": 18863,
+            "accuracy": 0.5053809044160525,
+            "rmse_atr": 1.5854323513519393,
+            "sample_policy": "evaluated decisions with forecast; skips bars while a trade is open"
+          }
+        },
+        "previous_bar": {
+          "metrics": {
+            "trades": 7900,
+            "buys": 3982,
+            "sells": 3918,
+            "wins": 400,
+            "losses": 2390,
+            "timed_out": 5110,
+            "resolved_win_rate": 0.143369,
+            "timeout_rate": 0.646835,
+            "profit_factor": 0.53196,
+            "gross_profit_r": 1964.7917,
+            "gross_loss_r": 3693.4956,
+            "mean_r": -0.218823,
+            "net_r": -1728.7039,
+            "max_drawdown_r": 1735.1567
+          },
+          "decisions": 13527,
+          "waits": 5627,
+          "gap_skipped": 566,
+          "decision_reasons": {
+            "forecast_down": 3918,
+            "insufficient_model_edge": 1781,
+            "forecast_up": 3982,
+            "late_entry_extension": 1743,
+            "insufficient_model_strength": 1318,
+            "trend_conflict": 785
+          },
+          "forecast_diagnostics": {
+            "wrong": 6802,
+            "correct": 6664,
+            "flat": 61,
+            "samples": 13466,
+            "accuracy": 0.494875983959602,
+            "rmse_atr": 3.224756003124553,
+            "sample_policy": "evaluated decisions with forecast; skips bars while a trade is open"
+          }
+        },
+        "momentum_4bar": {
+          "metrics": {
+            "trades": 5886,
+            "buys": 2984,
+            "sells": 2902,
+            "wins": 340,
+            "losses": 1799,
+            "timed_out": 3747,
+            "resolved_win_rate": 0.158953,
+            "timeout_rate": 0.636595,
+            "profit_factor": 0.543813,
+            "gross_profit_r": 1511.3364,
+            "gross_loss_r": 2779.1484,
+            "mean_r": -0.215394,
+            "net_r": -1267.812,
+            "max_drawdown_r": 1272.8182
+          },
+          "decisions": 14933,
+          "waits": 9047,
+          "gap_skipped": 649,
+          "decision_reasons": {
+            "insufficient_model_strength": 2550,
+            "late_entry_extension": 2256,
+            "forecast_down": 2902,
+            "insufficient_model_edge": 3944,
+            "forecast_up": 2984,
+            "trend_conflict": 297
+          },
+          "forecast_diagnostics": {
+            "correct": 7280,
+            "wrong": 7602,
+            "flat": 51,
+            "samples": 14882,
+            "accuracy": 0.4891815616180621,
+            "rmse_atr": 2.120799434184329,
+            "sample_policy": "evaluated decisions with forecast; skips bars while a trade is open"
+          }
+        },
+        "contrarian_previous_bar": {
+          "metrics": {
+            "trades": 7865,
+            "buys": 3910,
+            "sells": 3955,
+            "wins": 348,
+            "losses": 2429,
+            "timed_out": 5088,
+            "resolved_win_rate": 0.125315,
+            "timeout_rate": 0.646917,
+            "profit_factor": 0.51706,
+            "gross_profit_r": 1886.7614,
+            "gross_loss_r": 3649.0203,
+            "mean_r": -0.224063,
+            "net_r": -1762.2589,
+            "max_drawdown_r": 1765.5657
+          },
+          "decisions": 13542,
+          "waits": 5677,
+          "gap_skipped": 564,
+          "decision_reasons": {
+            "forecast_up": 3910,
+            "insufficient_model_edge": 1795,
+            "forecast_down": 3955,
+            "trend_conflict": 1780,
+            "insufficient_model_strength": 1294,
+            "late_entry_extension": 808
+          },
+          "forecast_diagnostics": {
+            "correct": 6781,
+            "wrong": 6693,
+            "flat": 68,
+            "samples": 13474,
+            "accuracy": 0.5032655484637079,
+            "rmse_atr": 3.2363781353508823,
+            "sample_policy": "evaluated decisions with forecast; skips bars while a trade is open"
+          }
+        },
+        "contrarian_momentum_4bar": {
+          "metrics": {
+            "trades": 5698,
+            "buys": 2821,
+            "sells": 2877,
+            "wins": 253,
+            "losses": 1810,
+            "timed_out": 3635,
+            "resolved_win_rate": 0.122637,
+            "timeout_rate": 0.637943,
+            "profit_factor": 0.534482,
+            "gross_profit_r": 1418.6803,
+            "gross_loss_r": 2654.3103,
+            "mean_r": -0.216853,
+            "net_r": -1235.63,
+            "max_drawdown_r": 1239.3645
+          },
+          "decisions": 15096,
+          "waits": 9398,
+          "gap_skipped": 655,
+          "decision_reasons": {
+            "insufficient_model_strength": 2620,
+            "trend_conflict": 2436,
+            "forecast_up": 2821,
+            "insufficient_model_edge": 4065,
+            "late_entry_extension": 277,
+            "forecast_down": 2877
+          },
+          "forecast_diagnostics": {
+            "wrong": 7373,
+            "correct": 7674,
+            "flat": 49,
+            "samples": 15047,
+            "accuracy": 0.5100019937529076,
+            "rmse_atr": 2.114964497069838,
+            "sample_policy": "evaluated decisions with forecast; skips bars while a trade is open"
+          }
+        }
+      }
+    }
+  ],
+  "overall": {
+    "SMC_LOCAL": {
+      "trades": 1,
+      "buys": 1,
+      "sells": 0,
+      "wins": 0,
+      "losses": 1,
+      "timed_out": 0,
+      "resolved_win_rate": 0.0,
+      "timeout_rate": 0.0,
+      "profit_factor": 0.0,
+      "gross_profit_r": 0.0,
+      "gross_loss_r": 1.1,
+      "mean_r": -1.1,
+      "net_r": -1.1,
+      "max_drawdown_r": 1.1
+    },
+    "previous_bar": {
+      "trades": 37769,
+      "buys": 18955,
+      "sells": 18814,
+      "wins": 1898,
+      "losses": 12725,
+      "timed_out": 23146,
+      "resolved_win_rate": 0.129796,
+      "timeout_rate": 0.612831,
+      "profit_factor": 0.443227,
+      "gross_profit_r": 8516.2191,
+      "gross_loss_r": 19214.1451,
+      "mean_r": -0.283246,
+      "net_r": -10697.9259,
+      "max_drawdown_r": 10706.7634
+    },
+    "momentum_4bar": {
+      "trades": 25734,
+      "buys": 12956,
+      "sells": 12778,
+      "wins": 1463,
+      "losses": 8741,
+      "timed_out": 15530,
+      "resolved_win_rate": 0.143375,
+      "timeout_rate": 0.603482,
+      "profit_factor": 0.458002,
+      "gross_profit_r": 6061.9428,
+      "gross_loss_r": 13235.6214,
+      "mean_r": -0.278763,
+      "net_r": -7173.6787,
+      "max_drawdown_r": 7178.7716
+    },
+    "contrarian_previous_bar": {
+      "trades": 37602,
+      "buys": 18678,
+      "sells": 18924,
+      "wins": 1624,
+      "losses": 12832,
+      "timed_out": 23146,
+      "resolved_win_rate": 0.112341,
+      "timeout_rate": 0.615552,
+      "profit_factor": 0.443366,
+      "gross_profit_r": 8268.2906,
+      "gross_loss_r": 18648.89,
+      "mean_r": -0.276065,
+      "net_r": -10380.5993,
+      "max_drawdown_r": 10381.5935
+    },
+    "contrarian_momentum_4bar": {
+      "trades": 24748,
+      "buys": 12316,
+      "sells": 12432,
+      "wins": 1029,
+      "losses": 8504,
+      "timed_out": 15215,
+      "resolved_win_rate": 0.107941,
+      "timeout_rate": 0.614797,
+      "profit_factor": 0.472238,
+      "gross_profit_r": 5697.1188,
+      "gross_loss_r": 12064.0811,
+      "mean_r": -0.257272,
+      "net_r": -6366.9623,
+      "max_drawdown_r": 6367.4114
+    }
+  },
+  "gate": {
+    "eligible_for_shadow": false,
+    "minimum_30_trades_each_fold": false,
+    "positive_pf_and_mean_r_all_folds": false,
+    "mean_r_beats_all_baselines_each_fold": false,
+    "live_promotion": false,
+    "note": "Fixed conservative research gate, not evidence of live profitability."
+  },
+  "shadow": {
+    "requested": true,
+    "votes_written": 0,
+    "mode": "historical OOS research votes, not live integration"
+  }
+}
