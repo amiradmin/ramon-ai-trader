@@ -46,6 +46,33 @@ services:
       start_period: 180s
       retries: 3
 
+  dashboard:
+    image: ramon-ai-trader:local
+    init: true
+    restart: unless-stopped
+    depends_on:
+      model:
+        condition: service_healthy
+    command:
+      - python
+      - -m
+      - ramon.monitor
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8013"
+      - --db
+      - /data/ramon_history.sqlite3
+      - --health-url
+      - http://model:8012/health
+    environment:
+      RAMON_MT5_USERS_ROOT: /mt5-users
+    ports:
+      - "127.0.0.1:8013:8013"
+    volumes:
+      - ./data:/data:ro
+      - ${HOME}/.mt5/drive_c/users:/mt5-users:ro
+
   tools:
     profiles: ["tools"]
     build:
