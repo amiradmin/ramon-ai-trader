@@ -70,6 +70,10 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
     timesfm3_shadow = TimesFM3Shadow.from_env()
     moment_shadow = MomentAnomalyShadow.from_env()
     finbert_shadow = FinBertNewsShadow.from_env()
+    moment_live_enabled = os.getenv("RAMON_MOMENT_LIVE_ENABLED", "1").strip().lower() in {"1","true","yes","on"}
+    moment_live_threshold = float(os.getenv("RAMON_MOMENT_LIVE_THRESHOLD", "2.0"))
+    finbert_live_enabled = os.getenv("RAMON_FINBERT_LIVE_ENABLED", "1").strip().lower() in {"1","true","yes","on"}
+    finbert_live_threshold = float(os.getenv("RAMON_FINBERT_LIVE_THRESHOLD", "0.35"))
     shadow_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ramon-shadow")
     moment_future = None
     finbert_future = None
@@ -78,6 +82,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
         "moment_anomaly_score": -1.0,
         "moment_anomaly_ratio": -1.0,
         "moment_anomaly_label": "WARMING" if moment_shadow.enabled else "UNAVAILABLE",
+        "moment_anomaly_bar_time": 0,
     }
     latest_finbert_payload = {
         **finbert_shadow.status(),
@@ -162,6 +167,10 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     **finbert_shadow.status(),
                     **news_provider.status(),
                     **model_handlers(),
+                    "moment_live_enabled": int(moment_live_enabled),
+                    "moment_live_threshold": moment_live_threshold,
+                    "finbert_live_enabled": int(finbert_live_enabled),
+                    "finbert_live_threshold": finbert_live_threshold,
                 },
             )
 
@@ -351,6 +360,46 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 else:
                     response.update(market_state=market_assessment["state"], market_state_route="OBSERVE",
                                     market_state_policy=market_assessment["version"])
+
+                # Active external-model vetoes. They may only turn a proposed
+                # entry into WAIT; they can never create or reverse a trade.
+                current_bar = int(market.bars[-1].time)
+                moment_fresh = (
+                    int(response.get("moment_shadow_ready", 0)) == 1
+                    and int(response.get("moment_anomaly_bar_time", 0)) == current_bar
+                )
+                moment_ratio = float(response.get("moment_anomaly_ratio", -1.0))
+                moment_veto = (
+                    moment_live_enabled
+                    and moment_fresh
+                    and moment_ratio >= moment_live_threshold
+                )
+                finbert_ready = int(response.get("finbert_shadow_ready", 0)) == 1
+                finbert_score = abs(float(response.get("finbert_directional_score", 0.0)))
+                finbert_veto = (
+                    finbert_live_enabled
+                    and finbert_ready
+                    and finbert_score >= finbert_live_threshold
+                    and str(response.get("finbert_sentiment_label", "UNAVAILABLE")) != "NEUTRAL"
+                )
+                response["moment_live_active"] = int(moment_live_enabled)
+                response["moment_live_fresh"] = int(moment_fresh)
+                response["moment_live_veto"] = int(moment_veto)
+                response["moment_live_threshold"] = moment_live_threshold
+                response["finbert_live_active"] = int(finbert_live_enabled)
+                response["finbert_live_veto"] = int(finbert_veto)
+                response["finbert_live_threshold"] = finbert_live_threshold
+
+                if str(response.get("decision", "")) in {"BUY", "SELL"}:
+                    if moment_veto:
+                        response["decision"] = "WAIT"
+                        response["reason"] = "moment_anomaly_veto"
+                        response["range_execution"] = 0
+                    elif finbert_veto:
+                        response["decision"] = "WAIT"
+                        response["reason"] = "finbert_sentiment_veto"
+                        response["range_execution"] = 0
+
                 if not response["range_execution"]:
                     range_setup = None
                 sample_key = uuid4().hex[:16]
