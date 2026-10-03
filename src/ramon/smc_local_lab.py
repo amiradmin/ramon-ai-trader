@@ -79,14 +79,16 @@ class RidgeModel:
 
 
 def fit(rows: Sequence[Sequence[float]], targets: Sequence[float], *, l2: float,
-        metadata: dict) -> RidgeModel:
+        metadata: dict, feature_names: Sequence[str] = FEATURE_NAMES) -> RidgeModel:
     if len(rows) != len(targets) or len(rows) < 100 or l2 <= 0:
         raise ValueError('need >=100 aligned training rows and positive ridge penalty')
-    if any(len(row) != len(FEATURE_NAMES) for row in rows):
+    if not feature_names or len(set(feature_names)) != len(feature_names):
+        raise ValueError("invalid feature names")
+    if any(len(row) != len(feature_names) for row in rows):
         raise ValueError('invalid feature schema')
     if not all(isfinite(v) for row in rows for v in row) or not all(isfinite(v) for v in targets):
         raise ValueError('non-finite training data')
-    means = tuple(mean(row[j] for row in rows) for j in range(len(FEATURE_NAMES)))
+    means = tuple(mean(row[j] for row in rows) for j in range(len(feature_names)))
     scales = tuple(max(pstdev(row[j] for row in rows), 1e-9) for j in range(len(means)))
     bias = mean(targets)
     n, d = len(rows), len(means)
