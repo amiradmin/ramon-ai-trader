@@ -1119,11 +1119,11 @@ void DrawDashboard()
       +"   Currency: "+AccountInfoString(ACCOUNT_CURRENCY)
       +"   Trades: "+(today<0 ? "?" : IntegerToString(today))
       +"/"+(SmallOnlyMode ? "unlimited" : IntegerToString(MaxTradesPerDay)),
-      28,288,clrWhite,9);
+      28,266,clrWhite,9);
 
    UiLabel("BALANCE_USD","Balance: "+DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),2)+" units"
       +"   ~= $"+DoubleToString(AccountUnitsToUSD(AccountInfoDouble(ACCOUNT_BALANCE)),2),
-      28,266,clrWhite,9);
+      28,288,clrWhite,9);
 
    UiLabel("LIVE_PNL",
       has_managed_position
