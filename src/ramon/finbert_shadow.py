@@ -1,6 +1,7 @@
-"""Shadow-only FinBERT sentiment model for Ramon.
+"""FinBERT financial sentiment model for Ramon.
 
-Consumes the nearest financial-calendar event text. Never changes execution.
+Consumes the nearest financial-calendar event text. The server may use a strong
+non-neutral result as a conservative live entry veto; it never creates a trade.
 """
 from __future__ import annotations
 
