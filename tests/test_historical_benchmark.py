@@ -63,6 +63,7 @@ def test_benchmark_reports_chronological_folds_years_and_directions(tmp_path):
         assert set(model["directional_accuracy"]) == {"1", "4", "8", "16"}
         assert set(model["horizon_matrix"]) == {"1", "4", "8", "16"}
         assert set(model["regime_directional_accuracy"]) == {"1", "4", "8", "16"}
+        assert set(model["regime_trade_matrix"]) == {"1", "4", "8", "16"}
         for horizon in ("1", "4", "8", "16"):
             directional = model["directional_accuracy"][horizon]
             assert directional["samples"] > 0
@@ -70,6 +71,15 @@ def test_benchmark_reports_chronological_folds_years_and_directions(tmp_path):
             assert "mean_signed_move" in directional
             assert "timeout_rate" in model["horizon_matrix"][horizon]["metrics"]
             assert model["regime_directional_accuracy"][horizon]
+            assert model["regime_trade_matrix"][horizon]["by_regime"]
+            assert model["regime_trade_matrix"][horizon]["stability"]
+            for state, stability in model["regime_trade_matrix"][horizon]["stability"].items():
+                assert "overall" in stability
+                assert "profitable_folds" in stability
+                assert "positive_mean_r_folds" in stability
+                assert len(stability["folds"]) == 5
+                assert 0 <= stability["profitable_folds"] <= 5
+                assert 0 <= stability["positive_mean_r_folds"] <= 5
             for state_metrics in model["regime_directional_accuracy"][horizon].values():
                 if state_metrics["samples"]:
                     assert 0 <= state_metrics["accuracy"] <= 1
@@ -91,6 +101,7 @@ def test_custom_analysis_horizons_are_respected(tmp_path):
     for model in report["models"].values():
         assert set(model["directional_accuracy"]) == {"1", "8"}
         assert set(model["horizon_matrix"]) == {"1", "8"}
+        assert set(model["regime_trade_matrix"]) == {"1", "8"}
 
 
 def test_contrarian_mirrors_direction():
@@ -133,3 +144,18 @@ def test_contrarian_never_emits_nonpositive_path():
     assert forecast.high > 0
     assert all(value > 0 for value in forecast.median_path)
     assert forecast.low <= forecast.median <= forecast.high
+
+
+def test_regime_trade_stability_sums_trade_metrics(tmp_path):
+    db = tmp_path / "external.sqlite3"
+    seed(db, rows=1800)
+    report = benchmark_database(db, folds=3, stride=12, analysis_horizons=(4,))
+    model = report["models"]["contrarian_previous_bar"]
+    matrix = model["regime_trade_matrix"]["4"]
+    total = sum(metrics["trades"] for metrics in matrix["by_regime"].values())
+    horizon_total = model["horizon_matrix"]["4"]["metrics"]["trades"]
+    assert total == horizon_total
+    for state, row in matrix["stability"].items():
+        assert len(row["folds"]) == 3
+        assert row["folds_with_trades"] <= 3
+        assert row["overall"]["trades"] == matrix["by_regime"][state]["trades"]
