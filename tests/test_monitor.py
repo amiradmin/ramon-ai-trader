@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 
 import pytest
 
-from ramon.monitor import build_snapshot, dollar_readiness, freshness, handler_for, read_diagnostic, read_history
+from ramon.monitor import build_snapshot, dollar_readiness, freshness, handler_for, income_roadmap, read_diagnostic, read_history
 
 
 NOW = 1_800_000_000
@@ -206,3 +206,46 @@ def test_dollar_readiness_does_not_promote_small_sample():
     assert result["trade_count"] == 10
     assert result["status"] == "NOT READY"
     assert result["ready"] is False
+
+
+def test_income_roadmap_starts_with_validation_on_cent_account():
+    readiness = {
+        "ready": False, "profit_factor": 1.1, "max_drawdown_r": 5.0,
+        "span_days": 10.0, "current_version_trades": 20,
+    }
+    road = income_roadmap(readiness, {
+        "AccountType": "CENT (configured)",
+        "BalanceUnits": "3000.00  BalanceUSDApprox: 30.00  EquityUSDApprox: 30.00",
+    })
+    assert road["current_stage"] == "validate"
+    assert road["stages"][0]["state"] == "current"
+    assert all(s["state"] == "locked" for s in road["stages"][1:])
+
+
+def test_income_roadmap_moves_to_dollar_pilot_only_after_ready():
+    readiness = {
+        "ready": True, "profit_factor": 1.31, "max_drawdown_r": 4.0,
+        "span_days": 25.0, "current_version_trades": 55,
+    }
+    road = income_roadmap(readiness, {
+        "AccountType": "CENT (configured)",
+        "BalanceUnits": "3500.00  BalanceUSDApprox: 35.00  EquityUSDApprox: 35.00",
+    })
+    assert road["stages"][0]["state"] == "done"
+    assert road["current_stage"] == "pilot30"
+    assert road["stages"][1]["state"] == "current"
+
+
+def test_income_roadmap_recognizes_standard_scale_stage():
+    readiness = {
+        "ready": True, "profit_factor": 1.35, "max_drawdown_r": 5.0,
+        "span_days": 35.0, "current_version_trades": 60,
+    }
+    road = income_roadmap(readiness, {
+        "AccountType": "STANDARD (configured)",
+        "BalanceUnits": "150.00  BalanceUSDApprox: 150.00  EquityUSDApprox: 150.00",
+    })
+    assert road["stages"][0]["done"] is True
+    assert road["stages"][1]["done"] is True
+    assert road["stages"][2]["done"] is True
+    assert road["current_stage"] == "scale500"

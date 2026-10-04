@@ -246,6 +246,97 @@ def dollar_readiness(trades):
     }
 
 
+def income_roadmap(readiness, diag):
+    """Build a conservative, evidence-gated path from validation to income."""
+    account_type = (diag.get("AccountType", "").split()[0] or "UNKNOWN").upper()
+    balance_usd = number(match(diag.get("BalanceUnits"), r"BalanceUSDApprox: ([\d.]+)"))
+    is_standard = account_type == "STANDARD"
+    pf = number(readiness.get("profit_factor"))
+    dd = number(readiness.get("max_drawdown_r"))
+    span = number(readiness.get("span_days")) or 0.0
+    version_trades = int(readiness.get("current_version_trades") or 0)
+
+    stages = [
+        {
+            "id": "validate",
+            "title": "اثبات روی حساب سنتی",
+            "capital": "حساب فعلی",
+            "goal": "Readiness ≥ 80 و عبور از همهٔ گیت‌ها",
+            "done": bool(readiness.get("ready")),
+            "note": "Forward Test واقعی؛ بدون اتکا به بک‌تست به‌تنهایی.",
+        },
+        {
+            "id": "pilot30",
+            "title": "پایلوت حساب دلاری",
+            "capital": "$30–$50",
+            "goal": "حساب STANDARD + حفظ معیارهای Readiness",
+            "done": bool(readiness.get("ready")) and is_standard and balance_usd is not None and balance_usd >= 20,
+            "note": "هدف این مرحله اثبات اجرای واقعی است، نه خرج خانه.",
+        },
+        {
+            "id": "scale100",
+            "title": "درآمد کوچک",
+            "capital": "$100–$200",
+            "goal": "حداقل 50 معامله روی نسخهٔ پایدار و PF ≥ 1.25",
+            "done": is_standard and balance_usd is not None and balance_usd >= 100
+                    and version_trades >= 50 and pf is not None and pf >= 1.25,
+            "note": "افزایش سرمایه فقط مرحله‌ای؛ ریسک متناسب با حساب.",
+        },
+        {
+            "id": "scale500",
+            "title": "درآمد جانبی محسوس",
+            "capital": "$500+",
+            "goal": "حداقل 30 روز داده، PF ≥ 1.30 و Drawdown ≤ 8R",
+            "done": is_standard and balance_usd is not None and balance_usd >= 500
+                    and span >= 30 and pf is not None and pf >= 1.30
+                    and dd is not None and dd <= 8.0,
+            "note": "در این مرحله می‌توان بخشی از سود را برداشت و بقیه را برای رشد نگه داشت.",
+        },
+        {
+            "id": "income200",
+            "title": "هدف درآمد $200 / ماه",
+            "capital": "≈ $4,000 سناریویی",
+            "goal": "چند ماه پایداری + سرمایه کافی",
+            "done": is_standard and balance_usd is not None and balance_usd >= 4000
+                    and span >= 90 and pf is not None and pf >= 1.30
+                    and dd is not None and dd <= 8.0,
+            "note": "سرمایهٔ $4,000 بر مبنای سناریوی 5٪ ماهانه است؛ پیش‌بینی یا تضمین بازده نیست.",
+        },
+        {
+            "id": "household",
+            "title": "درآمد قابل اتکاتر برای خانه",
+            "capital": "پس از اثبات چندماهه",
+            "goal": "حداقل 90 روز عملکرد واقعی و عدم وابستگی به یک دورهٔ خاص بازار",
+            "done": is_standard and balance_usd is not None and balance_usd >= 4000
+                    and span >= 90 and pf is not None and pf >= 1.35
+                    and dd is not None and dd <= 6.0,
+            "note": "این مرحله باید با برداشت‌های واقعی و کنترل Drawdown تأیید شود.",
+        },
+    ]
+    current = 0
+    for idx, stage in enumerate(stages):
+        if stage["done"]:
+            current = idx + 1
+        else:
+            break
+    current = min(current, len(stages) - 1)
+    for idx, stage in enumerate(stages):
+        stage["state"] = "done" if stage["done"] else "current" if idx == current else "locked"
+        stage["number"] = idx + 1
+    return {
+        "account_type": account_type,
+        "balance_usd": None if balance_usd is None else round(balance_usd, 2),
+        "current_stage": stages[current]["id"],
+        "current_stage_number": current + 1,
+        "stage_count": len(stages),
+        "stages": stages,
+        "planning_monthly_return_percent": 5.0,
+        "planning_income_target_usd": 200.0,
+        "planning_capital_for_target_usd": 4000.0,
+        "disclaimer": "مرحله‌های درآمدی سناریوی برنامه‌ریزی هستند و سود را تضمین یا پیش‌بینی نمی‌کنند.",
+    }
+
+
 def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=None):
     now = time.time() if now is None else now
     diag, diag_error = read_diagnostic(diagnostic)
@@ -583,6 +674,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
     ]
 
     readiness = dollar_readiness(trades)
+    roadmap = income_roadmap(readiness, diag)
     warnings = [x for x in (diag_error, db_error) if x]
     if model_time["state"] != "fresh":
         warnings.append("تصمیم مدل تازه نیست؛ آخرین تصمیم ثبت‌شده نمایش داده می‌شود")
@@ -599,7 +691,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
             "ea_version": diag.get("EA version"), "nodes": nodes,
             "edges": [{"from": a, "to": b, "label": label} for a, b, label in edges],
             "timeline": timeline, "trades": outcomes, "model_handler_map": model_handler_map,
-            "dollar_readiness": readiness, "warnings": warnings}
+            "dollar_readiness": readiness, "income_roadmap": roadmap, "warnings": warnings}
 
 
 def control_state(diagnostic):
