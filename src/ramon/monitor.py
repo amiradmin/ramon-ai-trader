@@ -139,8 +139,16 @@ def read_history(path, symbol, sample_key=""):
                     sample = dict(row) if row else {}
             if not sample:
                 sample = rows[0] if rows else {}
-            trades = [dict(r) for r in con.execute(
-                "SELECT * FROM trade_outcomes WHERE symbol=? ORDER BY closed DESC LIMIT 8", (symbol,))] if "trade_outcomes" in tables else []
+            trades = []
+            if "trade_outcomes" in tables:
+                trade_cols = {r[1] for r in con.execute("PRAGMA table_info(trade_outcomes)")}
+                role_filter = (
+                    " AND (trade_role IS NULL OR trade_role='' OR UPPER(trade_role) IN ('PRIMARY','MAIN'))"
+                    if "trade_role" in trade_cols else ""
+                )
+                trades = [dict(r) for r in con.execute(
+                    "SELECT * FROM trade_outcomes WHERE symbol=?" + role_filter +
+                    " ORDER BY closed DESC LIMIT 150", (symbol,))]
             return sample, rows, trades, None
     except sqlite3.Error as exc:
         return {}, [], [], f"تاریخچه خوانده نشد: {type(exc).__name__}"
@@ -154,6 +162,88 @@ def match(text, pattern):
 def metric(value):
     n = number(value)
     return "—" if n is None else f"{n:.3f}"
+
+
+def dollar_readiness(trades):
+    """Score readiness for a small real-dollar forward-test account from PRIMARY outcomes."""
+    rows = [r for r in trades if number(r.get("closed")) is not None]
+    rows_desc = sorted(rows, key=lambda r: number(r.get("closed")) or 0, reverse=True)
+    rows_asc = list(reversed(rows_desc))
+    count = len(rows_desc)
+
+    wins = sum(max(0.0, number(r.get("net_units")) or 0.0) for r in rows_desc)
+    losses = sum(max(0.0, -(number(r.get("net_units")) or 0.0)) for r in rows_desc)
+    profit_factor = (wins / losses) if losses > 0 else (9.99 if wins > 0 else None)
+
+    r_values = [number(r.get("net_r")) for r in rows_asc]
+    r_values = [x for x in r_values if x is not None]
+    expectancy_r = (sum(r_values) / len(r_values)) if r_values else None
+    equity = peak = max_drawdown_r = 0.0
+    for value in r_values:
+        equity += value
+        peak = max(peak, equity)
+        max_drawdown_r = max(max_drawdown_r, peak - equity)
+
+    if rows_asc:
+        first_open = number(rows_asc[0].get("opened")) or number(rows_asc[0].get("closed")) or 0
+        last_close = number(rows_asc[-1].get("closed")) or first_open
+        span_days = max(0.0, (last_close - first_open) / 86400.0)
+    else:
+        span_days = 0.0
+
+    current_version = str(rows_desc[0].get("entry_ea_version") or "") if rows_desc else ""
+    current_version_trades = 0
+    if current_version:
+        for row in rows_desc:
+            if str(row.get("entry_ea_version") or "") != current_version:
+                break
+            current_version_trades += 1
+
+    sample_score = min(25.0, 25.0 * count / 150.0)
+    pf_score = 0.0 if profit_factor is None else min(25.0, max(0.0, (profit_factor - 1.0) / 0.40 * 25.0))
+    expectancy_score = 0.0 if expectancy_r is None else min(15.0, max(0.0, expectancy_r / 0.12 * 15.0))
+    if not r_values:
+        drawdown_score = 0.0
+    elif max_drawdown_r <= 4.0:
+        drawdown_score = 15.0
+    else:
+        drawdown_score = min(15.0, max(0.0, (12.0 - max_drawdown_r) / 8.0 * 15.0))
+    duration_score = min(10.0, 10.0 * span_days / 21.0)
+    stability_score = min(10.0, 10.0 * current_version_trades / 50.0)
+    score = round(sample_score + pf_score + expectancy_score + drawdown_score + duration_score + stability_score)
+
+    hard_checks = {
+        "trades": count >= 100,
+        "profit_factor": profit_factor is not None and profit_factor >= 1.25,
+        "duration": span_days >= 14.0,
+        "version_stability": current_version_trades >= 30,
+        "expectancy": expectancy_r is not None and expectancy_r > 0,
+        "drawdown": bool(r_values) and max_drawdown_r <= 10.0,
+    }
+    ready = score >= 80 and all(hard_checks.values())
+    status = "READY" if ready else "CAUTION" if score >= 60 else "NOT READY"
+    criteria = [
+        {"id": "trades", "label": "معاملات PRIMARY", "value": str(count), "target": "حداقل 100", "pass": hard_checks["trades"]},
+        {"id": "profit_factor", "label": "Profit Factor", "value": "—" if profit_factor is None else f"{profit_factor:.2f}", "target": "حداقل 1.25", "pass": hard_checks["profit_factor"]},
+        {"id": "duration", "label": "مدت Forward Test", "value": f"{span_days:.1f} روز", "target": "حداقل 14 روز", "pass": hard_checks["duration"]},
+        {"id": "version_stability", "label": "معامله روی نسخه فعلی", "value": str(current_version_trades), "target": "حداقل 30", "pass": hard_checks["version_stability"]},
+        {"id": "expectancy", "label": "Expectancy", "value": "—" if expectancy_r is None else f"{expectancy_r:+.3f}R", "target": "بیشتر از 0R", "pass": hard_checks["expectancy"]},
+        {"id": "drawdown", "label": "Max Drawdown", "value": "—" if not r_values else f"{max_drawdown_r:.2f}R", "target": "حداکثر 10R", "pass": hard_checks["drawdown"]},
+    ]
+    return {
+        "score": score,
+        "status": status,
+        "ready": ready,
+        "trade_count": count,
+        "profit_factor": None if profit_factor is None else round(profit_factor, 3),
+        "expectancy_r": None if expectancy_r is None else round(expectancy_r, 4),
+        "max_drawdown_r": None if not r_values else round(max_drawdown_r, 3),
+        "span_days": round(span_days, 2),
+        "current_ea_version": current_version or None,
+        "current_version_trades": current_version_trades,
+        "criteria": criteria,
+        "weights": {"sample": 25, "profit_factor": 25, "expectancy": 15, "drawdown": 15, "duration": 10, "version_stability": 10},
+    }
 
 
 def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=None):
@@ -298,7 +388,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
                          "reason": f.get("reason", "UNKNOWN"), "detail": REASONS.get(f.get("reason"), f.get("reason", "دلیل ثبت نشده")),
                          "strategy": "RANGE" if row.get("chronos_model") == "range-reversal-v1" else "CHRONOS"})
     outcomes = []
-    for row in trades:
+    for row in trades[:8]:
         offset = row.get("closed_utc_offset_seconds")
         outcomes.append({"direction": row.get("direction"), "net_units": row.get("net_units"),
                          "exit": row.get("exit_detail") or row.get("exit_reason"),
@@ -492,6 +582,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
         ),
     ]
 
+    readiness = dollar_readiness(trades)
     warnings = [x for x in (diag_error, db_error) if x]
     if model_time["state"] != "fresh":
         warnings.append("تصمیم مدل تازه نیست؛ آخرین تصمیم ثبت‌شده نمایش داده می‌شود")
@@ -507,7 +598,8 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
             "reason_fa": REASONS.get(reason, reason), "ea_status": ea_status,
             "ea_version": diag.get("EA version"), "nodes": nodes,
             "edges": [{"from": a, "to": b, "label": label} for a, b, label in edges],
-            "timeline": timeline, "trades": outcomes, "model_handler_map": model_handler_map, "warnings": warnings}
+            "timeline": timeline, "trades": outcomes, "model_handler_map": model_handler_map,
+            "dollar_readiness": readiness, "warnings": warnings}
 
 
 def control_state(diagnostic):

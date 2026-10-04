@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 
 import pytest
 
-from ramon.monitor import build_snapshot, freshness, handler_for, read_diagnostic, read_history
+from ramon.monitor import build_snapshot, dollar_readiness, freshness, handler_for, read_diagnostic, read_history
 
 
 NOW = 1_800_000_000
@@ -172,3 +172,37 @@ def test_http_surface_only_reads_health_and_cannot_request_a_trade(sources, monk
         server.shutdown()
         thread.join(3)
         server.server_close()
+
+
+def test_dollar_readiness_requires_enough_forward_evidence():
+    rows = []
+    base = NOW - 22 * 86400
+    for i in range(120):
+        net_r = 0.18 if i % 2 == 0 else -0.10
+        rows.append({
+            "opened": base + i * 14400,
+            "closed": base + i * 14400 + 1800,
+            "net_units": net_r * 10,
+            "net_r": net_r,
+            "entry_ea_version": "0.60.0" if i >= 80 else "0.59.0",
+        })
+    result = dollar_readiness(rows)
+    assert result["trade_count"] == 120
+    assert result["profit_factor"] > 1.25
+    assert result["current_version_trades"] == 40
+    assert result["status"] == "READY"
+    assert result["ready"] is True
+
+
+def test_dollar_readiness_does_not_promote_small_sample():
+    rows = [{
+        "opened": NOW - 3600,
+        "closed": NOW - 1800,
+        "net_units": 1.0,
+        "net_r": 0.5,
+        "entry_ea_version": "0.60.0",
+    } for _ in range(10)]
+    result = dollar_readiness(rows)
+    assert result["trade_count"] == 10
+    assert result["status"] == "NOT READY"
+    assert result["ready"] is False
