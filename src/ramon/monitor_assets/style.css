@@ -5,9 +5,13 @@
 
 .model-map-panel{margin-top:20px;direction:rtl;border:1px solid var(--border);border-radius:14px;background:var(--panel);overflow:hidden}
 .model-map-wrap{overflow:auto}
-.model-map-table{width:100%;border-collapse:collapse;font-size:11px}
+.model-map-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:11px}
 .model-map-table th,.model-map-table td{padding:11px 14px;border-bottom:1px solid #233044;text-align:right;vertical-align:middle}
 .model-map-table th{color:var(--muted);font-weight:500;background:#101925;position:sticky;top:0;z-index:1}
+.model-map-table th:nth-child(1),.model-map-table td:nth-child(1){width:24%;text-align:right}
+.model-map-table th:nth-child(2),.model-map-table td:nth-child(2){width:42%;text-align:left;direction:ltr}
+.model-map-table th:nth-child(3),.model-map-table td:nth-child(3){width:14%;text-align:center}
+.model-map-table th:nth-child(4),.model-map-table td:nth-child(4){width:20%;text-align:left;direction:ltr}
 .model-map-row{cursor:help;outline:none}
 .model-map-row:hover,.model-map-row:focus{background:#172335}
 .model-map-name{font-weight:600;color:var(--text);white-space:nowrap}
