@@ -261,6 +261,7 @@ def income_roadmap(readiness, diag):
             "id": "validate",
             "title": "اثبات روی حساب سنتی",
             "capital": "حساب فعلی",
+            "eta": "حدود ۲–۳ هفته",
             "goal": "Readiness ≥ 80 و عبور از همهٔ گیت‌ها",
             "done": bool(readiness.get("ready")),
             "note": "Forward Test واقعی؛ بدون اتکا به بک‌تست به‌تنهایی.",
@@ -269,6 +270,7 @@ def income_roadmap(readiness, diag):
             "id": "pilot30",
             "title": "پایلوت حساب دلاری",
             "capital": "$30–$50",
+            "eta": "حدود ۱–۲ ماه",
             "goal": "حساب STANDARD + حفظ معیارهای Readiness",
             "done": bool(readiness.get("ready")) and is_standard and balance_usd is not None and balance_usd >= 20,
             "note": "هدف این مرحله اثبات اجرای واقعی است، نه خرج خانه.",
@@ -277,6 +279,7 @@ def income_roadmap(readiness, diag):
             "id": "scale100",
             "title": "درآمد کوچک",
             "capital": "$100–$200",
+            "eta": "حدود ۲–۳ ماه",
             "goal": "حداقل 50 معامله روی نسخهٔ پایدار و PF ≥ 1.25",
             "done": is_standard and balance_usd is not None and balance_usd >= 100
                     and version_trades >= 50 and pf is not None and pf >= 1.25,
@@ -286,6 +289,7 @@ def income_roadmap(readiness, diag):
             "id": "scale500",
             "title": "درآمد جانبی محسوس",
             "capital": "$500+",
+            "eta": "حدود ۳–۶ ماه",
             "goal": "حداقل 30 روز داده، PF ≥ 1.30 و Drawdown ≤ 8R",
             "done": is_standard and balance_usd is not None and balance_usd >= 500
                     and span >= 30 and pf is not None and pf >= 1.30
@@ -296,6 +300,7 @@ def income_roadmap(readiness, diag):
             "id": "income200",
             "title": "هدف درآمد $200 / ماه",
             "capital": "≈ $4,000 سناریویی",
+            "eta": "حدود ۶–۱۲ ماه",
             "goal": "چند ماه پایداری + سرمایه کافی",
             "done": is_standard and balance_usd is not None and balance_usd >= 4000
                     and span >= 90 and pf is not None and pf >= 1.30
@@ -306,6 +311,7 @@ def income_roadmap(readiness, diag):
             "id": "household",
             "title": "درآمد قابل اتکاتر برای خانه",
             "capital": "پس از اثبات چندماهه",
+            "eta": "حدود ۹–۱۸ ماه",
             "goal": "حداقل 90 روز عملکرد واقعی و عدم وابستگی به یک دورهٔ خاص بازار",
             "done": is_standard and balance_usd is not None and balance_usd >= 4000
                     and span >= 90 and pf is not None and pf >= 1.35

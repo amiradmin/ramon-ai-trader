@@ -249,3 +249,18 @@ def test_income_roadmap_recognizes_standard_scale_stage():
     assert road["stages"][1]["done"] is True
     assert road["stages"][2]["done"] is True
     assert road["current_stage"] == "scale500"
+
+
+def test_income_roadmap_includes_estimated_time_for_every_stage():
+    readiness = {
+        "ready": False, "profit_factor": 1.1, "max_drawdown_r": 5.0,
+        "span_days": 10.0, "current_version_trades": 20,
+    }
+    road = income_roadmap(readiness, {
+        "AccountType": "CENT (configured)",
+        "BalanceUnits": "3000.00  BalanceUSDApprox: 30.00  EquityUSDApprox: 30.00",
+    })
+    assert len(road["stages"]) == 6
+    assert all(stage.get("eta") for stage in road["stages"])
+    assert road["stages"][0]["eta"] == "حدود ۲–۳ هفته"
+    assert road["stages"][-1]["eta"] == "حدود ۹–۱۸ ماه"

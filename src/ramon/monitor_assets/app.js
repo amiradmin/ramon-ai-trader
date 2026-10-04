@@ -73,7 +73,7 @@ function renderRoadmap(){
     const card=el("article",`roadmap-step ${s.state}`);
     const top=el("div","roadmap-step-top");
     top.append(el("span","roadmap-number",String(s.number).padStart(2,"0")),el("span","roadmap-state",s.state==="done"?"انجام شده":s.state==="current"?"مرحله فعلی":"قفل"));
-    card.append(top,el("h3",null,s.title),el("strong","roadmap-capital",s.capital),el("p",null,s.goal),el("small",null,s.note));
+    card.append(top,el("h3",null,s.title),el("strong","roadmap-capital",s.capital),el("span","roadmap-eta",`زمان تقریبی: ${s.eta||"نامشخص"}`),el("p",null,s.goal),el("small",null,s.note));
     box.append(card);
   }
 }
