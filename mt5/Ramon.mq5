@@ -1,5 +1,5 @@
 #property strict
-#property version "1.555"
+#property version "1.556"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -870,8 +870,8 @@ bool EnsureRamonEyeResource()
    if(ArraySize(run_lengths)!=ArraySize(run_colors))
       return false;
 
-   uint pixels[];
-   if(ArrayResize(pixels,1600)!=1600)
+   uint source_pixels[];
+   if(ArrayResize(source_pixels,1600)!=1600)
       return false;
 
    int pos=0;
@@ -881,14 +881,34 @@ bool EnsureRamonEyeResource()
       {
          if(pos>=1600)
             return false;
-         pixels[pos++]=run_colors[i];
+         source_pixels[pos++]=run_colors[i];
       }
    }
    if(pos!=1600)
       return false;
 
+   // Scale the embedded 40x40 artwork to a true 48x48 resource.
+   // OBJ_BITMAP_LABEL does not reliably upscale a smaller resource just by
+   // increasing XSIZE/YSIZE, so create the larger bitmap explicitly.
+   const int source_size=40;
+   const int logo_size=48;
+   uint pixels[];
+   if(ArrayResize(pixels,logo_size*logo_size)!=(logo_size*logo_size))
+      return false;
+   for(int y=0;y<logo_size;y++)
+   {
+      int sy=(y*source_size)/logo_size;
+      if(sy>=source_size) sy=source_size-1;
+      for(int x=0;x<logo_size;x++)
+      {
+         int sx=(x*source_size)/logo_size;
+         if(sx>=source_size) sx=source_size-1;
+         pixels[y*logo_size+x]=source_pixels[sy*source_size+sx];
+      }
+   }
+
    RamonEyeResourceReady=ResourceCreate(
-      "RamonEye",pixels,40,40,0,0,40,COLOR_FORMAT_ARGB_NORMALIZE
+      "RamonEye",pixels,logo_size,logo_size,0,0,logo_size,COLOR_FORMAT_ARGB_NORMALIZE
    );
    if(!RamonEyeResourceReady)
       Print("Ramon eye resource creation failed err=",GetLastError());
@@ -905,10 +925,10 @@ void UiEyeLogo()
       ObjectCreate(0,object,OBJ_BITMAP_LABEL,0,0,0);
    ObjectSetInteger(0,object,OBJPROP_CORNER,CORNER_RIGHT_UPPER);
    ObjectSetInteger(0,object,OBJPROP_ANCHOR,ANCHOR_RIGHT_UPPER);
-   ObjectSetInteger(0,object,OBJPROP_XDISTANCE,18);
-   ObjectSetInteger(0,object,OBJPROP_YDISTANCE,18);
-   ObjectSetInteger(0,object,OBJPROP_XSIZE,40);
-   ObjectSetInteger(0,object,OBJPROP_YSIZE,40);
+   ObjectSetInteger(0,object,OBJPROP_XDISTANCE,22);
+   ObjectSetInteger(0,object,OBJPROP_YDISTANCE,22);
+   ObjectSetInteger(0,object,OBJPROP_XSIZE,48);
+   ObjectSetInteger(0,object,OBJPROP_YSIZE,48);
    ObjectSetInteger(0,object,OBJPROP_BACK,false);
    ObjectSetInteger(0,object,OBJPROP_SELECTABLE,false);
    ObjectSetInteger(0,object,OBJPROP_SELECTED,false);
@@ -1153,7 +1173,7 @@ void DrawDashboard()
    // Tall/narrow panel: summary text first, checklist directly underneath.
    UiRect("PANEL",12,24,560,1015,C'15,23,42',C'71,85,105');
 
-   UiLabel("TITLE","RAMON AI TRADER  v0.55.5 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.55.6 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+" M15 | Forecast ["+ModelTag(LastForecastModelHandler)
       +"] | Shadow ["+ModelTag(LastForecastShadowModelHandler)+"] | "
