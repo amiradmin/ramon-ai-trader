@@ -1,5 +1,5 @@
 #property strict
-#property version "1.561"
+#property version "1.562"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -1196,41 +1196,8 @@ void DrawDashboard()
       && (bool)MQLInfoInteger(MQL_TRADE_ALLOWED)
       && (bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED);
    double dominant_edge=MathMax(LastBuyEdge,LastSellEdge);
-   bool edge_pass=LastMinimumEdge>0.0 && dominant_edge>=LastMinimumEdge;
-   bool strength_pass=LastMinimumStrength>0.0 && LastSignalStrength>=LastMinimumStrength;
    string dominant=(LastBuyEdge>=LastSellEdge ? "BUY" : "SELL");
    color state_color=DirectionColor(LastModelDecision);
-
-   string live_reason="";
-   bool live_ready=LiveExecutionReady(live_reason);
-   color live_color=(live_ready && permissions && lock_ok ? clrWhite : clrTomato);
-   color risk_gate_color=(RiskGateBlocked() ? clrTomato : clrWhite);
-   color sizing_color=DirectionColor(LastSizingSide);
-
-   // v0.53.2 display-only trade checklist helpers.
-   bool checklist_spread_pass=(spread_points>0 && spread_points<=MaxSpreadPoints);
-   bool checklist_volatility_ok=(LastAtr>0.0 && LastStopDistance>0.0 && LastTargetDistance>0.0);
-   bool checklist_risk_exit_ok=(LastStopDistance>0.0 && LastTargetDistance>0.0);
-   bool checklist_directional=(LastModelDecision=="BUY" || LastModelDecision=="SELL");
-   bool checklist_entry_ready=checklist_directional
-      && edge_pass && strength_pass
-      && LastIntrabarConfirmed && LastAiTrendConfirmed
-      && checklist_spread_pass && checklist_volatility_ok;
-
-   string checklist_market_trend="UNCONFIRMED";
-   color checklist_market_color=clrGold;
-   if(LastAiTrendConfirmed && LastAiTrendDirection=="BUY")
-   {
-      checklist_market_trend="BULLISH";
-      checklist_market_color=DirectionColor("BUY");
-   }
-   else if(LastAiTrendConfirmed && LastAiTrendDirection=="SELL")
-   {
-      checklist_market_trend="BEARISH";
-      checklist_market_color=DirectionColor("SELL");
-   }
-
-   double checklist_rr=(LastStopDistance>0.0 ? LastTargetDistance/LastStopDistance : 0.0);
 
    ulong managed_ticket=0;
    datetime managed_opened=0;
@@ -1249,10 +1216,10 @@ void DrawDashboard()
       (live_profit_usd<-0.00001 ? "-$" : "$"))
       +DoubleToString(MathAbs(live_profit_usd),2);
 
-   // Tall/narrow panel: summary text first, checklist directly underneath.
-   UiRect("PANEL",12,24,560,1015,C'15,23,42',C'71,85,105');
+   // Compact panel: live summary plus model/handler map.
+   UiRect("PANEL",12,24,560,655,C'15,23,42',C'71,85,105');
 
-   UiLabel("TITLE","RAMON AI TRADER  v0.56.1 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.56.2 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+" M15 | Forecast ["+ModelTag(LastForecastModelHandler)
       +"] | Shadow ["+ModelTag(LastForecastShadowModelHandler)+"] | "
@@ -1273,8 +1240,6 @@ void DrawDashboard()
    UiLabel("SIGNAL",compact_signal,28,154,clrWhite,9);
    ObjectDelete(0,UiPrefix+"SIGNAL_PRICE");
 
-   // The old Forecast / Edge / Strength / Intrabar / AI Trend rows were removed here
-   // because the same live values now appear once in the checklist below.
 
    string role_mark=(LastRoleShadow || !LastEnsembleReady ? "*" : "");
    UiLabel("ROLE_MODELS",(LastRoleShadow ? "*SHADOW* | "+LastShadowRegimeLabel : "ROLE MODELS "+(LastEnsembleReady ? "READY" : "*LEARNING*"))
@@ -1355,91 +1320,8 @@ void DrawDashboard()
    ObjectDelete(0,UiPrefix+"RISK_GATE");
    ObjectDelete(0,UiPrefix+"MONEY_CONFIRM");
 
-   // ---------------------- checklist ----------------------
-   int tx=24, ty=320, tw=520, th=366, row_h=28;
-   UiRect("CHECK_TABLE_BG",tx,ty,tw,th,C'17,27,46',C'71,85,105');
-   UiRect("CHECK_TABLE_HEAD",tx+4,ty+4,tw-8,28,C'30,41,59',C'71,85,105');
-
-   UiLabel("CHECK_TITLE","10-POINT TRADE CHECK",tx+12,ty+10,clrWhite,10);
-   UiLabel("CHECK_SUMMARY",
-      "MKT "+checklist_market_trend+" | MODEL "+LastModelDecision
-      +" | ENTRY "+(checklist_entry_ready ? "READY" : "NOT READY"),
-      tx+188,ty+10,(checklist_entry_ready ? state_color : clrGold),8);
-
-   UiLabel("CHECK_H1","#",tx+12,ty+42,clrWhite,8);
-   UiLabel("CHECK_H2","CHECK",tx+38,ty+42,clrWhite,8);
-   UiLabel("CHECK_H3","LIVE VALUE",tx+184,ty+42,clrWhite,8);
-   UiLabel("CHECK_H4","STATUS",tx+442,ty+42,clrWhite,8);
-
-   int ry=ty+62;
-   for(int r=0;r<10;r++)
-      UiRect("CHECK_ROW_BG_"+IntegerToString(r+1),tx+4,ry+r*row_h,tw-8,row_h-2,
-         (r%2==0 ? C'20,31,52' : C'15,24,42'),C'38,50,68');
-
-   string cvals[10];
-   cvals[0]=LastModelDecision+" | "+LastModelReason+" | "+ModelTag(LastForecastModelHandler);
-   cvals[1]=checklist_market_trend+" | AI "+LastAiTrendDirection+" | "+ModelTag(LastMarketStateHandler);
-   cvals[2]=DoubleToString(LastSignalStrength,3)+" / "+DoubleToString(LastMinimumStrength,3);
-   cvals[3]=dominant+" "+DoubleToString(dominant_edge,2)+" / "+DoubleToString(LastMinimumEdge,2);
-   cvals[4]=LastIntrabarDirection+" | move "+DoubleToString(LastIntrabarMoveAtr,3)
-      +" | rb "+DoubleToString(LastIntrabarReboundAtr,3);
-   cvals[5]=LastAiTrendDirection+" | score "+DoubleToString(LastAiTrendScore,3)
-      +" | path "+DoubleToString(LastAiTrendMoveAtr,3)
-      +" | cons "+DoubleToString(LastAiTrendConsistency,2);
-   cvals[6]=(LastTargetStructureReady
-      ? LastTargetMethod+" | "+LastTargetDirection
-      : "target structure learning")+" | "+ModelTag(LastTargetModelHandler);
-   cvals[7]="ATR "+DoubleToString(LastAtr,2)
-      +" | SL "+DoubleToString(LastStopDistance,2)
-      +" | TP "+DoubleToString(LastTargetDistance,2);
-   cvals[8]="spread "+IntegerToString(spread_points)+" / max "+IntegerToString(MaxSpreadPoints);
-   cvals[9]="SL "+DoubleToString(LastStopDistance,2)
-      +" | TP "+DoubleToString(LastTargetDistance,2)
-      +" | RR "+DoubleToString(checklist_rr,2)
-      +" | "+ModelTag(LastRiskModelHandler);
-
-   string cnames[10]={"Direction","Market trend","Trend strength","Model edge",
-      "Intrabar timing","AI trend","Market structure","Volatility","Entry cost","Risk / exit"};
-   string cstats[10];
-   color ccolors[10];
-
-   cstats[0]=(checklist_directional ? "SIGNAL" : "WAIT");
-   cstats[1]=(LastAiTrendConfirmed ? "CONFIRMED" : "NOT READY");
-   cstats[2]=PassFail(strength_pass);
-   cstats[3]=PassFail(edge_pass);
-   cstats[4]=PassFail(LastIntrabarConfirmed);
-   cstats[5]=PassFail(LastAiTrendConfirmed);
-   cstats[6]=(LastTargetStructureReady ? "READY" : "*LEARNING*");
-   cstats[7]=(checklist_volatility_ok ? "DATA OK" : "INVALID");
-   cstats[8]=PassFail(checklist_spread_pass);
-   cstats[9]=(checklist_risk_exit_ok ? "DEFINED" : "INVALID");
-
-   for(int i=0;i<10;i++) ccolors[i]=clrWhite;
-   ccolors[0]=(checklist_directional ? state_color : clrWhite);
-   ccolors[1]=(LastAiTrendConfirmed ? checklist_market_color : clrGold);
-   ccolors[2]=(strength_pass ? clrWhite : clrGold);
-   ccolors[3]=(edge_pass ? DirectionColor(dominant) : clrGold);
-   ccolors[4]=(LastIntrabarConfirmed ? DirectionColor(LastIntrabarDirection) : clrGold);
-   ccolors[5]=(LastAiTrendConfirmed ? DirectionColor(LastAiTrendDirection) : clrGold);
-   ccolors[6]=(LastTargetStructureReady ? clrWhite : clrGold);
-   ccolors[7]=(checklist_volatility_ok ? clrWhite : clrTomato);
-   ccolors[8]=(checklist_spread_pass ? clrWhite : clrGold);
-   ccolors[9]=(checklist_risk_exit_ok ? clrWhite : clrTomato);
-
-   for(int i=0;i<10;i++)
-   {
-      int cy=ry+7+i*row_h;
-      UiLabel("CXN_"+IntegerToString(i),IntegerToString(i+1),tx+12,cy,clrWhite,8);
-      UiLabel("CXK_"+IntegerToString(i),cnames[i],tx+38,cy,clrWhite,8);
-      UiLabel("CXV_"+IntegerToString(i),cvals[i],tx+184,cy,clrWhite,8);
-      UiLabel("CXS_"+IntegerToString(i),cstats[i],tx+442,cy,ccolors[i],8);
-   }
-
-   UiLabel("CHECK_NOTE","TRADE CHECK | * = SHADOW / LEARNING",
-      tx+12,ty+346,clrWhite,8);
-
    // ---------------------- model / handler map ----------------------
-   int mx=24, my=700, mw=520, mh=244;
+   int mx=24, my=320, mw=520, mh=244;
    UiRect("MODEL_MAP_BG",mx,my,mw,mh,C'17,27,46',C'71,85,105');
    UiRect("MODEL_MAP_HEAD",mx+4,my+4,mw-8,26,C'30,41,59',C'71,85,105');
    UiLabel("MODEL_MAP_TITLE","MODEL / HANDLER MAP",mx+12,my+9,clrWhite,10);
@@ -1551,17 +1433,17 @@ void DrawDashboard()
       ObjectSetString(0,UiPrefix+handler_id,OBJPROP_TOOLTIP,mtips[mi]);
    }
 
-   UiButton("COPY","COPY DIAGNOSTIC",28,958,176,30);
-   UiButton("CLOSE","CLOSE TRADE",218,958,110,30);
+   UiButton("COPY","COPY DIAGNOSTIC",28,578,176,30);
+   UiButton("CLOSE","CLOSE TRADE",218,578,110,30);
    ObjectSetInteger(0,UiPrefix+"CLOSE",OBJPROP_BGCOLOR,
       has_managed_position ? C'153,27,27' : C'55,65,81');
    ObjectSetInteger(0,UiPrefix+"CLOSE",OBJPROP_BORDER_COLOR,
       has_managed_position ? C'248,113,113' : C'75,85,99');
 
-   UiLabel("COPY_STATUS",LastCopyStatus,340,958,
+   UiLabel("COPY_STATUS",LastCopyStatus,340,578,
       (StringFind(LastCopyStatus,"failed")>=0 || StringFind(LastCopyStatus,"disabled")>=0
          ? clrTomato : clrWhite),8);
-   UiLabel("CLOSE_STATUS",LastCloseStatus,340,974,
+   UiLabel("CLOSE_STATUS",LastCloseStatus,340,594,
       (StringFind(LastCloseStatus,"FAILED")>=0 ? clrTomato : clrWhite),8);
 
    ChartRedraw();
