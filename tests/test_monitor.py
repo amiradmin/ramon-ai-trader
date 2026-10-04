@@ -166,7 +166,7 @@ def test_http_surface_only_reads_health_and_cannot_request_a_trade(sources, monk
             assert error.value.code == 404
         with pytest.raises(HTTPError) as error:
             urlopen(Request(url + "/api/snapshot", data=b"{}"), timeout=3)
-        assert error.value.code == 501
+        assert error.value.code == 404
         assert called == ["http://127.0.0.1:8012/health"]
     finally:
         server.shutdown()

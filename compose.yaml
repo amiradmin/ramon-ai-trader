@@ -71,7 +71,7 @@ services:
       - "127.0.0.1:8013:8013"
     volumes:
       - ./data:/data:ro
-      - ${HOME}/.mt5/drive_c/users:/mt5-users:ro
+      - ${HOME}/.mt5/drive_c/users:/mt5-users
 
   tools:
     profiles: ["tools"]

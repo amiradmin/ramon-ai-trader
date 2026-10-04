@@ -37,8 +37,8 @@ input bool AccountIsCent = true; // Configured account mode; MT5 ACCOUNT_CURRENC
 input bool ConfirmMoneyUnitsPerUSD = false; // Must be true before live trading can arm.
 input string ExpectedAccountCurrency = ""; // Optional exact ACCOUNT_CURRENCY check when non-empty.
 input double RiskPerTradeUSD = 0.06; // Preferred sizing budget.
-input bool AllowMinLotRiskOverride = true; // Permit minimum volume within the fixed executable risk cap.
-const double MaxExecutableRiskUSD = 0.35; // Hard fixed cap; MT5 chart inputs cannot override this value.
+input bool AllowMinLotRiskOverride = true; // Permit minimum volume within the executable risk cap.
+double MaxExecutableRiskUSD = 0.35; // Default; updated by the Control dashboard for PRIMARY.
 input int MaxSpreadPoints = 50;
 input int MaxTradesPerDay = 400;
 input int MaximumHoldBars = 4;
@@ -475,6 +475,18 @@ double SmallProfitRiskCapUnits()
    return MathMin(SmallProfitMaxLossUnits,SmallProfitMaxRiskUSD*MoneyUnitsPerUSD);
 }
 
+void ReadControlRiskCap()
+{
+   if(SmallOnlyMode) return;
+   int handle=FileOpen("Ramon_Control.txt",FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
+   if(handle==INVALID_HANDLE) return;
+   string raw=FileReadString(handle);
+   FileClose(handle);
+   double value=StringToDouble(raw);
+   if(MathIsValidNumber(value) && value>=0.01 && value<=0.50)
+      MaxExecutableRiskUSD=value;
+}
+
 double EffectiveRiskPerTradeUSD()
 {
    double multiplier=(LastRiskModelReady ? LastRiskMultiplier : 1.0);
@@ -758,6 +770,7 @@ string BuildDiagnosticText()
       +"  RiskMultiplier: "+DoubleToString(LastRiskMultiplier,2)+"x"
       +"  RiskBudgetAccountUnits: "+DoubleToString(LastRiskBudgetUnits,2)
       +"  RiskBudgetUSD: "+DoubleToString(AccountUnitsToUSD(LastRiskBudgetUnits),4)+"\n"
+      +"ControlBridge: "+(SmallOnlyMode ? "SMALL independent" : "PRIMARY file-v1")+"\n"
       +"MinLotOverride: "+(AllowMinLotRiskOverride ? "ON" : "OFF")
       +"  MaxExecutableRiskUSD: "+DoubleToString(MaxExecutableRiskUSD,2)
       +"  OverrideUsed: "+BoolText(LastMinLotOverrideUsed)+"\n"
@@ -1889,7 +1902,7 @@ double SelectVolume(ENUM_ORDER_TYPE direction,double entry,double stop)
    double money=0.0;
    if(!OrderCalcProfit(direction,_Symbol,minimum,entry,stop,money) || money>=0.0)
       return 0.0;
-   double budget=EffectiveRiskPerTradeUSD()*MoneyUnitsPerUSD;
+   double budget=MathMin(EffectiveRiskPerTradeUSD(),MaxExecutableRiskUSD)*MoneyUnitsPerUSD;
    double hard_cap=MaxExecutableRiskUSD*MoneyUnitsPerUSD;
    if(budget<=0.0 || hard_cap<=0.0)
       return 0.0;
@@ -3989,6 +4002,7 @@ void OnTick()
 
 void OnTimer()
 {
+   ReadControlRiskCap();
    ShowStatus();
    if(!(bool)TerminalInfoInteger(TERMINAL_CONNECTED))
    { StatusLine="Terminal disconnected"; ShowStatus(); return; }
@@ -4453,6 +4467,10 @@ void OnTimer()
       if(!SmallProfitTarget(side,entry,volume,tick,target))
       { StatusLine="Broker cannot place 2-cent target"; ShowStatus(); return; }
    }
+   double executable_loss=0.0;
+   if(!SmallOnlyMode && (!OrderCalcProfit(side,_Symbol,volume,entry,stop,executable_loss)
+      || executable_loss>=0.0 || -executable_loss>MaxExecutableRiskUnits()+0.00001))
+   { StatusLine="Entry risk exceeds Control cap"; ShowStatus(); return; }
    double margin=0.0;
    if(!OrderCalcMargin(side,_Symbol,volume,entry,margin)
       || margin>AccountInfoDouble(ACCOUNT_MARGIN_FREE)*0.8)
@@ -4580,6 +4598,7 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
 
 int OnInit()
 {
+   ReadControlRiskCap();
    if(_Symbol!=TradeSymbol || _Period!=PERIOD_M15 || StringFind(_Symbol,"XAUUSD")!=0)
    { Print("Attach only to ",TradeSymbol," M15"); return INIT_FAILED; }
    if(SmallOnlyMode && (MagicNumber!=SmallProfitMagicNumber
@@ -4589,7 +4608,6 @@ int OnInit()
    { Print("Primary mode cannot use the small-trade magic number"); return INIT_FAILED; }
    if(MoneyUnitsPerUSD<=0.0 || RiskPerTradeUSD<=0.0 || RiskPerTradeUSD>0.50
       || MaxExecutableRiskUSD<=0.0 || MaxExecutableRiskUSD>0.50
-      || MaxExecutableRiskUSD<EffectiveRiskPerTradeUSD()
       || MaxSpreadPoints<=0 || (!SmallOnlyMode && MaxTradesPerDay<1) || MaximumHoldBars<1
       || ProfitProtectionFallbackActivationUnits<=0.0
       || ProfitProtectionActivationMinUnits<=0.0

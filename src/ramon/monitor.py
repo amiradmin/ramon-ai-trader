@@ -1,4 +1,4 @@
-"""Independent, read-only decision flow monitor. Never calls /decision or MT5."""
+"""Decision flow monitor with an explicit, file-backed PRIMARY risk control."""
 from __future__ import annotations
 
 import argparse
@@ -11,6 +11,8 @@ from pathlib import Path
 import re
 import sqlite3
 import time
+import tempfile
+from urllib.parse import urlsplit
 from urllib.request import urlopen
 
 
@@ -508,11 +510,46 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
             "timeline": timeline, "trades": outcomes, "model_handler_map": model_handler_map, "warnings": warnings}
 
 
+def control_state(diagnostic):
+    diag, error = read_diagnostic(diagnostic)
+    path = Path(diagnostic).with_name("Ramon_Control.txt") if diagnostic else None
+    requested = None
+    if path and path.exists():
+        try:
+            requested = number(path.read_text().strip())
+        except OSError:
+            pass
+    observed = number(match(diag.get("MinLotOverride"), r"MaxExecutableRiskUSD: ([\d.]+)"))
+    return {"requested": requested, "observed": observed,
+            "supported": diag.get("ControlBridge") == "PRIMARY file-v1",
+            "fresh": freshness(diag.get("captured_epoch"), time.time(), 30)["state"] == "fresh",
+            "writable": bool(path and path.parent.is_dir() and os.access(path.parent, os.W_OK)),
+            "error": error, "default": 0.35, "minimum": 0.01, "maximum": 0.50}
+
+
+def save_control(diagnostic, value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0.01 <= value <= 0.50:
+        raise ValueError("مقدار باید عددی بین ۰٫۰۱ و ۰٫۵۰ دلار باشد")
+    if diagnostic is None:
+        raise ValueError("مسیر فایل اکسپرت در دسترس نیست")
+    path = Path(diagnostic).with_name("Ramon_Control.txt")
+    # Atomic replacement prevents the EA from reading a partially written cap.
+    with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as out:
+        temp = Path(out.name)
+        out.write(f"{value:.8f}\n")
+    try:
+        temp.replace(path)
+    finally:
+        temp.unlink(missing_ok=True)
+
+
 def handler_for(db, diagnostic, symbol, health_url):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             route = self.path.split("?", 1)[0]
-            if route == "/api/snapshot":
+            if route == "/api/control":
+                self.reply(json.dumps(control_state(diagnostic), ensure_ascii=False).encode(), "application/json; charset=utf-8")
+            elif route == "/api/snapshot":
                 health = None
                 try:
                     with urlopen(health_url, timeout=.7) as response:
@@ -521,12 +558,35 @@ def handler_for(db, diagnostic, symbol, health_url):
                     pass
                 data = build_snapshot(db, diagnostic, symbol=symbol, health=health)
                 self.reply(json.dumps(data, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
-            elif route in {"/", "/monitor", "/app.js", "/style.css"}:
-                filename = {"/": "index.html", "/monitor": "index.html", "/app.js": "app.js", "/style.css": "style.css"}[route]
-                content_type = {"index.html": "text/html", "app.js": "text/javascript", "style.css": "text/css"}[filename]
+            elif route in {"/", "/monitor", "/app.js", "/style.css", "/control", "/control.js"}:
+                filename = {"/": "index.html", "/monitor": "index.html", "/app.js": "app.js", "/style.css": "style.css", "/control": "control.html", "/control.js": "control.js"}[route]
+                content_type = {"index.html": "text/html", "app.js": "text/javascript", "style.css": "text/css", "control.html": "text/html", "control.js": "text/javascript"}[filename]
                 self.reply((ASSETS / filename).read_bytes(), content_type + "; charset=utf-8")
             else:
                 self.send_error(404)
+
+        def do_POST(self):
+            if self.path != "/api/control":
+                self.send_error(404)
+                return
+            origin = self.headers.get("Origin")
+            if origin and (urlsplit(origin).netloc != self.headers.get("Host") or urlsplit(origin).scheme not in {"http", "https"}):
+                self.send_error(403)
+                return
+            if self.headers.get("Content-Type", "").split(";")[0] != "application/json":
+                self.send_error(415)
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= 1024:
+                    raise ValueError("درخواست نامعتبر است")
+                payload = json.loads(self.rfile.read(length))
+                if not isinstance(payload, dict):
+                    raise ValueError("درخواست نامعتبر است")
+                save_control(diagnostic, payload.get("max_executable_risk_usd"))
+                self.reply(json.dumps(control_state(diagnostic), ensure_ascii=False).encode(), "application/json; charset=utf-8")
+            except (ValueError, OSError) as exc:
+                self.send_error(400, "Invalid control request" if isinstance(exc, ValueError) else "Control file unavailable")
 
         def reply(self, body, content_type):
             self.send_response(200)

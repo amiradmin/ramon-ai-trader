@@ -544,4 +544,5 @@ def test_range_main_quick_five_cent_target_contract():
 
 def test_max_executable_risk_cap_is_035():
     source = Path("mt5/Ramon.mq5").read_text(encoding="utf-8")
-    assert "const double MaxExecutableRiskUSD = 0.35;" in source
+    assert "double MaxExecutableRiskUSD = 0.35;" in source
+    assert "ReadControlRiskCap();" in source

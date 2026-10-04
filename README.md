@@ -752,3 +752,26 @@ PYTHONPATH=src .venv/bin/python -m ramon.policy_replay \
 ### اعتبار زمانی دادهٔ M1
 
 درخواست تصمیم دارای M1 باید `quote_time` داشته باشد. زمان شروع کندل‌ها باید با فاصلهٔ ۶۰ ثانیه افزایش یابد، آخرین کندل نباید در آینده باشد و حداکثر ۱۲۰ ثانیه از زمان شروع آن گذشته باشد. کندل جاری و در حال تشکیل در درخواست زنده مجاز است، چون EA آن را ارسال می‌کند؛ ارزیابی تاریخی فقط کندل‌های بسته‌شده را استفاده می‌کند. تمام مقایسه‌ها روی ساعت مشترک بروکر انجام می‌شوند.
+
+### Control dashboard
+
+The monitoring dashboard links to `/control`. This page previews changes to
+`MaxExecutableRiskUSD` (USD, 0.01–0.50) and atomically saves the requested value
+in `Ramon_Control.txt` beside the PRIMARY diagnostic in MT5 Common/Files.
+The updated `mt5/Ramon.mq5` must be compiled and reloaded for live application;
+an older EA continues using its fixed cap. The page distinguishes the saved
+request from the cap observed in a fresh diagnostic, so saving alone does not
+claim successful application. Reload/rebuild the monitor service to serve the
+new page. Docker's dashboard MT5 users mount must be writable (as configured
+in compose); the history database remains read-only.
+
+PRIMARY reads the control file at initialization and on every timer cycle.
+The default remains $0.35 if no control file exists at startup. Invalid files
+retain the last valid value. Raising the cap enables eligible minimum-lot
+exceptions but does not scale volume to the larger cap. Lowering it below the
+preferred risk budget limits normal sizing as well. A final pre-order risk
+check applies to PRIMARY entries, including Range; independent Range limits
+still apply. SMALL retains its separate limits. Existing positions and exit
+management are unchanged. The setting is shared by PRIMARY instances using
+the same MT5 Common/Files directory. Keep the dashboard on its configured
+localhost interface; it is a local control surface without account login.
