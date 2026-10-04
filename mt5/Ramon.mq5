@@ -4,7 +4,6 @@
 
 #include <Trade/Trade.mqh>
 
-#resource "RamonEye.bmp"
 
 #define RAMON_GMEM_MOVEABLE 0x0002
 #define RAMON_CF_UNICODETEXT 13
@@ -859,8 +858,48 @@ void UiButton(const string name,const string text,const int x,const int y,const 
    ObjectSetString(0,object,OBJPROP_TEXT,text);
 }
 
+bool RamonEyeResourceReady=false;
+
+bool EnsureRamonEyeResource()
+{
+   if(RamonEyeResourceReady)
+      return true;
+
+   uint run_lengths[]={499,1,1,35,1,1,1,2,1,1,1,31,1,1,1,1,3,1,1,1,29,1,1,1,1,3,1,1,1,1,1,27,1,1,1,1,1,1,1,1,1,1,1,1,1,1,26,1,1,1,1,1,1,1,1,1,1,1,1,1,1,26,1,1,1,1,1,1,1,1,1,1,1,1,1,1,25,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,25,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,26,1,1,1,1,1,1,1,1,1,1,1,1,1,1,26,1,1,1,1,1,1,1,1,1,1,1,1,1,1,26,1,1,1,1,1,1,1,1,1,1,2,1,1,27,1,1,1,1,1,2,1,1,2,1,29,1,1,1,1,3,2,1,31,1,1,1,1,1,1,1,1,536};
+   uint run_colors[]={0x00000000,0x20080850,0x10101040,0x00000000,0x30000060,0xA0101078,0xE0202080,0xF0100878,0xD0100870,0x90080858,0x20080848,0x00000000,0x80000068,0xF0282890,0xF07880D0,0xF04048C0,0xF01010B0,0xF01010A8,0xF0080868,0x60080850,0x00000000,0x80101070,0xF0101090,0xF02830C0,0xF02020B0,0xF0000098,0xF00808A0,0xF01010B8,0xF01010A8,0xF0100870,0x60080850,0x00000000,0x30202878,0xF0101090,0xF01010B0,0xF00808A0,0xF0000088,0xF03028A0,0xF06058B0,0xF04840A8,0xF0100898,0xF0080098,0xF01010A8,0xF01010B0,0xF0080868,0x20080848,0x00000000,0xA0182080,0xF01018B0,0xF01008A8,0xF0000090,0xF07068B8,0xF0D0D8E8,0xF0C8E0F0,0xF0D8E0E8,0xF0B8B8D8,0xF03030A0,0xF0080098,0xF01010B0,0xF0101098,0x80080858,0x00000000,0xE02028A8,0xF01010B8,0xF0000090,0xF04848A8,0xF0C8E8F0,0xF078C8F0,0xF060B0E0,0xF070C0E8,0xF0D0E8F0,0xF0A0A0C8,0xF0000080,0xF01008A8,0xF01010B0,0xD0100870,0x00000000,0x10283070,0xF02030B8,0xF01010A8,0xF0000088,0xF09090C8,0xF098E0F8,0xF04078A0,0xF0101820,0xF0386890,0xF090D0F0,0xF0C0C8D8,0xF0181090,0xF00800A0,0xF02020C0,0xE0202090,0x00000000,0x10303088,0xF02030C0,0xF01010A8,0xF0000088,0xF09898C8,0xF098E0F8,0xF0305880,0xF0000000,0xF0203858,0xF080C8F0,0xF0C8D0E0,0xF0201890,0xF01010A0,0xF03038C0,0xE0101098,0x00000000,0xD02030C8,0xF01010B0,0xF0000090,0xF06860B0,0xF0C8E8F8,0xF060B0E0,0xF04078A0,0xF050A0D0,0xF0B0E0F8,0xF0B0B0C8,0xF0080880,0xF02028A8,0xF02018A8,0xD0080898,0x00000000,0x901830D0,0xF01018C0,0xF0080090,0xF0100888,0xF0A0A0C0,0xF0D0E8F8,0xF0B8E8F8,0xF0C8E8F8,0xF0C0C8D8,0xF0303078,0xF0080088,0xF01010A0,0xF01008A0,0x90100890,0x00000000,0x202040D0,0xF01828C8,0xF01008A0,0xF0080090,0xF0080880,0xF0585898,0xF08080A8,0xF0686898,0xF0181870,0xF0000080,0xF0100898,0xF0100890,0x20101898,0x00000000,0x601830D0,0xF01020C8,0xF01008A0,0xF0080090,0xF0000080,0xF0000078,0xF0080088,0xF0100898,0xF01008A0,0x60101098,0x00000000,0x601830C8,0xF01820C0,0xF01010B8,0xF01010A8,0xF01008A0,0xF01010B0,0x601018A8,0x00000000,0x201830C8,0x801828C8,0xD01820B8,0xE01018B0,0xE01010B0,0xD01018B0,0x901820C0,0x201828B8,0x00000000};
+   if(ArraySize(run_lengths)!=ArraySize(run_colors))
+      return false;
+
+   uint pixels[];
+   if(ArrayResize(pixels,1600)!=1600)
+      return false;
+
+   int pos=0;
+   for(int i=0;i<ArraySize(run_lengths);i++)
+   {
+      for(uint j=0;j<run_lengths[i];j++)
+      {
+         if(pos>=1600)
+            return false;
+         pixels[pos++]=run_colors[i];
+      }
+   }
+   if(pos!=1600)
+      return false;
+
+   RamonEyeResourceReady=ResourceCreate(
+      "RamonEye",pixels,40,40,0,0,40,COLOR_FORMAT_ARGB_NORMALIZE
+   );
+   if(!RamonEyeResourceReady)
+      Print("Ramon eye resource creation failed err=",GetLastError());
+   return RamonEyeResourceReady;
+}
+
 void UiEyeLogo()
 {
+   if(!EnsureRamonEyeResource())
+      return;
+
    string object=UiPrefix+"EYE_LOGO";
    if(ObjectFind(0,object)<0)
       ObjectCreate(0,object,OBJ_BITMAP_LABEL,0,0,0);
@@ -868,13 +907,15 @@ void UiEyeLogo()
    ObjectSetInteger(0,object,OBJPROP_ANCHOR,ANCHOR_RIGHT_UPPER);
    ObjectSetInteger(0,object,OBJPROP_XDISTANCE,18);
    ObjectSetInteger(0,object,OBJPROP_YDISTANCE,18);
+   ObjectSetInteger(0,object,OBJPROP_XSIZE,40);
+   ObjectSetInteger(0,object,OBJPROP_YSIZE,40);
    ObjectSetInteger(0,object,OBJPROP_BACK,false);
    ObjectSetInteger(0,object,OBJPROP_SELECTABLE,false);
    ObjectSetInteger(0,object,OBJPROP_SELECTED,false);
    ObjectSetInteger(0,object,OBJPROP_HIDDEN,true);
-   ObjectSetString(0,object,OBJPROP_BMPFILE,0,"::RamonEye.bmp");
-   ObjectSetString(0,object,OBJPROP_BMPFILE,1,"::RamonEye.bmp");
+   ObjectSetString(0,object,OBJPROP_BMPFILE,"::RamonEye");
 }
+
 
 string PassFail(const bool value)
 {
@@ -4709,5 +4750,10 @@ void OnDeinit(const int reason)
    EventKillTimer();
    ObjectsDeleteAll(0,UiPrefix);
    ObjectsDeleteAll(0,TpUiPrefix);
+   if(RamonEyeResourceReady)
+   {
+      ResourceFree("::RamonEye");
+      RamonEyeResourceReady=false;
+   }
    Comment("");
 }
