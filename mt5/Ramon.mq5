@@ -1,8 +1,10 @@
 #property strict
-#property version "1.554"
+#property version "1.555"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
+
+#resource "RamonEye.bmp"
 
 #define RAMON_GMEM_MOVEABLE 0x0002
 #define RAMON_CF_UNICODETEXT 13
@@ -857,6 +859,23 @@ void UiButton(const string name,const string text,const int x,const int y,const 
    ObjectSetString(0,object,OBJPROP_TEXT,text);
 }
 
+void UiEyeLogo()
+{
+   string object=UiPrefix+"EYE_LOGO";
+   if(ObjectFind(0,object)<0)
+      ObjectCreate(0,object,OBJ_BITMAP_LABEL,0,0,0);
+   ObjectSetInteger(0,object,OBJPROP_CORNER,CORNER_RIGHT_UPPER);
+   ObjectSetInteger(0,object,OBJPROP_ANCHOR,ANCHOR_RIGHT_UPPER);
+   ObjectSetInteger(0,object,OBJPROP_XDISTANCE,18);
+   ObjectSetInteger(0,object,OBJPROP_YDISTANCE,18);
+   ObjectSetInteger(0,object,OBJPROP_BACK,false);
+   ObjectSetInteger(0,object,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,object,OBJPROP_SELECTED,false);
+   ObjectSetInteger(0,object,OBJPROP_HIDDEN,true);
+   ObjectSetString(0,object,OBJPROP_BMPFILE,0,"::RamonEye.bmp");
+   ObjectSetString(0,object,OBJPROP_BMPFILE,1,"::RamonEye.bmp");
+}
+
 string PassFail(const bool value)
 {
    return (value ? "PASS" : "FAIL");
@@ -1028,6 +1047,8 @@ void DrawDashboard()
       return;
    }
 
+   UiEyeLogo();
+
    int spread_points=(int)SymbolInfoInteger(_Symbol,SYMBOL_SPREAD);
    int today=TradesToday();
    bool lock_ok=AccountLockHealthy();
@@ -1091,7 +1112,7 @@ void DrawDashboard()
    // Tall/narrow panel: summary text first, checklist directly underneath.
    UiRect("PANEL",12,24,560,1015,C'15,23,42',C'71,85,105');
 
-   UiLabel("TITLE","RAMON AI TRADER  v0.55.4 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.55.5 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+" M15 | Forecast ["+ModelTag(LastForecastModelHandler)
       +"] | Shadow ["+ModelTag(LastForecastShadowModelHandler)+"] | "
