@@ -38,3 +38,25 @@ def test_import_skips_invalid_rows(tmp_path: Path) -> None:
     result = import_csv(tmp_path / "ramon.sqlite3", csv_path, symbol="XAUUSD_l")
     assert result["valid"] == 1
     assert result["skipped"] == 1
+
+
+def test_m5_history_is_stored_separately_from_live_m15_history(tmp_path: Path) -> None:
+    csv_path = tmp_path / "m5.csv"
+    csv_path.write_text(
+        "time,open,high,low,close,spread_points\n"
+        "1800000000,100,101,99,100.5,42\n"
+        "1800000300,100.5,102,100,101.5,43\n",
+        encoding="utf-8",
+    )
+    db = tmp_path / "ramon.sqlite3"
+    result = import_csv(db, csv_path, symbol="XAUUSD_l", timeframe="M5")
+    assert result["valid"] == 2
+    assert history_count(db) == 0  # Current live M15 model remains isolated.
+    import sqlite3
+
+    with sqlite3.connect(db) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*), MIN(spread_points), MAX(spread_points) "
+            "FROM history_bars WHERE symbol=? AND timeframe=?",
+            ("XAUUSD_l", "M5"),
+        ).fetchone() == (2, 42, 43)
