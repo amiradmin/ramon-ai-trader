@@ -1,5 +1,5 @@
 #property strict
-#property version "1.557"
+#property version "1.558"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -246,7 +246,7 @@ string LastCopyStatus = "Ready";
 string LastCloseStatus = "Ready";
 const string UiPrefix = "RAMON_UI_";
 const string TpUiPrefix = "RAMON_TP_";
-const string RamonEyeResourceName = "RamonEye96";
+const string RamonEyeResourceName = "RamonEyeHQ96";
 const int RamonEyeDisplaySize = 96;
 ulong ProfitProtectionTicket = 0;
 double ProfitProtectionPeakUnits = 0.0;
@@ -862,58 +862,133 @@ void UiButton(const string name,const string text,const int x,const int y,const 
 
 bool RamonEyeResourceReady=false;
 
+uint RamonARGB(const int a,const int r,const int g,const int b)
+{
+   int aa=(int)MathMax(0,MathMin(255,a));
+   int rr=(int)MathMax(0,MathMin(255,r));
+   int gg=(int)MathMax(0,MathMin(255,g));
+   int bb=(int)MathMax(0,MathMin(255,b));
+   return ((uint)aa<<24)|((uint)rr<<16)|((uint)gg<<8)|(uint)bb;
+}
+
+double RamonClamp01(const double value)
+{
+   return MathMax(0.0,MathMin(1.0,value));
+}
+
+double RamonSmooth(const double edge0,const double edge1,const double value)
+{
+   if(edge1<=edge0)
+      return (value>=edge1 ? 1.0 : 0.0);
+   double t=RamonClamp01((value-edge0)/(edge1-edge0));
+   return t*t*(3.0-2.0*t);
+}
+
 bool EnsureRamonEyeResource()
 {
    if(RamonEyeResourceReady)
       return true;
 
-   uint run_lengths[]={499,1,1,35,1,1,1,2,1,1,1,31,1,1,1,1,3,1,1,1,29,1,1,1,1,3,1,1,1,1,1,27,1,1,1,1,1,1,1,1,1,1,1,1,1,1,26,1,1,1,1,1,1,1,1,1,1,1,1,1,1,26,1,1,1,1,1,1,1,1,1,1,1,1,1,1,25,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,25,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,26,1,1,1,1,1,1,1,1,1,1,1,1,1,1,26,1,1,1,1,1,1,1,1,1,1,1,1,1,1,26,1,1,1,1,1,1,1,1,1,1,2,1,1,27,1,1,1,1,1,2,1,1,2,1,29,1,1,1,1,3,2,1,31,1,1,1,1,1,1,1,1,536};
-   uint run_colors[]={0x00000000,0x20080850,0x10101040,0x00000000,0x30000060,0xA0101078,0xE0202080,0xF0100878,0xD0100870,0x90080858,0x20080848,0x00000000,0x80000068,0xF0282890,0xF07880D0,0xF04048C0,0xF01010B0,0xF01010A8,0xF0080868,0x60080850,0x00000000,0x80101070,0xF0101090,0xF02830C0,0xF02020B0,0xF0000098,0xF00808A0,0xF01010B8,0xF01010A8,0xF0100870,0x60080850,0x00000000,0x30202878,0xF0101090,0xF01010B0,0xF00808A0,0xF0000088,0xF03028A0,0xF06058B0,0xF04840A8,0xF0100898,0xF0080098,0xF01010A8,0xF01010B0,0xF0080868,0x20080848,0x00000000,0xA0182080,0xF01018B0,0xF01008A8,0xF0000090,0xF07068B8,0xF0D0D8E8,0xF0C8E0F0,0xF0D8E0E8,0xF0B8B8D8,0xF03030A0,0xF0080098,0xF01010B0,0xF0101098,0x80080858,0x00000000,0xE02028A8,0xF01010B8,0xF0000090,0xF04848A8,0xF0C8E8F0,0xF078C8F0,0xF060B0E0,0xF070C0E8,0xF0D0E8F0,0xF0A0A0C8,0xF0000080,0xF01008A8,0xF01010B0,0xD0100870,0x00000000,0x10283070,0xF02030B8,0xF01010A8,0xF0000088,0xF09090C8,0xF098E0F8,0xF04078A0,0xF0101820,0xF0386890,0xF090D0F0,0xF0C0C8D8,0xF0181090,0xF00800A0,0xF02020C0,0xE0202090,0x00000000,0x10303088,0xF02030C0,0xF01010A8,0xF0000088,0xF09898C8,0xF098E0F8,0xF0305880,0xF0000000,0xF0203858,0xF080C8F0,0xF0C8D0E0,0xF0201890,0xF01010A0,0xF03038C0,0xE0101098,0x00000000,0xD02030C8,0xF01010B0,0xF0000090,0xF06860B0,0xF0C8E8F8,0xF060B0E0,0xF04078A0,0xF050A0D0,0xF0B0E0F8,0xF0B0B0C8,0xF0080880,0xF02028A8,0xF02018A8,0xD0080898,0x00000000,0x901830D0,0xF01018C0,0xF0080090,0xF0100888,0xF0A0A0C0,0xF0D0E8F8,0xF0B8E8F8,0xF0C8E8F8,0xF0C0C8D8,0xF0303078,0xF0080088,0xF01010A0,0xF01008A0,0x90100890,0x00000000,0x202040D0,0xF01828C8,0xF01008A0,0xF0080090,0xF0080880,0xF0585898,0xF08080A8,0xF0686898,0xF0181870,0xF0000080,0xF0100898,0xF0100890,0x20101898,0x00000000,0x601830D0,0xF01020C8,0xF01008A0,0xF0080090,0xF0000080,0xF0000078,0xF0080088,0xF0100898,0xF01008A0,0x60101098,0x00000000,0x601830C8,0xF01820C0,0xF01010B8,0xF01010A8,0xF01008A0,0xF01010B0,0x601018A8,0x00000000,0x201830C8,0x801828C8,0xD01820B8,0xE01018B0,0xE01010B0,0xD01018B0,0x901820C0,0x201828B8,0x00000000};
-   if(ArraySize(run_lengths)!=ArraySize(run_colors))
-      return false;
-
-   uint source_pixels[];
-   if(ArrayResize(source_pixels,1600)!=1600)
-      return false;
-
-   int pos=0;
-   for(int i=0;i<ArraySize(run_lengths);i++)
-   {
-      for(uint j=0;j<run_lengths[i];j++)
-      {
-         if(pos>=1600)
-            return false;
-         source_pixels[pos++]=run_colors[i];
-      }
-   }
-   if(pos!=1600)
-      return false;
-
-   // Scale the embedded 40x40 artwork to a true 48x48 resource.
-   // OBJ_BITMAP_LABEL does not reliably upscale a smaller resource just by
-   // increasing XSIZE/YSIZE, so create the larger bitmap explicitly.
-   const int source_size=40;
-   const int logo_size=96;
+   const int size=RamonEyeDisplaySize;
    uint pixels[];
-   if(ArrayResize(pixels,logo_size*logo_size)!=(logo_size*logo_size))
+   if(ArrayResize(pixels,size*size)!=(size*size))
       return false;
-   for(int y=0;y<logo_size;y++)
+
+   const double cx=47.5;
+   const double cy=48.0;
+   const double outer_r=43.0;
+   const double eye_cx=49.0;
+   const double eye_cy=50.0;
+
+   for(int y=0;y<size;y++)
    {
-      int sy=(y*source_size)/logo_size;
-      if(sy>=source_size) sy=source_size-1;
-      for(int x=0;x<logo_size;x++)
+      for(int x=0;x<size;x++)
       {
-         int sx=(x*source_size)/logo_size;
-         if(sx>=source_size) sx=source_size-1;
-         pixels[y*logo_size+x]=source_pixels[sy*source_size+sx];
+         double dx=x-cx;
+         double dy=y-cy;
+         double radius=MathSqrt(dx*dx+dy*dy);
+         uint pixel=0x00000000;
+
+         // Deep cobalt glass sphere with antialiased transparent edge.
+         if(radius<=outer_r+1.5)
+         {
+            double edge_alpha=1.0-RamonSmooth(outer_r-0.8,outer_r+1.5,radius);
+            double radial=RamonClamp01(1.0-radius/outer_r);
+            double light=MathExp(-((x-31.0)*(x-31.0)+(y-20.0)*(y-20.0))/150.0);
+            double side_glow=MathExp(-((x-73.0)*(x-73.0)+(y-48.0)*(y-48.0))/520.0);
+            double lower_shadow=RamonSmooth(48.0,86.0,(double)y);
+
+            int rr=(int)(8 + 15*radial + 34*light + 8*side_glow);
+            int gg=(int)(12 + 20*radial + 45*light + 10*side_glow);
+            int bb=(int)(105 + 92*radial + 52*light + 24*side_glow - 20*lower_shadow);
+            int aa=(int)(255.0*edge_alpha);
+            pixel=RamonARGB(aa,rr,gg,bb);
+
+            // Subtle brighter cobalt rim like the supplied glass charm.
+            double rim=RamonSmooth(35.0,41.5,radius)*(1.0-RamonSmooth(41.5,44.0,radius));
+            if(rim>0.0)
+            {
+               rr=(int)(rr+10*rim);
+               gg=(int)(gg+12*rim);
+               bb=(int)(bb+30*rim);
+               pixel=RamonARGB(aa,rr,gg,bb);
+            }
+         }
+
+         // Concentric nazar eye.
+         double ex=x-eye_cx;
+         double ey=y-eye_cy;
+         double er=MathSqrt(ex*ex+ey*ey);
+         if(er<21.5)
+         {
+            double ring_edge=1.0-RamonSmooth(20.2,21.5,er);
+            double shade=0.94+0.06*RamonClamp01((eye_cy-y+18.0)/36.0);
+            int v=(int)(245.0*shade);
+            pixel=RamonARGB((int)(255*ring_edge),v,v,MathMin(255,v+4));
+         }
+         if(er<13.2)
+         {
+            double iris_edge=1.0-RamonSmooth(12.0,13.2,er);
+            double iris_light=MathExp(-((x-44.0)*(x-44.0)+(y-43.0)*(y-43.0))/90.0);
+            int rr=(int)(40+18*iris_light);
+            int gg=(int)(160+55*iris_light);
+            int bb=(int)(205+38*iris_light);
+            pixel=RamonARGB((int)(255*iris_edge),rr,gg,bb);
+         }
+         if(er<7.2)
+         {
+            double pupil_edge=1.0-RamonSmooth(6.2,7.2,er);
+            int v=(int)(3+8*RamonClamp01(er/7.2));
+            pixel=RamonARGB((int)(255*pupil_edge),v,v,v+2);
+         }
+
+         // Crisp specular highlights from the new high-resolution reference.
+         double h1=MathExp(-((x-33.0)*(x-33.0)+(y-18.0)*(y-18.0))/13.0);
+         double h2=MathExp(-((x-42.0)*(x-42.0)+(y-17.0)*(y-17.0))/24.0);
+         double highlight=MathMax(h1,h2*0.82);
+         if(radius<outer_r && highlight>0.08)
+         {
+            uint base=pixel;
+            int a=(int)((base>>24)&255);
+            int r0=(int)((base>>16)&255);
+            int g0=(int)((base>>8)&255);
+            int b0=(int)(base&255);
+            double mix=RamonClamp01(highlight);
+            int rr=(int)(r0+(255-r0)*mix);
+            int gg=(int)(g0+(255-g0)*mix);
+            int bb=(int)(b0+(255-b0)*mix);
+            pixel=RamonARGB(a,rr,gg,bb);
+         }
+
+         pixels[y*size+x]=pixel;
       }
    }
 
    RamonEyeResourceReady=ResourceCreate(
-      RamonEyeResourceName,pixels,logo_size,logo_size,0,0,logo_size,COLOR_FORMAT_ARGB_NORMALIZE
+      RamonEyeResourceName,pixels,size,size,0,0,size,COLOR_FORMAT_ARGB_NORMALIZE
    );
    if(!RamonEyeResourceReady)
-      Print("Ramon eye resource creation failed err=",GetLastError());
+      Print("Ramon eye HQ resource creation failed err=",GetLastError());
    return RamonEyeResourceReady;
 }
 
@@ -923,9 +998,6 @@ void UiEyeLogo()
       return;
 
    string object=UiPrefix+"EYE_LOGO";
-
-   // Recreate the bitmap label so MT5 cannot keep an older small cached object.
-   ObjectDelete(0,object);
    if(ObjectFind(0,object)<0)
       ObjectCreate(0,object,OBJ_BITMAP_LABEL,0,0,0);
 
@@ -1178,7 +1250,7 @@ void DrawDashboard()
    // Tall/narrow panel: summary text first, checklist directly underneath.
    UiRect("PANEL",12,24,560,1015,C'15,23,42',C'71,85,105');
 
-   UiLabel("TITLE","RAMON AI TRADER  v0.55.7 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.55.8 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+" M15 | Forecast ["+ModelTag(LastForecastModelHandler)
       +"] | Shadow ["+ModelTag(LastForecastShadowModelHandler)+"] | "
