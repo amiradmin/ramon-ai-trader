@@ -1,5 +1,5 @@
 #property strict
-#property version "1.562"
+#property version "1.563"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -1199,6 +1199,11 @@ void DrawDashboard()
    string dominant=(LastBuyEdge>=LastSellEdge ? "BUY" : "SELL");
    color state_color=DirectionColor(LastModelDecision);
 
+   string live_reason="";
+   bool live_ready=LiveExecutionReady(live_reason);
+   color live_color=(live_ready && permissions && lock_ok ? clrWhite : clrTomato);
+   color sizing_color=DirectionColor(LastSizingSide);
+
    ulong managed_ticket=0;
    datetime managed_opened=0;
    bool has_managed_position=ManagedPosition(managed_ticket,managed_opened);
@@ -1219,7 +1224,7 @@ void DrawDashboard()
    // Compact panel: live summary plus model/handler map.
    UiRect("PANEL",12,24,560,655,C'15,23,42',C'71,85,105');
 
-   UiLabel("TITLE","RAMON AI TRADER  v0.56.2 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.56.3 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+" M15 | Forecast ["+ModelTag(LastForecastModelHandler)
       +"] | Shadow ["+ModelTag(LastForecastShadowModelHandler)+"] | "
