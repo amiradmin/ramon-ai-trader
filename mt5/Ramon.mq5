@@ -1,5 +1,5 @@
 #property strict
-#property version "1.556"
+#property version "1.557"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -246,6 +246,8 @@ string LastCopyStatus = "Ready";
 string LastCloseStatus = "Ready";
 const string UiPrefix = "RAMON_UI_";
 const string TpUiPrefix = "RAMON_TP_";
+const string RamonEyeResourceName = "RamonEye96";
+const int RamonEyeDisplaySize = 96;
 ulong ProfitProtectionTicket = 0;
 double ProfitProtectionPeakUnits = 0.0;
 double ProfitProtectionCurrentUnits = 0.0;
@@ -891,7 +893,7 @@ bool EnsureRamonEyeResource()
    // OBJ_BITMAP_LABEL does not reliably upscale a smaller resource just by
    // increasing XSIZE/YSIZE, so create the larger bitmap explicitly.
    const int source_size=40;
-   const int logo_size=48;
+   const int logo_size=96;
    uint pixels[];
    if(ArrayResize(pixels,logo_size*logo_size)!=(logo_size*logo_size))
       return false;
@@ -908,7 +910,7 @@ bool EnsureRamonEyeResource()
    }
 
    RamonEyeResourceReady=ResourceCreate(
-      "RamonEye",pixels,logo_size,logo_size,0,0,logo_size,COLOR_FORMAT_ARGB_NORMALIZE
+      RamonEyeResourceName,pixels,logo_size,logo_size,0,0,logo_size,COLOR_FORMAT_ARGB_NORMALIZE
    );
    if(!RamonEyeResourceReady)
       Print("Ramon eye resource creation failed err=",GetLastError());
@@ -921,21 +923,24 @@ void UiEyeLogo()
       return;
 
    string object=UiPrefix+"EYE_LOGO";
+
+   // Recreate the bitmap label so MT5 cannot keep an older small cached object.
+   ObjectDelete(0,object);
    if(ObjectFind(0,object)<0)
       ObjectCreate(0,object,OBJ_BITMAP_LABEL,0,0,0);
+
    ObjectSetInteger(0,object,OBJPROP_CORNER,CORNER_RIGHT_UPPER);
    ObjectSetInteger(0,object,OBJPROP_ANCHOR,ANCHOR_RIGHT_UPPER);
-   ObjectSetInteger(0,object,OBJPROP_XDISTANCE,22);
-   ObjectSetInteger(0,object,OBJPROP_YDISTANCE,22);
-   ObjectSetInteger(0,object,OBJPROP_XSIZE,48);
-   ObjectSetInteger(0,object,OBJPROP_YSIZE,48);
+   ObjectSetInteger(0,object,OBJPROP_XDISTANCE,28);
+   ObjectSetInteger(0,object,OBJPROP_YDISTANCE,20);
+   ObjectSetInteger(0,object,OBJPROP_XSIZE,RamonEyeDisplaySize);
+   ObjectSetInteger(0,object,OBJPROP_YSIZE,RamonEyeDisplaySize);
    ObjectSetInteger(0,object,OBJPROP_BACK,false);
    ObjectSetInteger(0,object,OBJPROP_SELECTABLE,false);
    ObjectSetInteger(0,object,OBJPROP_SELECTED,false);
    ObjectSetInteger(0,object,OBJPROP_HIDDEN,true);
-   ObjectSetString(0,object,OBJPROP_BMPFILE,"::RamonEye");
+   ObjectSetString(0,object,OBJPROP_BMPFILE,"::"+RamonEyeResourceName);
 }
-
 
 string PassFail(const bool value)
 {
@@ -1173,7 +1178,7 @@ void DrawDashboard()
    // Tall/narrow panel: summary text first, checklist directly underneath.
    UiRect("PANEL",12,24,560,1015,C'15,23,42',C'71,85,105');
 
-   UiLabel("TITLE","RAMON AI TRADER  v0.55.6 "
+   UiLabel("TITLE","RAMON AI TRADER  v0.55.7 "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+" M15 | Forecast ["+ModelTag(LastForecastModelHandler)
       +"] | Shadow ["+ModelTag(LastForecastShadowModelHandler)+"] | "
@@ -4772,7 +4777,7 @@ void OnDeinit(const int reason)
    ObjectsDeleteAll(0,TpUiPrefix);
    if(RamonEyeResourceReady)
    {
-      ResourceFree("::RamonEye");
+      ResourceFree("::"+RamonEyeResourceName);
       RamonEyeResourceReady=false;
    }
    Comment("");
