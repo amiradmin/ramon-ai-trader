@@ -235,7 +235,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
         def do_POST(self) -> None:
             nonlocal moment_future, finbert_future, latest_moment_payload
             nonlocal latest_finbert_payload, last_shadow_bar, last_finbert_event_key
-            if self.path not in {"/decision", "/trades"}:
+            if self.path not in {"/decision", "/trades", "/manual-override"}:
                 self.send_error(404)
                 return
             try:
