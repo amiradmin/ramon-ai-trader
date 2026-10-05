@@ -569,6 +569,9 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 response["sample_saved"] = 0
                 response["manual_overrides_active"] = sorted(active_overrides)
                 response["manual_override_count"] = len(active_overrides)
+                response["manual_execution_override"] = int(
+                    bool(active_overrides & {"entry_timing", "base", "decision"})
+                )
 
                 if history_db:
                     try:
@@ -621,7 +624,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                                               "entry_timing_rebound_atr": response.get("entry_timing_rebound_atr"),
                                               "entry_timing_turn": response.get("entry_timing_turn", 0),
                                               "manual_overrides_active": sorted(active_overrides),
-                                              "manual_override_rows": list(active_override_rows.values())},
+                                              "manual_override_rows": list(active_override_rows.values()),
+                                              "manual_execution_override": response.get("manual_execution_override", 0)},
                                     "settings": asdict(request_settings),
                                     "handlers": model_handlers(),
                                     "external_models": {
