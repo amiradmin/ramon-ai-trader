@@ -187,6 +187,19 @@ function resize(){const width=$("viewport").clientWidth;const scale=zoomed?1:Mat
 function render(){const changed=lastKey!==snapshot.sample_key;$("decision").textContent=snapshot.decision;$("reason").textContent=snapshot.reason_fa;const state=snapshot.nodes.find(n=>n.id==="decision")?.values["حالت بازار"];$("market-state").textContent=`حالت بازار: ${marketStates[state]||state||"ثبت نشده"}`;$("strategy").textContent=snapshot.nodes.find(n=>n.id==="decision")?.values["مسیر"]||"—";$("model-age").textContent=age(snapshot.model_freshness);$("model-time").textContent=formattedTime(snapshot.model_freshness.at,true);$("ea-age").textContent=age(snapshot.ea_freshness);$("ea-status").textContent=snapshot.ea_status;$("service-status").textContent=snapshot.nodes.find(n=>n.id==="service")?.state==="pass"?"پاسخ‌گو":"در دسترس نیست";$("source-link").textContent=snapshot.joined?`شناسهٔ مدل و اکسپرت یکسان · نسخه ${snapshot.ea_version||"—"}`:"شناسهٔ مدل و اکسپرت قابل تطبیق نیست";$("warning").hidden=snapshot.warnings.length===0;$("warning").textContent=snapshot.warnings.join(" · ");$("updated").textContent=`بازخوانی ${formattedTime(snapshot.generated_at)}`;$("sample-id").textContent=`DECISION ID ${snapshot.sample_key||"—"}`;renderNodes();renderEdges(changed);detail();renderReadiness();renderRoadmap();renderModelMap();renderHistory();resize();lastKey=snapshot.sample_key;}
 const opportunityDate=new Intl.DateTimeFormat("fa-IR",{timeZone:"Asia/Tehran",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
 const opportunitySet=(id,text)=>{$(id).textContent=text;};
+function percent(v){return typeof v==="number"&&Number.isFinite(v)&&v>=0&&v<=1?(v*100).toFixed(1)+"%":"—";}
+async function manualOpportunity(row,button){
+  if(button.disabled)return;
+  button.disabled=true;const old=button.textContent;button.textContent="در حال ارسال…";
+  try{
+    const response=await fetch("/api/manual-entry",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({direction:row.direction,signal_bar_time:row.signal_bar_time})});
+    let data={};try{data=await response.json();}catch{}
+    if(!response.ok||!data.queued)throw new Error(data.error||("HTTP "+response.status));
+    button.textContent="ارسال شد";
+    opportunitySet("opportunity-status","فرمان "+row.direction+" ارسال شد؛ EA قبل از بازکردن پوزیشن همهٔ قفل‌های اجرایی و ریسک را دوباره بررسی می‌کند.");
+    setTimeout(()=>void refreshOpportunities(),1500);
+  }catch(err){button.textContent="رد شد";opportunitySet("opportunity-status","ورود دستی انجام نشد: "+err.message);setTimeout(()=>{button.disabled=!row.actionable;button.textContent=old;},1800);}
+}
 function renderOpportunities(data){
   const body=$("opportunity-rows");body.replaceChildren();
   const labels={OPEN:"هنوز باز",TP_OBSERVED:"هدف در نمونه‌ها دیده شد",SL_OBSERVED:"حد ضرر در نمونه‌ها دیده شد",TIMEOUT_OBSERVED:"پایان ۴ ساعت",DATA_GAP:"نامشخص؛ شکاف داده"};
@@ -197,11 +210,17 @@ function renderOpportunities(data){
     const disposition=row.executed?"معاملهٔ بسته‌شده ثبت شده":row.model_approved?"سیگنال صادر شده؛ اجرای سفارش تأیید نشده":"مسدود";
     const cells=[opportunityDate.format(new Date(row.captured*1000)),row.strategy+" / "+row.direction,
       format(row.entry)+" / "+format(row.stop)+" / "+format(row.target),format(row.edge)+" / "+format(row.minimum_edge),
-      format(row.strength),disposition+" · علت نخست: "+(reasons[row.first_reason]||row.first_reason||"—")+(row.last_reason!==row.first_reason?" · آخرین: "+(reasons[row.last_reason]||row.last_reason||"—"):""),
+      format(row.strength),percent(row.success_probability),disposition+" · علت نخست: "+(reasons[row.first_reason]||row.first_reason||"—")+(row.last_reason!==row.first_reason?" · آخرین: "+(reasons[row.last_reason]||row.last_reason||"—"):""),
       (labels[row.outcome]||row.outcome)+(row.net_r!==null&&row.outcome!=="DATA_GAP"?" · "+format(row.net_r)+"R":"")];
-    cells.forEach((text,index)=>{const td=document.createElement("td");td.textContent=text;if([2,3,4].includes(index))td.dir="ltr";tr.append(td);});body.append(tr);
+    cells.forEach((text,index)=>{const td=document.createElement("td");td.textContent=text;if([2,3,4,5].includes(index))td.dir="ltr";tr.append(td);});
+    const action=document.createElement("td"),button=document.createElement("button");
+    button.type="button";button.className="opportunity-entry "+(row.direction==="BUY"?"buy":"sell");
+    button.textContent=row.actionable?"باز کردن "+row.direction:"منقضی";
+    button.disabled=!row.actionable;
+    button.title=row.actionable?"فرمان ورود به EA ارسال می‌شود؛ EA دوباره ریسک و قفل‌های اجرایی را بررسی می‌کند":"فقط فرصت‌های تازهٔ ۹۰ ثانیهٔ اخیر قابل اجرا هستند";
+    button.addEventListener("click",()=>manualOpportunity(row,button));action.append(button);tr.append(action);body.append(tr);
   }
-  opportunitySet("opportunity-status",data.error?"دریافت جدول ناموفق: "+data.error:(data.opportunities||[]).length?"آخرین ۲۴ ساعت · "+data.opportunities.length+" کاندید؛ ممکن است هم‌پوشان باشند · داده تا "+(data.as_of?opportunityDate.format(new Date(data.as_of*1000)):"—"):"هنوز کاندیدی با مزیت مثبت ثبت نشده");
+  opportunitySet("opportunity-status",data.error?"دریافت جدول ناموفق: "+data.error:(data.opportunities||[]).length?"آخرین ۲۴ ساعت · "+data.opportunities.length+" کاندید · دکمهٔ ورود تا "+(data.actionable_seconds||90)+" ثانیه فعال است · داده تا "+(data.as_of?opportunityDate.format(new Date(data.as_of*1000)):"—"):"هنوز کاندیدی با مزیت مثبت ثبت نشده");
 }
 async function refreshOpportunities(){try{const r=await fetch("/api/opportunities",{cache:"no-store"});if(!r.ok)throw Error();renderOpportunities(await r.json());}catch{opportunitySet("opportunity-status","دریافت جدول ناموفق؛ اطلاعات قبلی ممکن است قدیمی باشد");}}
 async function refresh(){if(busy)return;busy=true;clearTimeout(timer);const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),5000);try{const response=await fetch("/api/snapshot",{cache:"no-store",signal:controller.signal});if(!response.ok)throw Error("monitor unavailable");snapshot=await response.json();render();void refreshOpportunities();$("connection").textContent="داشبورد متصل";$("connection").className="connection connected";}catch{ $("connection").textContent="اتصال قطع است؛ تلاش مجدد";$("connection").className="connection error";$("warning").hidden=false;$("warning").textContent="ارتباط با داشبورد قطع شده است؛ داده‌های روی صفحه مربوط به آخرین دریافت هستند.";document.querySelectorAll(".node").forEach(e=>{e.className="node stale";const b=e.querySelector(".state-badge");b.className="state-badge stale";b.textContent="دادهٔ قدیمی";});if(snapshot){snapshot.nodes.forEach(n=>n.state="stale");detail();renderEdges(false);}}finally{clearTimeout(timeout);busy=false;timer=setTimeout(refresh,3000);}}
