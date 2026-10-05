@@ -455,14 +455,25 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
     ea_status = diag.get("Status", "وضعیت اکسپرت در دسترس نیست")
     nodes = []
 
+    engine_labels = {
+        "forecast": "AI · Chronos",
+        "edge": "AI→Logic",
+        "strength": "AI→Logic",
+        "base": "AI+Logic",
+        "shadow": "AI · Shadow",
+        "decision": "AI+Logic",
+    }
+
     def node(id, title, status, detail, *, source="model", values=None):
         stamp = ea_time if source == "ea" else model_time
         if source == "health":
             stamp = {"state": "fresh" if health and health.get("ready") else "unknown", "at": utc_time(now), "age_seconds": 0}
         effective = status if stamp["state"] == "fresh" else "stale" if stamp["state"] in {"stale", "clock_error"} else "unknown"
         nodes.append({"id": id, "title": title, "state": effective, "observed_state": status,
-                      "detail": detail, "source": source, "observed_at": stamp["at"],
-                      "age_seconds": stamp["age_seconds"], "values": values or {}})
+                      "detail": detail, "source": source, "engine": engine_labels.get(id),
+                      "manual_override_supported": id in {"timing", "extension", "edge", "strength", "market_direction", "entry_timing", "base", "decision", "range"},
+                      "observed_at": stamp["at"], "age_seconds": stamp["age_seconds"],
+                      "values": values or {}})
 
     market_status = "blocked" if any(x in ea_status.lower() for x in ("stale", "disconnected", "symbol trading disabled")) else "observed" if diag else "unknown"
     node("market", "دادهٔ بازار و قیمت", market_status, ea_status, source="ea",
