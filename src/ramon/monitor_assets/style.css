@@ -111,3 +111,28 @@
 .opportunity-table tbody tr.opportunity-confidence-medium:hover{background:rgba(118,104,35,.34)}
 .opportunity-table tbody tr.opportunity-confidence-neutral:hover{background:rgba(75,88,110,.30)}
 .opportunity-table tbody tr.opportunity-confidence-low:hover{background:rgba(120,52,58,.38)}
+
+
+/* Portrait desktop mode: give the decision flow the full monitor width.
+   This targets rotated desktop displays without changing the normal landscape layout. */
+@media (orientation:portrait) and (min-width:801px){
+  main{max-width:none;padding:22px 16px 56px}
+  .workspace{display:flex;flex-direction:column;gap:16px}
+  .flow-panel,.detail-panel{width:100%}
+  .flow-panel{order:1}
+  .detail-panel{order:2;position:static;padding:22px 26px}
+  .detail-panel dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 28px}
+  .detail-panel .override-action,.detail-panel .audit-note,.detail-panel .detail-source{grid-column:1/-1}
+  .canvas-viewport{max-height:none;min-height:1040px}
+  .panel-heading{padding:17px 20px;gap:14px;align-items:flex-start}
+  .flow-controls{flex-wrap:wrap;justify-content:flex-start;gap:9px}
+  .legend{padding:13px 20px;gap:13px;font-size:11px}
+  .node-title{font-size:15px}
+  .node-detail{font-size:11px;line-height:1.9}
+  #edges text{font-size:11px}
+  .flow-footer{font-size:10px;padding:13px 18px}
+  .summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .readiness-criteria{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .roadmap-steps{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .model-map-table{font-size:12px}
+}
