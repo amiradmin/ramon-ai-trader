@@ -8,7 +8,7 @@
 <body>
   <header class="topbar">
     <div class="brand" dir="ltr"><span class="brand-icon">R</span><strong>RAMON</strong><span class="brand-divider"></span><span class="brand-caption">DECISION FLOW</span></div>
-    <div class="top-actions"><a href="/control" class="nav-link">Control · کنترل ریسک</a><span class="readonly">فقط مشاهده</span><span id="connection" role="status" class="connection">در حال اتصال</span></div>
+    <div class="top-actions"><a href="/control" class="nav-link">Control · کنترل ریسک</a><span class="readonly">مشاهده + ورود دستی کنترل‌شده</span><span id="connection" role="status" class="connection">در حال اتصال</span></div>
   </header>
   <main>
     <section class="page-heading"><div><span class="eyebrow">از مشاهدهٔ بازار تا اجرای معامله</span><h1>رامون چطور تصمیم می‌گیرد؟</h1><p>هر مرحله را انتخاب کن؛ شرط، مقدار و دلیل توقف را ببین.</p></div><div class="instrument" dir="ltr"><strong>XAUUSD_l</strong><span>M15 · CHRONOS-2</span></div></section>
@@ -41,7 +41,7 @@
         <header class="panel-heading"><div><span class="eyebrow">DECISION PATH</span><h2>فلوچارت تصمیم‌گیری</h2></div><div class="flow-controls"><span id="updated">—</span><button id="copy-analysis" type="button" class="copy-analysis" aria-label="کپی بسته کامل تحلیل تصمیم">COPY ANALYSIS</button><button id="reset-overrides" type="button" class="reset-overrides" aria-label="غیرفعال کردن همه عبورهای دستی">RESET PASS</button><button id="zoom" type="button" aria-label="بزرگ‌نمایی فلوچارت">＋</button><button id="refresh" type="button" aria-label="به‌روزرسانی وضعیت">↻</button></div></header>
         <div class="legend"><span><i class="dot pass"></i>شرط برقرار</span><span><i class="dot blocked"></i>شرط ردشده</span><span><i class="dot active"></i>پوزیشن باز</span><span><i class="dot shadow"></i>ناظر</span><span><i class="dot stale"></i>قدیمی</span><span><i class="dot unknown"></i>نامشخص</span></div>
         <div class="canvas-viewport" id="viewport"><div id="canvas-space"><div id="canvas" class="canvas" dir="rtl"><svg id="edges" viewBox="0 0 1020 1190" aria-hidden="true"></svg><div id="nodes"></div><div class="flow-note"><strong>سیگنال ≠ سفارش</strong><p>خط سبز شرط ثبت‌شده را نشان می‌دهد. عبور واقعی از تمام قفل‌ها فقط با شواهد اکسپرت تأیید می‌شود.</p><span>اتصال، تصمیم مدل و وضعیت اجرا سه منبع جدا هستند.</span></div></div></div></div>
-        <footer class="flow-footer"><span>بازخوانی هر ۳ ثانیه · بدون ارسال درخواست معامله</span><span id="sample-id" dir="ltr">DECISION ID —</span></footer>
+        <footer class="flow-footer"><span>بازخوانی هر ۳ ثانیه · ورود دستی فقط با کلیک و تأیید دوبارهٔ EA</span><span id="sample-id" dir="ltr">DECISION ID —</span></footer>
       </div>
       <aside class="detail-panel" aria-label="جزئیات مرحله">
         <div class="detail-top"><span class="eyebrow">INSPECT A STEP</span><h2 id="detail-title">تصمیم نهایی مدل</h2><span id="detail-state" class="state-badge unknown">در انتظار</span></div>
@@ -61,9 +61,9 @@
     <div id="model-map-tooltip" class="model-map-tooltip" role="tooltip" hidden></div>
     <section class="market-detail-card">
       <span class="eyebrow">OPPORTUNITY LEDGER</span><h2>فرصت‌های دارای مزیت مثبت مدل</h2>
-      <p>این جدول سفارش ارسال نمی‌کند. مزیت مثبت، سود تضمین‌شده نیست؛ هر جهت در هر کندل M15 یک‌بار ثبت می‌شود. نتایج از قیمت‌های نمونه‌برداری‌شده‌اند و هزینهٔ کمیسیون و لغزش را شامل نمی‌شوند.</p>
+      <p>مزیت مثبت، سود تضمین‌شده نیست. درصد موفقیت از مدل Direction Quality می‌آید؛ اگر مدل نمونهٔ معتبر نداشته باشد «—» نمایش داده می‌شود. دکمهٔ ورود فقط برای فرصت تازه فعال است و EA پیش از سفارش همهٔ کنترل‌های اجرایی و ریسک را دوباره بررسی می‌کند.</p>
       <p id="opportunity-status" aria-live="polite">در حال دریافت…</p>
-      <div class="opportunity-scroll"><table class="opportunity-table"><thead><tr><th>زمان تهران</th><th>مسیر / جهت</th><th>ورود / حد ضرر / هدف</th><th>مزیت / حداقل</th><th>قدرت</th><th>تصمیم و دلیل</th><th>نتیجهٔ فرضی</th></tr></thead><tbody id="opportunity-rows"></tbody></table></div>
+      <div class="opportunity-scroll"><table class="opportunity-table"><thead><tr><th>زمان تهران</th><th>مسیر / جهت</th><th>ورود / حد ضرر / هدف</th><th>مزیت / حداقل</th><th>قدرت</th><th>موفقیت پیش‌بینی‌شده</th><th>تصمیم و دلیل</th><th>نتیجهٔ فرضی</th><th>اقدام</th></tr></thead><tbody id="opportunity-rows"></tbody></table></div>
     </section>
     <section class="history-grid">
       <div class="history-panel"><header class="panel-heading"><div><span class="eyebrow">RECORDED DECISIONS</span><h2>آخرین تصمیم‌های مدل</h2></div><span class="muted">زمان دریافت توسط سرویس</span></header><div id="timeline" class="timeline"></div></div>
