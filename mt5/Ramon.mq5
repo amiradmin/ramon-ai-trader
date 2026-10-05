@@ -1,6 +1,6 @@
 #property strict
-#property version "1.566"
-#define RAMON_EA_VERSION "0.56.6"
+#property version "1.567"
+#define RAMON_EA_VERSION "0.56.7"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -4207,6 +4207,7 @@ void OnTimer()
    string ai_trend_direction="";
    double ai_trend_confirmed=0.0,ai_trend_score=0.0,ai_trend_move_atr=0.0,ai_trend_consistency=0.0;
    double trend_min_path_atr=0.0,trend_min_consistency=0.0,trend_min_edge_fraction=0.0,trend_min_micro_move_atr=0.0;
+   double manual_execution_override=0.0;
    if(!JsonText(reply,"decision",decision)
       || !JsonText(reply,"reason",reason)
       || !JsonText(reply,"sample_key",sample_key)
@@ -4263,6 +4264,7 @@ void OnTimer()
       || !JsonNumber(reply,"trend_min_consistency",trend_min_consistency)
       || !JsonNumber(reply,"trend_min_edge_fraction",trend_min_edge_fraction)
       || !JsonNumber(reply,"trend_min_micro_move_atr",trend_min_micro_move_atr)
+      || !JsonNumber(reply,"manual_execution_override",manual_execution_override)
       || !JsonNumber(reply,"spread_points",model_spread)
       || !JsonNumber(reply,"stop_distance",stop_distance)
       || !JsonNumber(reply,"target_distance",target_distance)
@@ -4524,9 +4526,13 @@ void OnTimer()
    double range_execution=0.0,range_stop=0.0,range_target=0.0,range_low=0.0,range_high=0.0;
    JsonNumber(reply,"range_execution",range_execution);
    bool range_trade=(range_execution>=0.5);
-   if(!range_trade && (intrabar_confirmed<0.5 || ai_trend_confirmed<0.5
+   if(!range_trade && manual_execution_override<0.5
+      && (intrabar_confirmed<0.5 || ai_trend_confirmed<0.5
       || intrabar_direction!=decision || ai_trend_direction!=decision))
    { StatusLine="DIRECTION GUARD: normal entry needs aligned confirmations"; ShowStatus(); return; }
+   if(!range_trade && manual_execution_override>=0.5)
+      Print("Ramon execution: MANUAL EXECUTION OVERRIDE accepted for ",decision,
+         " sample=",sample_key);
 
    if(range_trade)
    {
