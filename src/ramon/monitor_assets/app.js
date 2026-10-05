@@ -217,9 +217,19 @@ function renderOpportunities(data){
     cells.forEach((text,index)=>{const td=document.createElement("td");td.textContent=text;if([2,3,4,5].includes(index))td.dir="ltr";tr.append(td);});
     const action=document.createElement("td"),button=document.createElement("button");
     button.type="button";button.className="opportunity-entry "+(row.direction==="BUY"?"buy":"sell");
-    button.textContent=row.actionable?"باز کردن "+row.direction:"منقضی";
-    button.disabled=!row.actionable;
-    button.title=row.actionable?"فرمان ورود به EA ارسال می‌شود؛ EA دوباره ریسک و قفل‌های اجرایی را بررسی می‌کند":"فقط فرصت‌های تازهٔ ۹۰ ثانیهٔ اخیر قابل اجرا هستند";
+    if(row.position_open){
+      button.textContent="پوزیشن باز است";
+      button.disabled=true;
+      button.title="این فرصت همین حالا پوزیشن باز دارد"+(row.position_ticket?" · Ticket "+row.position_ticket:"");
+    }else if(row.entry_queued){
+      button.textContent="در صف اجرا";
+      button.disabled=true;
+      button.title="فرمان این فرصت قبلاً برای EA ارسال شده است";
+    }else{
+      button.textContent=row.actionable?"باز کردن "+row.direction:"منقضی";
+      button.disabled=!row.actionable;
+      button.title=row.actionable?"فرمان ورود به EA ارسال می‌شود؛ EA دوباره ریسک و قفل‌های اجرایی را بررسی می‌کند":"فقط فرصت‌های تازهٔ ۹۰ ثانیهٔ اخیر قابل اجرا هستند";
+    }
     button.addEventListener("click",()=>manualOpportunity(row,button));action.append(button);tr.append(action);body.append(tr);
   }
   const perf=snapshot&&snapshot.dashboard_opportunity_performance;
