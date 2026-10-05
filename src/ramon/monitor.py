@@ -665,7 +665,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
          source="ea", values={"پوزیشن": position or None, "مرحلهٔ TP": diag.get("TPStage"), "قفل سود": diag.get("TPStageLock"),
                               "خروج زیان": diag.get("EarlyAdverseExit"), "توقف خروج بازار بسته": diag.get("MarketClosedExitPause")})
     edges = [
-        ("market", "forecast", "بازار"), ("service", "forecast", "آماده"),
+        ("market", "service", "داده"), ("service", "forecast", "آماده"),
         ("forecast", "timing", "قفل"), ("timing", "extension", "امتداد"), ("extension", "edge", "مزیت"), ("edge", "strength", "قدرت"),
         ("strength", "confirmation", "تأیید"), ("confirmation", "base", "تصمیم"),
         ("base", "decision", "عادی"), ("forecast", "shadow", "ناظر"),
