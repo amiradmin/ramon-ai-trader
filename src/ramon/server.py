@@ -545,7 +545,11 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         response["reason"] = "finbert_sentiment_veto"
                         response["range_execution"] = 0
 
-                if "decision" in active_overrides and str(response.get("decision", "")) == "WAIT":
+                if "range" in active_overrides and range_setup is not None:
+                    response["decision"] = range_setup["direction"]
+                    response["reason"] = "manual_override_range_pass"
+                    response["range_execution"] = 1
+                elif "decision" in active_overrides and str(response.get("decision", "")) == "WAIT":
                     response["decision"] = dominant_direction(result)
                     response["reason"] = "manual_override_final_pass"
                     response["range_execution"] = 0
