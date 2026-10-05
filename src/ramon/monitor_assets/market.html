@@ -28,6 +28,34 @@
       <article><span>Anomaly / News</span><strong id="mr-anomaly">—</strong><small id="mr-news">—</small></article>
     </section>
 
+    <section class="sahar-flow-section">
+      <header class="panel-heading sahar-flow-heading">
+        <div><span class="eyebrow">DECISION PATH</span><h2>فلوچارت تصمیم‌گیری Ramon</h2><p>روی هر مرحله کلیک کن تا وضعیت و داده‌های همان مرحله را ببینی.</p></div>
+        <button id="sahar-flow-zoom" type="button" class="trace-zoom" aria-label="بزرگ‌نمایی فلوچارت">بزرگ‌نمایی ＋</button>
+      </header>
+      <div class="legend sahar-flow-legend">
+        <span><i class="dot pass"></i>شرط برقرار</span>
+        <span><i class="dot blocked"></i>شرط ردشده</span>
+        <span><i class="dot active"></i>پوزیشن باز</span>
+        <span><i class="dot shadow"></i>ناظر</span>
+        <span><i class="dot stale"></i>قدیمی</span>
+        <span><i class="dot unknown"></i>نامشخص</span>
+      </div>
+      <div class="sahar-flow-viewport" id="sahar-flow-viewport">
+        <div id="sahar-flow-space">
+          <div id="sahar-flow-canvas" dir="rtl">
+            <svg id="sahar-flow-edges" viewBox="0 0 1020 1190" aria-hidden="true"></svg>
+            <div id="sahar-flow-nodes"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sahar-flow-detail">
+        <div class="detail-top"><span class="eyebrow">INSPECT A STEP</span><h2 id="sahar-flow-detail-title">تصمیم نهایی مدل</h2><span id="sahar-flow-detail-state" class="state-badge unknown">در انتظار</span></div>
+        <p id="sahar-flow-detail-description" class="detail-description">یک مرحله را در فلوچارت انتخاب کن.</p>
+        <dl id="sahar-flow-detail-values"></dl>
+      </div>
+    </section>
+
     <section class="market-review-grid">
       <div class="market-chart-card">
         <header><div><span class="eyebrow">PRICE ACTION</span><h2>کندل‌های اخیر</h2></div><div class="market-chart-tabs"><button type="button" class="active" data-tf="m15">M15</button><button type="button" data-tf="m1">M1</button></div></header>
