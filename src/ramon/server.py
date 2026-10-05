@@ -253,11 +253,14 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         raise ValueError("unsupported override stage")
                     if not sample_key or signal_bar_time <= 0:
                         raise ValueError("sample_key and signal_bar_time are required")
+                    action = str(payload.get("action", "FORCE_PASS"))
+                    if action not in {"FORCE_PASS", "REVIEW_ONLY"}:
+                        raise ValueError("unsupported override action")
                     row = {
                         "stage": stage,
                         "sample_key": sample_key,
                         "signal_bar_time": signal_bar_time,
-                        "action": "FORCE_PASS",
+                        "action": action,
                         "requested_utc": int(time.time()),
                         "original_state": payload.get("original_state"),
                         "original_reason": payload.get("original_reason"),
