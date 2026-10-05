@@ -96,3 +96,9 @@
 @media(max-width:700px){.market-review-main{padding:18px 12px 40px}.market-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.market-detail-grid{grid-template-columns:1fr}.market-chart-card{padding:12px}.market-chart-card header{align-items:flex-start;flex-direction:column}.market-chart-footer{flex-direction:column}.market-detail-card dl>div{grid-template-columns:1fr}.market-detail-card dd{text-align:right}}
 .opportunity-scroll{overflow-x:auto}.opportunity-table{width:100%;border-collapse:collapse;font-size:13px;min-width:850px}.opportunity-table th,.opportunity-table td{padding:12px 10px;text-align:right;border-bottom:1px solid #29364a;vertical-align:top}.opportunity-table th{color:#a7b8ce}.opportunity-table td{font-variant-numeric:tabular-nums}.opportunity-table tbody tr:hover{background:#172336}
 .opportunity-scroll{max-height:560px;overflow:auto}.opportunity-table th{position:sticky;top:0;background:#101925;z-index:1}
+
+.opportunity-entry{min-width:108px;border:1px solid var(--border);border-radius:8px;padding:7px 10px;background:#172131;color:var(--text);cursor:pointer;font:700 10px monospace;white-space:nowrap}
+.opportunity-entry.buy{border-color:#3f7565;color:var(--green);background:#173a32}
+.opportunity-entry.sell{border-color:#75434a;color:var(--red);background:#3e272e}
+.opportunity-entry:disabled{opacity:.38;cursor:not-allowed;filter:grayscale(.4)}
+.opportunity-table th:last-child,.opportunity-table td:last-child{text-align:center;white-space:nowrap}
