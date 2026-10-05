@@ -619,12 +619,12 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
                                              "شرایط هم‌زمان": assessment.get("conditions", []),
                                              "شواهد تشخیص": assessment.get("evidence", {})})
     # These are terminal observations, not a replay of gates that short-circuit.
-    node("news", "قفل خبر", "blocked" if "NEWS GUARD" in ea_status else "observed" if diag.get("News") else "unknown",
+    node("news", "قفل خبر", "blocked" if "NEWS GUARD" in ea_status else "pass" if diag.get("News") else "unknown",
          "ورود از ۳۰ دقیقه قبل تا ۳۰ دقیقه بعدِ خبر پراثر متوقف است؛ تقویم نامعتبر هم مانع ورود است",
          source="ea", values={"آخرین خبر": diag.get("News"), "وضعیت اکسپرت": ea_status if "NEWS GUARD" in ea_status else "عبور از این گیت در هر تصمیم ثبت نشده"})
     live = match(diag.get("Live"), r"^(\w+)")
     permissions = diag.get("Trade permissions", "")
-    node("account", "حساب، مجوز و حالت زنده", "blocked" if live in {"BLOCKED", "OFF", "OBSERVE"} or "NO" in permissions or "AccountLock: FAIL" in diag.get("Live", "") else "observed" if live else "unknown",
+    node("account", "حساب، مجوز و حالت زنده", "blocked" if live in {"BLOCKED", "OFF", "OBSERVE"} or "NO" in permissions or "AccountLock: FAIL" in diag.get("Live", "") else "pass" if live else "unknown",
          "وضعیت مشاهده‌شدهٔ مجوزها؛ مجوز به معنی ارسال سفارش نیست", source="ea",
          values={"حالت": live, "قفل حساب": match(diag.get("Live"), r"AccountLock: (\w+)"),
                  "مجوز ترمینال": match(permissions, r"terminal=(\w+)"),
@@ -632,12 +632,12 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
                  "مجوز حساب": match(permissions, r"account=(\w+)"),
                  "واحد حساب در هر دلار": number(match(diag.get("MoneyUnitsConfirmed"), r"MoneyUnitsPerUSD: ([\d.]+)"))})
     cooldown_block = any(x in ea_status for x in ("cooldown", "Daily trade limit", "Entry already used", "history unavailable", "ACCOUNT LOSS LIMITS"))
-    node("limits", "محدودیت ورود و زیان حساب", "blocked" if cooldown_block else "unknown",
+    node("limits", "محدودیت ورود و زیان حساب", "blocked" if cooldown_block else "pass" if diag else "unknown",
          ea_status if cooldown_block else "بعد از دو SL زیان‌دهٔ پیاپی هم‌جهت: ۳۰ دقیقه وقفه؛ یک ورود MAIN در هر M15",
          source="ea", values={"ورودهای امروز": diag.get("Trades today"), "قفل زیان حساب": diag.get("AccountLossLimits"), "وقفهٔ رنج": "۵ دقیقه پس از بسته‌شدن",
                                "نتیجهٔ اجرای گیت": "ثبت نشده" if not cooldown_block else ea_status})
     risk = diag.get("RiskGate", "")
-    node("risk", "حجم، ریسک و مارجین", "blocked" if "BLOCK" in risk or any(x in ea_status for x in ("risk >", "hard risk cap", "Insufficient margin", "SL risk >", "TP not inside", "reward/risk <")) else "observed" if risk else "unknown",
+    node("risk", "حجم، ریسک و مارجین", "blocked" if "BLOCK" in risk or any(x in ea_status for x in ("risk >", "hard risk cap", "Insufficient margin", "SL risk >", "TP not inside", "reward/risk <")) else "pass" if risk else "unknown",
          "پیش‌نمایش ریسک با تأیید نهایی هنگام سفارش فرق دارد", source="ea",
          values={"پیش‌نمایش ریسک": risk or None,
                  "بودجهٔ ترجیحی، دلار": number(match(diag.get("RiskPerTradeUSD"), r"^([\d.]+)")),
