@@ -725,7 +725,8 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
                          "at": utc_time(row["closed"] - offset) if offset is not None else None,
                          "broker_at": utc_time(row["closed"]) if offset is None else None,
                          "time_basis": "UTC" if offset is not None else "broker time unknown offset",
-                         "strategy": row.get("entry_strategy"), "role": row.get("trade_role")})
+                         "strategy": row.get("entry_strategy"), "role": row.get("trade_role"),
+                         "entry_source": row.get("entry_source") or "AUTO_RAMON"})
     handlers = audit.get("handlers") if isinstance(audit.get("handlers"), dict) else {}
     external_models = audit.get("external_models") if isinstance(audit.get("external_models"), dict) else {}
     moment_snapshot = external_models.get("moment") if isinstance(external_models.get("moment"), dict) else {}
