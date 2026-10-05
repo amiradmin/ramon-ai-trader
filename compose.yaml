@@ -73,6 +73,35 @@ services:
       - ./data:/data:ro
       - ${HOME}/.mt5/drive_c/users:/mt5-users
 
+  market-dashboard:
+    image: ramon-ai-trader:local
+    init: true
+    restart: unless-stopped
+    depends_on:
+      model:
+        condition: service_healthy
+    command:
+      - python
+      - -m
+      - ramon.market_dashboard
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8014"
+      - --db
+      - /data/ramon_history.sqlite3
+      - --health-url
+      - http://model:8012/health
+      - --model-url
+      - http://model:8012
+    environment:
+      RAMON_MT5_USERS_ROOT: /mt5-users
+    ports:
+      - "8014:8014"
+    volumes:
+      - ./data:/data:ro
+      - ${HOME}/.mt5/drive_c/users:/mt5-users:ro
+
   trade-outbox:
     image: ramon-ai-trader:local
     init: true
