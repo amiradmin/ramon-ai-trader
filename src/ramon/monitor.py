@@ -1070,7 +1070,11 @@ def handler_for(db, diagnostic, symbol, health_url):
                     "original_state": node_row.get("state"),
                     "original_reason": snap.get("reason"),
                     "node_values": node_row.get("values", {}),
-                    "action": "FORCE_PASS" if stage in pass_allowed else "REVIEW_ONLY",
+                    "action": (
+                        "FORCE_PASS"
+                        if stage in pass_allowed and node_row.get("state") == "blocked"
+                        else "REVIEW_ONLY"
+                    ),
                 }
                 model_url = health_url.rsplit("/health", 1)[0] + "/manual-override"
                 request = Request(
