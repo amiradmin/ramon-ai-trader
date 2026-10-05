@@ -456,7 +456,7 @@ def recent_market_context(db, symbol="XAUUSD_l", m15_limit=12, m1_limit=15):
                         "time": int(t),
                         "open": float(o),
                         "high": float(h),
-                        "low": float(l),
+                        "low": float(lo),
                         "close": float(cl),
                         "spread_points": int(spread or 0),
                         "body": float(cl - o),
