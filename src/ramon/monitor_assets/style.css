@@ -61,3 +61,6 @@
 .override-button{width:100%;min-height:44px;border:1px solid #8b6b2e;border-radius:8px;background:#3b2e18;color:#f1c86f;font:600 12px inherit;cursor:pointer}
 .override-button:hover{background:#4a381c}.override-button:disabled{opacity:.55;cursor:default}
 .override-help{margin-top:8px;color:var(--muted);font-size:9px;line-height:1.8}
+
+.node-engine{font:700 9px monospace;color:#8fd3ff;border:1px solid #35556f;background:#162b3b;border-radius:999px;padding:2px 6px;line-height:1;white-space:nowrap}
+.node-engine[hidden]{display:none}
