@@ -17,7 +17,7 @@ def test_terminal_cooldown_against_broker_history_cases(tmp_path):
     if not compiler:
         pytest.skip('C++ compiler required for MQL history adapter')
     source = (ROOT / 'mt5/Ramon.mq5').read_text()
-    functions = source[source.index('int ReadCooldownPosition('):source.index('void SyncClosedTrades()')]
+    functions = source[source.index('int ReadCooldownPosition('):source.index('string TradeOutboxPath(')]
     functions = functions.replace('ulong identifiers[];', 'std::vector<ulong> identifiers;')
     functions = functions.replace('long exit_times[];', 'std::vector<long> exit_times;')
     harness = r'''
@@ -134,7 +134,7 @@ def test_execution_gate_precedes_order_and_does_not_gate_position_management():
     timer = source[source.index('void OnTimer()'):]
     assert timer.index('ManageOpenPosition()') < timer.index('LocalLossCooldownBlocked(decision,cooldown_reason)')
     assert timer.index('LocalLossCooldownBlocked(decision,cooldown_reason)') < timer.index('Trade.Buy(')
-    gate = source[source.index('int ReadCooldownPosition('):source.index('void SyncClosedTrades()')]
+    gate = source[source.index('int ReadCooldownPosition('):source.index('string TradeOutboxPath(')]
     assert 'WebRequest' not in gate
     assert 'ValidSampleKey' not in gate
     assert 'training_status' not in gate

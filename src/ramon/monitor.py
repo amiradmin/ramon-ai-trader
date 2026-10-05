@@ -438,13 +438,17 @@ def income_roadmap(readiness, diag):
     }
 
 
-def recent_market_context(db, symbol="XAUUSD_l", m15_limit=12, m1_limit=15):
+def recent_market_context(db, symbol="XAUUSD_l", m15_limit=12, m1_limit=15, *, signal_bar_time=None, quote_time=None):
+    """Historical context, not the exact candles supplied to the selected decision.
+
+    Stored bars use the broker clock; no per-bar UTC offset is persisted.
+    """
     path = Path(db)
     if not path.is_file():
         return {"m15": [], "m1": []}
     result = {"m15": [], "m1": []}
     try:
-        with sqlite3.connect(path) as con:
+        with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True) as con:
             for timeframe, limit, key in (("M15", m15_limit, "m15"), ("M1", m1_limit, "m1")):
                 rows = con.execute(
                     """SELECT time,open,high,low,close,COALESCE(spread_points,0)
@@ -457,6 +461,7 @@ def recent_market_context(db, symbol="XAUUSD_l", m15_limit=12, m1_limit=15):
                 result[key] = [
                     {
                         "time": int(t),
+                        "time_basis": "broker time unknown offset",
                         "open": float(o),
                         "high": float(h),
                         "low": float(lo),
@@ -469,6 +474,22 @@ def recent_market_context(db, symbol="XAUUSD_l", m15_limit=12, m1_limit=15):
                 ]
     except sqlite3.Error:
         return {"m15": [], "m1": []}
+    warnings = []
+    if any(result.values()):
+        warnings.append("زمان کندل‌های تاریخچه به وقت بروکر است؛ اختلاف با UTC ثبت نشده و این کندل‌ها ورودی دقیق تصمیم نیستند")
+    signal = number(signal_bar_time)
+    quote = number(quote_time)
+    reference = quote if quote is not None else signal + 900 if signal is not None else None
+    if signal is not None and result["m15"] and result["m15"][-1]["time"] != signal:
+        warnings.append("آخرین کندل M15 تاریخچه با کندل سیگنال تصمیم یکسان نیست")
+    if reference is not None:
+        if not result["m1"]:
+            warnings.append("کندل M1 در تاریخچه موجود نیست؛ ورودی زندهٔ M1 از این گزارش قابل تأیید نیست")
+        elif reference - result["m1"][-1]["time"] > 120:
+            warnings.append("کندل‌های M1 تاریخچه نسبت به زمان تصمیم قدیمی‌اند؛ آن‌ها را ورودی زندهٔ مدل تلقی نکنید")
+        elif result["m1"][-1]["time"] > reference:
+            warnings.append("آخرین کندل M1 تاریخچه بعد از زمان تصمیم است؛ ورودی همان تصمیم نیست")
+    result["warnings"] = warnings
     return result
 
 
@@ -975,7 +996,11 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
         "net_units": dashboard_net,
     }
     roadmap = income_roadmap(readiness, diag)
+    recent_market = recent_market_context(
+        db, symbol, signal_bar_time=base.get("signal_bar_time"), quote_time=sample.get("quote_time")
+    )
     warnings = [x for x in (diag_error, db_error) if x]
+    warnings.extend(recent_market.get("warnings", []))
     if model_time["state"] != "fresh":
         warnings.append("تصمیم مدل تازه نیست؛ آخرین تصمیم ثبت‌شده نمایش داده می‌شود")
     if ea_time["state"] != "fresh":
@@ -1003,7 +1028,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
             "ea_version": diag.get("EA version"), "nodes": nodes,
             "edges": [{"from": a, "to": b, "label": label} for a, b, label in edges],
             "timeline": timeline, "trades": outcomes, "model_handler_map": model_handler_map,
-            "recent_market": recent_market_context(db, symbol),
+            "recent_market": recent_market,
             "dollar_readiness": readiness, "dashboard_opportunity_performance": dashboard_performance,
             "income_roadmap": roadmap, "warnings": warnings}
 
@@ -1065,12 +1090,13 @@ def analysis_bundle(snapshot: dict, selected_stage: str = "") -> str:
 
     recent_market = snapshot.get("recent_market") if isinstance(snapshot.get("recent_market"), dict) else {}
     for key, label in (("m15", "M15"), ("m1", "M1")):
-        lines.extend(["", f"=== {label} CANDLES (oldest -> newest) ==="])
+        lines.extend(["", f"=== {label} CANDLES (oldest -> newest; historical context, not exact decision input) ==="])
         rows = recent_market.get(key) if isinstance(recent_market.get(key), list) else []
         if not rows:
             lines.append("NO DATA")
         for bar in rows:
-            stamp = utc_time(bar.get("time"))
+            raw_stamp = utc_time(bar.get("time"))
+            stamp = (raw_stamp.removesuffix("+00:00") + " (broker time; UTC offset unknown)") if raw_stamp else "UNKNOWN TIME"
             lines.append(
                 f"{stamp} | O {bar.get('open')} H {bar.get('high')} "
                 f"L {bar.get('low')} C {bar.get('close')} | "

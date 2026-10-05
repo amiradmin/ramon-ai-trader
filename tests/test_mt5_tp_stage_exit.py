@@ -1,6 +1,7 @@
 """Run the production MQL TP manager through a small terminal adapter."""
 from pathlib import Path
 import shutil
+import re
 import subprocess
 import pytest
 
@@ -11,6 +12,8 @@ def test_tp_stage_requires_distinct_fresh_snapshots_and_keeps_price_exits(tmp_pa
         pytest.skip('C++ adapter compiler unavailable')
     s=Path('mt5/Ramon.mq5').read_text()
     fn=s[s.index('bool ManageTPStages('):s.index('void ResetMainFastProfitState()')]
+    timing = '\n'.join(re.search(r'const int ' + name + r' = \d+;', s).group() for name in ('ExitWeakSnapshotSpacingSeconds', 'ExitModelFreshnessSeconds'))
+    timing += '\n' + s[s.index('void UpdateWeakConfirmation('):s.index('void ReadControlRiskCap()')]
     harness=r'''
 #include <string>
 #include <cmath>
@@ -20,7 +23,7 @@ struct MqlTick { double bid=101.1,ask=101.2; };
 string TPStageDirection="BUY",TPStageStatus,StatusLine,LastModelDecision="WAIT",detail;
 int TPStage=1,TPStageWeakSnapshots=0,SnapshotIntervalSeconds=30,TPStageWeakSnapshotsRequired=2;
 int TP1GraceSeconds=30,TP2GraceSeconds=30,MaxDeviationPoints=20;
-datetime TPStageHitTime=1000,TPStageLastDecisionTime=1000,LastModelSnapshotTime=1030,now=1030;
+datetime TPStageHitTime=1000,TPStageLastDecisionTime=1000,LastModelSnapshotTime=1030,now=1030,TPStageLastWeakCountTime=0;
 double TPStageTP1=101,TPStageTP2=102,TPStageTP3=103,TPStageProgress=0;
 double TP1RetraceFraction=.2,TP2RetraceFraction=.2,TP1HealthyProgressFraction=.35;
 int POSITION_PRICE_OPEN=0,attempts=0;
@@ -47,7 +50,7 @@ template<class... T>void Print(T...){}
 '''
     cases=r'''
 void reset(){TPStage=1;TPStageWeakSnapshots=0;TPStageHitTime=1000;TPStageLastDecisionTime=1000;
- LastModelSnapshotTime=now=1030;LastModelDecision="WAIT";TPStageDirection="BUY";
+ LastModelSnapshotTime=now=1030;TPStageLastWeakCountTime=0;LastModelDecision="WAIT";TPStageDirection="BUY";
  price=101.1;attempts=0;supportive=paused=false;success=true;detail="";}
 int main(){
  reset();assert(!ManageTPStages(1));assert(TPStageWeakSnapshots==1);
@@ -67,7 +70,7 @@ int main(){
  assert(!ManageTPStages(1));now=LastModelSnapshotTime=1060;assert(ManageTPStages(1));assert(attempts==1);
 }
 '''
-    cpp=tmp_path/'tp.cpp';cpp.write_text(harness+fn+cases)
+    cpp=tmp_path/'tp.cpp';cpp.write_text(harness+timing+fn+cases)
     binary=tmp_path/'tp'
     subprocess.run([compiler,'-std=c++17',str(cpp),'-o',str(binary)],check=True,capture_output=True,text=True)
     subprocess.run([str(binary)],check=True,capture_output=True,text=True)

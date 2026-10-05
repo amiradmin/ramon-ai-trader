@@ -1,5 +1,6 @@
 from dataclasses import replace
 import sqlite3
+import pytest
 from ramon.core import Bar,Market
 from ramon.range_shadow import observe
 
@@ -51,7 +52,8 @@ def test_live_requires_capability_and_never_overrides_primary_or_veto():
  assert live_candidate(replace(m,ask=m.bid+1),{'decision':'WAIT','reason':'insufficient_model_strength'},**kwargs) is None
 
 
-def test_http_range_protocol_and_sample_provenance(tmp_path,monkeypatch):
+@pytest.mark.parametrize('manual', [False, True])
+def test_http_range_protocol_and_sample_provenance(tmp_path,monkeypatch,manual):
  import json,socket,threading,time
  from urllib.request import Request,urlopen
  from ramon.server import serve
@@ -77,10 +79,16 @@ def test_http_range_protocol_and_sample_provenance(tmp_path,monkeypatch):
   except OSError:time.sleep(.01)
  def send(p):
   with urlopen(Request(url+'/decision',data=json.dumps(p).encode(),headers={'Content-Type':'application/json'})) as f:return json.load(f)
- assert send(payload)['decision']=='WAIT'
+ first=send(payload)
+ assert first['decision']=='WAIT'
+ if manual:
+  override={'stage':'range','sample_key':first['sample_key'],'signal_bar_time':m.bars[-1].time,'action':'FORCE_PASS'}
+  with urlopen(Request(url+'/manual-override',data=json.dumps(override).encode(),headers={'Content-Type':'application/json'})) as f:
+   assert json.load(f)['active']==['range']
  time.sleep(1.05)
  result=send(payload|{'range_execution_ready':True})
  assert result['decision']=='BUY' and result['range_execution']==1
+ assert result['reason']==('manual_override_range_pass' if manual else 'range_reversal_buy')
  assert result['target_tp3']==0 and result['target_method']=='range_midpoint'
  assert abs(result['range_target_price']-100)<1e-9 and result['sample_saved']==1
  with sqlite3.connect(tmp_path/'history.db') as c:

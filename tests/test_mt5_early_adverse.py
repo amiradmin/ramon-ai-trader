@@ -1,6 +1,7 @@
 """Exercise the actual MQL adverse-exit function with a terminal API adapter."""
 from pathlib import Path
 import shutil
+import re
 import subprocess
 
 import pytest
@@ -16,6 +17,8 @@ def test_early_adverse_exit_against_position_and_snapshot_cases(tmp_path):
     source = (ROOT / "mt5/Ramon.mq5").read_text()
     functions = source[source.index("void ResetEarlyAdverseState()"):
                        source.index("void SelectDynamicProfitProtectionThresholds(")]
+    timing = '\n'.join(re.search(r'const int ' + name + r' = \d+;', source).group() for name in ('ExitWeakSnapshotSpacingSeconds', 'ExitModelFreshnessSeconds'))
+    timing += '\n' + source[source.index('void UpdateWeakConfirmation('):source.index('void ReadControlRiskCap()')]
     harness = r'''
 #include <string>
 #include <cmath>
@@ -31,7 +34,7 @@ ulong EarlyAdverseTicket=0;
 double EarlyAdverseInitialRiskUnits=0,EarlyAdverseTriggerLossUnits=0;
 double EarlyAdverseAppliedRiskFraction=0;
 int EarlyAdverseWeakSnapshots=0;
-datetime EarlyAdverseLastDecisionTime=0;
+datetime EarlyAdverseLastDecisionTime=0,EarlyAdverseLastWeakCountTime=0;
 bool EarlyAdverseTriggered=false;
 datetime LastModelSnapshotTime=0;
 string LastModelDecision="WAIT",LastIntrabarDirection="NONE",LastAiTrendDirection="NONE";
@@ -115,7 +118,7 @@ int main(){
 }
 '''
     adapter = tmp_path / "adverse.cpp"
-    adapter.write_text(harness + functions + cases)
+    adapter.write_text(harness + timing + functions + cases)
     binary = tmp_path / "adverse"
     subprocess.run([compiler, "-std=c++17", str(adapter), "-o", str(binary)],
                    check=True, capture_output=True, text=True)

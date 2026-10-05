@@ -2,9 +2,9 @@ from pathlib import Path
 
 
 def test_managed_position_guard_precedes_live_order_submission():
-    source = Path("mt5/Ramon.mq5").read_text(encoding="utf-8")
+    source = Path("mt5/Ramon.mq5").read_text(encoding="utf-8").split("void OnTimer()", 1)[1]
 
-    guard = "if(ManagedPosition(ticket,opened))"
+    guard = "if(managed_position_open && !dashboard_manual_entry)"
     buy = "Trade.Buy(volume,_Symbol"
     sell = "Trade.Sell(volume,_Symbol"
 
@@ -26,8 +26,9 @@ def test_managed_position_guard_precedes_live_order_submission():
 def test_learning_continues_while_execution_remains_single_position():
     source = Path("mt5/Ramon.mq5").read_text(encoding="utf-8")
 
-    marker = "// Learning snapshots continue while positions exist; execution remains single-position."
-    guard = "if(ManagedPosition(ticket,opened))"
+    marker = "AppendSignalCsv();"
+    guard = "if(managed_position_open && !dashboard_manual_entry)"
 
     assert marker in source
-    assert source.find(marker) < source.find(guard)
+    timer = source.split("void OnTimer()", 1)[1]
+    assert timer.find(marker) < timer.find(guard)

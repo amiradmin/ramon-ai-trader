@@ -1,6 +1,6 @@
 #property strict
-#property version "1.577"
-#define RAMON_EA_VERSION "0.57.7"
+#property version "1.578"
+#define RAMON_EA_VERSION "0.57.8"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -1960,6 +1960,14 @@ bool SmallProfitTarget(const ENUM_ORDER_TYPE side,const double entry,
          return gain<=SmallProfitTargetUnits+0.25;
    }
    return false;
+}
+
+bool RangeMainReasonValid(const string decision,const string reason)
+{
+   if(decision!="BUY" && decision!="SELL") return false;
+   return reason=="manual_override_range_pass"
+      || (decision=="BUY" && reason=="range_reversal_buy")
+      || (decision=="SELL" && reason=="range_reversal_sell");
 }
 
 bool RangeMainRewardRiskValid(const ENUM_ORDER_TYPE side,const double entry,
@@ -4681,7 +4689,8 @@ void OnTimer()
 
    if(!dashboard_manual_entry && ManagedPosition(ticket,opened) && ManageNewsGuard(ticket))
    { ShowStatus(); return; }
-   if(!dashboard_manual_entry && NewsGuardEntryBlocked())
+   // Human selection bypasses analytical vetoes, not execution safety gates.
+   if(NewsGuardEntryBlocked())
    { StatusLine="NEWS GUARD: entry paused (high-impact window or calendar unavailable)"; ShowStatus(); return; }
 
    // Automatic Ramon entries remain single-position. Dashboard opportunity entries
@@ -4743,18 +4752,18 @@ void OnTimer()
    if(SymbolInfoInteger(_Symbol,SYMBOL_TRADE_MODE)!=SYMBOL_TRADE_MODE_FULL)
    { StatusLine="Symbol trading disabled"; ShowStatus(); return; }
    string account_loss_reason="";
-   if(!dashboard_manual_entry && AccountLossLimitsBlocked(account_loss_reason))
+   if(AccountLossLimitsBlocked(account_loss_reason))
    { StatusLine=account_loss_reason; ShowStatus(); return; }
    string cooldown_reason="";
-   if(!dashboard_manual_entry && LocalLossCooldownBlocked(decision,cooldown_reason))
+   if(LocalLossCooldownBlocked(decision,cooldown_reason))
    { StatusLine=cooldown_reason; ShowStatus(); return; }
    int today=(SmallOnlyMode ? 0 : TradesToday());
-   if(!dashboard_manual_entry && !SmallOnlyMode && (today<0 || today>=MaxTradesPerDay))
+   if(!SmallOnlyMode && (today<0 || today>=MaxTradesPerDay))
    { StatusLine="Daily trade limit/history unavailable"; ShowStatus(); return; }
    MqlTick tick;
    if(!SymbolInfoTick(_Symbol,tick) || TimeCurrent()-tick.time>30)
    { StatusLine="Quote changed/stale"; ShowStatus(); return; }
-   if(!dashboard_manual_entry && (int)SymbolInfoInteger(_Symbol,SYMBOL_SPREAD)>MaxSpreadPoints)
+   if((int)SymbolInfoInteger(_Symbol,SYMBOL_SPREAD)>MaxSpreadPoints)
    { StatusLine="Quote changed/stale"; ShowStatus(); return; }
    if(stop_distance<=0.0 || target_distance<=0.0 || atr<=0.0)
    { StatusLine="Invalid stop/target"; ShowStatus(); return; }
@@ -4772,7 +4781,7 @@ void OnTimer()
    if(range_trade)
    {
       if(!EnableRangeMain || SmallOnlyMode || small_profit
-         || (reason!="range_reversal_buy" && reason!="range_reversal_sell")
+         || !RangeMainReasonValid(decision,reason)
          || !JsonNumber(reply,"range_stop_price",range_stop)
          || !JsonNumber(reply,"range_target_price",range_target)
          || !JsonNumber(reply,"range_low",range_low)
