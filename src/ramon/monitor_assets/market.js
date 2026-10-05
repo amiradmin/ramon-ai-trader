@@ -66,6 +66,30 @@ function renderOpinions(rows){
   for(const r of rows||[]){const item=document.createElement("article");item.className="recent-opinion";const top=document.createElement("div"),strong=document.createElement("strong"),span=document.createElement("span");strong.textContent=r.opinion;span.textContent=r.confidence+"/5";top.append(strong,span);const tm=document.createElement("small");tm.textContent=r.created_utc?fullFmt.format(new Date(r.created_utc*1000)):"—";const p=document.createElement("p");p.textContent=r.note||"بدون توضیح";item.append(top,tm,p);box.append(item);}
   if(!(rows||[]).length){const p=document.createElement("p");p.className="empty";p.textContent="هنوز نظری ثبت نشده";box.append(p);}
 }
+async function saharManualOpportunity(row,button){
+  if(button.disabled)return;
+  if(!confirm("باز کردن "+row.direction+" برای این فرصت؟"))return;
+  button.disabled=true;
+  const old=button.textContent;
+  button.textContent="در حال ارسال…";
+  try{
+    const response=await fetch("/api/manual-entry",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({direction:row.direction,signal_bar_time:row.signal_bar_time})
+    });
+    let data={};
+    try{data=await response.json();}catch{}
+    if(!response.ok||!data.queued)throw new Error(data.error||("HTTP "+response.status));
+    button.textContent="در صف اجرا";
+    set("sahar-opportunity-status","فرمان "+row.direction+" ارسال شد؛ EA قبل از ورود کنترل‌های اجرایی و ریسک را بررسی می‌کند.");
+    setTimeout(()=>void refresh(),1200);
+  }catch(e){
+    button.textContent="رد شد";
+    set("sahar-opportunity-status","ورود انجام نشد: "+e.message);
+    setTimeout(()=>{button.disabled=!row.actionable;button.textContent=old;},1800);
+  }
+}
 function renderSaharOpportunities(data){
   const body=$("sahar-opportunity-rows");body.replaceChildren();
   const labels={OPEN:"هنوز باز",TP_OBSERVED:"هدف دیده شد",SL_OBSERVED:"حد ضرر دیده شد",TIMEOUT_OBSERVED:"پایان ۴ ساعت",DATA_GAP:"شکاف داده"};
@@ -79,9 +103,26 @@ function renderSaharOpportunities(data){
       fmt(row.entry)+" / "+fmt(row.stop)+" / "+fmt(row.target),fmt(row.edge)+" / "+fmt(row.minimum_edge),
       fmt(row.strength),pct(row.success_probability),disposition+" · "+txt(row.last_reason),
       (labels[row.outcome]||row.outcome)+(row.net_r!==null&&row.outcome!=="DATA_GAP"?" · "+fmt(row.net_r)+"R":"")];
-    cells.forEach((text,index)=>{const td=document.createElement("td");td.textContent=text;if([2,3,4,5].includes(index))td.dir="ltr";tr.append(td);});body.append(tr);
+    cells.forEach((text,index)=>{const td=document.createElement("td");td.textContent=text;if([2,3,4,5].includes(index))td.dir="ltr";tr.append(td);});
+    const action=document.createElement("td"),button=document.createElement("button");
+    button.type="button";button.className="opportunity-entry "+(row.direction==="BUY"?"buy":"sell");
+    if(row.position_open){
+      button.textContent="پوزیشن باز است";
+      button.disabled=true;
+      button.title="این فرصت همین حالا پوزیشن باز دارد"+(row.position_ticket?" · Ticket "+row.position_ticket:"");
+    }else if(row.entry_queued){
+      button.textContent="در صف اجرا";
+      button.disabled=true;
+      button.title="فرمان این فرصت قبلاً برای EA ارسال شده است";
+    }else{
+      button.textContent=row.actionable?"باز کردن "+row.direction:"منقضی";
+      button.disabled=!row.actionable;
+      button.title=row.actionable?"ارسال ورود دستی کنترل‌شده به EA":"فقط فرصت‌های تازه قابل اجرا هستند";
+    }
+    button.addEventListener("click",()=>saharManualOpportunity(row,button));
+    action.append(button);tr.append(action);body.append(tr);
   }
-  set("sahar-opportunity-status",data.error?"دریافت جدول ناموفق: "+data.error:(data.opportunities||[]).length?"آخرین ۲۴ ساعت · "+data.opportunities.length+" فرصت · رنگ بر اساس احتمال موفقیت مدل":"هنوز فرصتی ثبت نشده");
+  set("sahar-opportunity-status",data.error?"دریافت جدول ناموفق: "+data.error:(data.opportunities||[]).length?"آخرین ۲۴ ساعت · "+data.opportunities.length+" فرصت · باز: "+(data.open_dashboard_positions||0)+" · در صف: "+(data.queued_dashboard_entries||0)+" · رنگ بر اساس احتمال موفقیت مدل":"هنوز فرصتی ثبت نشده");
 }
 async function refresh(){
   clearTimeout(timer);
