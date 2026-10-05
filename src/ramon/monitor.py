@@ -1022,7 +1022,7 @@ def handler_for(db, diagnostic, symbol, health_url):
                 self.send_error(404)
 
         def do_POST(self):
-            if self.path not in {"/api/control", "/api/override"}:
+            if self.path not in {"/api/control", "/api/override", "/api/override/reset"}:
                 self.send_error(404)
                 return
             origin = self.headers.get("Origin")
@@ -1042,6 +1042,19 @@ def handler_for(db, diagnostic, symbol, health_url):
                 if self.path == "/api/control":
                     save_control(diagnostic, payload.get("max_executable_risk_usd"))
                     self.reply(json.dumps(control_state(diagnostic), ensure_ascii=False).encode(), "application/json; charset=utf-8")
+                    return
+
+                if self.path == "/api/override/reset":
+                    model_url = health_url.rsplit("/health", 1)[0] + "/manual-overrides/reset"
+                    request = Request(
+                        model_url,
+                        data=b"{}",
+                        headers={"Content-Type": "application/json"},
+                        method="POST",
+                    )
+                    with urlopen(request, timeout=2.0) as response:
+                        result = object_json(response.read(100_000))
+                    self.reply(json.dumps(result, ensure_ascii=False).encode(), "application/json; charset=utf-8")
                     return
 
                 stage = str(payload.get("stage", ""))
