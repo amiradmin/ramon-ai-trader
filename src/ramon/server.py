@@ -24,12 +24,12 @@ from .timesfm_shadow import TimesFM3Shadow
 from .moment_shadow import MomentAnomalyShadow
 from .finbert_shadow import FinBertNewsShadow
 from .range_shadow import observe as observe_range_shadow
-from .range_strategy import live_candidate
+from .range_strategy import candidate as range_candidate, live_candidate
 from .market_state import assess_market, apply_market_policy
 
 
 
-ANALYTIC_OVERRIDE_STAGES = {"timing", "extension", "edge", "strength", "market_direction", "entry_timing"}
+ANALYTIC_OVERRIDE_STAGES = {"timing", "extension", "edge", "strength", "market_direction", "entry_timing", "base", "decision", "range"}
 
 
 def _ensure_override_table(db: str) -> None:
@@ -452,6 +452,17 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     capable=payload.get("range_execution_ready") is True,
                     quote_time=quote_time, max_spread_points=settings.max_spread_points,
                 )
+                if (
+                    range_setup is None
+                    and "range" in active_overrides
+                    and range_live_enabled
+                    and payload.get("range_execution_ready") is True
+                    and quote_time is not None
+                    and (market.ask - market.bid) / market.point <= settings.max_spread_points
+                ):
+                    forced_range = range_candidate(market)
+                    if forced_range.get("range_candidate"):
+                        range_setup = forced_range
                 response["range_execution"] = int(range_setup is not None)
                 if range_setup:
                     response.update({
@@ -533,6 +544,11 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         response["decision"] = "WAIT"
                         response["reason"] = "finbert_sentiment_veto"
                         response["range_execution"] = 0
+
+                if "decision" in active_overrides and str(response.get("decision", "")) == "WAIT":
+                    response["decision"] = dominant_direction(result)
+                    response["reason"] = "manual_override_final_pass"
+                    response["range_execution"] = 0
 
                 if not response["range_execution"]:
                     range_setup = None
