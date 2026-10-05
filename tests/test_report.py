@@ -18,6 +18,7 @@ from ramon.report import (
     print_profit_since_small_mode,
     SMALL_MODE_START_EPOCH,
     print_stored_sizing,
+    print_giveback_and_tail_loss_audit,
     rolling_trade_metrics,
     trade_time,
 )
@@ -402,6 +403,53 @@ def test_path_risk_and_rolling_metrics_are_closed_trade_based():
     assert latest["pf"] == pytest.approx(3.0 / 11.0)
     assert latest["expectancy_units"] == pytest.approx(-8.0 / 3.0)
     assert latest["expectancy_r"] == pytest.approx(-0.8 / 3.0)
+
+
+def test_giveback_and_tail_loss_audit_flags_recent_risk_events(capsys):
+    trades = [
+        {
+            **outcome(trade_key="old", sample_key="1" * 16, net_units=3.0, initial_risk_units=10),
+            "net_r": 0.3,
+            "exit_reason": "DEAL_REASON_EXPERT",
+            "exit_detail": "maximum_hold_bars",
+            "training_status": "LEARNABLE",
+            "opened_utc_offset_seconds": 0,
+            "closed_utc_offset_seconds": 0,
+        },
+        {
+            **outcome(trade_key="giveback", sample_key="2" * 16, net_units=-6.5, initial_risk_units=10),
+            "net_r": -0.65,
+            "exit_reason": "DEAL_REASON_EXPERT",
+            "exit_detail": "early_adverse_exit",
+            "training_status": "LEARNABLE",
+            "opened_utc_offset_seconds": 0,
+            "closed_utc_offset_seconds": 0,
+        },
+        {
+            **outcome(trade_key="tail", sample_key="3" * 16, net_units=-22.0, initial_risk_units=10),
+            "net_r": -2.2,
+            "exit_reason": "DEAL_REASON_SL",
+            "training_status": "LEARNABLE",
+            "opened_utc_offset_seconds": 0,
+            "closed_utc_offset_seconds": 0,
+        },
+    ]
+    excursions = {
+        "giveback": {"mfe_r": 1.25, "mae_r": 0.8, "bars": 2},
+        "tail": {"mfe_r": 0.40, "mae_r": 4.10, "bars": 1},
+    }
+
+    print_giveback_and_tail_loss_audit(trades, excursions, recent_window=2)
+    output = capsys.readouterr().out
+
+    assert "=== RECENT 2-TRADE GIVEBACK / TAIL-LOSS AUDIT ===" in output
+    assert "Profit givebacks: 1" in output
+    assert "MFE~1.250R -> final=-0.650R" in output
+    assert "AUTO/LEARNABLE" in output
+    assert ">1R losses: 1" in output
+    assert "WARNING #3 BUY" in output
+    assert "final=-2.200R" in output
+    assert "MAE~4.100R" in output
 
 
 def test_report_includes_m15_bar_envelope_excursion_estimates(tmp_path, capsys):
