@@ -66,6 +66,34 @@ def test_observed_preview_does_not_claim_an_order_or_gate_pass(sources):
     assert n["shadow"]["state"] == "shadow"
 
 
+@pytest.mark.parametrize("detected,ready,state,signal_ready", [
+    ("SELL", 1, "idle", "خیر"),
+    ("NEUTRAL", 0, "idle", "خیر"),
+    ("BUY", 0, "blocked", "خیر"),
+    ("BUY", 1, "pass", "بله"),
+])
+def test_entry_timing_readiness_belongs_to_the_signal(sources, detected, ready, state, signal_ready):
+    db, diag = sources
+    with sqlite3.connect(db) as con:
+        metadata = json.loads(con.execute("SELECT model_metadata FROM decision_samples").fetchone()[0])
+        metadata["decision_audit"]["final"].update({
+            "cent_direction_gate_active": 1,
+            "market_direction": detected,
+            "entry_timing_direction": detected,
+            "entry_timing_ready": ready,
+        })
+        con.execute("UPDATE decision_samples SET model_metadata=?", (json.dumps(metadata),))
+    snapshot = build_snapshot(db, diag, now=NOW)
+    timing = nodes(snapshot)["entry_timing"]
+    assert timing["observed_state"] == state
+    assert timing["values"]["آمادهٔ ورود"] == signal_ready
+    assert timing["values"]["زمان جهت بررسی تأیید شده"] == ("بله" if ready else "خیر")
+    assert timing["values"]["جهت سیگنال"] == "BUY"
+    if ready and detected == "SELL":
+        assert "هم‌جهت نیست" in timing["detail"]
+    assert snapshot["decision"] == "WAIT"
+
+
 def test_healthy_service_never_refreshes_old_forecast_or_position(sources):
     db, diag = sources
     diagnostic(diag, position="BUY #123 profit=5.00")

@@ -562,18 +562,23 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
                  "ساختار قیمت": final.get("market_direction_structure")})
 
     timing_ready = final.get("entry_timing_ready") == 1
+    timing_direction = final.get("entry_timing_direction")
+    signal_timing_ready = timing_ready and direction_matches and timing_direction == proposed_direction
     timing_state = (
-        "pass" if cent_gate_active and direction_matches and timing_ready
+        "pass" if cent_gate_active and signal_timing_ready
         else "blocked" if cent_gate_active and direction_matches
         else "idle" if cent_gate_active
         else "observed" if final.get("entry_timing_direction") else "unknown"
     )
     node("entry_timing", "زمان مناسب ورود", timing_state,
-         "چرخش و حرکت کوتاه‌مدت زمان ورود را تأیید کرده‌اند" if timing_ready else
+         "زمان ورود جهت مستقل بازار تأیید شده، اما این جهت با سیگنال مدل هم‌جهت نیست؛ زمان ورود سیگنال تأیید نشده" if timing_ready and not signal_timing_ready else
+         "چرخش و حرکت کوتاه‌مدت زمان ورود سیگنال را تأیید کرده‌اند؛ مجوز نهایی ورود جدا بررسی می‌شود" if signal_timing_ready else
          "جهت درست است ولی چرخش/حرکت کوتاه‌مدت هنوز ورود را تأیید نکرده" if direction_matches else
-         "تا تأیید جهت بازار، زمان ورود اجرا نمی‌شود",
-         values={"جهت بررسی": final.get("entry_timing_direction"),
-                 "آمادهٔ ورود": "بله" if timing_ready else "خیر",
+         "تا تأیید جهت بازار، زمان ورود سیگنال قابل تأیید نیست",
+         values={"جهت بررسی": timing_direction,
+                 "جهت سیگنال": proposed_direction,
+                 "زمان جهت بررسی تأیید شده": "بله" if timing_ready else "خیر",
+                 "آمادهٔ ورود": "بله" if signal_timing_ready else "خیر",
                  "حرکت کوتاه / ATR": final.get("entry_timing_move_atr"),
                  "برگشت / ATR": final.get("entry_timing_rebound_atr"),
                  "چرخش کوتاه‌مدت": "بله" if final.get("entry_timing_turn") == 1 else "خیر",
