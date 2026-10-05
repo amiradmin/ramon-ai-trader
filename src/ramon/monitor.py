@@ -1059,8 +1059,9 @@ def handler_for(db, diagnostic, symbol, health_url):
                 node_row = next((n for n in snap.get("nodes", []) if n.get("id") == stage), None)
                 if not node_row:
                     raise ValueError("مرحله جاری پیدا نشد")
-                if stage in pass_allowed and node_row.get("state") != "blocked":
-                    raise ValueError("فقط شرط قرمز فعلی قابل عبور دستی است")
+                # Analytical stages may always be annotated. A blocked stage is
+                # FORCE_PASS; pass/idle/unknown stages are REVIEW_ONLY so the UI can
+                # show an action consistently from steps 04 through 17.
                 if not snap.get("sample_key") or not snap.get("signal_bar_time"):
                     raise ValueError("تصمیم جاری شناسه معتبر ندارد")
                 forward = {
@@ -1087,7 +1088,16 @@ def handler_for(db, diagnostic, symbol, health_url):
                     result = object_json(response.read(100_000))
                 self.reply(json.dumps(result, ensure_ascii=False).encode(), "application/json; charset=utf-8")
             except (ValueError, OSError) as exc:
-                self.send_error(400, "Invalid control request" if isinstance(exc, ValueError) else "Control file unavailable")
+                body = json.dumps(
+                    {"ok": False, "error": str(exc)},
+                    ensure_ascii=False,
+                ).encode("utf-8")
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
 
         def reply(self, body, content_type):
             self.send_response(200)
