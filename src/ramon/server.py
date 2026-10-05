@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import os
@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 import time
 from uuid import uuid4
 
-from .core import Forecast, Market, Settings, evaluate
+from .core import Forecast, Market, Settings, evaluate, independent_market_direction, independent_entry_timing
 from .ensemble import EnsembleCoordinator, dominant_direction
 from .shadow_roles import ShadowCoordinator
 from .history import persist_decision_sample, persist_market, persist_trade_outcome, persist_replay_input
@@ -235,8 +235,13 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                                 )
 
                 news_snapshot = news_provider.snapshot()
+                account_is_cent = payload.get("account_is_cent") is True
+                request_settings = (
+                    replace(settings, require_direction_confirmation=False)
+                    if account_is_cent else settings
+                )
                 with guard:
-                    result = evaluate(market, cached_model, settings)
+                    result = evaluate(market, cached_model, request_settings)
                     audit_forecast = cached_model._forecast if result.forecast_median>0 else None
                     ensemble_payload, feature_snapshot = ensemble.assess(
                         market, result, news_snapshot.features
@@ -310,6 +315,29 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 # The terminal owns the loss-streak gate. Uploaded history can lag
                 # fresh closes or omit intervening outcomes; it is not authoritative.
                 response["loss_streak_cooldown_source"] = "mt5_history"
+
+                direction_gate = independent_market_direction(market, atr=result.atr)
+                timing_gate = independent_entry_timing(
+                    market,
+                    atr=result.atr,
+                    direction=str(direction_gate["direction"]),
+                    min_move_atr=settings.trend_min_micro_move_atr,
+                    min_rebound_atr=settings.intrabar_min_rebound_atr,
+                )
+                response.update({
+                    "cent_direction_gate_active": int(account_is_cent),
+                    "market_direction": direction_gate["direction"],
+                    "market_direction_score": direction_gate["score"],
+                    "market_direction_ret_1_atr": direction_gate["ret_1_atr"],
+                    "market_direction_ret_4_atr": direction_gate["ret_4_atr"],
+                    "market_direction_micro_move_atr": direction_gate["micro_move_atr"],
+                    "market_direction_structure": direction_gate["structure"],
+                    "entry_timing_ready": timing_gate["ready"],
+                    "entry_timing_direction": timing_gate["direction"],
+                    "entry_timing_move_atr": timing_gate["move_atr"],
+                    "entry_timing_rebound_atr": timing_gate["rebound_atr"],
+                    "entry_timing_turn": timing_gate["turn"],
+                })
 
                 response.update(news_snapshot.payload())
                 response["news_model_ready"] = int(ensemble.news_ready)
@@ -398,6 +426,24 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 response["finbert_live_veto"] = int(finbert_veto)
                 response["finbert_live_threshold"] = finbert_live_threshold
 
+                if (
+                    account_is_cent
+                    and not bool(response.get("range_execution"))
+                    and str(response.get("decision", "")) in {"BUY", "SELL"}
+                ):
+                    proposed = str(response["decision"])
+                    detected = str(response.get("market_direction", "NEUTRAL"))
+                    if detected != proposed:
+                        response["decision"] = "WAIT"
+                        response["reason"] = (
+                            "market_direction_neutral"
+                            if detected == "NEUTRAL"
+                            else "market_direction_conflict"
+                        )
+                    elif int(response.get("entry_timing_ready", 0)) != 1:
+                        response["decision"] = "WAIT"
+                        response["reason"] = "entry_timing_required"
+
                 if str(response.get("decision", "")) in {"BUY", "SELL"}:
                     if moment_veto:
                         response["decision"] = "WAIT"
@@ -452,7 +498,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                                               "range_execution": response["range_execution"],
                                               "market_state": response["market_state"],
                                               "market_state_route": response["market_state_route"]},
-                                    "settings": asdict(settings),
+                                    "settings": asdict(request_settings),
                                     "handlers": model_handlers(),
                                     "external_models": {
                                         "moment": dict(latest_moment_payload),
