@@ -5,11 +5,80 @@ const timeFmt=new Intl.DateTimeFormat("fa-IR",{timeZone:"Asia/Tehran",hour:"2-di
 const fullFmt=new Intl.DateTimeFormat("fa-IR",{timeZone:"Asia/Tehran",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
 const updateFmt=new Intl.DateTimeFormat("fa-IR-u-ca-persian",{timeZone:"Asia/Tehran",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false});
 const num=v=>typeof v==="number"&&Number.isFinite(v)?v:null;
+const saharFlowLabels={pass:"شرط برقرار",blocked:"شرط ردشده",active:"پوزیشن باز",shadow:"فقط ناظر",stale:"دادهٔ قدیمی",unknown:"نامشخص",observed:"مشاهده‌شده",idle:"انتظار"};
+const saharFlowCoords={market:[35,28],service:[280,28],forecast:[525,28],shadow:[280,218],timing:[770,28],extension:[770,218],edge:[770,408],strength:[525,408],market_direction:[280,408],entry_timing:[35,408],base:[280,598],range:[35,598],decision:[525,598],news:[770,598],account:[770,798],limits:[525,798],risk:[280,798],order:[35,798],position:[35,1018]};
+let saharFlowSelected="decision",saharFlowZoomed=false;
 function node(id){return snapshot&&snapshot.nodes?snapshot.nodes.find(x=>x.id===id):null;}
 function handler(name){return snapshot&&snapshot.model_handler_map?snapshot.model_handler_map.find(x=>x.name===name):null;}
 function txt(v,fallback="—"){return v===null||v===undefined||v===""?fallback:String(v);}
 function set(id,v){const e=$(id);if(e)e.textContent=txt(v);}
 function value(n,key){return n&&n.values?n.values[key]:undefined;}
+function saharFlowState(node){
+  if(node&&node.state==="observed"&&["market","forecast"].includes(node.id))return "pass";
+  return node&&node.state||"unknown";
+}
+function saharSvg(name,attrs){const e=document.createElementNS("http://www.w3.org/2000/svg",name);for(const [k,v] of Object.entries(attrs))e.setAttribute(k,v);return e;}
+function saharRoute(a,b){
+  const [ax,ay]=saharFlowCoords[a],[bx,by]=saharFlowCoords[b],w=206,h=127;
+  if(a==="range"&&b==="decision")return {d:`M ${ax+w/2} ${ay+h} V ${by+h+30} H ${bx+w/2} V ${by+h}`,x:398,y:by+h+25};
+  if(ay===by)return {d:`M ${ax+(bx>ax?w:0)} ${ay+h/2} H ${bx+(bx>ax?0:w)}`,x:(ax+bx+w)/2,y:ay+h/2-10};
+  if(ax===bx)return {d:`M ${ax+w/2} ${ay+(by>ay?h:0)} V ${by+(by>ay?0:h)}`,x:ax+w/2+8,y:(ay+by+h)/2};
+  return {d:`M ${ax+w/2} ${ay+h} V ${by-20} H ${bx+w/2} V ${by}`,x:(ax+bx+w)/2,y:by-28};
+}
+function renderSaharFlowDetail(){
+  const n=snapshot&&snapshot.nodes&&snapshot.nodes.find(x=>x.id===saharFlowSelected);
+  if(!n)return;
+  const state=saharFlowState(n);
+  set("sahar-flow-detail-title",n.title);
+  const badge=$("sahar-flow-detail-state");badge.textContent=saharFlowLabels[state]||state;badge.className="state-badge "+state;
+  set("sahar-flow-detail-description",n.detail||"—");
+  const dl=$("sahar-flow-detail-values");dl.replaceChildren();
+  if(n.engine){const d=document.createElement("div"),dt=document.createElement("dt"),dd=document.createElement("dd");dt.textContent="نوع تصمیم‌گیری";dd.textContent=n.engine;d.append(dt,dd);dl.append(d);}
+  for(const [k,v] of Object.entries(n.values||{})){const d=document.createElement("div"),dt=document.createElement("dt"),dd=document.createElement("dd");dt.textContent=k;dd.textContent=txt(v);d.append(dt,dd);dl.append(d);}
+  document.querySelectorAll("#sahar-flow-nodes .node").forEach(e=>e.classList.toggle("selected",e.dataset.nodeId===saharFlowSelected));
+}
+function renderSaharFlow(){
+  if(!snapshot||!snapshot.nodes)return;
+  const nodes=$("sahar-flow-nodes");nodes.replaceChildren();
+  let index=1;
+  for(const n of snapshot.nodes){
+    if(!saharFlowCoords[n.id])continue;
+    const b=document.createElement("button");b.type="button";b.className="node "+saharFlowState(n);b.dataset.nodeId=n.id;
+    b.style.left=saharFlowCoords[n.id][0]+"px";b.style.top=saharFlowCoords[n.id][1]+"px";
+    const top=document.createElement("span");top.className="node-top";
+    const badge=document.createElement("span");badge.className="state-badge "+saharFlowState(n);badge.textContent=saharFlowLabels[saharFlowState(n)]||saharFlowState(n);
+    const eng=document.createElement("span");eng.className="node-engine";eng.textContent=n.engine||"";eng.hidden=!n.engine;
+    const no=document.createElement("span");no.className="node-number";no.textContent=String(index++).padStart(2,"0");
+    const title=document.createElement("span");title.className="node-title";title.textContent=n.title;
+    const detail=document.createElement("span");detail.className="node-detail";detail.textContent=n.detail||"";
+    top.append(badge,eng,no);b.append(top,title,detail);
+    b.addEventListener("click",()=>{saharFlowSelected=n.id;renderSaharFlowDetail();});
+    nodes.append(b);
+  }
+  const svg=$("sahar-flow-edges");svg.replaceChildren();
+  const defs=saharSvg("defs",{});
+  const colors={pass:"#66d8b1",blocked:"#f18586",active:"#72b5f6",shadow:"#b09ae9",stale:"#dfbd74",unknown:"#71829a",observed:"#72b5f6",idle:"#71829a"};
+  for(const [state,color] of Object.entries(colors)){const m=saharSvg("marker",{id:"sahar-arrow-"+state,viewBox:"0 0 10 10",refX:"9",refY:"5",markerWidth:"6",markerHeight:"6",orient:"auto-start-reverse"});m.append(saharSvg("path",{d:"M 0 0 L 10 5 L 0 10 z",fill:color}));defs.append(m);}svg.append(defs);
+  for(const edge of snapshot.edges||[]){
+    if(!saharFlowCoords[edge.from]||!saharFlowCoords[edge.to])continue;
+    const from=snapshot.nodes.find(n=>n.id===edge.from),to=snapshot.nodes.find(n=>n.id===edge.to);
+    let state=to?saharFlowState(to):"unknown";
+    const branchOff=(edge.from==="base"&&edge.to==="range"&&snapshot.decision!=="WAIT"&&snapshot.nodes.find(n=>n.id==="range")?.observed_state!=="pass")||(edge.from==="base"&&edge.to==="decision"&&snapshot.nodes.find(n=>n.id==="range")?.observed_state==="pass");
+    if(branchOff)state="idle";else if(from&&saharFlowState(from)==="pass"&&to&&saharFlowState(to)==="pass")state="pass";
+    const r=saharRoute(edge.from,edge.to);
+    svg.append(saharSvg("path",{d:r.d,class:"flow "+state,"marker-end":"url(#sahar-arrow-"+state+")"}));
+    const t=saharSvg("text",{x:r.x,y:r.y,"text-anchor":"middle"});t.textContent=edge.label;svg.append(t);
+  }
+  renderSaharFlowDetail();
+  resizeSaharFlow();
+}
+function resizeSaharFlow(){
+  const viewport=$("sahar-flow-viewport");if(!viewport)return;
+  const scale=saharFlowZoomed?1:Math.min(1,Math.max(.45,viewport.clientWidth/1020));
+  $("sahar-flow-canvas").style.transform="scale("+scale+")";
+  $("sahar-flow-space").style.width=(1020*scale)+"px";
+  $("sahar-flow-space").style.height=(1190*scale)+"px";
+}
 function renderKpis(){
   const market=node("market"),forecast=node("forecast"),strength=node("strength"),edge=node("edge");
   const direction=node("market_direction"),timing=node("entry_timing"),news=node("news");
@@ -129,7 +198,7 @@ async function refresh(){
   try{
     const res=await Promise.all([fetch("/api/snapshot",{cache:"no-store"}),fetch("/api/opinions",{cache:"no-store"}),fetch("/api/opportunities",{cache:"no-store"})]);
     if(!res[0].ok)throw new Error("snapshot unavailable");
-    snapshot=await res[0].json();renderKpis();renderCandles();
+    snapshot=await res[0].json();renderKpis();renderCandles();renderSaharFlow();
     if(res[1].ok)renderOpinions((await res[1].json()).opinions||[]);
     if(res[2].ok)renderSaharOpportunities(await res[2].json());
     $("market-connection").textContent="زنده";$("market-connection").className="connection connected";
@@ -148,4 +217,6 @@ $("submit-opinion").addEventListener("click",async()=>{
   }catch(e){$("opinion-status").textContent="خطا در ثبت: "+e.message;}
   finally{busy=false;btn.textContent="ثبت نظر";btn.disabled=!selectedOpinion;}
 });
+$("sahar-flow-zoom").addEventListener("click",()=>{saharFlowZoomed=!saharFlowZoomed;$("sahar-flow-zoom").textContent=saharFlowZoomed?"نمای کلی −":"بزرگ‌نمایی ＋";resizeSaharFlow();});
+new ResizeObserver(resizeSaharFlow).observe($("sahar-flow-viewport"));
 void refresh();
