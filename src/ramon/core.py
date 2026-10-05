@@ -543,7 +543,7 @@ def evaluate(
             reason = "insufficient_model_strength"
         elif confirmation_blocked:
             reason = "direction_confirmation_required"
-        elif manual_overrides:
+        elif any(stage in manual_overrides for stage in {"timing", "extension", "edge", "strength", "confirmation", "base"}):
             side = "BUY" if dominant_buy else "SELL"
             edge = dominant_edge
             reason = "manual_override_base_pass"
