@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 from .monitor import ASSETS, build_snapshot, default_diagnostic, object_json
+from .opportunities import read_opportunities
 
 
 def handler_for(db: str, diagnostic, symbol: str, health_url: str, model_url: str):
@@ -51,6 +52,12 @@ def handler_for(db: str, diagnostic, symbol: str, health_url: str, model_url: st
                 data = build_snapshot(db, diagnostic, symbol=symbol, health=self._health())
                 self.reply(
                     json.dumps(data, ensure_ascii=False, allow_nan=False).encode(),
+                    "application/json; charset=utf-8",
+                )
+                return
+            if route == "/api/opportunities":
+                self.reply(
+                    json.dumps(read_opportunities(db, symbol), ensure_ascii=False, allow_nan=False).encode(),
                     "application/json; charset=utf-8",
                 )
                 return
