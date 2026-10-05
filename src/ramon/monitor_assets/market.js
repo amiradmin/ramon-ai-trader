@@ -3,6 +3,7 @@ const $=id=>document.getElementById(id);
 let snapshot=null,timeframe="m15",selectedOpinion="",busy=false,timer=null;
 const timeFmt=new Intl.DateTimeFormat("fa-IR",{timeZone:"Asia/Tehran",hour:"2-digit",minute:"2-digit",second:"2-digit"});
 const fullFmt=new Intl.DateTimeFormat("fa-IR",{timeZone:"Asia/Tehran",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
+const updateFmt=new Intl.DateTimeFormat("fa-IR-u-ca-persian",{timeZone:"Asia/Tehran",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false});
 const num=v=>typeof v==="number"&&Number.isFinite(v)?v:null;
 function node(id){return snapshot&&snapshot.nodes?snapshot.nodes.find(x=>x.id===id):null;}
 function handler(name){return snapshot&&snapshot.model_handler_map?snapshot.model_handler_map.find(x=>x.name===name):null;}
@@ -29,7 +30,14 @@ function renderKpis(){
   set("mr-timing-detail",timing&&timing.detail||"—");
   set("mr-anomaly",anomaly?anomaly.status+" · "+txt(anomaly.values&&anomaly.values.Ratio):"—");
   set("mr-news",news&&news.detail||"—");
-  set("mr-updated",snapshot.generated_at?"بروزرسانی "+timeFmt.format(new Date(snapshot.generated_at)):"—");
+  if(snapshot.generated_at){
+    const updated=new Date(snapshot.generated_at);
+    set("mr-updated","بروزرسانی "+timeFmt.format(updated));
+    set("mr-last-update","آخرین بروزرسانی: "+updateFmt.format(updated));
+  }else{
+    set("mr-updated","—");
+    set("mr-last-update","آخرین بروزرسانی: —");
+  }
   const dl=$("market-signal-details");dl.replaceChildren();
   const rows=[
     ["Decision ID",snapshot.sample_key],["EA",snapshot.ea_version],["وضعیت EA",snapshot.ea_status],
