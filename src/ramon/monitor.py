@@ -962,7 +962,18 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
         if row["name"] in {"Anomaly Detection", "News Sentiment"}:
             row["status"] = {"pass": "OK", "blocked": "VETO", "idle": "OFF", "stale": "STALE", "unknown": "NO GATE SNAPSHOT"}.get(row["condition_state"], row["status"])
 
-    readiness = dollar_readiness(trades, diag.get("EA version"))
+    auto_trades = [row for row in trades if (row.get("entry_source") or "AUTO_RAMON") != "DASHBOARD_OPPORTUNITY"]
+    dashboard_trades = [row for row in trades if row.get("entry_source") == "DASHBOARD_OPPORTUNITY"]
+    readiness = dollar_readiness(auto_trades, diag.get("EA version"))
+    dashboard_closed = [row for row in dashboard_trades if number(row.get("closed")) is not None]
+    dashboard_wins = [row for row in dashboard_closed if (number(row.get("net_units")) or 0.0) > 0]
+    dashboard_net = sum(number(row.get("net_units")) or 0.0 for row in dashboard_closed)
+    dashboard_performance = {
+        "closed": len(dashboard_closed),
+        "wins": len(dashboard_wins),
+        "win_rate": (len(dashboard_wins) / len(dashboard_closed)) if dashboard_closed else None,
+        "net_units": dashboard_net,
+    }
     roadmap = income_roadmap(readiness, diag)
     warnings = [x for x in (diag_error, db_error) if x]
     if model_time["state"] != "fresh":
@@ -993,7 +1004,8 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
             "edges": [{"from": a, "to": b, "label": label} for a, b, label in edges],
             "timeline": timeline, "trades": outcomes, "model_handler_map": model_handler_map,
             "recent_market": recent_market_context(db, symbol),
-            "dollar_readiness": readiness, "income_roadmap": roadmap, "warnings": warnings}
+            "dollar_readiness": readiness, "dashboard_opportunity_performance": dashboard_performance,
+            "income_roadmap": roadmap, "warnings": warnings}
 
 
 def analysis_bundle(snapshot: dict, selected_stage: str = "") -> str:
