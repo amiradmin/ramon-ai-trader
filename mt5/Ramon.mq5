@@ -1,6 +1,6 @@
 #property strict
-#property version "1.571"
-#define RAMON_EA_VERSION "0.57.1"
+#property version "1.572"
+#define RAMON_EA_VERSION "0.57.2"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -4198,26 +4198,48 @@ int ReadDashboardManualEntry(const datetime current_bar,string &direction,string
    if(SmallOnlyMode)
       return 0;
 
-   string file_name="";
-   long search=FileFindFirst("Ramon_ManualEntry_*.cmd",file_name,FILE_COMMON);
-   if(search==INVALID_HANDLE)
-      return 0;
-   FileFindClose(search);
-
-   string command_path=file_name;
-   int handle=FileOpen(command_path,FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
+   const string queue_name="Ramon_ManualEntries.txt";
+   int handle=FileOpen(queue_name,FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
    if(handle==INVALID_HANDLE)
-   { why="command unreadable"; return -1; }
-   string raw=FileReadString(handle);
+      return 0;
+
+   string lines[];
+   int total=0;
+   while(!FileIsEnding(handle))
+   {
+      string line=FileReadString(handle);
+      StringTrimLeft(line); StringTrimRight(line);
+      if(line=="") continue;
+      ArrayResize(lines,total+1);
+      lines[total++]=line;
+   }
    FileClose(handle);
-   StringTrimLeft(raw); StringTrimRight(raw);
+   if(total<=0)
+   {
+      FileDelete(queue_name,FILE_COMMON);
+      return 0;
+   }
+
+   // Consume exactly the first queued command and preserve the rest.
+   if(total==1)
+      FileDelete(queue_name,FILE_COMMON);
+   else
+   {
+      int out=FileOpen(queue_name,FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON);
+      if(out==INVALID_HANDLE)
+      { why="queue rewrite failed"; return -1; }
+      for(int i=1;i<total;i++)
+         FileWriteString(out,lines[i]+"\r\n");
+      FileFlush(out);
+      FileClose(out);
+   }
+
    string parts[];
    ushort separator=StringGetCharacter("|",0);
-   int count=StringSplit(raw,separator,parts);
-   // Every queued command is consumed exactly once.
-   FileDelete(command_path,FILE_COMMON);
+   int count=StringSplit(lines[0],separator,parts);
    if(count!=3)
    { why="invalid command"; return -1; }
+
    datetime requested=(datetime)StringToInteger(parts[0]);
    datetime signal_bar=(datetime)StringToInteger(parts[1]);
    string side=parts[2];
@@ -4228,10 +4250,12 @@ int ReadDashboardManualEntry(const datetime current_bar,string &direction,string
    { why="command expired"; return -1; }
    if(signal_bar!=current_bar)
    { why="signal bar changed"; return -1; }
+
    direction=side;
-   Print("Ramon manual dashboard command consumed file=",file_name,
-      " side=",side," bar=",IntegerToString((long)signal_bar),
-      " requested=",TimeToString(requested,TIME_DATE|TIME_SECONDS));
+   Print("Ramon manual dashboard command consumed side=",side,
+      " bar=",IntegerToString((long)signal_bar),
+      " requested=",TimeToString(requested,TIME_DATE|TIME_SECONDS),
+      " queued_after=",IntegerToString(total-1));
    return 1;
 }
 
