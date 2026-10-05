@@ -387,3 +387,76 @@ def test_conflict_and_extension_are_independent(sources, reason, conflict, exten
     result = nodes(snapshot)
     assert result['timing']['observed_state'] == conflict
     assert result['extension']['observed_state'] == extension
+
+
+def test_trend_conflict_detail_explains_failed_override(sources):
+    db, diag = sources
+    with sqlite3.connect(db) as con:
+        metadata = json.loads(con.execute("SELECT model_metadata FROM decision_samples").fetchone()[0])
+        base = metadata["decision_audit"]["base"]
+        base.update({
+            "reason": "trend_conflict",
+            "signal_strength": 0.61,
+            "minimum_strength": 0.20,
+            "trend_conflict_active": 1,
+            "trend_conflict_override_strength": 0.70,
+            "trend_conflict_override_passed": 0,
+            "recent_move_atr": -3.42,
+            "aligned_recent_move_atr": -3.42,
+            "intrabar_confirmed": 1,
+            "intrabar_direction": "BUY",
+            "ai_trend_confirmed": 1,
+            "ai_trend_direction": "BUY",
+        })
+        metadata["decision_audit"]["settings"].update({
+            "trend_conflict_lookback": 12,
+            "trend_conflict_atr": 3.0,
+            "trend_conflict_override_strength": 0.70,
+        })
+        metadata["decision_audit"]["final"].update({"decision": "WAIT", "reason": "trend_conflict"})
+        con.execute("UPDATE decision_samples SET model_metadata=?", (json.dumps(metadata),))
+
+    timing = nodes(build_snapshot(db, diag, now=NOW))["timing"]
+    assert timing["observed_state"] == "blocked"
+    assert timing["values"]["حرکت اخیر / ATR"] == -3.42
+    assert timing["values"]["حد قدرت عبور"] == 0.70
+    assert timing["values"]["قدرت کافی برای عبور"] == "خیر"
+    assert timing["values"]["تأیید کوتاه‌مدت"] == "بله"
+    assert timing["values"]["تأیید مسیر Chronos"] == "بله"
+    assert timing["values"]["نتیجهٔ override"] == "مسدود"
+    assert "قدرت Chronos" in timing["detail"]
+
+
+def test_trend_conflict_detail_marks_confirmed_override_as_pass(sources):
+    db, diag = sources
+    with sqlite3.connect(db) as con:
+        metadata = json.loads(con.execute("SELECT model_metadata FROM decision_samples").fetchone()[0])
+        base = metadata["decision_audit"]["base"]
+        base.update({
+            "decision": "BUY",
+            "reason": "forecast_up",
+            "signal_strength": 0.81,
+            "minimum_strength": 0.20,
+            "trend_conflict_active": 1,
+            "trend_conflict_override_strength": 0.70,
+            "trend_conflict_override_passed": 1,
+            "recent_move_atr": -3.30,
+            "aligned_recent_move_atr": -3.30,
+            "intrabar_confirmed": 1,
+            "intrabar_direction": "BUY",
+            "ai_trend_confirmed": 1,
+            "ai_trend_direction": "BUY",
+        })
+        metadata["decision_audit"]["settings"].update({
+            "trend_conflict_lookback": 12,
+            "trend_conflict_atr": 3.0,
+            "trend_conflict_override_strength": 0.70,
+        })
+        metadata["decision_audit"]["final"].update({"decision": "BUY", "reason": "forecast_up"})
+        con.execute("UPDATE decision_samples SET final_decision='BUY', model_metadata=?", (json.dumps(metadata),))
+
+    timing = nodes(build_snapshot(db, diag, now=NOW))["timing"]
+    assert timing["observed_state"] == "pass"
+    assert timing["values"]["قدرت کافی برای عبور"] == "بله"
+    assert timing["values"]["نتیجهٔ override"] == "عبور مجاز"
+    assert "مجاز شد" in timing["detail"]
