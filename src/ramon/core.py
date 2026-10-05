@@ -222,6 +222,79 @@ def atr14(bars: Sequence[Bar]) -> float:
     return sum(ranges) / len(ranges)
 
 
+def independent_market_direction(market: Market, *, atr: float) -> dict[str, str | int | float]:
+    """Infer short-horizon price direction without using the Chronos forecast."""
+    if atr <= 0 or len(market.bars) < 5:
+        return {
+            "direction": "NEUTRAL", "score": 0, "ret_1_atr": 0.0,
+            "ret_4_atr": 0.0, "micro_move_atr": 0.0, "structure": "NEUTRAL",
+        }
+
+    ret_1 = (market.bars[-1].close - market.bars[-2].close) / atr
+    ret_4 = (market.bars[-1].close - market.bars[-5].close) / atr
+    micro_move = (
+        (market.bid - market.micro_bars[0].close) / atr
+        if len(market.micro_bars) >= 3 else 0.0
+    )
+
+    last = market.bars[-1]
+    prev = market.bars[-2]
+    if last.high > prev.high and last.low > prev.low:
+        structure = "BUY"
+    elif last.high < prev.high and last.low < prev.low:
+        structure = "SELL"
+    else:
+        structure = "NEUTRAL"
+
+    votes = 0
+    votes += 1 if ret_1 >= 0.03 else -1 if ret_1 <= -0.03 else 0
+    votes += 1 if ret_4 >= 0.08 else -1 if ret_4 <= -0.08 else 0
+    votes += 1 if micro_move >= 0.03 else -1 if micro_move <= -0.03 else 0
+    votes += 1 if structure == "BUY" else -1 if structure == "SELL" else 0
+
+    direction = "BUY" if votes >= 2 else "SELL" if votes <= -2 else "NEUTRAL"
+    return {
+        "direction": direction,
+        "score": votes,
+        "ret_1_atr": ret_1,
+        "ret_4_atr": ret_4,
+        "micro_move_atr": micro_move,
+        "structure": structure,
+    }
+
+
+def independent_entry_timing(
+    market: Market,
+    *,
+    atr: float,
+    direction: str,
+    min_move_atr: float = 0.03,
+    min_rebound_atr: float = 0.08,
+) -> dict[str, str | int | float]:
+    """Check entry timing in an independently detected market direction."""
+    if direction not in {"BUY", "SELL"}:
+        return {
+            "ready": 0, "direction": direction, "move_atr": 0.0,
+            "rebound_atr": 0.0, "turn": 0,
+        }
+    move_atr, rebound_atr, turn = _intrabar_metrics(
+        market, atr=atr, direction=direction
+    )
+    ready = int(
+        bool(market.micro_bars)
+        and move_atr >= min_move_atr
+        and rebound_atr >= min_rebound_atr
+        and turn
+    )
+    return {
+        "ready": ready,
+        "direction": direction,
+        "move_atr": move_atr,
+        "rebound_atr": rebound_atr,
+        "turn": int(turn),
+    }
+
+
 def _intrabar_metrics(
     market: Market,
     *,
