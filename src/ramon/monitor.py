@@ -492,11 +492,50 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
                  "سازگاری مسیر / حداقل": f"{metric(base.get('ai_trend_consistency'))} / {metric(base.get('trend_min_consistency'))}"})
     base_reason = base.get("reason")
     after_guards = base_reason in {"insufficient_model_edge", "insufficient_model_strength", "direction_confirmation_required"} or base.get("decision") in {"BUY", "SELL"}
-    conflict_state = "blocked" if base_reason == "trend_conflict" else "pass" if after_guards or base_reason in {"adverse_intrabar_timing", "late_entry_extension"} else "unknown"
+    conflict_active = base.get("trend_conflict_active") == 1 or base_reason == "trend_conflict"
+    conflict_override = base.get("trend_conflict_override_passed") == 1
+    conflict_state = "pass" if conflict_override else "blocked" if base_reason == "trend_conflict" else "pass" if after_guards or base_reason in {"adverse_intrabar_timing", "late_entry_extension"} else "unknown"
     extension_state = "blocked" if base_reason == "late_entry_extension" else "pass" if after_guards else "unknown"
-    node("timing", "قفل تعارض جهت", conflict_state,
-         "پیش‌بینی خلاف حرکت شدید اخیر است؛ ورود متوقف شد" if conflict_state == "blocked" else "تعارض شدید جهت وجود ندارد" if conflict_state == "pass" else "نتیجهٔ مستقل این شرط ثبت نشده",
-         values={"دلیل پایه": base_reason, "بازهٔ بررسی، کندل": settings.get("trend_conflict_lookback"), "حد تعارض ATR": settings.get("trend_conflict_atr")})
+
+    override_floor = number(base.get("trend_conflict_override_strength"))
+    if override_floor is None:
+        override_floor = number(settings.get("trend_conflict_override_strength"))
+    strength_ok = strength is not None and override_floor is not None and strength >= override_floor
+    intrabar_ok = base.get("intrabar_confirmed") == 1
+    path_ok = (
+        base.get("ai_trend_confirmed") == 1
+        and base.get("ai_trend_direction") == base.get("intrabar_direction")
+    )
+    if conflict_override:
+        conflict_detail = "تعارض شدید جهت وجود داشت، اما برگشت پرقدرت با تأیید کوتاه‌مدت و مسیر Chronos مجاز شد"
+    elif base_reason == "trend_conflict":
+        failed = []
+        if not strength_ok:
+            failed.append("قدرت Chronos به حد عبور نرسیده")
+        if not intrabar_ok:
+            failed.append("برگشت کوتاه‌مدت تأیید نشده")
+        if not path_ok:
+            failed.append("مسیر Chronos برگشت را تأیید نکرده")
+        conflict_detail = "تعارض شدید جهت؛ ورود متوقف شد" + (": " + "، ".join(failed) if failed else "")
+    elif conflict_active:
+        conflict_detail = "تعارض جهت ثبت شده است؛ نتیجهٔ عبور مستقل در این نسخه مشخص نیست"
+    elif conflict_state == "pass":
+        conflict_detail = "تعارض شدید جهت وجود ندارد"
+    else:
+        conflict_detail = "نتیجهٔ مستقل این شرط ثبت نشده"
+
+    node("timing", "قفل تعارض جهت", conflict_state, conflict_detail,
+         values={"دلیل پایه": base_reason,
+                 "حرکت اخیر / ATR": base.get("recent_move_atr"),
+                 "حرکت هم‌جهت سیگنال / ATR": base.get("aligned_recent_move_atr"),
+                 "بازهٔ بررسی، کندل": settings.get("trend_conflict_lookback"),
+                 "حد تعارض ATR": settings.get("trend_conflict_atr"),
+                 "قدرت Chronos": strength,
+                 "حد قدرت عبور": override_floor,
+                 "قدرت کافی برای عبور": "بله" if strength_ok else "خیر" if strength is not None and override_floor is not None else "نامشخص",
+                 "تأیید کوتاه‌مدت": "بله" if intrabar_ok else "خیر",
+                 "تأیید مسیر Chronos": "بله" if path_ok else "خیر",
+                 "نتیجهٔ override": "عبور مجاز" if conflict_override else "مسدود" if base_reason == "trend_conflict" else "لازم نبود"})
     node("extension", "قفل ورود دیرهنگام", extension_state,
          "قیمت بیش از حد در جهت ورود حرکت کرده" if extension_state == "blocked" else "امتداد قیمت از حد مجاز عبور نکرده" if extension_state == "pass" else "بررسی این شرط پس از قفل قبلی متوقف شد؛ نتیجه ثبت نشده",
          values={"دلیل پایه": base_reason, "حد امتداد ATR": settings.get("maximum_entry_extension_atr")})
