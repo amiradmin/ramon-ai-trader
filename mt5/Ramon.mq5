@@ -1,6 +1,6 @@
 #property strict
-#property version "1.575"
-#define RAMON_EA_VERSION "0.57.5"
+#property version "1.576"
+#define RAMON_EA_VERSION "0.57.6"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -43,7 +43,7 @@ input bool AllowMinLotRiskOverride = true; // Permit minimum volume within the e
 double MaxExecutableRiskUSD = 0.35; // Default; updated by the Control dashboard for PRIMARY.
 input int MaxSpreadPoints = 50;
 input int MaxTradesPerDay = 400;
-input int MaxDashboardOpportunityPositions = 5; // Hedging accounts only; manual opportunity positions with broker SL/TP.
+input int MaxDashboardOpportunityPositions = 20; // Hedging accounts only; manual opportunity positions with broker SL/TP.
 input int MaximumHoldBars = 4;
 input bool EnableAccountLossLimits = false; // Entry-only account guard; configure and validate before activation.
 input double DailyLossLimitPercent = 0.0; // 0 disables this limit; include realized costs and floating loss.
@@ -4673,9 +4673,9 @@ void OnTimer()
          " targetDist=",DoubleToString(target_distance,_Digits));
    }
 
-   if(ManagedPosition(ticket,opened) && ManageNewsGuard(ticket))
+   if(!dashboard_manual_entry && ManagedPosition(ticket,opened) && ManageNewsGuard(ticket))
    { ShowStatus(); return; }
-   if(NewsGuardEntryBlocked())
+   if(!dashboard_manual_entry && NewsGuardEntryBlocked())
    { StatusLine="NEWS GUARD: entry paused (high-impact window or calendar unavailable)"; ShowStatus(); return; }
 
    // Automatic Ramon entries remain single-position. Dashboard opportunity entries
@@ -4688,7 +4688,7 @@ void OnTimer()
    { StatusLine="MANUAL DASHBOARD BLOCKED: multiple positions require hedging account"; ShowStatus(); return; }
    if(dashboard_manual_entry && DashboardOpportunityPositionCount()>=MaxDashboardOpportunityPositions)
    { StatusLine="MANUAL DASHBOARD BLOCKED: opportunity position limit"; ShowStatus(); return; }
-   if(OtherPositionOnSymbol())
+   if(!dashboard_manual_entry && OtherPositionOnSymbol())
    { StatusLine="Another robot has a position on this symbol"; ShowStatus(); return; }
    if(decision!="BUY" && decision!="SELL" && decision!="WAIT")
    { StatusLine="Unknown model decision"; ShowStatus(); return; }
@@ -4737,17 +4737,18 @@ void OnTimer()
    if(SymbolInfoInteger(_Symbol,SYMBOL_TRADE_MODE)!=SYMBOL_TRADE_MODE_FULL)
    { StatusLine="Symbol trading disabled"; ShowStatus(); return; }
    string account_loss_reason="";
-   if(AccountLossLimitsBlocked(account_loss_reason))
+   if(!dashboard_manual_entry && AccountLossLimitsBlocked(account_loss_reason))
    { StatusLine=account_loss_reason; ShowStatus(); return; }
    string cooldown_reason="";
-   if(LocalLossCooldownBlocked(decision,cooldown_reason))
+   if(!dashboard_manual_entry && LocalLossCooldownBlocked(decision,cooldown_reason))
    { StatusLine=cooldown_reason; ShowStatus(); return; }
    int today=(SmallOnlyMode ? 0 : TradesToday());
-   if(!SmallOnlyMode && (today<0 || today>=MaxTradesPerDay))
+   if(!dashboard_manual_entry && !SmallOnlyMode && (today<0 || today>=MaxTradesPerDay))
    { StatusLine="Daily trade limit/history unavailable"; ShowStatus(); return; }
    MqlTick tick;
-   if(!SymbolInfoTick(_Symbol,tick) || TimeCurrent()-tick.time>30
-      || (int)SymbolInfoInteger(_Symbol,SYMBOL_SPREAD)>MaxSpreadPoints)
+   if(!SymbolInfoTick(_Symbol,tick) || TimeCurrent()-tick.time>30)
+   { StatusLine="Quote changed/stale"; ShowStatus(); return; }
+   if(!dashboard_manual_entry && (int)SymbolInfoInteger(_Symbol,SYMBOL_SPREAD)>MaxSpreadPoints)
    { StatusLine="Quote changed/stale"; ShowStatus(); return; }
    if(stop_distance<=0.0 || target_distance<=0.0 || atr<=0.0)
    { StatusLine="Invalid stop/target"; ShowStatus(); return; }
