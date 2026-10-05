@@ -1,6 +1,6 @@
 #property strict
-#property version "1.570"
-#define RAMON_EA_VERSION "0.57.0"
+#property version "1.571"
+#define RAMON_EA_VERSION "0.57.1"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -4199,12 +4199,12 @@ int ReadDashboardManualEntry(const datetime current_bar,string &direction,string
       return 0;
 
    string file_name="";
-   long search=FileFindFirst("RamonManualEntries\\*.cmd",file_name,FILE_COMMON);
+   long search=FileFindFirst("Ramon_ManualEntry_*.cmd",file_name,FILE_COMMON);
    if(search==INVALID_HANDLE)
       return 0;
    FileFindClose(search);
 
-   string command_path="RamonManualEntries\\"+file_name;
+   string command_path=file_name;
    int handle=FileOpen(command_path,FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
    if(handle==INVALID_HANDLE)
    { why="command unreadable"; return -1; }
@@ -4229,6 +4229,9 @@ int ReadDashboardManualEntry(const datetime current_bar,string &direction,string
    if(signal_bar!=current_bar)
    { why="signal bar changed"; return -1; }
    direction=side;
+   Print("Ramon manual dashboard command consumed file=",file_name,
+      " side=",side," bar=",IntegerToString((long)signal_bar),
+      " requested=",TimeToString(requested,TIME_DATE|TIME_SECONDS));
    return 1;
 }
 
