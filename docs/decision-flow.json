@@ -82,8 +82,8 @@
         "edges": [
           {
             "from": "market",
-            "to": "forecast",
-            "label": "بازار",
+            "to": "service",
+            "label": "داده",
             "arrow": "-->"
           },
           {
