@@ -1149,7 +1149,18 @@ def queue_manual_entry(db, diagnostic, symbol, payload):
         raise ValueError("این فرصت دیگر تازه و قابل اجرا نیست")
     common_dir = Path(diagnostic).parent
     queue_path = common_dir / "Ramon_ManualEntries.txt"
-    command = f"{int(time.time())}|{signal_bar_time}|{direction}\n"
+    sample_key = str(row.get("sample_key") or "")
+    risk_distance = float(row.get("risk_distance") or 0.0)
+    target_distance = abs(float(row.get("target") or 0.0) - float(row.get("entry") or 0.0))
+    edge = float(row.get("edge") or 0.0)
+    probability = row.get("success_probability")
+    if not re.fullmatch(r"[a-f0-9]{16}", sample_key) or risk_distance <= 0 or target_distance <= 0 or edge <= 0:
+        raise ValueError("اطلاعات فرصت برای اجرای دستی کامل نیست")
+    probability_value = -1.0 if probability is None else float(probability)
+    command = (
+        f"{int(time.time())}|{signal_bar_time}|{direction}|{sample_key}|"
+        f"{risk_distance:.10f}|{target_distance:.10f}|{edge:.10f}|{probability_value:.10f}\n"
+    )
     with open(queue_path, "a", encoding="ascii", newline="") as out:
         out.write(command)
         out.flush()
