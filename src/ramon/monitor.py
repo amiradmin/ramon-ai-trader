@@ -1148,15 +1148,12 @@ def queue_manual_entry(db, diagnostic, symbol, payload):
     if not row.get("actionable"):
         raise ValueError("این فرصت دیگر تازه و قابل اجرا نیست")
     common_dir = Path(diagnostic).parent
+    queue_path = common_dir / "Ramon_ManualEntries.txt"
     command = f"{int(time.time())}|{signal_bar_time}|{direction}\n"
-    final = common_dir / f"Ramon_ManualEntry_{time.time_ns()}_{signal_bar_time}_{direction}.cmd"
-    with tempfile.NamedTemporaryFile(mode="w", dir=common_dir, delete=False) as out:
-        temp = Path(out.name)
+    with open(queue_path, "a", encoding="ascii", newline="") as out:
         out.write(command)
-    try:
-        temp.replace(final)
-    finally:
-        temp.unlink(missing_ok=True)
+        out.flush()
+        os.fsync(out.fileno())
     return {
         "queued": True,
         "direction": direction,
