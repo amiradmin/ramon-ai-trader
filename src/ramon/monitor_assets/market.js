@@ -66,13 +66,30 @@ function renderOpinions(rows){
   for(const r of rows||[]){const item=document.createElement("article");item.className="recent-opinion";const top=document.createElement("div"),strong=document.createElement("strong"),span=document.createElement("span");strong.textContent=r.opinion;span.textContent=r.confidence+"/5";top.append(strong,span);const tm=document.createElement("small");tm.textContent=r.created_utc?fullFmt.format(new Date(r.created_utc*1000)):"—";const p=document.createElement("p");p.textContent=r.note||"بدون توضیح";item.append(top,tm,p);box.append(item);}
   if(!(rows||[]).length){const p=document.createElement("p");p.className="empty";p.textContent="هنوز نظری ثبت نشده";box.append(p);}
 }
+function renderOpportunities(data){
+  const body=$("opportunity-rows");body.replaceChildren();
+  const labels={OPEN:"هنوز باز",TP_OBSERVED:"هدف در نمونه‌ها دیده شد",SL_OBSERVED:"حد ضرر در نمونه‌ها دیده شد",TIMEOUT_OBSERVED:"پایان ۴ ساعت",DATA_GAP:"نامشخص؛ شکاف داده"};
+  const reasons={trend_conflict:"تعارض جهت",insufficient_model_edge:"مزیت ناکافی",insufficient_model_strength:"قدرت ناکافی",adverse_intrabar_timing:"حرکت کوتاه مخالف",late_entry_extension:"ورود دیرهنگام",direction_confirmation_required:"نبود تأیید جهت",market_direction_conflict:"تعارض جهت مستقل",market_direction_neutral:"جهت خنثی",confirmed_countertrend_reversal:"برگشت تأییدشده"};
+  const format=v=>num(v)===null?"—":v.toFixed(3);
+  for(const row of data.opportunities||[]){
+    const tr=document.createElement("tr");
+    const disposition=row.executed?"معاملهٔ بسته‌شده ثبت شده":row.model_approved?"سیگنال صادر شده؛ اجرای سفارش تأیید نشده":"مسدود";
+    const cells=[fullFmt.format(new Date(row.captured*1000)),row.strategy+" / "+row.direction,
+      format(row.entry)+" / "+format(row.stop)+" / "+format(row.target),format(row.edge)+" / "+format(row.minimum_edge),
+      format(row.strength),disposition+" · علت نخست: "+(reasons[row.first_reason]||row.first_reason||"—")+(row.last_reason!==row.first_reason?" · آخرین: "+(reasons[row.last_reason]||row.last_reason||"—"):""),
+      (labels[row.outcome]||row.outcome)+(row.net_r!==null&&row.outcome!=="DATA_GAP"?" · "+format(row.net_r)+"R":"")];
+    cells.forEach((text,index)=>{const td=document.createElement("td");td.textContent=text;if([2,3,4].includes(index))td.dir="ltr";tr.append(td);});body.append(tr);
+  }
+  set("opportunity-status",data.error?"دریافت جدول ناموفق: "+data.error:(data.opportunities||[]).length?"آخرین ۲۴ ساعت · "+data.opportunities.length+" کاندید؛ ممکن است هم‌پوشان باشند · داده تا "+(data.as_of?fullFmt.format(new Date(data.as_of*1000)):"—"):"هنوز کاندیدی با مزیت مثبت ثبت نشده");
+}
 async function refresh(){
   clearTimeout(timer);
   try{
-    const res=await Promise.all([fetch("/api/snapshot",{cache:"no-store"}),fetch("/api/opinions",{cache:"no-store"})]);
+    const res=await Promise.all([fetch("/api/snapshot",{cache:"no-store"}),fetch("/api/opinions",{cache:"no-store"}),fetch("/api/opportunities",{cache:"no-store"})]);
     if(!res[0].ok)throw new Error("snapshot unavailable");
     snapshot=await res[0].json();renderKpis();renderCandles();
     if(res[1].ok)renderOpinions((await res[1].json()).opinions||[]);
+    if(res[2].ok)renderOpportunities(await res[2].json());else set("opportunity-status","دریافت جدول ناموفق؛ اطلاعات قبلی ممکن است قدیمی باشد");
     $("market-connection").textContent="زنده";$("market-connection").className="connection connected";
   }catch(e){$("market-connection").textContent="اتصال قطع";$("market-connection").className="connection error";}
   timer=setTimeout(refresh,3000);
