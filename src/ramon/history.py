@@ -23,7 +23,7 @@ TRADE_TELEMETRY_COLUMNS = {
     "opened_utc_offset_seconds": "INTEGER", "closed_utc_offset_seconds": "INTEGER",
     "actual_fill_price": "REAL",
     "exit_detail": "TEXT", "entry_ea_version": "TEXT",
-    "trade_role": "TEXT", "entry_magic": "INTEGER",
+    "trade_role": "TEXT", "entry_magic": "INTEGER", "entry_source": "TEXT",
     **SIZING_TELEMETRY_COLUMNS,
 }
 
@@ -505,11 +505,13 @@ def validate_trade_telemetry(payload: dict[str, object], net: float) -> dict[str
             raise ValueError("invalid actual_fill_price")
         extra["actual_fill_price"] = value
 
-    for name in ("exit_detail", "entry_ea_version"):
+    for name in ("exit_detail", "entry_ea_version", "entry_source"):
         if payload.get(name):
             value = str(payload[name])
             if len(value) > 128 or any(ord(c) < 32 for c in value):
                 raise ValueError("invalid trade telemetry text")
+            if name == "entry_source" and value not in {"AUTO_RAMON", "RANGE_AUTO", "SMALL_AUTO", "DASHBOARD_OPPORTUNITY"}:
+                raise ValueError("invalid entry_source")
             extra[name] = value
 
     if payload.get("trade_role") is not None:
