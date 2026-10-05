@@ -66,13 +66,31 @@ function renderOpinions(rows){
   for(const r of rows||[]){const item=document.createElement("article");item.className="recent-opinion";const top=document.createElement("div"),strong=document.createElement("strong"),span=document.createElement("span");strong.textContent=r.opinion;span.textContent=r.confidence+"/5";top.append(strong,span);const tm=document.createElement("small");tm.textContent=r.created_utc?fullFmt.format(new Date(r.created_utc*1000)):"—";const p=document.createElement("p");p.textContent=r.note||"بدون توضیح";item.append(top,tm,p);box.append(item);}
   if(!(rows||[]).length){const p=document.createElement("p");p.className="empty";p.textContent="هنوز نظری ثبت نشده";box.append(p);}
 }
+function renderSaharOpportunities(data){
+  const body=$("sahar-opportunity-rows");body.replaceChildren();
+  const labels={OPEN:"هنوز باز",TP_OBSERVED:"هدف دیده شد",SL_OBSERVED:"حد ضرر دیده شد",TIMEOUT_OBSERVED:"پایان ۴ ساعت",DATA_GAP:"شکاف داده"};
+  const fmt=v=>num(v)===null?"—":Number(v).toFixed(3);
+  const pct=v=>num(v)===null||v<0||v>1?"—":(v*100).toFixed(1)+"%";
+  for(const row of data.opportunities||[]){
+    const tr=document.createElement("tr"),p=num(row.success_probability);
+    tr.className=p===null?"":p>=.70?"opportunity-confidence-high":p>=.55?"opportunity-confidence-medium":p>=.45?"opportunity-confidence-neutral":"opportunity-confidence-low";
+    const disposition=row.executed?"معامله ثبت شده":row.model_approved?"سیگنال مدل":"مسدود";
+    const cells=[fullFmt.format(new Date(row.captured*1000)),row.strategy+" / "+row.direction,
+      fmt(row.entry)+" / "+fmt(row.stop)+" / "+fmt(row.target),fmt(row.edge)+" / "+fmt(row.minimum_edge),
+      fmt(row.strength),pct(row.success_probability),disposition+" · "+txt(row.last_reason),
+      (labels[row.outcome]||row.outcome)+(row.net_r!==null&&row.outcome!=="DATA_GAP"?" · "+fmt(row.net_r)+"R":"")];
+    cells.forEach((text,index)=>{const td=document.createElement("td");td.textContent=text;if([2,3,4,5].includes(index))td.dir="ltr";tr.append(td);});body.append(tr);
+  }
+  set("sahar-opportunity-status",data.error?"دریافت جدول ناموفق: "+data.error:(data.opportunities||[]).length?"آخرین ۲۴ ساعت · "+data.opportunities.length+" فرصت · رنگ بر اساس احتمال موفقیت مدل":"هنوز فرصتی ثبت نشده");
+}
 async function refresh(){
   clearTimeout(timer);
   try{
-    const res=await Promise.all([fetch("/api/snapshot",{cache:"no-store"}),fetch("/api/opinions",{cache:"no-store"})]);
+    const res=await Promise.all([fetch("/api/snapshot",{cache:"no-store"}),fetch("/api/opinions",{cache:"no-store"}),fetch("/api/opportunities",{cache:"no-store"})]);
     if(!res[0].ok)throw new Error("snapshot unavailable");
     snapshot=await res[0].json();renderKpis();renderCandles();
     if(res[1].ok)renderOpinions((await res[1].json()).opinions||[]);
+    if(res[2].ok)renderSaharOpportunities(await res[2].json());
     $("market-connection").textContent="زنده";$("market-connection").className="connection connected";
   }catch(e){$("market-connection").textContent="اتصال قطع";$("market-connection").className="connection error";}
   timer=setTimeout(refresh,3000);
