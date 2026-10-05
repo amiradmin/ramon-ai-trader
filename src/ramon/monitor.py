@@ -987,6 +987,91 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
             "dollar_readiness": readiness, "income_roadmap": roadmap, "warnings": warnings}
 
 
+def analysis_bundle(snapshot: dict, selected_stage: str = "") -> str:
+    node_numbers = {
+        "market": "01", "service": "02", "forecast": "03", "timing": "04",
+        "extension": "05", "edge": "06", "strength": "07", "market_direction": "08",
+        "entry_timing": "09", "base": "10", "decision": "11", "news": "12",
+        "account": "13", "limits": "14", "risk": "15", "order": "16",
+        "position": "17", "range": "R1", "shadow": "S1",
+    }
+    nodes = snapshot.get("nodes") if isinstance(snapshot.get("nodes"), list) else []
+    selected = next((row for row in nodes if row.get("id") == selected_stage), None)
+
+    lines = [
+        "=== RAMON ANALYSIS BUNDLE ===",
+        f"Generated: {snapshot.get('generated_at', '—')}",
+        f"Symbol: {snapshot.get('symbol', '—')}",
+        f"EA version: {snapshot.get('ea_version', '—')}",
+        f"Decision ID: {snapshot.get('sample_key', '—')}",
+        f"Signal bar time: {snapshot.get('signal_bar_time', '—')}",
+        f"Decision: {snapshot.get('decision', '—')}",
+        f"Reason: {snapshot.get('reason', '—')} | {snapshot.get('reason_fa', '—')}",
+        f"EA status: {snapshot.get('ea_status', '—')}",
+        f"Joined model/EA: {snapshot.get('joined', False)}",
+        "Active manual passes: " + (
+            ", ".join(str(x) for x in snapshot.get("manual_overrides_active", [])) or "NONE"
+        ),
+        "Selected step: " + (
+            f"{node_numbers.get(selected.get('id'), selected.get('id'))} {selected.get('title')}"
+            if selected else "NONE"
+        ),
+        "",
+        "=== SELECTED STEP ===",
+        json.dumps(selected, ensure_ascii=False, indent=2) if selected else "NONE",
+        "",
+        "=== ALL DECISION / EXECUTION STEPS ===",
+    ]
+    for node in nodes:
+        node_id = str(node.get("id", ""))
+        lines.append(
+            f"[{node_numbers.get(node_id, node_id)}] {node.get('title', '—')} | "
+            f"state={node.get('state', '—')} observed={node.get('observed_state', '—')} "
+            f"manual={bool(node.get('manual_override'))} engine={node.get('engine') or 'Logic'}"
+        )
+        lines.append(f"detail: {node.get('detail', '—')}")
+        lines.append(
+            "values: " + json.dumps(node.get("values") or {}, ensure_ascii=False, sort_keys=True)
+        )
+
+    lines.extend(["", "=== RECENT DECISIONS ==="])
+    for row in snapshot.get("timeline") or []:
+        lines.append(
+            f"{row.get('at', '—')} | {row.get('decision', '—')} | "
+            f"{row.get('reason', '—')} | {row.get('strategy', '—')} | "
+            f"{row.get('sample_key', '—')}"
+        )
+
+    recent_market = snapshot.get("recent_market") if isinstance(snapshot.get("recent_market"), dict) else {}
+    for key, label in (("m15", "M15"), ("m1", "M1")):
+        lines.extend(["", f"=== {label} CANDLES (oldest -> newest) ==="])
+        rows = recent_market.get(key) if isinstance(recent_market.get(key), list) else []
+        if not rows:
+            lines.append("NO DATA")
+        for bar in rows:
+            stamp = utc_time(bar.get("time"))
+            lines.append(
+                f"{stamp} | O {bar.get('open')} H {bar.get('high')} "
+                f"L {bar.get('low')} C {bar.get('close')} | "
+                f"body {bar.get('body')} range {bar.get('range')} "
+                f"spreadPts {bar.get('spread_points')}"
+            )
+
+    lines.extend(["", "=== MODEL / HANDLER MAP ==="])
+    for row in snapshot.get("model_handler_map") or []:
+        lines.append(
+            f"{row.get('name', '—')} | {row.get('handler', '—')} | "
+            f"status={row.get('status', '—')} | "
+            f"condition={row.get('condition_state', '—')} | "
+            f"values={json.dumps(row.get('values') or {}, ensure_ascii=False, sort_keys=True)}"
+        )
+
+    lines.extend(["", "=== WARNINGS ==="])
+    warnings = snapshot.get("warnings") or []
+    lines.extend(str(w) for w in warnings) if warnings else lines.append("NONE")
+    return "\n".join(lines) + "\n"
+
+
 def control_state(diagnostic):
     diag, error = read_diagnostic(diagnostic)
     path = Path(diagnostic).with_name("Ramon_Control.txt") if diagnostic else None
@@ -1040,6 +1125,18 @@ def handler_for(db, diagnostic, symbol, health_url):
                 self.reply(json.dumps(data, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
             elif route == "/api/control":
                 self.reply(json.dumps(control_state(diagnostic), ensure_ascii=False).encode(), "application/json; charset=utf-8")
+            elif route == "/api/analysis":
+                params = parse_qs(urlsplit(self.path).query)
+                selected_stage = str(params.get("stage", [""])[0])[:64]
+                health = None
+                try:
+                    with urlopen(health_url, timeout=.7) as response:
+                        health = object_json(response.read(100_000))
+                except (OSError, ValueError):
+                    pass
+                data = build_snapshot(db, diagnostic, symbol=symbol, health=health)
+                body = analysis_bundle(data, selected_stage).encode("utf-8")
+                self.reply(body, "text/plain; charset=utf-8")
             elif route == "/api/snapshot":
                 health = None
                 try:
