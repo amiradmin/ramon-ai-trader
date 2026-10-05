@@ -1,6 +1,6 @@
 #property strict
-#property version "1.568"
-#define RAMON_EA_VERSION "0.56.8"
+#property version "1.569"
+#define RAMON_EA_VERSION "0.56.9"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -4203,6 +4203,16 @@ void OnTimer()
    if(closed<=0)
       return;
 
+   // Dashboard manual-entry commands are checked every timer tick, not only on
+   // the normal model cadence. A valid command forces an immediate fresh model
+   // request so the trade is revalidated against the current quote and gates.
+   string dashboard_direction="",dashboard_command_reason="";
+   int dashboard_command=ReadDashboardManualEntry(closed,dashboard_direction,dashboard_command_reason);
+   if(dashboard_command<0)
+      Print("Ramon manual dashboard entry ignored: ",dashboard_command_reason);
+   else if(dashboard_command>0)
+      LastDecisionRequestTime=0;
+
    if(LastDecisionRequestTime>0
       && now-LastDecisionRequestTime<DecisionCadenceSeconds())
    {
@@ -4486,11 +4496,15 @@ void OnTimer()
       " median=",DoubleToString(median,_Digits));
 
    bool dashboard_manual_entry=false;
-   string dashboard_direction="",dashboard_command_reason="";
-   int dashboard_command=ReadDashboardManualEntry(bar_time,dashboard_direction,dashboard_command_reason);
-   if(dashboard_command<0)
-      Print("Ramon manual dashboard entry ignored: ",dashboard_command_reason);
-   else if(dashboard_command>0)
+   if(dashboard_command>0)
+   {
+      if(bar_time!=closed)
+      {
+         dashboard_command=-1;
+         Print("Ramon manual dashboard entry ignored: model bar changed");
+      }
+   }
+   if(dashboard_command>0)
    {
       double selected_edge=(dashboard_direction=="BUY" ? buy_edge : sell_edge);
       if(selected_edge>0.0)
