@@ -346,6 +346,77 @@ def print_excursion_summary(
     print()
 
 
+def print_giveback_and_tail_loss_audit(
+    trades: list[dict],
+    excursions: dict[str, dict[str, float | int]],
+    *,
+    recent_window: int = 20,
+    giveback_mfe_r: float = 0.75,
+    tail_loss_r: float = -1.0,
+) -> None:
+    """Flag profit givebacks and losses beyond 1R using read-only M15 excursion evidence."""
+    recent = trades[-recent_window:] if recent_window > 0 else trades
+    givebacks = []
+    tail_losses = []
+
+    for index, row in enumerate(trades, 1):
+        if row not in recent:
+            continue
+        exc = excursions.get(str(row["trade_key"]))
+        if (
+            exc is not None
+            and float(row["net_units"]) < 0
+            and float(exc["mfe_r"]) >= giveback_mfe_r
+        ):
+            givebacks.append((index, row, exc))
+        if float(row["net_r"]) < tail_loss_r:
+            tail_losses.append((index, row, exc))
+
+    print(f"=== RECENT {len(recent)}-TRADE GIVEBACK / TAIL-LOSS AUDIT ===")
+    print(
+        f"Giveback rule: final loss after approximate MFE >= {giveback_mfe_r:.2f}R "
+        f"(M15 bar-envelope evidence)."
+    )
+    print(f"Tail-loss warning: final R < {tail_loss_r:.2f}R.")
+    print()
+
+    if givebacks:
+        giveback_net = sum(float(row["net_units"]) for _, row, _ in givebacks)
+        print(f"Profit givebacks: {len(givebacks)} | net={giveback_net:+.4f} units")
+        for index, row, exc in givebacks:
+            manual = training_status(row).startswith("CENSORED_MANUAL")
+            tag = "MANUAL/CENSORED" if manual else "AUTO/LEARNABLE"
+            print(
+                f"  #{index} {row['direction']} {trade_time(row, 'opened')} "
+                f"| MFE~{float(exc['mfe_r']):.3f}R -> final={float(row['net_r']):+.3f}R "
+                f"| net={float(row['net_units']):+.2f} "
+                f"| {row['exit_reason']} / {exit_detail(row)} | {tag}"
+            )
+    else:
+        print("Profit givebacks: 0")
+
+    print()
+    if tail_losses:
+        tail_net = sum(float(row["net_units"]) for _, row, _ in tail_losses)
+        print(f">1R losses: {len(tail_losses)} | net={tail_net:+.4f} units")
+        for index, row, exc in tail_losses:
+            excursion_text = (
+                f" | MFE~{float(exc['mfe_r']):.3f}R MAE~{float(exc['mae_r']):.3f}R"
+                if exc is not None else ""
+            )
+            print(
+                f"  WARNING #{index} {row['direction']} {trade_time(row, 'opened')} "
+                f"| final={float(row['net_r']):+.3f}R | net={float(row['net_units']):+.2f}"
+                f"{excursion_text} | {row['exit_reason']} / {exit_detail(row)}"
+            )
+    else:
+        print(">1R losses: 0")
+
+    print("This audit is descriptive only; MFE/MAE are approximate M15 envelopes, not tick-exact.")
+    print("Manual/censored exits are shown but must not be used as supervised entry labels.")
+    print()
+
+
 def print_telemetry(trades: list[dict]) -> None:
     """Report coverage, reconciled cost components and immutable entry provenance."""
     total = len(trades)
@@ -583,6 +654,7 @@ def generate_report(DB: str, SYMBOL: str = "XAUUSD_l", LIMIT: int = 20) -> None:
         print_path_risk(trades)
         print_rolling_performance(trades, 20)
         print_excursion_summary(trades, excursions)
+        print_giveback_and_tail_loss_audit(trades, excursions, recent_window=20)
 
         print_telemetry(trades)
         print_active_bundle_performance(trades)
