@@ -21,6 +21,9 @@ REASONS = {
     "insufficient_model_strength": "قدرت پیش‌بینی کافی نیست",
     "insufficient_model_edge": "مزیت پس از هزینهٔ اسپرد کافی نیست",
     "direction_confirmation_required": "جهت ورود هنوز تأیید نشده",
+    "market_direction_conflict": "جهت مستقل بازار خلاف جهت سیگنال است",
+    "market_direction_neutral": "جهت مستقل بازار هنوز خنثی است",
+    "entry_timing_required": "جهت تأیید شده ولی زمان ورود هنوز مناسب نیست",
     "adverse_intrabar_timing": "حرکت کوتاه‌مدت خلاف جهت ورود است",
     "late_entry_extension": "قیمت بیش از حد در جهت ورود حرکت کرده",
     "trend_conflict": "پیش‌بینی خلاف حرکت شدید اخیر است",
@@ -484,76 +487,53 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
     node("strength", "قدرت پیش‌بینی", "pass" if strength is not None and floor is not None and strength >= floor else "blocked" if strength is not None and floor is not None else "unknown",
          "قدرت پایین فقط با تأیید هم‌زمان برگشت و مسیر مدل می‌تواند پذیرفته شود",
          values={"قدرت": strength, "حداقل قدرت عادی": floor, "ورود ضعیف مجاز": settings.get("allow_weak_intrabar_entries")})
-    confirms = base.get("intrabar_confirmed") == 1 and base.get("ai_trend_confirmed") == 1 and base.get("intrabar_direction") == base.get("ai_trend_direction")
-    consistency_floor = number(settings.get("trend_min_consistency"))
-    if consistency_floor is None:
-        consistency_floor = number(base.get("trend_min_consistency"))
-    path_move_floor = number(settings.get("trend_min_path_atr"))
-    if path_move_floor is None:
-        path_move_floor = number(base.get("trend_min_path_atr"))
-    micro_move_floor = number(settings.get("trend_min_micro_move_atr"))
-    if micro_move_floor is None:
-        micro_move_floor = number(base.get("trend_min_micro_move_atr"))
-    rebound_floor = number(base.get("intrabar_min_rebound_atr"))
-    if rebound_floor is None:
-        rebound_floor = number(settings.get("intrabar_min_rebound_atr"))
-
-    intrabar_move = number(base.get("intrabar_move_atr"))
-    intrabar_rebound = number(base.get("intrabar_rebound_atr"))
-    path_move = number(base.get("ai_trend_move_atr"))
-    path_consistency = number(base.get("ai_trend_consistency"))
-    edge_floor = number(base.get("trend_edge_floor"))
-    dominant_edge = max(number(base.get("buy_edge")) or 0.0, number(base.get("sell_edge")) or 0.0)
-    same_direction = (
-        base.get("intrabar_direction") not in {None, "NONE"}
-        and base.get("intrabar_direction") == base.get("ai_trend_direction")
+    proposed_direction = (
+        base.get("decision")
+        if base.get("decision") in {"BUY", "SELL"}
+        else ("BUY" if (number(base.get("buy_edge")) or 0) > (number(base.get("sell_edge")) or 0) else "SELL")
     )
-    turn_ok = base.get("intrabar_turn_confirmed") == 1
-    move_ok = intrabar_move is not None and number(base.get("intrabar_min_move_atr")) is not None and intrabar_move >= number(base.get("intrabar_min_move_atr"))
-    rebound_ok = intrabar_rebound is not None and rebound_floor is not None and intrabar_rebound >= rebound_floor
-    path_move_ok = path_move is not None and path_move_floor is not None and path_move >= path_move_floor
-    consistency_ok = path_consistency is not None and consistency_floor is not None and path_consistency >= consistency_floor
-    micro_move_ok = intrabar_move is not None and micro_move_floor is not None and intrabar_move >= micro_move_floor
-    edge_ok = edge_floor is not None and dominant_edge >= edge_floor
-
-    failed_confirmation = []
-    if not turn_ok:
-        failed_confirmation.append("چرخش کوتاه‌مدت تأیید نشده")
-    if not move_ok:
-        failed_confirmation.append("حرکت کوتاه‌مدت به حد لازم نرسیده")
-    if not rebound_ok:
-        failed_confirmation.append("برگشت از کف/سقف به حد لازم نرسیده")
-    if not same_direction:
-        failed_confirmation.append("جهت کوتاه‌مدت و مسیر Chronos هم‌جهت نیست")
-    if not path_move_ok:
-        failed_confirmation.append("حرکت مسیر Chronos کافی نیست")
-    if not consistency_ok:
-        failed_confirmation.append("سازگاری مسیر Chronos کافی نیست")
-    if not edge_ok:
-        failed_confirmation.append("مزیت جهت به حد مسیر مدل نرسیده")
-    if not micro_move_ok:
-        failed_confirmation.append("حرکت کوتاه‌مدت برای مسیر مدل کافی نیست")
-
-    confirmation_detail = (
-        "جهت و زمان ورود با تأیید کوتاه‌مدت و مسیر Chronos تأیید شده"
-        if confirms else
-        "ورود هنوز تأیید نشده: " + "، ".join(failed_confirmation)
-        if failed_confirmation else
-        "ورود عادی نیازمند هم‌جهتی پیش‌بینی، حرکت کوتاه‌مدت و مسیر مدل است"
+    detected_direction = final.get("market_direction")
+    cent_gate_active = final.get("cent_direction_gate_active") == 1
+    direction_known = detected_direction in {"BUY", "SELL"}
+    direction_matches = direction_known and detected_direction == proposed_direction
+    direction_state = (
+        "pass" if cent_gate_active and direction_matches
+        else "blocked" if cent_gate_active and detected_direction in {"BUY", "SELL", "NEUTRAL"}
+        else "observed" if detected_direction else "unknown"
     )
-    node("confirmation", "تأیید جهت و زمان ورود", "pass" if confirms else "blocked" if base else "unknown",
-         confirmation_detail,
-         values={"تأیید کوتاه‌مدت": base.get("intrabar_confirmed"),
-                 "تأیید مسیر مدل": base.get("ai_trend_confirmed"),
-                 "جهت کوتاه‌مدت": base.get("intrabar_direction"),
-                 "جهت مسیر Chronos": base.get("ai_trend_direction"),
-                 "چرخش کوتاه‌مدت": "بله" if turn_ok else "خیر",
-                 "حرکت / حداقل ATR": f"{metric(intrabar_move)} / {metric(base.get('intrabar_min_move_atr'))}",
-                 "برگشت / حداقل ATR": f"{metric(intrabar_rebound)} / {metric(rebound_floor)}",
-                 "حرکت مسیر / حداقل ATR": f"{metric(path_move)} / {metric(path_move_floor)}",
-                 "سازگاری مسیر / حداقل": f"{metric(path_consistency)} / {metric(consistency_floor)}",
-                 "مزیت / حداقل مسیر": f"{metric(dominant_edge)} / {metric(edge_floor)}",
-                 "حرکت کوتاه برای مسیر / حداقل": f"{metric(intrabar_move)} / {metric(micro_move_floor)}"})
+    node("market_direction", "تشخیص جهت بازار", direction_state,
+         "جهت مستقل بازار با سیگنال هم‌جهت است" if direction_matches else
+         "جهت مستقل بازار خنثی است؛ ورود متوقف می‌شود" if detected_direction == "NEUTRAL" else
+         "جهت مستقل بازار خلاف سیگنال است؛ ورود متوقف می‌شود" if direction_known else
+         "تشخیص جهت مستقل هنوز ثبت نشده",
+         values={"فعال روی حساب سنتی": "بله" if cent_gate_active else "خیر",
+                 "جهت سیگنال": proposed_direction,
+                 "جهت مستقل بازار": detected_direction,
+                 "امتیاز جهت": final.get("market_direction_score"),
+                 "بازده ۱ کندل / ATR": final.get("market_direction_ret_1_atr"),
+                 "بازده ۴ کندل / ATR": final.get("market_direction_ret_4_atr"),
+                 "حرکت M1 / ATR": final.get("market_direction_micro_move_atr"),
+                 "ساختار قیمت": final.get("market_direction_structure")})
+
+    timing_ready = final.get("entry_timing_ready") == 1
+    timing_state = (
+        "pass" if cent_gate_active and direction_matches and timing_ready
+        else "blocked" if cent_gate_active and direction_matches
+        else "idle" if cent_gate_active
+        else "observed" if final.get("entry_timing_direction") else "unknown"
+    )
+    node("entry_timing", "زمان مناسب ورود", timing_state,
+         "چرخش و حرکت کوتاه‌مدت زمان ورود را تأیید کرده‌اند" if timing_ready else
+         "جهت درست است ولی چرخش/حرکت کوتاه‌مدت هنوز ورود را تأیید نکرده" if direction_matches else
+         "تا تأیید جهت بازار، زمان ورود اجرا نمی‌شود",
+         values={"جهت بررسی": final.get("entry_timing_direction"),
+                 "آمادهٔ ورود": "بله" if timing_ready else "خیر",
+                 "حرکت کوتاه / ATR": final.get("entry_timing_move_atr"),
+                 "برگشت / ATR": final.get("entry_timing_rebound_atr"),
+                 "چرخش کوتاه‌مدت": "بله" if final.get("entry_timing_turn") == 1 else "خیر",
+                 "حداقل حرکت / ATR": settings.get("trend_min_micro_move_atr"),
+                 "حداقل برگشت / ATR": settings.get("intrabar_min_rebound_atr")})
+
     base_reason = base.get("reason")
     after_guards = base_reason in {"insufficient_model_edge", "insufficient_model_strength", "direction_confirmation_required"} or base.get("decision") in {"BUY", "SELL"}
     conflict_active = base.get("trend_conflict_active") == 1 or base_reason == "trend_conflict"
@@ -667,7 +647,8 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
     edges = [
         ("market", "service", "داده"), ("service", "forecast", "آماده"),
         ("forecast", "timing", "قفل"), ("timing", "extension", "امتداد"), ("extension", "edge", "مزیت"), ("edge", "strength", "قدرت"),
-        ("strength", "confirmation", "تأیید"), ("confirmation", "base", "تصمیم"),
+        ("strength", "market_direction", "جهت"), ("market_direction", "entry_timing", "زمان"),
+        ("entry_timing", "base", "تصمیم"),
         ("base", "decision", "عادی"), ("forecast", "shadow", "ناظر"),
         ("base", "range", "WAIT"), ("range", "decision", "برگشت رنج"),
         ("decision", "news", "سیگنال"), ("news", "account", "مجوز"),
