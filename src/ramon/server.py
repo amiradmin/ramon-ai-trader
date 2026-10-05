@@ -32,6 +32,78 @@ from .market_state import assess_market, apply_market_policy
 ANALYTIC_OVERRIDE_STAGES = {"timing", "extension", "edge", "strength", "market_direction", "entry_timing", "base", "decision", "range", "news", "account", "limits", "risk", "order", "position"}
 
 
+def _ensure_human_opinion_table(db: str) -> None:
+    if not db:
+        return
+    with sqlite3.connect(db) as con:
+        con.execute(
+            """CREATE TABLE IF NOT EXISTS human_market_opinions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_utc INTEGER NOT NULL,
+                reviewer TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                sample_key TEXT NOT NULL,
+                signal_bar_time INTEGER NOT NULL,
+                opinion TEXT NOT NULL,
+                confidence INTEGER NOT NULL,
+                note TEXT NOT NULL,
+                snapshot_json TEXT NOT NULL
+            )"""
+        )
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_human_market_opinions_time "
+            "ON human_market_opinions(symbol, created_utc DESC)"
+        )
+        con.commit()
+
+
+def _persist_human_opinion(db: str, payload: dict[str, object]) -> None:
+    if not db:
+        raise ValueError("history persistence is disabled")
+    reviewer = str(payload.get("reviewer", "Sahar")).strip()[:64] or "Sahar"
+    symbol = str(payload.get("symbol", "XAUUSD_l")).strip()
+    sample_key = str(payload.get("sample_key", "")).strip()
+    signal_bar_time = int(payload.get("signal_bar_time", 0))
+    opinion = str(payload.get("opinion", "")).upper()
+    confidence = int(payload.get("confidence", 0))
+    note = str(payload.get("note", "")).strip()[:2000]
+    snapshot = payload.get("snapshot") if isinstance(payload.get("snapshot"), dict) else {}
+    if not symbol.startswith("XAUUSD") or not sample_key or signal_bar_time <= 0:
+        raise ValueError("invalid opinion context")
+    if opinion not in {"BUY", "SELL", "WAIT"}:
+        raise ValueError("opinion must be BUY, SELL or WAIT")
+    if confidence not in {1, 2, 3, 4, 5}:
+        raise ValueError("confidence must be 1..5")
+    _ensure_human_opinion_table(db)
+    with sqlite3.connect(db) as con:
+        con.execute(
+            """INSERT INTO human_market_opinions
+               (created_utc,reviewer,symbol,sample_key,signal_bar_time,opinion,confidence,note,snapshot_json)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            (
+                int(time.time()), reviewer, symbol, sample_key, signal_bar_time,
+                opinion, confidence, note,
+                json.dumps(snapshot, ensure_ascii=False, allow_nan=False),
+            ),
+        )
+        con.commit()
+
+
+def _recent_human_opinions(db: str, symbol: str = "XAUUSD_l", limit: int = 12) -> list[dict[str, object]]:
+    if not db:
+        return []
+    _ensure_human_opinion_table(db)
+    with sqlite3.connect(db) as con:
+        con.row_factory = sqlite3.Row
+        rows = con.execute(
+            """SELECT created_utc,reviewer,symbol,sample_key,signal_bar_time,opinion,confidence,note
+               FROM human_market_opinions WHERE symbol=?
+               ORDER BY id DESC LIMIT ?""",
+            (symbol, max(1, min(int(limit), 50))),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def _ensure_override_table(db: str) -> None:
     if not db:
         return
@@ -190,7 +262,14 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
     }
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
-            if self.path != "/health":
+            route = self.path.split("?", 1)[0]
+            if route == "/human-opinions":
+                params = parse_qs(urlsplit(self.path).query)
+                symbol = str(params.get("symbol", ["XAUUSD_l"])[0])
+                limit = int(params.get("limit", ["12"])[0])
+                self.reply(200, {"opinions": _recent_human_opinions(history_db, symbol, limit)})
+                return
+            if route != "/health":
                 self.send_error(404)
                 return
             self.reply(
@@ -235,7 +314,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
         def do_POST(self) -> None:
             nonlocal moment_future, finbert_future, latest_moment_payload
             nonlocal latest_finbert_payload, last_shadow_bar, last_finbert_event_key
-            if self.path not in {"/decision", "/trades", "/manual-override", "/manual-overrides/reset"}:
+            if self.path not in {"/decision", "/trades", "/manual-override", "/manual-overrides/reset", "/human-opinion"}:
                 self.send_error(404)
                 return
             try:
@@ -245,6 +324,10 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 payload = json.loads(self.rfile.read(length))
                 if not isinstance(payload, dict):
                     raise ValueError("request must be a JSON object")
+                if self.path == "/human-opinion":
+                    _persist_human_opinion(history_db, payload)
+                    self.reply(200, {"saved": True})
+                    return
                 if self.path == "/manual-overrides/reset":
                     cleared = []
                     for bar_time, rows in list(manual_overrides_by_bar.items()):
