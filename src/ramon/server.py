@@ -267,9 +267,14 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         "node_values": payload.get("node_values") if isinstance(payload.get("node_values"), dict) else {},
                         "operator": "dashboard",
                     }
-                    manual_overrides_by_bar.setdefault(signal_bar_time, {})[stage] = row
+                    if action == "FORCE_PASS":
+                        manual_overrides_by_bar.setdefault(signal_bar_time, {})[stage] = row
                     _persist_manual_override(history_db, row)
-                    self.reply(200, {"saved": True, "active": sorted(manual_overrides_by_bar[signal_bar_time])})
+                    self.reply(200, {
+                        "saved": True,
+                        "action": action,
+                        "active": sorted(manual_overrides_by_bar.get(signal_bar_time, {})),
+                    })
                     return
                 if self.path == "/trades":
                     if not history_db:
