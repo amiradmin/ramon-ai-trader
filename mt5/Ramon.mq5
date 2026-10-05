@@ -1,6 +1,6 @@
 #property strict
-#property version "1.565"
-#define RAMON_EA_VERSION "0.56.5"
+#property version "1.566"
+#define RAMON_EA_VERSION "0.56.6"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -617,7 +617,7 @@ string BuildDiagnosticText()
       +"Range MAIN: "+BoolText(EnableRangeMain)+" | quick 5-unit TP, boundary SL, RR >=1.2, 30min maximum\n"
       +"AccountLossLimits: "+AccountLossLimitStatus+" | enabled="+BoolText(EnableAccountLossLimits)
       +" daily="+DoubleToString(DailyLossLimitPercent,2)+"% drawdown="+DoubleToString(MaximumEquityDrawdownPercent,2)+"%\n"
-      +"NewsGuard: ACTIVE | entries -15/+15min; close -5min; calendar required\n"
+      +"NewsGuard: ACTIVE | entries -30/+30min; close -5/+15min; calendar required\n"
       +"EA role: "+(SmallOnlyMode ? "SMALL 2c" : "PRIMARY")
       +"  Magic: "+IntegerToString((long)MagicNumber)+"\n"
       +"Captured: "+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+" UTC\n"
@@ -1593,21 +1593,21 @@ bool CopyDiagnosticToClipboard()
 
 datetime NewsHighEventUTC=0;
 datetime NewsGuardReceivedUTC=0;
-bool NewsGuardWindow(const int before_minutes)
+bool NewsGuardWindow(const int before_minutes,const int after_minutes)
 {
    if(NewsHighEventUTC<=0) return false;
    long delta=(long)NewsHighEventUTC-(long)TimeGMT();
-   return delta<=before_minutes*60 && delta>=-15*60;
+   return delta<=before_minutes*60 && delta>=-after_minutes*60;
 }
 bool NewsGuardEntryBlocked()
 {
    return !LastNewsSourceReady || NewsGuardReceivedUTC<=0
       || LastNewsSourceAgeSeconds+(TimeGMT()-NewsGuardReceivedUTC)>1800
-      || NewsGuardWindow(15);
+      || NewsGuardWindow(30,30);
 }
 bool ManageNewsGuard(const ulong ticket)
 {
-   if(!NewsGuardWindow(5)) return false;
+   if(!NewsGuardWindow(5,15)) return false;
    StatusLine="NEWS GUARD: close before high-impact USD news";
    if(ManagedExitPausedForMarketClosed(ticket)) return true;
    if(Trade.PositionClose(ticket,MaxDeviationPoints))
