@@ -1,6 +1,6 @@
 #property strict
-#property version "1.576"
-#define RAMON_EA_VERSION "0.57.6"
+#property version "1.577"
+#define RAMON_EA_VERSION "0.57.7"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -4346,20 +4346,15 @@ void OnTimer()
    if(closed<=0)
       return;
 
-   // Dashboard manual-entry commands are checked every timer tick, not only on
-   // the normal model cadence. A valid command forces an immediate fresh model
-   // request so the trade is revalidated against the current quote and gates.
+   // Do not consume a queued manual command until a valid model snapshot has
+   // reached the execution section. This prevents commands from disappearing
+   // when a network/parser/telemetry return happens earlier in the timer cycle.
    string dashboard_direction="",dashboard_sample_key="",dashboard_command_reason="";
    double dashboard_risk_distance=0.0,dashboard_target_distance=0.0;
    double dashboard_edge=0.0,dashboard_probability=-1.0;
-   int dashboard_command=ReadDashboardManualEntry(
-      closed,dashboard_direction,dashboard_sample_key,
-      dashboard_risk_distance,dashboard_target_distance,
-      dashboard_edge,dashboard_probability,dashboard_command_reason
-   );
-   if(dashboard_command<0)
-      Print("Ramon manual dashboard entry ignored: ",dashboard_command_reason);
-   else if(dashboard_command>0)
+   int dashboard_command=0;
+   bool dashboard_pending=FileIsExist("Ramon_ManualEntries.txt",FILE_COMMON);
+   if(dashboard_pending)
       LastDecisionRequestTime=0;
 
    if(LastDecisionRequestTime>0
@@ -4370,7 +4365,7 @@ void OnTimer()
       SyncClosedTrades();
       return;
    }
-   if(dashboard_command<=0
+   if(!dashboard_pending
       && LastNetworkFinishedMs>0 && GetTickCount64()-LastNetworkFinishedMs<1000)
       return; // Manual dashboard commands must not be consumed and then dropped by the network spacing gate.
    LastDecisionRequestTime=now;
@@ -4644,6 +4639,17 @@ void OnTimer()
    AppendImprovementShadowCsv();
    Print("Ramon ",UTCText(bar_time,TIME_DATE|TIME_SECONDS)," ",decision," ",reason,
       " median=",DoubleToString(median,_Digits));
+
+   if(dashboard_pending)
+   {
+      dashboard_command=ReadDashboardManualEntry(
+         closed,dashboard_direction,dashboard_sample_key,
+         dashboard_risk_distance,dashboard_target_distance,
+         dashboard_edge,dashboard_probability,dashboard_command_reason
+      );
+      if(dashboard_command<0)
+         Print("Ramon manual dashboard entry ignored: ",dashboard_command_reason);
+   }
 
    bool dashboard_manual_entry=false;
    if(dashboard_command>0)
