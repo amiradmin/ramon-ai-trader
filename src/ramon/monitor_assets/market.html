@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Ramon · Live Market Review</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/market.js" defer></script>
+</head>
+<body class="market-review-body">
+  <header class="topbar">
+    <div class="brand" dir="ltr"><span class="brand-icon">R</span><strong>RAMON</strong><span class="brand-divider"></span><span class="brand-caption">LIVE MARKET REVIEW</span></div>
+    <div class="top-actions"><span class="readonly">فقط مشاهده + ثبت نظر</span><span id="market-connection" class="connection">در حال اتصال</span></div>
+  </header>
+  <main class="market-review-main">
+    <section class="page-heading">
+      <div><span class="eyebrow">XAUUSD · M15 + M1</span><h1>داشبورد زندهٔ شرایط بازار</h1><p>برای بررسی مستقل شرایط بازار و ثبت نظر انسانی؛ نظر ثبت‌شده مستقیماً معامله‌ای باز نمی‌کند.</p></div>
+      <div class="instrument" dir="ltr"><strong id="mr-price">—</strong><span id="mr-spread">Spread —</span></div>
+    </section>
+
+    <section class="market-kpis">
+      <article><span>تصمیم Ramon</span><strong id="mr-decision">—</strong><small id="mr-reason">—</small></article>
+      <article><span>جهت مستقل بازار</span><strong id="mr-direction">—</strong><small id="mr-direction-score">—</small></article>
+      <article><span>قدرت Chronos</span><strong id="mr-strength">—</strong><small id="mr-edge">—</small></article>
+      <article><span>ATR / حالت بازار</span><strong id="mr-atr">—</strong><small id="mr-state">—</small></article>
+      <article><span>زمان ورود</span><strong id="mr-timing">—</strong><small id="mr-timing-detail">—</small></article>
+      <article><span>Anomaly / News</span><strong id="mr-anomaly">—</strong><small id="mr-news">—</small></article>
+    </section>
+
+    <section class="market-review-grid">
+      <div class="market-chart-card">
+        <header><div><span class="eyebrow">PRICE ACTION</span><h2>کندل‌های اخیر</h2></div><div class="market-chart-tabs"><button type="button" class="active" data-tf="m15">M15</button><button type="button" data-tf="m1">M1</button></div></header>
+        <svg id="market-candles" viewBox="0 0 900 360" role="img" aria-label="نمودار کندل‌های اخیر"></svg>
+        <div class="market-chart-footer"><span id="mr-chart-range">—</span><span id="mr-updated">—</span></div>
+      </div>
+
+      <aside class="market-opinion-card">
+        <span class="eyebrow">HUMAN REVIEW · SAHAR</span>
+        <h2>نظر سحر</h2>
+        <p>برداشت خودت از بازار را مستقل از Ramon ثبت کن. این داده برای مقایسه و آموزش نگه‌داری می‌شود.</p>
+        <div class="opinion-direction" role="group" aria-label="جهت پیشنهادی">
+          <button type="button" data-opinion="BUY">BUY</button>
+          <button type="button" data-opinion="WAIT">WAIT</button>
+          <button type="button" data-opinion="SELL">SELL</button>
+        </div>
+        <label class="opinion-label">اطمینان
+          <select id="opinion-confidence">
+            <option value="1">1 / 5</option><option value="2">2 / 5</option><option value="3" selected>3 / 5</option><option value="4">4 / 5</option><option value="5">5 / 5</option>
+          </select>
+        </label>
+        <label class="opinion-label">دلیل یا نکته
+          <textarea id="opinion-note" maxlength="2000" rows="5" placeholder="مثلاً: ساختار M15 صعودی است ولی M1 هنوز پولبک نزولی دارد..."></textarea>
+        </label>
+        <button id="submit-opinion" class="opinion-submit" type="button" disabled>ثبت نظر</button>
+        <div id="opinion-status" class="opinion-status" aria-live="polite"></div>
+      </aside>
+    </section>
+
+    <section class="market-detail-grid">
+      <article class="market-detail-card"><span class="eyebrow">RAMON SIGNAL</span><h2>جزئیات تصمیم</h2><dl id="market-signal-details"></dl></article>
+      <article class="market-detail-card"><span class="eyebrow">RECENT HUMAN REVIEWS</span><h2>آخرین نظرهای سحر</h2><div id="recent-opinions" class="recent-opinions"></div></article>
+    </section>
+  </main>
+</body>
+</html>
