@@ -102,3 +102,12 @@
 .opportunity-entry.sell{border-color:#75434a;color:var(--red);background:#3e272e}
 .opportunity-entry:disabled{opacity:.38;cursor:not-allowed;filter:grayscale(.4)}
 .opportunity-table th:last-child,.opportunity-table td:last-child{text-align:center;white-space:nowrap}
+
+.opportunity-table tbody tr.opportunity-confidence-high{background:rgba(30,110,75,.28)}
+.opportunity-table tbody tr.opportunity-confidence-medium{background:rgba(118,104,35,.24)}
+.opportunity-table tbody tr.opportunity-confidence-neutral{background:rgba(75,88,110,.20)}
+.opportunity-table tbody tr.opportunity-confidence-low{background:rgba(120,52,58,.28)}
+.opportunity-table tbody tr.opportunity-confidence-high:hover{background:rgba(30,110,75,.38)}
+.opportunity-table tbody tr.opportunity-confidence-medium:hover{background:rgba(118,104,35,.34)}
+.opportunity-table tbody tr.opportunity-confidence-neutral:hover{background:rgba(75,88,110,.30)}
+.opportunity-table tbody tr.opportunity-confidence-low:hover{background:rgba(120,52,58,.38)}
