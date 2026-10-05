@@ -5,7 +5,7 @@ const coords = {market:[35,28],service:[280,28],forecast:[525,28],shadow:[280,21
 
 const marketStates={TREND_UP:"روند صعودی",TREND_DOWN:"روند نزولی",PULLBACK_UP:"پولبک در روند صعودی",PULLBACK_DOWN:"پولبک در روند نزولی",RANGE_LOW:"لبهٔ پایین رنج",RANGE_HIGH:"لبهٔ بالای رنج",RANGE_MIDDLE:"وسط رنج",BREAKOUT_UP:"شکست صعودی",BREAKOUT_DOWN:"شکست نزولی",BREAKOUT_RETEST_UP:"آزمون مجدد شکست صعودی",BREAKOUT_RETEST_DOWN:"آزمون مجدد شکست نزولی",FALSE_BREAKOUT_UP:"شکست کاذب سقف",FALSE_BREAKOUT_DOWN:"شکست کاذب کف",REGIME_TRANSITION:"تغییر رژیم",PRICE_GAP:"جهش قیمت",VOLATILITY_SHOCK:"شوک نوسان",LOW_LIQUIDITY:"اسپرد زیاد نسبت به نوسان",FLAT_MARKET:"بازار تخت",DISORDERLY_MARKET:"بازار نامنظم",VOLATILITY_COMPRESSION:"فشردگی نوسان",CONFLICTING_STRUCTURE:"ساختارهای متعارض",UNCERTAIN:"نامشخص"};
 let snapshot = null, selected = "decision", lastKey = null, busy = false, timer = null, zoomed = false, overrideBusy = false;
-const overrideStages = new Set(["timing","extension","edge","strength","market_direction","entry_timing"]);
+const overrideStages = new Set(["timing","extension","edge","strength","market_direction","entry_timing","base","decision","range"]);
 const timeFormat = new Intl.DateTimeFormat("fa-IR", {timeZone:"Asia/Tehran", hour:"2-digit",minute:"2-digit",second:"2-digit"});
 const dateFormat = new Intl.DateTimeFormat("fa-IR", {timeZone:"Asia/Tehran", year:"numeric",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit",second:"2-digit"});
 const brokerDateFormat = new Intl.DateTimeFormat("fa-IR", {timeZone:"UTC",year:"numeric",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit",second:"2-digit"});
