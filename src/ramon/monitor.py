@@ -1113,6 +1113,45 @@ def save_control(diagnostic, value):
         temp.unlink(missing_ok=True)
 
 
+
+def queue_manual_entry(db, diagnostic, symbol, payload):
+    if diagnostic is None:
+        raise ValueError("مسیر فایل اکسپرت در دسترس نیست")
+    direction = str(payload.get("direction", "")).upper()
+    signal_bar_time = int(payload.get("signal_bar_time", 0))
+    if direction not in {"BUY", "SELL"} or signal_bar_time <= 0:
+        raise ValueError("فرصت انتخاب‌شده نامعتبر است")
+    data = read_opportunities(db, symbol)
+    row = next(
+        (
+            item for item in data.get("opportunities", [])
+            if int(item.get("signal_bar_time") or 0) == signal_bar_time
+            and str(item.get("direction") or "").upper() == direction
+        ),
+        None,
+    )
+    if not row:
+        raise ValueError("فرصت در داده‌های فعلی پیدا نشد")
+    if not row.get("actionable"):
+        raise ValueError("این فرصت دیگر تازه و قابل اجرا نیست")
+    path = Path(diagnostic).with_name("Ramon_ManualEntry.txt")
+    command = f"{int(time.time())}|{signal_bar_time}|{direction}\n"
+    with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as out:
+        temp = Path(out.name)
+        out.write(command)
+    try:
+        temp.replace(path)
+    finally:
+        temp.unlink(missing_ok=True)
+    return {
+        "queued": True,
+        "direction": direction,
+        "signal_bar_time": signal_bar_time,
+        "success_probability": row.get("success_probability"),
+        "expires_in_seconds": data.get("actionable_seconds", 90),
+    }
+
+
 def handler_for(db, diagnostic, symbol, health_url):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -1164,7 +1203,7 @@ def handler_for(db, diagnostic, symbol, health_url):
                 self.send_error(404)
 
         def do_POST(self):
-            if self.path not in {"/api/control", "/api/override", "/api/override/reset"}:
+            if self.path not in {"/api/control", "/api/override", "/api/override/reset", "/api/manual-entry"}:
                 self.send_error(404)
                 return
             origin = self.headers.get("Origin")
@@ -1184,6 +1223,11 @@ def handler_for(db, diagnostic, symbol, health_url):
                 if self.path == "/api/control":
                     save_control(diagnostic, payload.get("max_executable_risk_usd"))
                     self.reply(json.dumps(control_state(diagnostic), ensure_ascii=False).encode(), "application/json; charset=utf-8")
+                    return
+
+                if self.path == "/api/manual-entry":
+                    result = queue_manual_entry(db, diagnostic, symbol, payload)
+                    self.reply(json.dumps(result, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
                     return
 
                 if self.path == "/api/override/reset":
