@@ -352,7 +352,13 @@ def _model_trend_metrics(
     return direction, move_atr, consistency, score
 
 
-def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settings()) -> Decision:
+def evaluate(
+    market: Market,
+    forecaster: Forecaster,
+    settings: Settings = Settings(),
+    *,
+    manual_overrides: frozenset[str] = frozenset(),
+) -> Decision:
     """Make a model-led BUY/SELL/WAIT decision; safety checks stay outside the model."""
     market.validate()
     if settings.horizon < 1 or settings.context < 128:
@@ -500,29 +506,47 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
             and bool(market.micro_bars)
             and intrabar_move_atr < settings.strong_entry_min_intrabar_move_atr
         )
-        if trend_conflict and not confirmed_reversal:
-            reason = "trend_conflict"
-        elif adverse_intrabar_timing:
-            strong_entry_guard_active = 1
-            reason = "adverse_intrabar_timing"
-        elif aligned_recent_move_atr >= settings.maximum_entry_extension_atr or intrabar_move_atr >= settings.maximum_entry_extension_atr:
-            reason = "late_entry_extension"
-        elif dominant_edge < minimum:
-            reason = "insufficient_model_edge"
-        elif dominant_strength < settings.minimum_strength and not (
+        conflict_blocked = trend_conflict and not confirmed_reversal and "timing" not in manual_overrides
+        adverse_blocked = adverse_intrabar_timing and "timing" not in manual_overrides
+        extension_blocked = (
+            aligned_recent_move_atr >= settings.maximum_entry_extension_atr
+            or intrabar_move_atr >= settings.maximum_entry_extension_atr
+        ) and "extension" not in manual_overrides
+        edge_blocked = dominant_edge < minimum and "edge" not in manual_overrides
+        strength_blocked = dominant_strength < settings.minimum_strength and not (
             settings.allow_weak_intrabar_entries
             and dominant_edge >= minimum
             and intrabar_confirmed
             and ai_trend_confirmed
             and ai_trend_direction == intrabar_direction
-        ):
-            # Weak forecasts need all three independent observations aligned.
+        ) and "strength" not in manual_overrides
+        confirmation_blocked = (
+            settings.require_direction_confirmation
+            and strong_entry
+            and not (
+                intrabar_confirmed and ai_trend_confirmed
+                and ai_trend_direction == intrabar_direction
+            )
+            and "confirmation" not in manual_overrides
+        )
+
+        if conflict_blocked:
+            reason = "trend_conflict"
+        elif adverse_blocked:
+            strong_entry_guard_active = 1
+            reason = "adverse_intrabar_timing"
+        elif extension_blocked:
+            reason = "late_entry_extension"
+        elif edge_blocked:
+            reason = "insufficient_model_edge"
+        elif strength_blocked:
             reason = "insufficient_model_strength"
-        elif settings.require_direction_confirmation and strong_entry and not (
-            intrabar_confirmed and ai_trend_confirmed
-            and ai_trend_direction == intrabar_direction
-        ):
+        elif confirmation_blocked:
             reason = "direction_confirmation_required"
+        elif manual_overrides:
+            side = "BUY" if dominant_buy else "SELL"
+            edge = dominant_edge
+            reason = "manual_override_base_pass"
         elif dominant_buy and buy_edge >= minimum and buy_strength >= settings.minimum_strength:
             side, edge, reason = "BUY", buy_edge, "forecast_up"
         elif not dominant_buy and sell_edge >= minimum and sell_strength >= settings.minimum_strength:
