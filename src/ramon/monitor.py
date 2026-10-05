@@ -13,7 +13,7 @@ import sqlite3
 import time
 import tempfile
 from urllib.parse import parse_qs, urlsplit
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 
 ASSETS = Path(__file__).with_name("monitor_assets")
@@ -918,9 +918,19 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
         warnings.append("شناسهٔ اکسپرت و تصمیم مدل متفاوت است؛ عبور مسیر اجرا قابل تأیید نیست")
     if model_time["state"] == "clock_error" or ea_time["state"] == "clock_error":
         warnings.append("زمان منبع در آینده است؛ ساعت نیاز به بررسی دارد")
-    return {"schema_version": 1, "generated_at": utc_time(now), "symbol": symbol, "read_only": True,
+    active_manual = final.get("manual_overrides_active") if isinstance(final.get("manual_overrides_active"), list) else []
+    for item in nodes:
+        if item["id"] in active_manual:
+            item["state"] = "pass" if model_time["state"] == "fresh" else item["state"]
+            item["observed_state"] = "pass"
+            item["manual_override"] = True
+            item["detail"] = "MANUAL PASS — " + item["detail"]
+
+    return {"schema_version": 2, "generated_at": utc_time(now), "symbol": symbol, "read_only": False,
             "model_freshness": model_time, "ea_freshness": ea_time, "joined": joined,
-            "sample_key": sample.get("sample_key"), "decision": decision, "reason": reason,
+            "sample_key": sample.get("sample_key"), "signal_bar_time": base.get("signal_bar_time"),
+            "manual_overrides_active": active_manual,
+            "decision": decision, "reason": reason,
             "reason_fa": REASONS.get(reason, reason), "ea_status": ea_status,
             "ea_version": diag.get("EA version"), "nodes": nodes,
             "edges": [{"from": a, "to": b, "label": label} for a, b, label in edges],
@@ -998,7 +1008,7 @@ def handler_for(db, diagnostic, symbol, health_url):
                 self.send_error(404)
 
         def do_POST(self):
-            if self.path != "/api/control":
+            if self.path not in {"/api/control", "/api/override"}:
                 self.send_error(404)
                 return
             origin = self.headers.get("Origin")
@@ -1010,13 +1020,50 @@ def handler_for(db, diagnostic, symbol, health_url):
                 return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
-                if not 0 < length <= 1024:
+                if not 0 < length <= 8192:
                     raise ValueError("درخواست نامعتبر است")
                 payload = json.loads(self.rfile.read(length))
                 if not isinstance(payload, dict):
                     raise ValueError("درخواست نامعتبر است")
-                save_control(diagnostic, payload.get("max_executable_risk_usd"))
-                self.reply(json.dumps(control_state(diagnostic), ensure_ascii=False).encode(), "application/json; charset=utf-8")
+                if self.path == "/api/control":
+                    save_control(diagnostic, payload.get("max_executable_risk_usd"))
+                    self.reply(json.dumps(control_state(diagnostic), ensure_ascii=False).encode(), "application/json; charset=utf-8")
+                    return
+
+                stage = str(payload.get("stage", ""))
+                allowed = {"timing", "extension", "edge", "strength", "market_direction", "entry_timing"}
+                if stage not in allowed:
+                    raise ValueError("این مرحله قابل عبور دستی نیست")
+                health = None
+                try:
+                    with urlopen(health_url, timeout=.7) as response:
+                        health = object_json(response.read(100_000))
+                except (OSError, ValueError):
+                    pass
+                snap = build_snapshot(db, diagnostic, symbol=symbol, health=health)
+                node_row = next((n for n in snap.get("nodes", []) if n.get("id") == stage), None)
+                if not node_row or node_row.get("state") != "blocked":
+                    raise ValueError("فقط شرط قرمز فعلی قابل عبور دستی است")
+                if not snap.get("sample_key") or not snap.get("signal_bar_time"):
+                    raise ValueError("تصمیم جاری شناسه معتبر ندارد")
+                forward = {
+                    "stage": stage,
+                    "sample_key": snap["sample_key"],
+                    "signal_bar_time": snap["signal_bar_time"],
+                    "original_state": node_row.get("state"),
+                    "original_reason": snap.get("reason"),
+                    "node_values": node_row.get("values", {}),
+                }
+                model_url = health_url.rsplit("/health", 1)[0] + "/manual-override"
+                request = Request(
+                    model_url,
+                    data=json.dumps(forward, ensure_ascii=False).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urlopen(request, timeout=2.0) as response:
+                    result = object_json(response.read(100_000))
+                self.reply(json.dumps(result, ensure_ascii=False).encode(), "application/json; charset=utf-8")
             except (ValueError, OSError) as exc:
                 self.send_error(400, "Invalid control request" if isinstance(exc, ValueError) else "Control file unavailable")
 
