@@ -485,11 +485,75 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
          "قدرت پایین فقط با تأیید هم‌زمان برگشت و مسیر مدل می‌تواند پذیرفته شود",
          values={"قدرت": strength, "حداقل قدرت عادی": floor, "ورود ضعیف مجاز": settings.get("allow_weak_intrabar_entries")})
     confirms = base.get("intrabar_confirmed") == 1 and base.get("ai_trend_confirmed") == 1 and base.get("intrabar_direction") == base.get("ai_trend_direction")
+    consistency_floor = number(settings.get("trend_min_consistency"))
+    if consistency_floor is None:
+        consistency_floor = number(base.get("trend_min_consistency"))
+    path_move_floor = number(settings.get("trend_min_path_atr"))
+    if path_move_floor is None:
+        path_move_floor = number(base.get("trend_min_path_atr"))
+    micro_move_floor = number(settings.get("trend_min_micro_move_atr"))
+    if micro_move_floor is None:
+        micro_move_floor = number(base.get("trend_min_micro_move_atr"))
+    rebound_floor = number(base.get("intrabar_min_rebound_atr"))
+    if rebound_floor is None:
+        rebound_floor = number(settings.get("intrabar_min_rebound_atr"))
+
+    intrabar_move = number(base.get("intrabar_move_atr"))
+    intrabar_rebound = number(base.get("intrabar_rebound_atr"))
+    path_move = number(base.get("ai_trend_move_atr"))
+    path_consistency = number(base.get("ai_trend_consistency"))
+    edge_floor = number(base.get("trend_edge_floor"))
+    dominant_edge = max(number(base.get("buy_edge")) or 0.0, number(base.get("sell_edge")) or 0.0)
+    same_direction = (
+        base.get("intrabar_direction") not in {None, "NONE"}
+        and base.get("intrabar_direction") == base.get("ai_trend_direction")
+    )
+    turn_ok = base.get("intrabar_turn_confirmed") == 1
+    move_ok = intrabar_move is not None and number(base.get("intrabar_min_move_atr")) is not None and intrabar_move >= number(base.get("intrabar_min_move_atr"))
+    rebound_ok = intrabar_rebound is not None and rebound_floor is not None and intrabar_rebound >= rebound_floor
+    path_move_ok = path_move is not None and path_move_floor is not None and path_move >= path_move_floor
+    consistency_ok = path_consistency is not None and consistency_floor is not None and path_consistency >= consistency_floor
+    micro_move_ok = intrabar_move is not None and micro_move_floor is not None and intrabar_move >= micro_move_floor
+    edge_ok = edge_floor is not None and dominant_edge >= edge_floor
+
+    failed_confirmation = []
+    if not turn_ok:
+        failed_confirmation.append("چرخش کوتاه‌مدت تأیید نشده")
+    if not move_ok:
+        failed_confirmation.append("حرکت کوتاه‌مدت به حد لازم نرسیده")
+    if not rebound_ok:
+        failed_confirmation.append("برگشت از کف/سقف به حد لازم نرسیده")
+    if not same_direction:
+        failed_confirmation.append("جهت کوتاه‌مدت و مسیر Chronos هم‌جهت نیست")
+    if not path_move_ok:
+        failed_confirmation.append("حرکت مسیر Chronos کافی نیست")
+    if not consistency_ok:
+        failed_confirmation.append("سازگاری مسیر Chronos کافی نیست")
+    if not edge_ok:
+        failed_confirmation.append("مزیت جهت به حد مسیر مدل نرسیده")
+    if not micro_move_ok:
+        failed_confirmation.append("حرکت کوتاه‌مدت برای مسیر مدل کافی نیست")
+
+    confirmation_detail = (
+        "جهت و زمان ورود با تأیید کوتاه‌مدت و مسیر Chronos تأیید شده"
+        if confirms else
+        "ورود هنوز تأیید نشده: " + "، ".join(failed_confirmation)
+        if failed_confirmation else
+        "ورود عادی نیازمند هم‌جهتی پیش‌بینی، حرکت کوتاه‌مدت و مسیر مدل است"
+    )
     node("confirmation", "تأیید جهت و زمان ورود", "pass" if confirms else "blocked" if base else "unknown",
-         "ورود عادی نیازمند هم‌جهتی پیش‌بینی، حرکت کوتاه‌مدت و مسیر مدل است",
-         values={"تأیید کوتاه‌مدت": base.get("intrabar_confirmed"), "تأیید مسیر مدل": base.get("ai_trend_confirmed"),
-                 "حرکت / حداقل ATR": f"{metric(base.get('intrabar_move_atr'))} / {metric(base.get('intrabar_min_move_atr'))}",
-                 "سازگاری مسیر / حداقل": f"{metric(base.get('ai_trend_consistency'))} / {metric(base.get('trend_min_consistency'))}"})
+         confirmation_detail,
+         values={"تأیید کوتاه‌مدت": base.get("intrabar_confirmed"),
+                 "تأیید مسیر مدل": base.get("ai_trend_confirmed"),
+                 "جهت کوتاه‌مدت": base.get("intrabar_direction"),
+                 "جهت مسیر Chronos": base.get("ai_trend_direction"),
+                 "چرخش کوتاه‌مدت": "بله" if turn_ok else "خیر",
+                 "حرکت / حداقل ATR": f"{metric(intrabar_move)} / {metric(base.get('intrabar_min_move_atr'))}",
+                 "برگشت / حداقل ATR": f"{metric(intrabar_rebound)} / {metric(rebound_floor)}",
+                 "حرکت مسیر / حداقل ATR": f"{metric(path_move)} / {metric(path_move_floor)}",
+                 "سازگاری مسیر / حداقل": f"{metric(path_consistency)} / {metric(consistency_floor)}",
+                 "مزیت / حداقل مسیر": f"{metric(dominant_edge)} / {metric(edge_floor)}",
+                 "حرکت کوتاه برای مسیر / حداقل": f"{metric(intrabar_move)} / {metric(micro_move_floor)}"})
     base_reason = base.get("reason")
     after_guards = base_reason in {"insufficient_model_edge", "insufficient_model_strength", "direction_confirmation_required"} or base.get("decision") in {"BUY", "SELL"}
     conflict_active = base.get("trend_conflict_active") == 1 or base_reason == "trend_conflict"
