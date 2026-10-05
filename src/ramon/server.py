@@ -29,7 +29,7 @@ from .market_state import assess_market, apply_market_policy
 
 
 
-ANALYTIC_OVERRIDE_STAGES = {"timing", "extension", "edge", "strength", "market_direction", "entry_timing", "base", "decision", "range"}
+ANALYTIC_OVERRIDE_STAGES = {"timing", "extension", "edge", "strength", "market_direction", "entry_timing", "base", "decision", "range", "news", "account", "limits", "risk", "order", "position"}
 
 
 def _ensure_override_table(db: str) -> None:
