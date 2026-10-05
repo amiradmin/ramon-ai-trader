@@ -235,7 +235,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
         def do_POST(self) -> None:
             nonlocal moment_future, finbert_future, latest_moment_payload
             nonlocal latest_finbert_payload, last_shadow_bar, last_finbert_event_key
-            if self.path not in {"/decision", "/trades", "/manual-override"}:
+            if self.path not in {"/decision", "/trades", "/manual-override", "/manual-overrides/reset"}:
                 self.send_error(404)
                 return
             try:
@@ -245,6 +245,20 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 payload = json.loads(self.rfile.read(length))
                 if not isinstance(payload, dict):
                     raise ValueError("request must be a JSON object")
+                if self.path == "/manual-overrides/reset":
+                    cleared = []
+                    for bar_time, rows in list(manual_overrides_by_bar.items()):
+                        for stage, original in list(rows.items()):
+                            reset_row = dict(original)
+                            reset_row["action"] = "RESET"
+                            reset_row["requested_utc"] = int(time.time())
+                            reset_row["reset_all"] = True
+                            _persist_manual_override(history_db, reset_row)
+                            cleared.append({"signal_bar_time": bar_time, "stage": stage})
+                    manual_overrides_by_bar.clear()
+                    self.reply(200, {"saved": True, "cleared": cleared, "active": []})
+                    return
+
                 if self.path == "/manual-override":
                     stage = str(payload.get("stage", ""))
                     sample_key = str(payload.get("sample_key", ""))
