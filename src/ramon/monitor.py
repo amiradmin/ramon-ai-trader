@@ -589,7 +589,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
     range_execution = final.get("range_execution") == 1
     range_setup = metadata.get("range_setup") if isinstance(metadata.get("range_setup"), dict) else {}
     range_disabled = (health or {}).get("range_main_enabled") is False or diag.get("Range MAIN", "").startswith("NO")
-    node("range", "مسیر جایگزین: برگشت رنج", "pass" if range_execution else "idle" if range_disabled else "unknown" if decision == "WAIT" else "idle",
+    node("range", "مسیر جایگزین: برگشت رنج", "pass" if range_execution else "idle" if range_disabled else "blocked",
          "برگشت رنج تأیید شده؛ اکسپرت سقف ریسک و هدف را دوباره بررسی می‌کند" if range_execution else
          "علت رد هر شرط رنج در تاریخچهٔ این نسخه ذخیره نشده؛ نتیجه را حدس نمی‌زنیم",
          values={"فعال در سرویس": (health or {}).get("range_main_enabled"), "فعال در اکسپرت": diag.get("Range MAIN"),
@@ -608,7 +608,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
                                              "شواهد تشخیص": assessment.get("evidence", {})})
     # These are terminal observations, not a replay of gates that short-circuit.
     node("news", "قفل خبر", "blocked" if "NEWS GUARD" in ea_status else "observed" if diag.get("News") else "unknown",
-         "ورود ±۱۵ دقیقهٔ خبر پراثر؛ خروج از ۵ دقیقه قبل؛ تقویم نامعتبر مانع ورود است",
+         "ورود از ۳۰ دقیقه قبل تا ۳۰ دقیقه بعدِ خبر پراثر متوقف است؛ تقویم نامعتبر هم مانع ورود است",
          source="ea", values={"آخرین خبر": diag.get("News"), "وضعیت اکسپرت": ea_status if "NEWS GUARD" in ea_status else "عبور از این گیت در هر تصمیم ثبت نشده"})
     live = match(diag.get("Live"), r"^(\w+)")
     permissions = diag.get("Trade permissions", "")
@@ -921,10 +921,12 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
     active_manual = final.get("manual_overrides_active") if isinstance(final.get("manual_overrides_active"), list) else []
     for item in nodes:
         if item["id"] in active_manual:
-            item["state"] = "pass" if model_time["state"] == "fresh" else item["state"]
-            item["observed_state"] = "pass"
-            item["manual_override"] = True
-            item["detail"] = "MANUAL PASS — " + item["detail"]
+            effective_manual = item["id"] != "range" or range_execution
+            if effective_manual:
+                item["state"] = "pass" if model_time["state"] == "fresh" else item["state"]
+                item["observed_state"] = "pass"
+                item["manual_override"] = True
+                item["detail"] = "MANUAL PASS — " + item["detail"]
 
     return {"schema_version": 2, "generated_at": utc_time(now), "symbol": symbol, "read_only": False,
             "model_freshness": model_time, "ea_freshness": ea_time, "joined": joined,
@@ -1031,7 +1033,7 @@ def handler_for(db, diagnostic, symbol, health_url):
                     return
 
                 stage = str(payload.get("stage", ""))
-                allowed = {"timing", "extension", "edge", "strength", "market_direction", "entry_timing"}
+                allowed = {"timing", "extension", "edge", "strength", "market_direction", "entry_timing", "base", "decision", "range"}
                 if stage not in allowed:
                     raise ValueError("این مرحله قابل عبور دستی نیست")
                 health = None
