@@ -4147,6 +4147,39 @@ void OnTick()
    ObserveTPStageCrossingsOnTick();
 }
 
+int ReadDashboardManualEntry(const datetime current_bar,string &direction,string &why)
+{
+   direction="";
+   why="";
+   if(SmallOnlyMode)
+      return 0;
+   int handle=FileOpen("Ramon_ManualEntry.txt",FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
+   if(handle==INVALID_HANDLE)
+      return 0;
+   string raw=FileReadString(handle);
+   FileClose(handle);
+   StringTrimLeft(raw); StringTrimRight(raw);
+   string parts[];
+   ushort separator=StringGetCharacter("|",0);
+   int count=StringSplit(raw,separator,parts);
+   // A dashboard command is single-use even when malformed or stale.
+   FileDelete("Ramon_ManualEntry.txt",FILE_COMMON);
+   if(count!=3)
+   { why="invalid command"; return -1; }
+   datetime requested=(datetime)StringToInteger(parts[0]);
+   datetime signal_bar=(datetime)StringToInteger(parts[1]);
+   string side=parts[2];
+   datetime utc_now=TimeGMT();
+   if(side!="BUY" && side!="SELL")
+   { why="invalid direction"; return -1; }
+   if(requested<=0 || utc_now-requested>90 || requested-utc_now>5)
+   { why="command expired"; return -1; }
+   if(signal_bar!=current_bar)
+   { why="signal bar changed"; return -1; }
+   direction=side;
+   return 1;
+}
+
 void OnTimer()
 {
    ReadControlRiskCap();
@@ -4452,6 +4485,29 @@ void OnTimer()
    Print("Ramon ",UTCText(bar_time,TIME_DATE|TIME_SECONDS)," ",decision," ",reason,
       " median=",DoubleToString(median,_Digits));
 
+   bool dashboard_manual_entry=false;
+   string dashboard_direction="",dashboard_command_reason="";
+   int dashboard_command=ReadDashboardManualEntry(bar_time,dashboard_direction,dashboard_command_reason);
+   if(dashboard_command<0)
+      Print("Ramon manual dashboard entry ignored: ",dashboard_command_reason);
+   else if(dashboard_command>0)
+   {
+      double selected_edge=(dashboard_direction=="BUY" ? buy_edge : sell_edge);
+      if(selected_edge>0.0)
+      {
+         decision=dashboard_direction;
+         reason="manual_dashboard_opportunity";
+         manual_execution_override=1.0;
+         dashboard_manual_entry=true;
+         StatusLine="MANUAL DASHBOARD "+decision+" requested";
+         Print("Ramon execution: manual dashboard opportunity accepted for revalidation ",
+            decision," bar=",IntegerToString((long)bar_time),
+            " edge=",DoubleToString(selected_edge,_Digits));
+      }
+      else
+         Print("Ramon manual dashboard entry ignored: selected edge is no longer positive");
+   }
+
    if(ManagedPosition(ticket,opened) && ManageNewsGuard(ticket))
    { ShowStatus(); return; }
    if(NewsGuardEntryBlocked())
@@ -4574,7 +4630,7 @@ void OnTimer()
    // MAIN three-stage plan: use TP3 as the broker-side fail-safe target whenever
    // the model supplied a valid directional TP1/TP2/TP3 structure.
    bool main_tp_plan_valid=(
-      !small_profit && !range_trade
+      !small_profit && !range_trade && !dashboard_manual_entry
       && EnableTPStageManagement
       && ValidDirectionalTargets(decision,entry,LastTargetTP1,LastTargetTP2,LastTargetTP3)
    );
@@ -4642,7 +4698,7 @@ void OnTimer()
       PersistTPPlan(LastSampleKey,decision,entry,stop,
          LastTargetTP1,LastTargetTP2,LastTargetTP3);
    // The broker owns SL/TP immediately. No position is opened when the model is unavailable.
-   string trade_comment="Ramon:"+LastSampleKey+(small_profit ? ":S" : (range_trade ? ":R" : ""));
+   string trade_comment="Ramon:"+LastSampleKey+(small_profit ? ":S" : (range_trade ? ":R" : (dashboard_manual_entry ? ":M" : "")));
    bool submitted=(
       decision=="BUY"
       ? Trade.Buy(volume,_Symbol,0.0,stop,target,trade_comment)
