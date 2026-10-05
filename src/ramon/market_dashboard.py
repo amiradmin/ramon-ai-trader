@@ -11,7 +11,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
-from .monitor import ASSETS, build_snapshot, default_diagnostic, object_json
+from .monitor import ASSETS, build_snapshot, default_diagnostic, object_json, opportunities_with_execution_state, queue_manual_entry
 from .opportunities import read_opportunities
 
 
@@ -57,7 +57,7 @@ def handler_for(db: str, diagnostic, symbol: str, health_url: str, model_url: st
                 return
             if route == "/api/opportunities":
                 self.reply(
-                    json.dumps(read_opportunities(db, symbol), ensure_ascii=False, allow_nan=False).encode(),
+                    json.dumps(opportunities_with_execution_state(db, diagnostic, symbol), ensure_ascii=False, allow_nan=False).encode(),
                     "application/json; charset=utf-8",
                 )
                 return
@@ -76,7 +76,7 @@ def handler_for(db: str, diagnostic, symbol: str, health_url: str, model_url: st
             self.send_error(404)
 
         def do_POST(self):
-            if self.path != "/api/opinion":
+            if self.path not in {"/api/opinion", "/api/manual-entry"}:
                 self.send_error(404)
                 return
             origin = self.headers.get("Origin")
@@ -93,6 +93,13 @@ def handler_for(db: str, diagnostic, symbol: str, health_url: str, model_url: st
                 payload = json.loads(self.rfile.read(length))
                 if not isinstance(payload, dict):
                     raise ValueError("invalid payload")
+                if self.path == "/api/manual-entry":
+                    result = queue_manual_entry(db, diagnostic, symbol, payload)
+                    self.reply(
+                        json.dumps(result, ensure_ascii=False, allow_nan=False).encode(),
+                        "application/json; charset=utf-8",
+                    )
+                    return
                 opinion = str(payload.get("opinion", "")).upper()
                 confidence = int(payload.get("confidence", 0))
                 note = str(payload.get("note", "")).strip()[:2000]
