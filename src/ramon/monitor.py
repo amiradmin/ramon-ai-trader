@@ -435,6 +435,40 @@ def income_roadmap(readiness, diag):
     }
 
 
+def recent_market_context(db, symbol="XAUUSD_l", m15_limit=12, m1_limit=15):
+    path = Path(db)
+    if not path.is_file():
+        return {"m15": [], "m1": []}
+    result = {"m15": [], "m1": []}
+    try:
+        with sqlite3.connect(path) as con:
+            for timeframe, limit, key in (("M15", m15_limit, "m15"), ("M1", m1_limit, "m1")):
+                rows = con.execute(
+                    """SELECT time,open,high,low,close,COALESCE(spread_points,0)
+                       FROM history_bars
+                       WHERE symbol=? AND timeframe=?
+                       ORDER BY time DESC LIMIT ?""",
+                    (symbol, timeframe, int(limit)),
+                ).fetchall()
+                rows.reverse()
+                result[key] = [
+                    {
+                        "time": int(t),
+                        "open": float(o),
+                        "high": float(h),
+                        "low": float(l),
+                        "close": float(cl),
+                        "spread_points": int(spread or 0),
+                        "body": float(cl - o),
+                        "range": float(h - lo),
+                    }
+                    for t, o, h, lo, cl, spread in rows
+                ]
+    except sqlite3.Error:
+        return {"m15": [], "m1": []}
+    return result
+
+
 def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=None):
     now = time.time() if now is None else now
     diag, diag_error = read_diagnostic(diagnostic)
@@ -949,6 +983,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
             "ea_version": diag.get("EA version"), "nodes": nodes,
             "edges": [{"from": a, "to": b, "label": label} for a, b, label in edges],
             "timeline": timeline, "trades": outcomes, "model_handler_map": model_handler_map,
+            "recent_market": recent_market_context(db, symbol),
             "dollar_readiness": readiness, "income_roadmap": roadmap, "warnings": warnings}
 
 
