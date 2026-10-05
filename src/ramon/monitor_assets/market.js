@@ -98,7 +98,7 @@ function renderSaharOpportunities(data){
   for(const row of data.opportunities||[]){
     const tr=document.createElement("tr"),p=num(row.success_probability);
     tr.className=p===null?"":p>=.70?"opportunity-confidence-high":p>=.55?"opportunity-confidence-medium":p>=.45?"opportunity-confidence-neutral":"opportunity-confidence-low";
-    const disposition=row.executed?"معامله ثبت شده":row.model_approved?"سیگنال مدل":"مسدود";
+    const disposition=row.position_open?"پوزیشن باز است"+(row.position_ticket?" · #"+row.position_ticket:""):row.entry_queued?"در صف اجرا":row.executed?"معامله ثبت شده":row.model_approved?"سیگنال مدل":"مسدود";
     const cells=[fullFmt.format(new Date(row.captured*1000)),row.strategy+" / "+row.direction,
       fmt(row.entry)+" / "+fmt(row.stop)+" / "+fmt(row.target),fmt(row.edge)+" / "+fmt(row.minimum_edge),
       fmt(row.strength),pct(row.success_probability),disposition+" · "+txt(row.last_reason),
