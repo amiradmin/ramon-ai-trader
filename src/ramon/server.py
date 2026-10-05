@@ -27,6 +27,7 @@ from .finbert_shadow import FinBertNewsShadow
 from .range_shadow import observe as observe_range_shadow
 from .range_strategy import candidate as range_candidate, live_candidate
 from .market_state import assess_market, apply_market_policy
+from .reversal_strategy import apply_reversal
 
 
 
@@ -177,6 +178,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
     cached_model = CachedForecaster(model)
     history_db = os.getenv("RAMON_HISTORY_DB", "").strip()
     range_live_enabled = os.getenv("RAMON_RANGE_LIVE_ENABLED", "0") == "1"
+    reversal_live_enabled = os.getenv("RAMON_REVERSAL_LIVE_ENABLED", "0") == "1"
     ensemble_dir = os.getenv("RAMON_ENSEMBLE_DIR", "/checkpoints/ensemble").strip()
     # Preview is the default; enabling the live ensemble requires an explicit mode.
     role_mode = os.getenv("RAMON_ROLE_MODE", "shadow").strip().lower()
@@ -297,6 +299,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     "maximum_entry_extension_atr": settings.maximum_entry_extension_atr,
                     "range_shadow_mode": "OBSERVE_ONLY" if history_db else "DISABLED",
                     "range_main_enabled": range_live_enabled,
+                    "reversal_live_enabled": reversal_live_enabled,
                     "history_last_error": str(history_status["last_error"]),
                     "history_last_persisted_bar": int(history_status["last_persisted_bar"]),
                     **ensemble.status(),
@@ -588,9 +591,13 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                                       "direction": range_setup["direction"],
                                       "legacy_target": range_setup["target"]}
                 market_assessment = assess_market(market, max_spread_points=settings.max_spread_points)
-                if settings.market_state_policy_enabled:
+                reversal_selected = apply_reversal(
+                    response, result, request_settings, market_assessment,
+                    enabled=reversal_live_enabled, manual_overrides=active_overrides,
+                )
+                if settings.market_state_policy_enabled and not reversal_selected:
                     apply_market_policy(response, market_assessment)
-                else:
+                elif not reversal_selected:
                     response.update(market_state=market_assessment["state"], market_state_route="OBSERVE",
                                     market_state_policy=market_assessment["version"])
 
@@ -662,6 +669,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
 
                 if not response["range_execution"]:
                     range_setup = None
+                if response["decision"] == "WAIT":
+                    response["reversal_execution"] = 0
                 sample_key = uuid4().hex[:16]
                 response["sample_key"] = sample_key
                 response["sample_saved"] = 0
@@ -698,15 +707,21 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                                 "ensemble_mode": ensemble.status()["ensemble_mode"],
                                 "ensemble_active": response.get("ensemble_active", 0),
                                 "role_manifest": ensemble.manifest,
-                                "execution_strategy": "range-reversal-v1" if range_setup else "chronos",
+                                "execution_strategy": "range-reversal-v1" if range_setup else "confirmed-reversal-v1" if response.get("reversal_execution") else "chronos",
                                 "range_setup": range_setup,
-                                "market_assessment": market_assessment,
+                                "market_assessment": (
+                                    {**market_assessment, "base_route": market_assessment["route"],
+                                     "route": "CONFIRMED_REVERSAL", "allowed_directions": [response["decision"]]}
+                                    if response.get("reversal_execution") else market_assessment
+                                ),
                                 "decision_audit": {
                                     "schema_version": 2,
                                     "base": result.to_dict(),
                                     "final": {**ensemble_payload, "decision": response["decision"],
                                               "reason": response["reason"],
                                               "range_execution": response["range_execution"],
+                                              "reversal_execution": response.get("reversal_execution", 0),
+                                              "reversal_live_enabled": int(reversal_live_enabled),
                                               "market_state": response["market_state"],
                                               "market_state_route": response["market_state_route"],
                                               "cent_direction_gate_active": response.get("cent_direction_gate_active", 0),
@@ -767,6 +782,10 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     response["decision"] = "WAIT"
                     response["reason"] = "range_sample_not_saved"
                     response["range_execution"] = 0
+                if response.get("reversal_execution") and not response["sample_saved"]:
+                    response["decision"] = "WAIT"
+                    response["reason"] = "reversal_sample_not_saved"
+                    response["reversal_execution"] = 0
                 self.reply(200, response)
             except (ValueError, TypeError, KeyError, OverflowError, json.JSONDecodeError) as exc:
                 self.reply(400, {"error": str(exc)})

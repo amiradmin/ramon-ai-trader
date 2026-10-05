@@ -18,6 +18,8 @@ from urllib.request import Request, urlopen
 
 ASSETS = Path(__file__).with_name("monitor_assets")
 REASONS = {
+    "confirmed_countertrend_reversal": "برگشت خلاف روند با تأیید مدل و حرکت کوتاه‌مدت",
+    "reversal_sample_not_saved": "تصمیم برگشت ثبت نشده؛ ورود متوقف است",
     "insufficient_model_strength": "قدرت پیش‌بینی کافی نیست",
     "insufficient_model_edge": "مزیت پس از هزینهٔ اسپرد کافی نیست",
     "direction_confirmation_required": "جهت ورود هنوز تأیید نشده",
