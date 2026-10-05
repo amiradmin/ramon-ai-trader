@@ -369,3 +369,21 @@ def test_model_map_green_requires_ready_gate_without_veto(sources, veto, expecte
     rows = {r["name"]: r for r in build_snapshot(db, diag, now=NOW)["model_handler_map"]}
     assert rows["Anomaly Detection"]["condition_state"] == "unknown"
     assert rows["News Sentiment"]["condition_state"] == "unknown"
+
+
+@pytest.mark.parametrize('reason,conflict,extension', [
+    ('trend_conflict', 'blocked', 'unknown'),
+    ('adverse_intrabar_timing', 'pass', 'unknown'),
+    ('late_entry_extension', 'pass', 'blocked'),
+    ('insufficient_model_strength', 'pass', 'pass'),
+])
+def test_conflict_and_extension_are_independent(sources, reason, conflict, extension):
+    db, diag = sources
+    with sqlite3.connect(db) as c:
+        metadata = json.loads(c.execute('SELECT model_metadata FROM decision_samples').fetchone()[0])
+        metadata['decision_audit']['base']['reason'] = reason
+        c.execute('UPDATE decision_samples SET model_metadata=?', (json.dumps(metadata),))
+    snapshot = build_snapshot(db, diag, now=NOW)
+    result = nodes(snapshot)
+    assert result['timing']['observed_state'] == conflict
+    assert result['extension']['observed_state'] == extension

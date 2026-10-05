@@ -490,10 +490,16 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
          values={"تأیید کوتاه‌مدت": base.get("intrabar_confirmed"), "تأیید مسیر مدل": base.get("ai_trend_confirmed"),
                  "حرکت / حداقل ATR": f"{metric(base.get('intrabar_move_atr'))} / {metric(base.get('intrabar_min_move_atr'))}",
                  "سازگاری مسیر / حداقل": f"{metric(base.get('ai_trend_consistency'))} / {metric(base.get('trend_min_consistency'))}"})
-    veto = base.get("reason") in {"trend_conflict", "late_entry_extension", "adverse_intrabar_timing", "spread_or_atr"}
-    node("timing", "قفل تعارض و ورود دیرهنگام", "blocked" if veto else "observed" if base else "unknown",
-         REASONS.get(base.get("reason")) if veto else "این قفل علت توقفِ تصمیم ذخیره‌شده نیست؛ عبور مستقل آن ثبت نشده",
-         values={"دلیل پایه": base.get("reason"), "حد امتداد ATR": settings.get("maximum_entry_extension_atr")})
+    base_reason = base.get("reason")
+    after_guards = base_reason in {"insufficient_model_edge", "insufficient_model_strength", "direction_confirmation_required"} or base.get("decision") in {"BUY", "SELL"}
+    conflict_state = "blocked" if base_reason == "trend_conflict" else "pass" if after_guards or base_reason in {"adverse_intrabar_timing", "late_entry_extension"} else "unknown"
+    extension_state = "blocked" if base_reason == "late_entry_extension" else "pass" if after_guards else "unknown"
+    node("timing", "قفل تعارض جهت", conflict_state,
+         "پیش‌بینی خلاف حرکت شدید اخیر است؛ ورود متوقف شد" if conflict_state == "blocked" else "تعارض شدید جهت وجود ندارد" if conflict_state == "pass" else "نتیجهٔ مستقل این شرط ثبت نشده",
+         values={"دلیل پایه": base_reason, "بازهٔ بررسی، کندل": settings.get("trend_conflict_lookback"), "حد تعارض ATR": settings.get("trend_conflict_atr")})
+    node("extension", "قفل ورود دیرهنگام", extension_state,
+         "قیمت بیش از حد در جهت ورود حرکت کرده" if extension_state == "blocked" else "امتداد قیمت از حد مجاز عبور نکرده" if extension_state == "pass" else "بررسی این شرط پس از قفل قبلی متوقف شد؛ نتیجه ثبت نشده",
+         values={"دلیل پایه": base_reason, "حد امتداد ATR": settings.get("maximum_entry_extension_atr")})
     node("base", "تصمیم مسیر عادی", "blocked" if base.get("decision") == "WAIT" else "pass" if base.get("decision") in {"BUY", "SELL"} else "unknown",
          REASONS.get(base.get("reason"), base.get("reason", "تصمیم پایه ثبت نشده")),
          values={"تصمیم پایه": base.get("decision"), "دلیل پایه": base.get("reason")})
@@ -557,7 +563,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
                               "خروج زیان": diag.get("EarlyAdverseExit"), "توقف خروج بازار بسته": diag.get("MarketClosedExitPause")})
     edges = [
         ("market", "forecast", "بازار"), ("service", "forecast", "آماده"),
-        ("forecast", "timing", "قفل"), ("timing", "edge", "مزیت"), ("edge", "strength", "قدرت"),
+        ("forecast", "timing", "قفل"), ("timing", "extension", "امتداد"), ("extension", "edge", "مزیت"), ("edge", "strength", "قدرت"),
         ("strength", "confirmation", "تأیید"), ("confirmation", "base", "تصمیم"),
         ("base", "decision", "عادی"), ("forecast", "shadow", "ناظر"),
         ("base", "range", "WAIT"), ("range", "decision", "برگشت رنج"),
