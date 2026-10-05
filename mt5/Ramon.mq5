@@ -1,6 +1,6 @@
 #property strict
-#property version "1.572"
-#define RAMON_EA_VERSION "0.57.2"
+#property version "1.573"
+#define RAMON_EA_VERSION "0.57.3"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -4191,9 +4191,23 @@ int DashboardOpportunityPositionCount()
    return count;
 }
 
-int ReadDashboardManualEntry(const datetime current_bar,string &direction,string &why)
+int ReadDashboardManualEntry(
+   const datetime current_bar,
+   string &direction,
+   string &sample_key,
+   double &risk_distance,
+   double &target_distance,
+   double &edge,
+   double &probability,
+   string &why
+)
 {
    direction="";
+   sample_key="";
+   risk_distance=0.0;
+   target_distance=0.0;
+   edge=0.0;
+   probability=-1.0;
    why="";
    if(SmallOnlyMode)
       return 0;
@@ -4220,7 +4234,6 @@ int ReadDashboardManualEntry(const datetime current_bar,string &direction,string
       return 0;
    }
 
-   // Consume exactly the first queued command and preserve the rest.
    if(total==1)
       FileDelete(queue_name,FILE_COMMON);
    else
@@ -4237,24 +4250,43 @@ int ReadDashboardManualEntry(const datetime current_bar,string &direction,string
    string parts[];
    ushort separator=StringGetCharacter("|",0);
    int count=StringSplit(lines[0],separator,parts);
-   if(count!=3)
+   if(count!=8)
    { why="invalid command"; return -1; }
 
    datetime requested=(datetime)StringToInteger(parts[0]);
    datetime signal_bar=(datetime)StringToInteger(parts[1]);
    string side=parts[2];
+   string command_sample=parts[3];
+   double command_risk=StringToDouble(parts[4]);
+   double command_target=StringToDouble(parts[5]);
+   double command_edge=StringToDouble(parts[6]);
+   double command_probability=StringToDouble(parts[7]);
    datetime utc_now=TimeGMT();
+
    if(side!="BUY" && side!="SELL")
    { why="invalid direction"; return -1; }
+   if(!ValidSampleKey(command_sample))
+   { why="invalid sample key"; return -1; }
+   if(command_risk<=0.0 || command_target<=0.0 || command_edge<=0.0)
+   { why="invalid opportunity geometry"; return -1; }
+   if(command_probability>1.0 || command_probability< -1.0)
+   { why="invalid probability"; return -1; }
    if(requested<=0 || utc_now-requested>90 || requested-utc_now>5)
    { why="command expired"; return -1; }
    if(signal_bar!=current_bar)
    { why="signal bar changed"; return -1; }
 
    direction=side;
+   sample_key=command_sample;
+   risk_distance=command_risk;
+   target_distance=command_target;
+   edge=command_edge;
+   probability=command_probability;
    Print("Ramon manual dashboard command consumed side=",side,
+      " sample=",command_sample,
       " bar=",IntegerToString((long)signal_bar),
-      " requested=",TimeToString(requested,TIME_DATE|TIME_SECONDS),
+      " edge=",DoubleToString(command_edge,_Digits),
+      " p=",DoubleToString(command_probability,3),
       " queued_after=",IntegerToString(total-1));
    return 1;
 }
@@ -4285,8 +4317,14 @@ void OnTimer()
    // Dashboard manual-entry commands are checked every timer tick, not only on
    // the normal model cadence. A valid command forces an immediate fresh model
    // request so the trade is revalidated against the current quote and gates.
-   string dashboard_direction="",dashboard_command_reason="";
-   int dashboard_command=ReadDashboardManualEntry(closed,dashboard_direction,dashboard_command_reason);
+   string dashboard_direction="",dashboard_sample_key="",dashboard_command_reason="";
+   double dashboard_risk_distance=0.0,dashboard_target_distance=0.0;
+   double dashboard_edge=0.0,dashboard_probability=-1.0;
+   int dashboard_command=ReadDashboardManualEntry(
+      closed,dashboard_direction,dashboard_sample_key,
+      dashboard_risk_distance,dashboard_target_distance,
+      dashboard_edge,dashboard_probability,dashboard_command_reason
+   );
    if(dashboard_command<0)
       Print("Ramon manual dashboard entry ignored: ",dashboard_command_reason);
    else if(dashboard_command>0)
@@ -4585,20 +4623,21 @@ void OnTimer()
    }
    if(dashboard_command>0)
    {
-      double selected_edge=(dashboard_direction=="BUY" ? buy_edge : sell_edge);
-      if(selected_edge>0.0)
-      {
-         decision=dashboard_direction;
-         reason="manual_dashboard_opportunity";
-         manual_execution_override=1.0;
-         dashboard_manual_entry=true;
-         StatusLine="MANUAL DASHBOARD "+decision+" requested";
-         Print("Ramon execution: manual dashboard opportunity accepted for revalidation ",
-            decision," bar=",IntegerToString((long)bar_time),
-            " edge=",DoubleToString(selected_edge,_Digits));
-      }
-      else
-         Print("Ramon manual dashboard entry ignored: selected edge is no longer positive");
+      decision=dashboard_direction;
+      reason="manual_dashboard_opportunity";
+      manual_execution_override=1.0;
+      dashboard_manual_entry=true;
+      LastSampleKey=dashboard_sample_key;
+      sample_key=dashboard_sample_key;
+      stop_distance=dashboard_risk_distance;
+      target_distance=dashboard_target_distance;
+      StatusLine="MANUAL DASHBOARD "+decision+" requested";
+      Print("Ramon execution: manual dashboard opportunity accepted ",
+         decision," sample=",dashboard_sample_key,
+         " edge=",DoubleToString(dashboard_edge,_Digits),
+         " p=",DoubleToString(dashboard_probability,3),
+         " stopDist=",DoubleToString(stop_distance,_Digits),
+         " targetDist=",DoubleToString(target_distance,_Digits));
    }
 
    if(ManagedPosition(ticket,opened) && ManageNewsGuard(ticket))
