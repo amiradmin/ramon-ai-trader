@@ -62,6 +62,9 @@ class DecisionTests(unittest.TestCase):
         self.model = FixedModel()
         self.market = Market("XAUUSD_l", "M15", 100.0, 100.4, 0.01, bars())
 
+    def test_default_direction_consistency_threshold_is_075(self) -> None:
+        self.assertEqual(Settings().trend_min_consistency, 0.75)
+
     def test_buy_is_model_led_and_pays_spread(self) -> None:
         result = evaluate(self.market, self.model, Settings(require_direction_confirmation=False, market_state_policy_enabled=False))
         self.assertEqual(result.decision, "BUY")
