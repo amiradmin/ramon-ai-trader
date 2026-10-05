@@ -97,6 +97,17 @@ class DecisionTests(unittest.TestCase):
         self.assertEqual(result["ready"], 1)
         self.assertEqual(result["turn"], 1)
 
+    def test_manual_override_can_bypass_analytical_edge_and_strength_gates(self) -> None:
+        weak_model = FixedModel(Forecast(99.5, 100.45, 100.8))
+        result = evaluate(
+            self.market,
+            weak_model,
+            Settings(require_direction_confirmation=False, market_state_policy_enabled=False),
+            manual_overrides=frozenset({"edge", "strength"}),
+        )
+        self.assertIn(result.decision, {"BUY", "SELL"})
+        self.assertEqual(result.reason, "manual_override_base_pass")
+
     def test_buy_is_model_led_and_pays_spread(self) -> None:
         result = evaluate(self.market, self.model, Settings(require_direction_confirmation=False, market_state_policy_enabled=False))
         self.assertEqual(result.decision, "BUY")
