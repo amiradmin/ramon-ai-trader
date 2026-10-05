@@ -34,6 +34,16 @@ if ! docker compose --profile tools run --rm tools -m ramon.train_roles \
   echo "Role training failed; existing active bundle remains selected."
 fi
 
+# Human review is an auxiliary learning/audit source. It is joined to the exact
+# Ramon decision sample and any realized trade outcome, but never alters live
+# execution directly.
+if ! docker compose --profile tools run --rm tools -m ramon.human_review \
+  --db /data/ramon_history.sqlite3 \
+  --report /checkpoints/ensemble/human_review_report.json \
+  --dataset /checkpoints/ensemble/human_review_samples.jsonl; then
+  echo "Human-review audit failed; trading and model promotion remain unchanged."
+fi
+
 AFTER="$(cat "$ACTIVE" 2>/dev/null || true)"
 ROLES_AFTER="$(cat "$ROLES" 2>/dev/null || true)"
 if [[ "$AFTER" != "$BEFORE" || "$ROLES_AFTER" != "$ROLES_BEFORE" ]]; then
