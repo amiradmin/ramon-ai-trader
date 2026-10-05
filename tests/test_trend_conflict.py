@@ -51,7 +51,12 @@ def test_trend_conflict_still_blocks_unconfirmed_countertrend_forecast() -> None
 
     assert result.decision == "WAIT"
     assert result.reason == "trend_conflict"
+    assert result.trend_conflict_active == 1
+    assert result.trend_conflict_override_passed == 0
     assert result.signal_strength >= 0.70
+    assert result.trend_conflict_active == 1
+    assert result.trend_conflict_override_passed == 0
+    assert result.aligned_recent_move_atr <= -3.0
 
 
 def test_trend_conflict_allows_only_confirmed_high_confidence_reversal() -> None:
@@ -74,6 +79,9 @@ def test_trend_conflict_allows_only_confirmed_high_confidence_reversal() -> None
     assert result.ai_trend_direction == "BUY"
     assert result.decision == "BUY"
     assert result.reason == "forecast_up"
+    assert result.trend_conflict_active == 1
+    assert result.trend_conflict_override_passed == 1
+    assert result.trend_conflict_override_strength == 0.70
 
 
 def test_trend_conflict_does_not_override_for_medium_confidence_reversal() -> None:
