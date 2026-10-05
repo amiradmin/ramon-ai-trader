@@ -165,3 +165,22 @@
   .sahar-flow-viewport{max-height:none}
   #sahar-flow-edges text{font-size:11px}
 }
+
+
+/* Larger flow labels and portrait cards for rotated desktop monitors. */
+.node-top{gap:8px;align-items:center;flex-wrap:wrap}
+.node-number{font-size:12px;font-weight:800;line-height:1.6}
+.node-title{font-size:16px;line-height:1.8}
+.node-detail{font-size:11px;line-height:1.95}
+#sahar-flow-nodes .node .node-number{font-size:12px;font-weight:800;line-height:1.6}
+
+@media (orientation:portrait) and (min-width:801px){
+  .canvas-viewport{min-height:1320px;max-height:none}
+  .sahar-flow-viewport{min-height:1320px;max-height:none}
+  .node{width:228px;min-height:146px;padding:15px 16px 14px}
+  .node-number{font-size:13px}
+  .node-title{font-size:17px}
+  .node-detail{font-size:12px;line-height:2;height:44px}
+  #edges text,#sahar-flow-edges text{font-size:11px}
+  .flow-footer{padding-top:18px;padding-bottom:18px}
+}
