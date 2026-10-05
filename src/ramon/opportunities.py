@@ -1,7 +1,21 @@
 """Read-only ledger of positive model edges; never authorizes an order."""
 import json
 import sqlite3
+import time
 from pathlib import Path
+
+
+ACTIONABLE_SECONDS = 90
+
+
+def _direction_probability(audit, side):
+    try:
+        quality = audit.get("shadow_forecasts", {}).get("direction_quality", {})
+        value = quality.get("buy_success_probability" if side == "BUY" else "sell_success_probability")
+        value = float(value)
+        return value if 0.0 <= value <= 1.0 else None
+    except (TypeError, ValueError):
+        return None
 
 
 def read_opportunities(db, symbol='XAUUSD_l', limit=200):
@@ -25,26 +39,32 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
                 side='BUY' if base['buy_edge']>base['sell_edge'] else 'SELL'
                 edge=max(base['buy_edge'],base['sell_edge'])
                 if edge<=0 or not row['quote_time']:continue
+                probability=_direction_probability(audit,side)
                 key=(row['signal_bar_time'],side)
                 if key in grouped:
                     grouped[key]['last_reason']=final.get('reason')
                     grouped[key]['model_approved'] |= row['final_decision']==side
                     grouped[key]['executed'] |= row['sample_key'] in traded
+                    grouped[key]['latest_captured']=row['captured']
+                    if probability is not None:
+                        grouped[key]['success_probability']=probability
                     continue
                 sign=1 if side=='BUY' else -1
                 entry=row['mid']+sign*row['spread']/2
                 # Use MAIN geometry, never substitute a range decision's levels.
                 stop=base.get('stop_distance');target=base.get('target_distance')
                 if not stop or not target:continue
-                grouped[key]={'captured':row['captured'],'sample_key':row['sample_key'],
+                grouped[key]={'captured':row['captured'],'latest_captured':row['captured'],'sample_key':row['sample_key'],
                     'signal_bar_time':row['signal_bar_time'],'quote_time':row['quote_time'],
                     'direction':side,'strategy':'برگشت تأییدشده' if base.get('trend_conflict_active')==1 and base.get('intrabar_confirmed')==1 and base.get('ai_trend_confirmed')==1 else 'پیش‌بینی مدل',
                     'edge':edge,'minimum_edge':base.get('minimum_edge'),'strength':base.get('signal_strength'),
+                    'success_probability':probability,
                     'entry':entry,'stop':entry-sign*stop,'target':entry+sign*target,
                     'risk_distance':stop,'first_reason':final.get('reason'),'last_reason':final.get('reason'),
                     'model_approved':row['final_decision']==side,'executed':row['sample_key'] in traded,
                     'outcome':'OPEN','net_r':None}
             except (ValueError,TypeError,KeyError):continue
+        now=int(time.time())
         for item in grouped.values():
             previous=item['quote_time'];sign=1 if item['direction']=='BUY' else -1
             for row in rows:
@@ -58,8 +78,14 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
                 if sign*(mark-item['stop'])<=0:item['outcome']='SL_OBSERVED';break
                 if sign*(mark-item['target'])>=0:item['outcome']='TP_OBSERVED';break
                 if q-item['quote_time']>=14400:item['outcome']='TIMEOUT_OBSERVED';break
+            item['age_seconds']=max(0,now-int(item['latest_captured']))
+            item['actionable']=bool(
+                item['outcome']=='OPEN' and not item['executed']
+                and item['age_seconds']<=ACTIONABLE_SECONDS
+            )
         return {'opportunities':sorted(grouped.values(),key=lambda x:x['captured'],reverse=True)[:max(1,min(limit,200))],
-                'as_of':latest,'scope':'positive_model_edge; first snapshot per M15/direction; quote sampled; spread included; no commission/slippage; not order authorization'}
+                'as_of':latest,'actionable_seconds':ACTIONABLE_SECONDS,
+                'scope':'positive_model_edge; first snapshot per M15/direction; quote sampled; spread included; no commission/slippage; manual execution requires fresh EA-side revalidation'}
     except sqlite3.Error as exc:
         return {'opportunities':[], 'error':str(exc),'scope':'positive_model_edge'}
     finally:con.close()
