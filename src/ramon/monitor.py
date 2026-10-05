@@ -472,6 +472,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
         nodes.append({"id": id, "title": title, "state": effective, "observed_state": status,
                       "detail": detail, "source": source, "engine": engine_labels.get(id),
                       "manual_override_supported": id in {"timing", "extension", "edge", "strength", "market_direction", "entry_timing", "base", "decision", "range"},
+                      "manual_review_supported": id in {"news", "account", "limits", "risk", "order", "position"},
                       "observed_at": stamp["at"], "age_seconds": stamp["age_seconds"],
                       "values": values or {}})
 
@@ -1044,9 +1045,10 @@ def handler_for(db, diagnostic, symbol, health_url):
                     return
 
                 stage = str(payload.get("stage", ""))
-                allowed = {"timing", "extension", "edge", "strength", "market_direction", "entry_timing", "base", "decision", "range"}
-                if stage not in allowed:
-                    raise ValueError("این مرحله قابل عبور دستی نیست")
+                pass_allowed = {"timing", "extension", "edge", "strength", "market_direction", "entry_timing", "base", "decision", "range"}
+                review_allowed = {"news", "account", "limits", "risk", "order", "position"}
+                if stage not in pass_allowed | review_allowed:
+                    raise ValueError("این مرحله قابل ثبت دستی نیست")
                 health = None
                 try:
                     with urlopen(health_url, timeout=.7) as response:
@@ -1055,7 +1057,9 @@ def handler_for(db, diagnostic, symbol, health_url):
                     pass
                 snap = build_snapshot(db, diagnostic, symbol=symbol, health=health)
                 node_row = next((n for n in snap.get("nodes", []) if n.get("id") == stage), None)
-                if not node_row or node_row.get("state") != "blocked":
+                if not node_row:
+                    raise ValueError("مرحله جاری پیدا نشد")
+                if stage in pass_allowed and node_row.get("state") != "blocked":
                     raise ValueError("فقط شرط قرمز فعلی قابل عبور دستی است")
                 if not snap.get("sample_key") or not snap.get("signal_bar_time"):
                     raise ValueError("تصمیم جاری شناسه معتبر ندارد")
@@ -1066,6 +1070,7 @@ def handler_for(db, diagnostic, symbol, health_url):
                     "original_state": node_row.get("state"),
                     "original_reason": snap.get("reason"),
                     "node_values": node_row.get("values", {}),
+                    "action": "FORCE_PASS" if stage in pass_allowed else "REVIEW_ONLY",
                 }
                 model_url = health_url.rsplit("/health", 1)[0] + "/manual-override"
                 request = Request(
