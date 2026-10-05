@@ -1,6 +1,6 @@
 #property strict
-#property version "1.569"
-#define RAMON_EA_VERSION "0.56.9"
+#property version "1.570"
+#define RAMON_EA_VERSION "0.57.0"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -43,6 +43,7 @@ input bool AllowMinLotRiskOverride = true; // Permit minimum volume within the e
 double MaxExecutableRiskUSD = 0.35; // Default; updated by the Control dashboard for PRIMARY.
 input int MaxSpreadPoints = 50;
 input int MaxTradesPerDay = 400;
+input int MaxDashboardOpportunityPositions = 5; // Hedging accounts only; manual opportunity positions with broker SL/TP.
 input int MaximumHoldBars = 4;
 input bool EnableAccountLossLimits = false; // Entry-only account guard; configure and validate before activation.
 input double DailyLossLimitPercent = 0.0; // 0 disables this limit; include realized costs and floating loss.
@@ -2771,6 +2772,11 @@ bool ClosedTradePayload(const ulong identifier,string &payload)
       +",\"exit_reason\":\""+exit_reason+"\""
       +",\"trade_role\":\""+(SmallOnlyMode ? "SMALL" : "MAIN")+"\""
       +",\"entry_magic\":"+IntegerToString((long)MagicNumber);
+   string opening_comment=HistoryDealGetString(opening_deal,DEAL_COMMENT);
+   string entry_source=(StringFind(opening_comment,":M")>=0 ? "DASHBOARD_OPPORTUNITY"
+      : (StringFind(opening_comment,":R")>=0 ? "RANGE_AUTO"
+      : (StringFind(opening_comment,":S")>=0 ? "SMALL_AUTO" : "AUTO_RAMON")));
+   payload+=",\"entry_source\":\""+entry_source+"\"";
    int offset=0;
    string version="",detail="";
    if(ReadDealTelemetry(opening_deal,offset,version,detail))
@@ -4147,23 +4153,48 @@ void OnTick()
    ObserveTPStageCrossingsOnTick();
 }
 
+int DashboardOpportunityPositionCount()
+{
+   int count=0;
+   for(int i=PositionsTotal()-1;i>=0;i--)
+   {
+      ulong candidate=PositionGetTicket(i);
+      if(candidate==0 || !PositionSelectByTicket(candidate))
+         continue;
+      if(PositionGetString(POSITION_SYMBOL)!=_Symbol
+         || (ulong)PositionGetInteger(POSITION_MAGIC)!=MagicNumber)
+         continue;
+      if(StringFind(PositionGetString(POSITION_COMMENT),":M")>=0)
+         count++;
+   }
+   return count;
+}
+
 int ReadDashboardManualEntry(const datetime current_bar,string &direction,string &why)
 {
    direction="";
    why="";
    if(SmallOnlyMode)
       return 0;
-   int handle=FileOpen("Ramon_ManualEntry.txt",FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
-   if(handle==INVALID_HANDLE)
+
+   string file_name="";
+   long search=FileFindFirst("RamonManualEntries\\*.cmd",file_name,FILE_COMMON);
+   if(search==INVALID_HANDLE)
       return 0;
+   FileFindClose(search);
+
+   string command_path="RamonManualEntries\\"+file_name;
+   int handle=FileOpen(command_path,FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
+   if(handle==INVALID_HANDLE)
+   { why="command unreadable"; return -1; }
    string raw=FileReadString(handle);
    FileClose(handle);
    StringTrimLeft(raw); StringTrimRight(raw);
    string parts[];
    ushort separator=StringGetCharacter("|",0);
    int count=StringSplit(raw,separator,parts);
-   // A dashboard command is single-use even when malformed or stale.
-   FileDelete("Ramon_ManualEntry.txt",FILE_COMMON);
+   // Every queued command is consumed exactly once.
+   FileDelete(command_path,FILE_COMMON);
    if(count!=3)
    { why="invalid command"; return -1; }
    datetime requested=(datetime)StringToInteger(parts[0]);
@@ -4527,9 +4558,16 @@ void OnTimer()
    if(NewsGuardEntryBlocked())
    { StatusLine="NEWS GUARD: entry paused (high-impact window or calendar unavailable)"; ShowStatus(); return; }
 
-   // Learning snapshots continue while positions exist; execution remains single-position.
-   if(ManagedPosition(ticket,opened))
+   // Automatic Ramon entries remain single-position. Dashboard opportunity entries
+   // may coexist only on a hedging account and remain protected by broker-side SL/TP.
+   bool managed_position_open=ManagedPosition(ticket,opened);
+   if(managed_position_open && !dashboard_manual_entry)
    { StatusLine=(LastSampleSaved ? "Managed position OPEN; learning snapshot saved" : "Managed position OPEN; snapshot storage failed"); ShowStatus(); return; }
+   if(dashboard_manual_entry && managed_position_open
+      && AccountInfoInteger(ACCOUNT_MARGIN_MODE)!=ACCOUNT_MARGIN_MODE_RETAIL_HEDGING)
+   { StatusLine="MANUAL DASHBOARD BLOCKED: multiple positions require hedging account"; ShowStatus(); return; }
+   if(dashboard_manual_entry && DashboardOpportunityPositionCount()>=MaxDashboardOpportunityPositions)
+   { StatusLine="MANUAL DASHBOARD BLOCKED: opportunity position limit"; ShowStatus(); return; }
    if(OtherPositionOnSymbol())
    { StatusLine="Another robot has a position on this symbol"; ShowStatus(); return; }
    if(decision!="BUY" && decision!="SELL" && decision!="WAIT")
@@ -4567,7 +4605,7 @@ void OnTimer()
       if(small_entries_on_bar>=SmallProfitMaxEntriesPerSignalBar)
       { StatusLine="Two small entries already used for this M15 signal bar"; ShowStatus(); return; }
    }
-   else if(LastEntrySignalBar==bar_time)
+   else if(!dashboard_manual_entry && LastEntrySignalBar==bar_time)
    { StatusLine="Entry already used for this M15 signal bar"; ShowStatus(); return; }
    string live_block_reason="";
    if(!LiveExecutionReady(live_block_reason))
