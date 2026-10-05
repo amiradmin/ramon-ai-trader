@@ -207,6 +207,8 @@ function renderOpportunities(data){
   const format=v=>typeof v!=="number"||!Number.isFinite(v)?"—":v.toFixed(3);
   for(const row of data.opportunities||[]){
     const tr=document.createElement("tr");
+    const p=row.success_probability;
+    tr.className=typeof p==="number"&&Number.isFinite(p)?(p>=0.70?"opportunity-confidence-high":p>=0.55?"opportunity-confidence-medium":p>=0.45?"opportunity-confidence-neutral":"opportunity-confidence-low"):"";
     const disposition=row.executed?"معاملهٔ بسته‌شده ثبت شده":row.model_approved?"سیگنال صادر شده؛ اجرای سفارش تأیید نشده":"مسدود";
     const cells=[opportunityDate.format(new Date(row.captured*1000)),row.strategy+" / "+row.direction,
       format(row.entry)+" / "+format(row.stop)+" / "+format(row.target),format(row.edge)+" / "+format(row.minimum_edge),
