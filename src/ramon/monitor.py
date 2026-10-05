@@ -14,6 +14,7 @@ import time
 import tempfile
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import Request, urlopen
+from .opportunities import read_opportunities
 
 
 ASSETS = Path(__file__).with_name("monitor_assets")
@@ -1144,6 +1145,8 @@ def handler_for(db, diagnostic, symbol, health_url):
                 data = build_snapshot(db, diagnostic, symbol=symbol, health=health)
                 body = analysis_bundle(data, selected_stage).encode("utf-8")
                 self.reply(body, "text/plain; charset=utf-8")
+            elif route == "/api/opportunities":
+                self.reply(json.dumps(read_opportunities(db, symbol), ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
             elif route == "/api/snapshot":
                 health = None
                 try:
