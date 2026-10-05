@@ -8,7 +8,10 @@ import unittest
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from ramon.core import Bar, Forecast, Market, Settings, evaluate
+from ramon.core import (
+    Bar, Forecast, Market, Settings, evaluate,
+    independent_market_direction, independent_entry_timing,
+)
 from ramon.replay import replay
 from ramon.server import CachedForecaster, persist_market_safely, serve
 from ramon.model import ChronosForecaster
@@ -64,6 +67,35 @@ class DecisionTests(unittest.TestCase):
 
     def test_default_direction_consistency_threshold_is_075(self) -> None:
         self.assertEqual(Settings().trend_min_consistency, 0.75)
+
+    def test_independent_market_direction_uses_price_not_forecast(self) -> None:
+        history = list(bars(251))
+        for i, close in enumerate((100.2, 100.4, 100.7, 101.0, 101.4), start=251):
+            history.append(Bar(1_800_000_000 + i * 900, close - 0.1, close + 0.3, close - 0.3, close))
+        micro = (
+            Bar(1_800_500_000, 101.10, 101.20, 101.00, 101.10),
+            Bar(1_800_500_060, 101.15, 101.30, 101.10, 101.20),
+            Bar(1_800_500_120, 101.25, 101.45, 101.20, 101.35),
+            Bar(1_800_500_180, 101.35, 101.55, 101.30, 101.45),
+        )
+        market = Market("XAUUSD_l", "M15", 101.50, 101.90, 0.01, tuple(history), micro)
+        result = independent_market_direction(market, atr=1.0)
+        self.assertEqual(result["direction"], "BUY")
+        self.assertGreaterEqual(result["score"], 2)
+
+    def test_independent_entry_timing_requires_turn_move_and_rebound(self) -> None:
+        micro = (
+            Bar(1_800_500_000, 100.00, 100.05, 99.95, 100.00),
+            Bar(1_800_500_060, 99.95, 100.00, 99.80, 99.90),
+            Bar(1_800_500_120, 99.90, 100.05, 99.85, 100.00),
+            Bar(1_800_500_180, 100.00, 100.20, 99.95, 100.15),
+        )
+        market = Market("XAUUSD_l", "M15", 100.18, 100.58, 0.01, bars(), micro)
+        result = independent_entry_timing(
+            market, atr=1.0, direction="BUY", min_move_atr=0.03, min_rebound_atr=0.08
+        )
+        self.assertEqual(result["ready"], 1)
+        self.assertEqual(result["turn"], 1)
 
     def test_buy_is_model_led_and_pays_spread(self) -> None:
         result = evaluate(self.market, self.model, Settings(require_direction_confirmation=False, market_state_policy_enabled=False))
