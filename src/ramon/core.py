@@ -195,6 +195,11 @@ class Decision:
     target_distance: float
     strong_entry_min_intrabar_move_atr: float = -0.03
     strong_entry_guard_active: int = 0
+    recent_move_atr: float = 0.0
+    aligned_recent_move_atr: float = 0.0
+    trend_conflict_active: int = 0
+    trend_conflict_override_strength: float = 0.70
+    trend_conflict_override_passed: int = 0
 
     def to_dict(self) -> dict[str, str | int | float]:
         return asdict(self)
@@ -315,6 +320,10 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
     ai_trend_move_atr = 0.0
     ai_trend_consistency = 0.0
     strong_entry_guard_active = 0
+    recent_move_atr = 0.0
+    aligned_recent_move_atr = 0.0
+    trend_conflict_active = 0
+    trend_conflict_override_passed = 0
 
     if atr <= market.point or spread_points > settings.max_spread_points:
         reason = "spread_or_atr"
@@ -389,6 +398,7 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
         )
         aligned_recent_move_atr = recent_move_atr if dominant_buy else -recent_move_atr
         trend_conflict = aligned_recent_move_atr <= -settings.trend_conflict_atr
+        trend_conflict_active = int(trend_conflict)
 
         # Do not blindly veto every forecast that fades a strong completed-bar
         # move. Chronos is allowed to call a reversal only when its confidence is
@@ -406,6 +416,7 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
             and ai_trend_confirmed
             and ai_trend_direction == intrabar_direction
         )
+        trend_conflict_override_passed = int(confirmed_reversal)
         adverse_intrabar_timing = (
             strong_entry
             and bool(market.micro_bars)
@@ -487,6 +498,11 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
         trend_min_micro_move_atr=settings.trend_min_micro_move_atr,
         strong_entry_min_intrabar_move_atr=settings.strong_entry_min_intrabar_move_atr,
         strong_entry_guard_active=strong_entry_guard_active,
+        recent_move_atr=recent_move_atr,
+        aligned_recent_move_atr=aligned_recent_move_atr,
+        trend_conflict_active=trend_conflict_active,
+        trend_conflict_override_strength=settings.trend_conflict_override_strength,
+        trend_conflict_override_passed=trend_conflict_override_passed,
         forecast_low=forecast.low,
         forecast_median=forecast.median,
         forecast_high=forecast.high,
