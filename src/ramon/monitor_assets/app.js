@@ -1,8 +1,8 @@
 "use strict";
 const $ = id => document.getElementById(id);
 const labels = {pass:"شرط برقرار",blocked:"شرط ردشده",active:"پوزیشن باز",shadow:"فقط ناظر",stale:"دادهٔ قدیمی",unknown:"نامشخص",observed:"مشاهده‌شده",idle:"انتظار"};
-const coords = {market:[35,28],service:[35,218],forecast:[280,28],shadow:[280,218],timing:[525,28],extension:[770,28],edge:[770,218],strength:[770,218],confirmation:[525,218],base:[280,408],range:[35,408],decision:[525,408],news:[770,408],account:[770,608],limits:[525,608],risk:[280,608],order:[35,608],position:[35,828]};
-for(const [id,point] of Object.entries(coords)){if(point[1]>=218 && id!=="edge")point[1]+=190;}
+const coords = {market:[35,28],service:[280,28],forecast:[525,28],shadow:[280,218],timing:[770,28],extension:[770,218],edge:[770,408],strength:[770,408],confirmation:[525,408],base:[280,598],range:[35,598],decision:[525,598],news:[770,598],account:[770,798],limits:[525,798],risk:[280,798],order:[35,798],position:[35,1018]};
+
 const marketStates={TREND_UP:"روند صعودی",TREND_DOWN:"روند نزولی",PULLBACK_UP:"پولبک در روند صعودی",PULLBACK_DOWN:"پولبک در روند نزولی",RANGE_LOW:"لبهٔ پایین رنج",RANGE_HIGH:"لبهٔ بالای رنج",RANGE_MIDDLE:"وسط رنج",BREAKOUT_UP:"شکست صعودی",BREAKOUT_DOWN:"شکست نزولی",BREAKOUT_RETEST_UP:"آزمون مجدد شکست صعودی",BREAKOUT_RETEST_DOWN:"آزمون مجدد شکست نزولی",FALSE_BREAKOUT_UP:"شکست کاذب سقف",FALSE_BREAKOUT_DOWN:"شکست کاذب کف",REGIME_TRANSITION:"تغییر رژیم",PRICE_GAP:"جهش قیمت",VOLATILITY_SHOCK:"شوک نوسان",LOW_LIQUIDITY:"اسپرد زیاد نسبت به نوسان",FLAT_MARKET:"بازار تخت",DISORDERLY_MARKET:"بازار نامنظم",VOLATILITY_COMPRESSION:"فشردگی نوسان",CONFLICTING_STRUCTURE:"ساختارهای متعارض",UNCERTAIN:"نامشخص"};
 let snapshot = null, selected = "decision", lastKey = null, busy = false, timer = null, zoomed = false;
 const timeFormat = new Intl.DateTimeFormat("fa-IR", {timeZone:"Asia/Tehran", hour:"2-digit",minute:"2-digit",second:"2-digit"});
@@ -19,14 +19,30 @@ function renderNodes(){const order=Object.keys(coords);for(const n of snapshot.n
 const ns="http://www.w3.org/2000/svg";
 function svgEl(name,attrs){const e=document.createElementNS(ns,name);for(const [k,v] of Object.entries(attrs))e.setAttribute(k,v);return e;}
 function route(a,b){const [ax,ay]=coords[a],[bx,by]=coords[b],w=206,h=127;
- if(a==="service"&&b==="forecast")return {d:`M ${ax+w} ${ay+h/2} H 258 V ${by+h/2} H ${bx}`,x:258,y:ay-15};
  if(a==="confirmation"&&b==="base")return {d:`M ${ax} ${ay+h/2} H 503 V ${by+h/2} H ${bx+w}`,x:503,y:by-15};
  if(a==="range"&&b==="decision")return {d:`M ${ax+w/2} ${ay+h} V ${by+h+30} H ${bx+w/2} V ${by+h}`,x:398,y:by+h+25};
  if(ay===by)return {d:`M ${ax+(bx>ax?w:0)} ${ay+h/2} H ${bx+(bx>ax?0:w)}`,x:(ax+bx+w)/2,y:ay+h/2-10};
  if(ax===bx)return {d:`M ${ax+w/2} ${ay+(by>ay?h:0)} V ${by+(by>ay?0:h)}`,x:ax+w/2+8,y:(ay+by+h)/2};
  return {d:`M ${ax+w/2} ${ay+h} V ${by-20} H ${bx+w/2} V ${by}`,x:(ax+bx+w)/2,y:by-28};}
-function renderEdges(changed){const svg=$("edges");svg.replaceChildren();const defs=svgEl("defs",{});const marker=svgEl("marker",{id:"arrow",viewBox:"0 0 10 10",refX:"9",refY:"5",markerWidth:"6",markerHeight:"6",orient:"auto-start-reverse"});marker.append(svgEl("path",{d:"M 0 0 L 10 5 L 0 10 z",fill:"#71829a"}));defs.append(marker);svg.append(defs);
- const fresh=snapshot.model_freshness.state==="fresh";for(const edge of snapshot.edges){const n=snapshot.nodes.find(n=>n.id===edge.to);let state=n?.state||"unknown";const branchOff=(edge.from==="base"&&edge.to==="range"&&snapshot.decision!=="WAIT"&&snapshot.nodes.find(n=>n.id==="range")?.observed_state!=="pass")||(edge.from==="base"&&edge.to==="decision"&&snapshot.nodes.find(n=>n.id==="range")?.observed_state==="pass");if(branchOff)state="idle";const r=route(edge.from,edge.to);const pulse=changed&&fresh&&n?.source==="model"&&state==="pass"&&!branchOff?" pulse":"";svg.append(svgEl("path",{d:r.d,class:`flow ${state}${pulse}`,"marker-end":"url(#arrow)"}));const t=svgEl("text",{x:r.x,y:r.y,"text-anchor":"middle"});t.textContent=edge.label;svg.append(t);}}
+function renderEdges(changed){
+ const svg=$("edges");svg.replaceChildren();
+ const defs=svgEl("defs",{});
+ const markerColors={pass:"#66d8b1",blocked:"#f18586",active:"#72b5f6",shadow:"#b09ae9",stale:"#dfbd74",unknown:"#71829a",observed:"#72b5f6",idle:"#71829a"};
+ for(const [state,color] of Object.entries(markerColors)){const marker=svgEl("marker",{id:`arrow-${state}`,viewBox:"0 0 10 10",refX:"9",refY:"5",markerWidth:"6",markerHeight:"6",orient:"auto-start-reverse"});marker.append(svgEl("path",{d:"M 0 0 L 10 5 L 0 10 z",fill:color}));defs.append(marker);}
+ svg.append(defs);
+ const fresh=snapshot.model_freshness.state==="fresh";
+ for(const edge of snapshot.edges){
+   const from=snapshot.nodes.find(n=>n.id===edge.from),to=snapshot.nodes.find(n=>n.id===edge.to);
+   let state=to?.state||"unknown";
+   const branchOff=(edge.from==="base"&&edge.to==="range"&&snapshot.decision!=="WAIT"&&snapshot.nodes.find(n=>n.id==="range")?.observed_state!=="pass")||(edge.from==="base"&&edge.to==="decision"&&snapshot.nodes.find(n=>n.id==="range")?.observed_state==="pass");
+   if(branchOff)state="idle";
+   else if(["pass","observed"].includes(from?.state)&&["pass","observed"].includes(to?.state))state="pass";
+   const r=route(edge.from,edge.to);
+   const pulse=changed&&fresh&&to?.source==="model"&&state==="pass"&&!branchOff?" pulse":"";
+   svg.append(svgEl("path",{d:r.d,class:`flow ${state}${pulse}`,"marker-end":`url(#arrow-${state})`}));
+   const t=svgEl("text",{x:r.x,y:r.y,"text-anchor":"middle"});t.textContent=edge.label;svg.append(t);
+ }
+}
 function modelMapTooltipText(row){
   const lines=[`${row.name} · ${row.handler}`,`Status: ${row.status}`,`شرط: ${row.condition_label||"ثبت نشده"} · ${labels[row.condition_state]||"نامشخص"}`,`Decision ID: ${row.sample_key||"ثبت نشده"}`];
   if(row.observed_at)lines.push(`Observed: ${formattedTime(row.observed_at,true)}`);
