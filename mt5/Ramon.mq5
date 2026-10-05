@@ -398,6 +398,27 @@ bool ManagedPosition(ulong &ticket,datetime &opened)
    return false;
 }
 
+bool ManagedAutomaticPosition(ulong &ticket,datetime &opened)
+{
+   ticket=0;
+   opened=0;
+   for(int i=PositionsTotal()-1;i>=0;i--)
+   {
+      ulong candidate=PositionGetTicket(i);
+      if(candidate==0 || !PositionSelectByTicket(candidate))
+         continue;
+      if(PositionGetString(POSITION_SYMBOL)!=_Symbol
+         || (ulong)PositionGetInteger(POSITION_MAGIC)!=MagicNumber)
+         continue;
+      if(StringFind(PositionGetString(POSITION_COMMENT),":M")>=0)
+         continue;
+      ticket=candidate;
+      opened=(datetime)PositionGetInteger(POSITION_TIME);
+      return true;
+   }
+   return false;
+}
+
 bool IsSmallProfitPosition(const ulong ticket)
 {
    if(ticket==0 || !PositionSelectByTicket(ticket)) return false;
@@ -3325,7 +3346,7 @@ void ObserveTPStageCrossingsOnTick()
 
    ulong ticket=0;
    datetime opened=0;
-   if(!ManagedPosition(ticket,opened))
+   if(!ManagedAutomaticPosition(ticket,opened))
       return;
 
    bool has_stage_plan=LoadTPStagePlan(ticket);
@@ -4070,7 +4091,7 @@ void ManageOpenPosition()
 {
    ulong ticket;
    datetime opened;
-   if(!ManagedPosition(ticket,opened))
+   if(!ManagedAutomaticPosition(ticket,opened))
    {
       ResetProfitProtectionState();
       ResetTPStageRuntime();
