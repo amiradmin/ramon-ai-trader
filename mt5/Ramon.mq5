@@ -1,6 +1,6 @@
 #property strict
-#property version "1.574"
-#define RAMON_EA_VERSION "0.57.4"
+#property version "1.575"
+#define RAMON_EA_VERSION "0.57.5"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -4174,6 +4174,37 @@ void OnTick()
    ObserveTPStageCrossingsOnTick();
 }
 
+void WriteOpenDashboardPositions()
+{
+   const string file_name="Ramon_OpenDashboardPositions.txt";
+   int handle=FileOpen(file_name,FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON);
+   if(handle==INVALID_HANDLE)
+      return;
+   for(int i=PositionsTotal()-1;i>=0;i--)
+   {
+      ulong ticket=PositionGetTicket(i);
+      if(ticket==0 || !PositionSelectByTicket(ticket))
+         continue;
+      if(PositionGetString(POSITION_SYMBOL)!=_Symbol
+         || (ulong)PositionGetInteger(POSITION_MAGIC)!=MagicNumber)
+         continue;
+      string comment=PositionGetString(POSITION_COMMENT);
+      int marker=StringFind(comment,"Ramon:");
+      if(marker!=0 || StringFind(comment,":M")<0 || StringLen(comment)<22)
+         continue;
+      string sample=StringSubstr(comment,6,16);
+      if(!ValidSampleKey(sample))
+         continue;
+      long type=PositionGetInteger(POSITION_TYPE);
+      string direction=(type==POSITION_TYPE_BUY ? "BUY" : "SELL");
+      datetime opened=(datetime)PositionGetInteger(POSITION_TIME);
+      FileWriteString(handle,sample+"|"+direction+"|"+IntegerToString((long)ticket)+"|"
+         +IntegerToString((long)opened)+"\r\n");
+   }
+   FileFlush(handle);
+   FileClose(handle);
+}
+
 int DashboardOpportunityPositionCount()
 {
    int count=0;
@@ -4295,6 +4326,7 @@ void OnTimer()
 {
    ReadControlRiskCap();
    ReadDecisionCadence();
+   WriteOpenDashboardPositions();
    datetime now=TimeCurrent();
    bool management_due=(LastPositionManagementTime==0 || now-LastPositionManagementTime>=5);
    if(management_due) ShowStatus();
@@ -4873,6 +4905,7 @@ void OnTradeTransaction(
    {
       RecordDealTelemetry(trans.deal);
       AppendTradeCsv(trans.deal);
+      WriteOpenDashboardPositions();
    }
 }
 
