@@ -67,3 +67,6 @@
 
 .reset-overrides{min-height:32px;padding:5px 10px;border:1px solid #6f4b4b;border-radius:7px;background:#2a1717;color:#e9a0a0;font:700 10px monospace;cursor:pointer}
 .reset-overrides:hover{background:#3a1e1e}.reset-overrides:disabled{opacity:.55;cursor:default}
+
+.copy-analysis{min-height:32px;padding:5px 10px;border:1px solid #365e78;border-radius:7px;background:#142735;color:#9bd9ff;font:700 10px monospace;cursor:pointer}
+.copy-analysis:hover{background:#193449}.copy-analysis:disabled{opacity:.55;cursor:default}
