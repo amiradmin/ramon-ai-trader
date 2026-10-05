@@ -137,6 +137,7 @@ class Settings:
     trend_min_micro_move_atr: float = 0.03
     trend_conflict_lookback: int = 12
     trend_conflict_atr: float = 3.0
+    trend_conflict_override_strength: float = 0.70
     strong_entry_min_intrabar_move_atr: float = -0.03
     stop_atr: float = 1.5
     target_atr: float = 3.0
@@ -286,6 +287,7 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
         and settings.trend_min_micro_move_atr >= 0
         and settings.trend_conflict_lookback >= 2
         and settings.trend_conflict_atr > 0
+        and settings.trend_conflict_override_strength >= settings.minimum_strength
         and settings.maximum_entry_extension_atr > 0
         and -1.0 <= settings.strong_entry_min_intrabar_move_atr <= 0.0
     ):
@@ -388,19 +390,28 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
         aligned_recent_move_atr = recent_move_atr if dominant_buy else -recent_move_atr
         trend_conflict = aligned_recent_move_atr <= -settings.trend_conflict_atr
 
-        # A strong Chronos point forecast must not repeatedly fade an extreme
-        # completed-bar move in the opposite direction. This is intentionally
-        # a narrow veto, not a generic trend-following replacement for Chronos.
+        # Do not blindly veto every forecast that fades a strong completed-bar
+        # move. Chronos is allowed to call a reversal only when its confidence is
+        # exceptional and both the intrabar turn and full forecast trajectory
+        # confirm that same direction. Otherwise the 3-ATR conflict stays a hard
+        # safety gate.
         strong_entry = (
             dominant_edge >= minimum
             and dominant_strength >= settings.minimum_strength
+        )
+        confirmed_reversal = (
+            trend_conflict
+            and dominant_strength >= settings.trend_conflict_override_strength
+            and intrabar_confirmed
+            and ai_trend_confirmed
+            and ai_trend_direction == intrabar_direction
         )
         adverse_intrabar_timing = (
             strong_entry
             and bool(market.micro_bars)
             and intrabar_move_atr < settings.strong_entry_min_intrabar_move_atr
         )
-        if trend_conflict:
+        if trend_conflict and not confirmed_reversal:
             reason = "trend_conflict"
         elif adverse_intrabar_timing:
             strong_entry_guard_active = 1
