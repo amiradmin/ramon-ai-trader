@@ -64,3 +64,6 @@
 
 .node-engine{font:700 9px monospace;color:#8fd3ff;border:1px solid #35556f;background:#162b3b;border-radius:999px;padding:2px 6px;line-height:1;white-space:nowrap}
 .node-engine[hidden]{display:none}
+
+.reset-overrides{min-height:32px;padding:5px 10px;border:1px solid #6f4b4b;border-radius:7px;background:#2a1717;color:#e9a0a0;font:700 10px monospace;cursor:pointer}
+.reset-overrides:hover{background:#3a1e1e}.reset-overrides:disabled{opacity:.55;cursor:default}
