@@ -200,6 +200,8 @@ class Decision:
     trend_conflict_active: int = 0
     trend_conflict_override_strength: float = 0.70
     trend_conflict_override_passed: int = 0
+    intrabar_turn_confirmed: int = 0
+    trend_edge_floor: float = 0.0
 
     def to_dict(self) -> dict[str, str | int | float]:
         return asdict(self)
@@ -324,6 +326,8 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
     aligned_recent_move_atr = 0.0
     trend_conflict_active = 0
     trend_conflict_override_passed = 0
+    intrabar_turn_confirmed = 0
+    trend_edge_floor = 0.0
 
     if atr <= market.point or spread_points > settings.max_spread_points:
         reason = "spread_or_atr"
@@ -359,6 +363,7 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
             atr=atr,
             direction=intrabar_direction,
         )
+        intrabar_turn_confirmed = int(micro_turn)
         (
             ai_trend_direction,
             ai_trend_move_atr,
@@ -503,6 +508,8 @@ def evaluate(market: Market, forecaster: Forecaster, settings: Settings = Settin
         trend_conflict_active=trend_conflict_active,
         trend_conflict_override_strength=settings.trend_conflict_override_strength,
         trend_conflict_override_passed=trend_conflict_override_passed,
+        intrabar_turn_confirmed=intrabar_turn_confirmed,
+        trend_edge_floor=trend_edge_floor,
         forecast_low=forecast.low,
         forecast_median=forecast.median,
         forecast_high=forecast.high,
