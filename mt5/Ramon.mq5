@@ -1,6 +1,6 @@
 #property strict
-#property version "1.573"
-#define RAMON_EA_VERSION "0.57.3"
+#property version "1.574"
+#define RAMON_EA_VERSION "0.57.4"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -4338,8 +4338,9 @@ void OnTimer()
       SyncClosedTrades();
       return;
    }
-   if(LastNetworkFinishedMs>0 && GetTickCount64()-LastNetworkFinishedMs<1000)
-      return; // Also separate a due model request from a telemetry response.
+   if(dashboard_command<=0
+      && LastNetworkFinishedMs>0 && GetTickCount64()-LastNetworkFinishedMs<1000)
+      return; // Manual dashboard commands must not be consumed and then dropped by the network spacing gate.
    LastDecisionRequestTime=now;
 
    string payload,reply;
@@ -4720,7 +4721,7 @@ void OnTimer()
    { StatusLine="Invalid stop/target"; ShowStatus(); return; }
    double range_execution=0.0,range_stop=0.0,range_target=0.0,range_low=0.0,range_high=0.0;
    JsonNumber(reply,"range_execution",range_execution);
-   bool range_trade=(range_execution>=0.5);
+   bool range_trade=(range_execution>=0.5 && !dashboard_manual_entry);
    if(!range_trade && manual_execution_override<0.5
       && (intrabar_confirmed<0.5 || ai_trend_confirmed<0.5
       || intrabar_direction!=decision || ai_trend_direction!=decision))
@@ -4833,7 +4834,7 @@ void OnTimer()
 
    // Telemetry/management staging must never block an otherwise valid entry.
    StageEntrySizing(LastSampleKey,side,entry,stop,volume);
-   if(!small_profit && !range_trade)
+   if(!small_profit && !range_trade && !dashboard_manual_entry)
       PersistTPPlan(LastSampleKey,decision,entry,stop,
          LastTargetTP1,LastTargetTP2,LastTargetTP3);
    // The broker owns SL/TP immediately. No position is opened when the model is unavailable.
