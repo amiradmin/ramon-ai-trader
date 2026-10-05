@@ -81,6 +81,7 @@ def read_trade_examples(conn: sqlite3.Connection, symbol: str, chronos_model: st
             WHERE s.symbol=? AND t.symbol=s.symbol AND s.chronos_model=?
               AND s.schema_version>=3 AND s.news_features IS NOT NULL AND t.direction=s.direction
               AND s.final_decision=t.direction AND t.training_status='LEARNABLE'
+              AND COALESCE(t.entry_source,'AUTO_RAMON')!='DASHBOARD_OPPORTUNITY'
               AND t.opened>=s.quote_time
               AND t.opened<=s.quote_time+90 AND t.closed>=t.opened
             ORDER BY s.quote_time,s.sample_key
