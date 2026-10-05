@@ -1127,6 +1127,65 @@ def save_control(diagnostic, value):
 
 
 
+def read_open_dashboard_positions(diagnostic):
+    if diagnostic is None:
+        return {}
+    path = Path(diagnostic).with_name("Ramon_OpenDashboardPositions.txt")
+    result = {}
+    try:
+        if not path.exists():
+            return result
+        for raw in path.read_text(encoding="ascii", errors="ignore").splitlines():
+            parts = raw.strip().split("|")
+            if len(parts) != 4:
+                continue
+            sample_key, direction, ticket, opened = parts
+            if not re.fullmatch(r"[a-f0-9]{16}", sample_key) or direction not in {"BUY", "SELL"}:
+                continue
+            result[sample_key] = {
+                "direction": direction,
+                "ticket": ticket,
+                "opened": int(opened) if opened.isdigit() else None,
+            }
+    except OSError:
+        return {}
+    return result
+
+
+def opportunities_with_execution_state(db, diagnostic, symbol):
+    data = read_opportunities(db, symbol)
+    opened = read_open_dashboard_positions(diagnostic)
+    queue_path = Path(diagnostic).with_name("Ramon_ManualEntries.txt") if diagnostic else None
+    queued = set()
+    try:
+        if queue_path and queue_path.exists():
+            for raw in queue_path.read_text(encoding="ascii", errors="ignore").splitlines():
+                parts = raw.strip().split("|")
+                if len(parts) >= 4 and re.fullmatch(r"[a-f0-9]{16}", parts[3]):
+                    queued.add(parts[3])
+    except OSError:
+        pass
+    for row in data.get("opportunities", []):
+        sample_key = str(row.get("sample_key") or "")
+        open_info = opened.get(sample_key)
+        row["position_open"] = bool(open_info)
+        row["position_ticket"] = open_info.get("ticket") if open_info else None
+        row["entry_queued"] = sample_key in queued
+        if row["position_open"]:
+            row["actionable"] = False
+            row["execution_state"] = "OPEN"
+        elif row["entry_queued"]:
+            row["actionable"] = False
+            row["execution_state"] = "QUEUED"
+        elif row.get("executed"):
+            row["execution_state"] = "CLOSED_RECORDED"
+        else:
+            row["execution_state"] = "AVAILABLE" if row.get("actionable") else "INACTIVE"
+    data["open_dashboard_positions"] = len(opened)
+    data["queued_dashboard_entries"] = len(queued)
+    return data
+
+
 def queue_manual_entry(db, diagnostic, symbol, payload):
     if diagnostic is None:
         raise ValueError("مسیر فایل اکسپرت در دسترس نیست")
@@ -1134,7 +1193,7 @@ def queue_manual_entry(db, diagnostic, symbol, payload):
     signal_bar_time = int(payload.get("signal_bar_time", 0))
     if direction not in {"BUY", "SELL"} or signal_bar_time <= 0:
         raise ValueError("فرصت انتخاب‌شده نامعتبر است")
-    data = read_opportunities(db, symbol)
+    data = opportunities_with_execution_state(db, diagnostic, symbol)
     row = next(
         (
             item for item in data.get("opportunities", [])
@@ -1145,6 +1204,10 @@ def queue_manual_entry(db, diagnostic, symbol, payload):
     )
     if not row:
         raise ValueError("فرصت در داده‌های فعلی پیدا نشد")
+    if row.get("position_open"):
+        raise ValueError("برای این فرصت همین حالا پوزیشن باز است")
+    if row.get("entry_queued"):
+        raise ValueError("فرمان این فرصت قبلاً در صف اجراست")
     if not row.get("actionable"):
         raise ValueError("این فرصت دیگر تازه و قابل اجرا نیست")
     common_dir = Path(diagnostic).parent
@@ -1207,7 +1270,7 @@ def handler_for(db, diagnostic, symbol, health_url):
                 body = analysis_bundle(data, selected_stage).encode("utf-8")
                 self.reply(body, "text/plain; charset=utf-8")
             elif route == "/api/opportunities":
-                self.reply(json.dumps(read_opportunities(db, symbol), ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
+                self.reply(json.dumps(opportunities_with_execution_state(db, diagnostic, symbol), ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
             elif route == "/api/snapshot":
                 health = None
                 try:
