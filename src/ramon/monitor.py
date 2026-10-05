@@ -12,7 +12,7 @@ import re
 import sqlite3
 import time
 import tempfile
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 from urllib.request import urlopen
 
 
@@ -159,12 +159,99 @@ def match(text, pattern):
     return found.group(1) if found else None
 
 
+def trade_trace(path, symbol, trade_key):
+    """Exact historical attribution; never mix in the current terminal snapshot."""
+    p = Path(path).expanduser().resolve()
+    if not p.is_file():
+        return None
+    with sqlite3.connect(p.as_uri() + "?mode=ro", uri=True, timeout=.3) as con:
+        con.row_factory = sqlite3.Row
+        con.execute("PRAGMA query_only=ON")
+        con.execute("BEGIN")
+        row = con.execute("SELECT * FROM trade_outcomes WHERE symbol=? AND trade_key=? LIMIT 1",
+                          (symbol, trade_key)).fetchone()
+        if not row:
+            return None
+        trade = dict(row)
+        if str(trade.get("trade_role") or "MAIN").upper() not in {"MAIN", "PRIMARY"}:
+            return None
+        row = con.execute("SELECT * FROM decision_samples WHERE symbol=? AND sample_key=? LIMIT 1",
+                          (symbol, trade.get("sample_key"))).fetchone()
+        sample = dict(row) if row else {}
+    metadata = object_json(sample.get("model_metadata"))
+    audit = metadata.get("decision_audit")
+    audit = audit if isinstance(audit, dict) else {}
+    def section(name):
+        value = audit.get(name)
+        return value if isinstance(value, dict) else {}
+    base, final, settings = section("base"), section("final"), section("settings")
+    stages = []
+    def stage(id, title, state, detail, values):
+        stages.append({"id": id, "title": title, "state": state, "detail": detail,
+                       "values": {k: v for k, v in values.items() if v is not None}})
+    def threshold(value, minimum):
+        value, minimum = number(value), number(minimum)
+        return "unknown" if value is None or minimum is None else "pass" if value >= minimum else "blocked"
+    reason = final.get("reason")
+    decision = final.get("decision") or sample.get("final_decision")
+    joined = bool(sample)
+    aligned = decision == trade.get("direction")
+    stage("market", "مشاهدهٔ بازار", "observed" if base else "unknown", "قیمت هنگام تصمیم؛ قیمت اجرای سفارش جداست",
+          {"قیمت خرید / فروش": f"{metric(base.get('signal_bid'))} / {metric(base.get('signal_ask'))}",
+           "اسپرد، point": base.get("spread_points"), "ATR": base.get("atr")})
+    stage("forecast", "پیش‌بینی مدل", "observed" if base.get("forecast_median") else "unknown", "پیش‌بینی ثبت‌شده در همین تصمیم",
+          {"مدل": sample.get("chronos_model"), "کف / میانه / سقف": " / ".join(metric(base.get(k)) for k in ("forecast_low", "forecast_median", "forecast_high")), "افق، کندل": settings.get("horizon")})
+    side = trade.get("direction", "").lower()
+    stage("edge", "مزیت پس از اسپرد", threshold(base.get(side + "_edge"), base.get("minimum_edge")),
+          "مقایسهٔ مزیت جهت معامله با حداقل ثبت‌شده",
+          {"مزیت جهت معامله": base.get(side + "_edge"), "حداقل": base.get("minimum_edge")})
+    strength_state = threshold(base.get("signal_strength"), base.get("minimum_strength"))
+    weak_allowed = (settings.get("allow_weak_intrabar_entries") is True
+                    and base.get("intrabar_confirmed") == 1 and base.get("ai_trend_confirmed") == 1
+                    and base.get("intrabar_direction") == base.get("ai_trend_direction") == trade.get("direction")
+                    and threshold(base.get("signal_strength"), base.get("intrabar_min_strength")) == "pass")
+    stage("strength", "قدرت سیگنال", "observed" if strength_state == "blocked" and weak_allowed else strength_state,
+          "قدرت کمتر از حد عادی؛ مسیر ورود ضعیف با دو تأیید مجاز بوده است" if strength_state == "blocked" and weak_allowed else "قدرت سیگنال و حداقل عادی",
+          {"قدرت": base.get("signal_strength"), "حداقل عادی": base.get("minimum_strength"), "حداقل مسیر ضعیف": base.get("intrabar_min_strength")})
+    confirms = all(k in base for k in ("intrabar_confirmed", "ai_trend_confirmed", "intrabar_direction", "ai_trend_direction"))
+    confirmed = base.get("intrabar_confirmed") == base.get("ai_trend_confirmed") == 1 and base.get("intrabar_direction") == base.get("ai_trend_direction") == trade.get("direction")
+    stage("confirmation", "تأیید جهت و زمان ورود", "pass" if confirmed else "blocked" if confirms else "unknown",
+          REASONS.get(base.get("reason"), base.get("reason") or "تأییدها ثبت نشده‌اند"),
+          {"تأیید کوتاه‌مدت": base.get("intrabar_confirmed"), "جهت کوتاه‌مدت": base.get("intrabar_direction"), "تأیید مسیر مدل": base.get("ai_trend_confirmed"), "جهت مسیر مدل": base.get("ai_trend_direction"), "حرکت ATR": base.get("intrabar_move_atr"), "سازگاری مسیر": base.get("ai_trend_consistency")})
+    stage("route", "انتخاب مسیر و تصمیم نهایی", "pass" if decision in {"BUY", "SELL"} and aligned else "blocked" if decision else "unknown",
+          REASONS.get(reason, reason or "تصمیم ذخیره‌شده پیدا نشد"),
+          {"تصمیم پایه": base.get("decision"), "تصمیم نهایی": decision, "مسیر": "RANGE" if final.get("range_execution") == 1 else "CHRONOS" if final else None, "حالت بازار": final.get("market_state"), "واکنش مجاز": final.get("market_state_route")})
+    external = section("external_models")
+    moment = external.get("moment") if isinstance(external.get("moment"), dict) else {}
+    finbert = external.get("finbert") if isinstance(external.get("finbert"), dict) else {}
+    stage("guards", "خبر، ناهنجاری و مدل‌های کمکی", "observed" if external or section("news_snapshot") else "unknown",
+          "مقادیر تاریخی مدل‌ها؛ عبور مستقل از قفل‌های اجرایی اکسپرت ثبت نشده است",
+          {"ناهـنجاری": moment.get("moment_anomaly_label"), "نسبت ناهنجاری": moment.get("moment_anomaly_ratio"), "احساس خبر": finbert.get("finbert_sentiment_label"), "خبر": section("news_snapshot").get("news_event_title"), "رژیم ناظر": final.get("shadow_regime_label"), "نقش‌ها": "فقط ناظر" if final.get("role_shadow") == 1 else None})
+    stage("risk", "حجم و ریسک ورود", "observed" if trade.get("initial_risk_units") is not None else "unknown",
+          "مقادیر ثبت‌شدهٔ معامله؛ تأیید جداگانهٔ تمام مجوزها و قفل‌ها موجود نیست",
+          {"حجم برنامه‌ریزی‌شده": trade.get("planned_volume"), "بودجهٔ ریسک، واحد حساب": trade.get("risk_budget_units"), "ریسک اولیه، واحد حساب": trade.get("initial_risk_units"), "سقف ریسک، دلار": trade.get("max_executable_risk_usd"), "استفاده از لات حداقل": trade.get("min_lot_override_used"), "فاصلهٔ حد ضرر": base.get("stop_distance"), "فاصلهٔ هدف": base.get("target_distance")})
+    stage("execution", "اجرای واقعی سفارش", "observed", "ورود با تاریخچهٔ معامله تأیید شده است",
+          {"جهت": trade.get("direction"), "قیمت اجرای واقعی": trade.get("actual_fill_price"), "نسخهٔ ثبت‌شده هنگام ورود": trade.get("entry_ea_version"), "نقش": trade.get("trade_role")})
+    stage("exit", "خروج و نتیجه", "observed", trade.get("exit_detail") or trade.get("exit_reason") or "علت خروج ثبت نشده",
+          {"سود / زیان خالص، واحد حساب": trade.get("net_units"), "نتیجه بر حسب R": trade.get("net_r"), "علت خروج": trade.get("exit_detail") or trade.get("exit_reason")})
+    def stamp(name):
+        value, offset = trade.get(name), trade.get(name + "_utc_offset_seconds")
+        return {"at": utc_time(value - offset) if value is not None and offset is not None else None,
+                "broker_at": utc_time(value) if offset is None else None}
+    return {"trade_key": trade_key, "sample_key": trade.get("sample_key"), "symbol": symbol,
+            "decision_joined": joined, "direction_matches": aligned if joined else None,
+            "decision_at": utc_time(sample.get("captured")), "opened": stamp("opened"), "closed": stamp("closed"),
+            "net_units": trade.get("net_units"), "direction": trade.get("direction"), "stages": stages,
+            "warnings": (["تصمیم ذخیره‌شده برای این معامله پیدا نشد؛ مراحل مدل نامشخص هستند"] if not joined else
+                         ["جهت تصمیم ذخیره‌شده با معامله هم‌خوان نیست"] if not aligned else [])}
+
+
 def metric(value):
     n = number(value)
     return "—" if n is None else f"{n:.3f}"
 
 
-def dollar_readiness(trades):
+def dollar_readiness(trades, current_ea_version=None):
     """Score readiness for a small real-dollar forward-test account from PRIMARY outcomes."""
     rows = [r for r in trades if number(r.get("closed")) is not None]
     rows_desc = sorted(rows, key=lambda r: number(r.get("closed")) or 0, reverse=True)
@@ -191,7 +278,9 @@ def dollar_readiness(trades):
     else:
         span_days = 0.0
 
-    current_version = str(rows_desc[0].get("entry_ea_version") or "") if rows_desc else ""
+    current_version = str(current_ea_version or "")
+    if not current_version and rows_desc:
+        current_version = str(rows_desc[0].get("entry_ea_version") or "")
     current_version_trades = 0
     if current_version:
         for row in rows_desc:
@@ -248,7 +337,7 @@ def dollar_readiness(trades):
 
 def income_roadmap(readiness, diag):
     """Build a conservative, evidence-gated path from validation to income."""
-    account_type = (diag.get("AccountType", "").split()[0] or "UNKNOWN").upper()
+    account_type = (diag.get("AccountType", "").split() or ["UNKNOWN"])[0].upper()
     balance_usd = number(match(diag.get("BalanceUnits"), r"BalanceUSDApprox: ([\d.]+)"))
     is_standard = account_type == "STANDARD"
     pf = number(readiness.get("profit_factor"))
@@ -487,9 +576,10 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
     outcomes = []
     for row in trades[:8]:
         offset = row.get("closed_utc_offset_seconds")
-        outcomes.append({"direction": row.get("direction"), "net_units": row.get("net_units"),
+        outcomes.append({"trade_key": row.get("trade_key"), "direction": row.get("direction"), "net_units": row.get("net_units"),
                          "exit": row.get("exit_detail") or row.get("exit_reason"),
                          "at": utc_time(row["closed"] - offset) if offset is not None else None,
+                         "broker_at": utc_time(row["closed"]) if offset is None else None,
                          "time_basis": "UTC" if offset is not None else "broker time unknown offset",
                          "strategy": row.get("entry_strategy"), "role": row.get("trade_role")})
     handlers = audit.get("handlers") if isinstance(audit.get("handlers"), dict) else {}
@@ -679,7 +769,55 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
         ),
     ]
 
-    readiness = dollar_readiness(trades)
+    # Green means the row's explicit condition, never merely a successful fetch.
+    def gate_state(text, stored, ready, *, requires_fresh=False):
+        if joined and text:
+            active = match(text, r"^(YES|NO)")
+            veto = match(text, r"Veto: (YES|NO)")
+            fresh = match(text, r"Fresh: (YES|NO)")
+            if ea_time["state"] != "fresh":
+                return "stale"
+            if active == "NO":
+                return "idle"
+            if active != "YES" or ready != 1 or veto is None or (requires_fresh and fresh != "YES"):
+                return "unknown"
+            return "blocked" if veto == "YES" else "pass"
+        prefix = "moment" if requires_fresh else "finbert"
+        if stored.get(prefix + "_live_active") == 0:
+            return "idle"
+        if (stored.get(prefix + "_live_active") != 1 or ready != 1
+                or (requires_fresh and stored.get(prefix + "_live_fresh") != 1)
+                or stored.get(prefix + "_live_veto") not in (0, 1)):
+            return "unknown"
+        return "blocked" if stored[prefix + "_live_veto"] == 1 else "pass"
+
+    moment_state = gate_state(diag.get("MOMENT LIVE"), moment_snapshot,
+                              moment_snapshot.get("moment_shadow_ready"), requires_fresh=True)
+    sentiment_state = gate_state(diag.get("FinBERT LIVE"), finbert_snapshot,
+                                 finbert_snapshot.get("finbert_shadow_ready"))
+    role_state = "shadow" if shadow else "observed" if final else "unknown"
+    conditions = {
+        "Forecast": ("pass" if base.get("decision") in {"BUY", "SELL"} else "blocked" if base.get("decision") == "WAIT" else "unknown", "تصمیم پایهٔ پیش‌بینی"),
+        "Forecast Shadow": ("shadow" if timesfm_snapshot.get("timesfm3_shadow_ready") == 1 else "idle", "پیش‌بینی ناظر؛ مجوز ورود نیست"),
+        "Regime": (role_state, "نقش مدل رژیم"),
+        "Anomaly Detection": (moment_state, "گیت زندهٔ ناهنجاری؛ فعال و تازه، بدون وتو"),
+        "Entry": (role_state, "نقش مدل ورود؛ SHADOW به معنی تأیید شرط نیست"),
+        "News Calendar": ("pass" if news_snapshot.get("news_source_ready") == 1 else "blocked" if news_snapshot.get("news_source_ready") == 0 else "unknown", "آمادگی منبع تقویم خبر؛ مجوز ورود نیست"),
+        "News Model": (role_state, "نقش مدل خبر"),
+        "News Sentiment": (sentiment_state, "گیت زندهٔ احساس خبر؛ فعال و آماده، بدون وتو"),
+        "Meta": (role_state, "نقش مدل ترکیبی"),
+        "Risk / SL": (role_state, "نقش مدل ریسک؛ ناظر با تأیید ریسک اجرایی فرق دارد"),
+        "Market State": ("pass" if assessment.get("route") in {"CONFIRMED_MODEL", "RANGE_REVERSAL"} else "blocked" if assessment.get("route") == "WAIT" else "observed" if assessment else "unknown", "سیاست بازار مسیر ورود دارد؛ تأیید نهایی سفارش نیست"),
+        "TP Structure": ("pass" if target_snapshot.get("ready") else "unknown", "ساختار هدف آماده است"),
+    }
+    for row in model_handler_map:
+        state, label = conditions[row["name"]]
+        row["condition_state"] = state if model_time["state"] == "fresh" else "stale" if model_time["state"] in {"stale", "clock_error"} else "unknown"
+        row["condition_label"] = label
+        if row["name"] in {"Anomaly Detection", "News Sentiment"}:
+            row["status"] = {"pass": "OK", "blocked": "VETO", "idle": "OFF", "stale": "STALE", "unknown": "NO GATE SNAPSHOT"}.get(row["condition_state"], row["status"])
+
+    readiness = dollar_readiness(trades, diag.get("EA version"))
     roadmap = income_roadmap(readiness, diag)
     warnings = [x for x in (diag_error, db_error) if x]
     if model_time["state"] != "fresh":
@@ -737,7 +875,21 @@ def handler_for(db, diagnostic, symbol, health_url):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             route = self.path.split("?", 1)[0]
-            if route == "/api/control":
+            if route == "/api/trade-trace":
+                key = parse_qs(urlsplit(self.path).query).get("trade_key", [""])[0]
+                if not key or len(key) > 256:
+                    self.send_error(400)
+                    return
+                try:
+                    data = trade_trace(db, symbol, key)
+                except sqlite3.Error:
+                    self.send_error(503)
+                    return
+                if data is None:
+                    self.send_error(404)
+                    return
+                self.reply(json.dumps(data, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
+            elif route == "/api/control":
                 self.reply(json.dumps(control_state(diagnostic), ensure_ascii=False).encode(), "application/json; charset=utf-8")
             elif route == "/api/snapshot":
                 health = None

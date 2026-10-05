@@ -194,6 +194,14 @@ def test_dollar_readiness_requires_enough_forward_evidence():
     assert result["ready"] is True
 
 
+def test_readiness_uses_running_version_even_before_its_first_close():
+    rows = [{"closed": NOW, "entry_ea_version": "0.54.8", "net_units": 1}]
+    result = dollar_readiness(rows, "0.56.3")
+    assert result["current_ea_version"] == "0.56.3"
+    assert result["current_version_trades"] == 0
+    assert dollar_readiness([], "0.56.3")["current_ea_version"] == "0.56.3"
+
+
 def test_dollar_readiness_does_not_promote_small_sample():
     rows = [{
         "opened": NOW - 3600,
@@ -264,3 +272,100 @@ def test_income_roadmap_includes_estimated_time_for_every_stage():
     assert all(stage.get("eta") for stage in road["stages"])
     assert road["stages"][0]["eta"] == "حدود ۲–۳ هفته"
     assert road["stages"][-1]["eta"] == "حدود ۹–۱۸ ماه"
+
+
+def trace_trade(db, *, sample="sample-1", role="MAIN"):
+    with sqlite3.connect(db) as c:
+        c.execute("""CREATE TABLE trade_outcomes(
+            trade_key TEXT, sample_key TEXT, symbol TEXT, direction TEXT,
+            opened INT, closed INT, net_units REAL, trade_role TEXT,
+            opened_utc_offset_seconds INT, closed_utc_offset_seconds INT)""")
+        c.execute("INSERT INTO trade_outcomes VALUES(?,?,?,?,?,?,?,?,?,?)",
+                  ("server:account:position", sample, "XAUUSD_l", "BUY", NOW-60, NOW,
+                   -8.82, role, 10800, None))
+
+
+def test_trade_trace_exact_join_does_not_use_latest_decision(sources):
+    from ramon.monitor import trade_trace
+    db, _ = sources
+    trace_trade(db)
+    with sqlite3.connect(db) as c:
+        c.execute("INSERT INTO decision_samples VALUES(2,?,?,?,?,?,?)",
+                  (NOW+60, "XAUUSD_l", "unrelated", "SELL", "new-model", '{}'))
+    result = trade_trace(db, "XAUUSD_l", "server:account:position")
+    assert result["sample_key"] == "sample-1"
+    assert result["decision_joined"] is True
+    assert result["direction_matches"] is False  # stored WAIT cannot be called BUY
+    route = next(s for s in result["stages"] if s["id"] == "route")
+    assert route["values"]["تصمیم نهایی"] == "WAIT"
+    assert result["closed"]["at"] is None
+    assert result["closed"]["broker_at"] is not None
+    assert result["opened"]["at"] == datetime.fromtimestamp(NOW-60-10800, timezone.utc).isoformat()
+    assert result["warnings"]
+    assert trade_trace(db, "OTHER", "server:account:position") is None
+    assert trade_trace(db, "XAUUSD_l", "' OR 1=1 --") is None
+
+
+def test_trade_trace_without_saved_decision_keeps_model_unknown(sources):
+    from ramon.monitor import trade_trace
+    db, _ = sources
+    trace_trade(db, sample="not-saved")
+    result = trade_trace(db, "XAUUSD_l", "server:account:position")
+    assert result["decision_joined"] is False
+    assert result["direction_matches"] is None
+    assert all(s["state"] == "unknown" for s in result["stages"][:7])
+    assert result["warnings"]
+    with sqlite3.connect(db) as c:
+        c.execute("UPDATE trade_outcomes SET trade_role='SMALL'")
+    assert trade_trace(db, "XAUUSD_l", "server:account:position") is None
+
+
+def test_trade_trace_http_is_read_only_and_does_not_call_live_service(sources, monkeypatch):
+    from urllib.parse import quote
+    import ramon.monitor as monitor
+    db, _ = sources
+    trace_trade(db)
+    monkeypatch.setattr(monitor, "urlopen", lambda *args, **kwargs: pytest.fail("historical trace must not contact service"))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler_for(*sources, "XAUUSD_l", "http://unused/health"))
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://127.0.0.1:{server.server_port}/api/trade-trace"
+    before = db.read_bytes()
+    try:
+        with urlopen(url + "?trade_key=" + quote("server:account:position")) as response:
+            assert json.loads(response.read())["sample_key"] == "sample-1"
+        for suffix, code in (("", 400), ("?trade_key=missing", 404)):
+            with pytest.raises(HTTPError) as error:
+                urlopen(url + suffix)
+            assert error.value.code == code
+        assert db.read_bytes() == before
+    finally:
+        server.shutdown(); thread.join(3); server.server_close()
+
+
+@pytest.mark.parametrize("veto, expected", [("NO", "pass"), ("YES", "blocked")])
+def test_model_map_green_requires_ready_gate_without_veto(sources, veto, expected):
+    db, diag = sources
+    with sqlite3.connect(db) as c:
+        raw = c.execute("SELECT model_metadata FROM decision_samples WHERE id=1").fetchone()[0]
+        metadata = json.loads(raw)
+        metadata["decision_audit"]["external_models"] = {
+            "moment": {"moment_shadow_ready": 1}, "finbert": {"finbert_shadow_ready": 1}}
+        metadata["decision_audit"]["news_snapshot"] = {"news_source_ready": 1}
+        c.execute("UPDATE decision_samples SET model_metadata=? WHERE id=1", (json.dumps(metadata),))
+    with diag.open("a") as f:
+        f.write(f"MOMENT LIVE: YES Fresh: YES Veto: {veto}\nFinBERT LIVE: YES Veto: {veto}\n")
+    result = build_snapshot(db, diag, now=NOW)
+    rows = {r["name"]: r for r in result["model_handler_map"]}
+    assert rows["Anomaly Detection"]["condition_state"] == expected
+    assert rows["News Sentiment"]["condition_state"] == expected
+    assert rows["News Calendar"]["condition_state"] == "pass"
+    assert rows["Entry"]["condition_state"] == "shadow"
+    assert rows["Risk / SL"]["condition_state"] == "shadow"
+    assert all(r["condition_state"] == "stale" for r in build_snapshot(db, diag, now=NOW+100)["model_handler_map"])
+    diagnostic(diag, sample="different-decision")
+    with diag.open("a") as f:
+        f.write("MOMENT LIVE: YES Fresh: YES Veto: NO\nFinBERT LIVE: YES Veto: NO\n")
+    rows = {r["name"]: r for r in build_snapshot(db, diag, now=NOW)["model_handler_map"]}
+    assert rows["Anomaly Detection"]["condition_state"] == "unknown"
+    assert rows["News Sentiment"]["condition_state"] == "unknown"

@@ -1,5 +1,6 @@
 #property strict
-#property version "1.563"
+#property version "1.564"
+#define RAMON_EA_VERSION "0.56.4"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -93,7 +94,7 @@ const double SmallEarlyAdverseRiskFraction = 0.50; // SMALL: evaluate earlier at
 const int EarlyAdverseWeakSnapshotsRequired = 2; // Require two distinct model snapshots with no support.
 const int EarlyAdverseMinAgeSeconds = 120; // Give a new trade two minutes before adverse-exit evaluation.
 input int RequestTimeoutMs = 4000;
-input int SnapshotIntervalSeconds = 30; // Re-evaluate fresh Bid/Ask inside the same M15 bar.
+input int SnapshotIntervalSeconds = 5; // Re-evaluate fresh Bid/Ask inside the same M15 bar.
 input int MaxDeviationPoints = 30;
 input ulong MagicNumber = 26092212;
 input bool WriteDiagnosticFile = true;
@@ -111,6 +112,11 @@ CTrade Trade;
 string AccountLossLimitStatus = "DISABLED";
 datetime LastDecisionRequestTime = 0;
 datetime LastModelSnapshotTime = 0;
+datetime LastPositionManagementTime = 0;
+ulong LastNetworkFinishedMs = 0;
+int DecisionCadenceOverrideSeconds = 0;
+const int ExitWeakSnapshotSpacingSeconds = 30;
+const int ExitModelFreshnessSeconds = 75;
 datetime LastEntrySignalBar = 0;
 int LastSmallEntriesOnSignalBar = 0;
 string StatusLine = "Starting";
@@ -267,6 +273,7 @@ double EarlyAdverseTriggerLossUnits = 0.0;
 double EarlyAdverseAppliedRiskFraction = 0.0;
 int EarlyAdverseWeakSnapshots = 0;
 datetime EarlyAdverseLastDecisionTime = 0;
+datetime EarlyAdverseLastWeakCountTime = 0;
 bool EarlyAdverseTriggered = false;
 ulong TPStagePositionIdentifier = 0;
 string TPStageSampleKey = "";
@@ -278,6 +285,7 @@ int TPStage = 0;
 datetime TPStageHitTime = 0;
 int TPStageWeakSnapshots = 0;
 datetime TPStageLastDecisionTime = 0;
+datetime TPStageLastWeakCountTime = 0;
 double TPStageProgress = 0.0;
 string TPStageStatus = "INACTIVE";
 double TPStageLockedSL = 0.0;
@@ -288,6 +296,7 @@ ulong MarketClosedExitPauseTicket = 0;
 ulong MainFastProfitTicket = 0;
 int MainFastProfitWeakSnapshots = 0;
 datetime MainFastProfitLastDecisionTime = 0;
+datetime MainFastProfitLastWeakCountTime = 0;
 double MainFastProfitProgress = 0.0;
 string MainFastProfitStatus = "INACTIVE";
 
@@ -479,6 +488,35 @@ double SmallProfitRiskCapUnits()
    return MathMin(SmallProfitMaxLossUnits,SmallProfitMaxRiskUSD*MoneyUnitsPerUSD);
 }
 
+int DecisionCadenceSeconds()
+{
+   return (DecisionCadenceOverrideSeconds>0 ? DecisionCadenceOverrideSeconds : SnapshotIntervalSeconds);
+}
+
+void ReadDecisionCadence()
+{
+   if(SmallOnlyMode) return;
+   int file=FileOpen("Ramon_DecisionCadence.txt",FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
+   if(file==INVALID_HANDLE) { DecisionCadenceOverrideSeconds=0; return; }
+   string raw=FileReadString(file);
+   FileClose(file);
+   StringTrimLeft(raw); StringTrimRight(raw);
+   int interval=(int)StringToInteger(raw);
+   if(interval>=5 && interval<=300 && raw==IntegerToString(interval))
+      DecisionCadenceOverrideSeconds=interval;
+}
+
+// Count first evidence immediately, then require the original 30-second spacing.
+// Faster entry snapshots can reset weak evidence, but cannot accelerate exits.
+void UpdateWeakConfirmation(const bool weak,const datetime snapshot,
+                            int &count,datetime &last_counted)
+{
+   if(!weak) { count=0; last_counted=0; return; }
+   if(count==0) { count=1; last_counted=snapshot; return; }
+   if(snapshot-last_counted>=ExitWeakSnapshotSpacingSeconds)
+   { count++; last_counted=snapshot; }
+}
+
 void ReadControlRiskCap()
 {
    if(SmallOnlyMode) return;
@@ -574,7 +612,8 @@ string BuildDiagnosticText()
 
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
-      +"EA version: 0.55.4\n"
+      +"EA version: "+RAMON_EA_VERSION+"\n"
+      +"ModelMapColors: condition-v1\nTradeLearningBridge: durable-outbox-v1\n"
       +"Range MAIN: "+BoolText(EnableRangeMain)+" | quick 5-unit TP, boundary SL, RR >=1.2, 30min maximum\n"
       +"AccountLossLimits: "+AccountLossLimitStatus+" | enabled="+BoolText(EnableAccountLossLimits)
       +" daily="+DoubleToString(DailyLossLimitPercent,2)+"% drawdown="+DoubleToString(MaximumEquityDrawdownPercent,2)+"%\n"
@@ -590,7 +629,8 @@ string BuildDiagnosticText()
       +"  TerminalConnected: "+BoolText((bool)TerminalInfoInteger(TERMINAL_CONNECTED))+"\n"+"Clock: UTC canonical  BrokerUTCOffsetSec: "+IntegerToString((int)BrokerUtcOffsetSeconds())+"\n\n"
       +"=== MODEL / SIGNAL ===\n"
       +"ModelUrl: "+ModelUrl+"\n"
-      +"Snapshot cadence: "+IntegerToString(SnapshotIntervalSeconds)+"s"
+      +"Decision timing: exit weak observations >=30s apart; exit data freshness 75s; management 5s; trade outbox 30s independent worker\n"
+      +"Snapshot cadence: "+IntegerToString(DecisionCadenceSeconds())+"s"
       +"  Last request: "+(LastDecisionRequestTime>0
          ? UTCText(LastDecisionRequestTime,TIME_DATE|TIME_SECONDS) : "NONE")+"\n"
       +"Decision: "+LastModelDecision+"  Reason: "+LastModelReason+"\n"
@@ -1179,6 +1219,36 @@ string ModelTag(const string handler)
    return handler;
 }
 
+string ModelMapConditionState(const int row)
+{
+   datetime now=TimeCurrent();
+   if(!(bool)TerminalInfoInteger(TERMINAL_CONNECTED) || LastModelSnapshotTime<=0
+      || now-LastModelSnapshotTime>90 || LastModelSnapshotTime>now+5)
+      return "STALE";
+   if(row==0) return (LastBaseDecision=="BUY" || LastBaseDecision=="SELL" ? "OK"
+      : LastBaseDecision=="WAIT" ? "BLOCKED" : "UNKNOWN");
+   if(row==1) return (LastTimesFMReady ? "SHADOW" : "OFF");
+   if(row==3)
+   {
+      if(!LastMomentLiveActive) return "OFF";
+      if(!LastMomentShadowReady || !LastMomentLiveFresh) return "UNKNOWN";
+      return (LastMomentLiveVeto ? "VETO" : "OK");
+   }
+   if(row==5) return (LastNewsSourceReady ? "OK" : "BLOCKED");
+   if(row==7)
+   {
+      if(!LastFinbertLiveActive) return "OFF";
+      if(!LastFinbertShadowReady) return "UNKNOWN";
+      return (LastFinbertLiveVeto ? "VETO" : "OK");
+   }
+   if(row==10) return (LastMarketStateRoute=="CONFIRMED_MODEL"
+      || LastMarketStateRoute=="RANGE_REVERSAL" ? "OK"
+      : LastMarketStateRoute=="WAIT" ? "BLOCKED" : "UNKNOWN");
+   if(row==11) return (LastTargetStructureReady ? "OK" : "UNKNOWN");
+   // Shadow role probabilities are observations, not passed execution gates.
+   return (LastRoleShadow ? "SHADOW" : "OBSERVED");
+}
+
 void DrawDashboard()
 {
    if(!ShowDashboard)
@@ -1224,11 +1294,11 @@ void DrawDashboard()
    // Compact panel: live summary plus model/handler map.
    UiRect("PANEL",12,24,560,655,C'15,23,42',C'71,85,105');
 
-   UiLabel("TITLE","RAMON AI TRADER  v0.56.3 "
+   UiLabel("TITLE","RAMON AI TRADER  v"+RAMON_EA_VERSION+" "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+" M15 | Forecast ["+ModelTag(LastForecastModelHandler)
       +"] | Shadow ["+ModelTag(LastForecastShadowModelHandler)+"] | "
-      +IntegerToString(SnapshotIntervalSeconds)+"s",28,56,clrWhite,9);
+      +IntegerToString(DecisionCadenceSeconds())+"s",28,56,clrWhite,9);
 
    UiLabel("LIVE","LIVE: "+LiveStateText()
       +"   LOCK: "+(lock_ok ? "OK" : "FAIL")
@@ -1432,8 +1502,16 @@ void DrawDashboard()
       int mrow=my+36+mi*16;
       string name_id="MODEL_NAME_"+IntegerToString(mi);
       string handler_id="MODEL_HANDLER_"+IntegerToString(mi);
-      UiLabel(name_id,mnames[mi],mx+12,mrow,clrWhite,8);
-      UiLabel(handler_id,"-> "+mhandlers[mi],mx+170,mrow,clrWhite,8);
+      string condition=ModelMapConditionState(mi);
+      color map_color=(condition=="OK" ? clrLimeGreen
+         : condition=="VETO" || condition=="BLOCKED" ? clrTomato
+         : condition=="SHADOW" ? C'192,155,235'
+         : condition=="STALE" ? clrOrange
+         : condition=="OFF" || condition=="UNKNOWN" ? clrGray : clrWhite);
+      mtips[mi]+="\nCondition: "+condition
+         +"\nGreen = this row's condition is OK, not permission to trade.";
+      UiLabel(name_id,mnames[mi],mx+12,mrow,map_color,8);
+      UiLabel(handler_id,"-> "+mhandlers[mi],mx+170,mrow,map_color,8);
       ObjectSetString(0,UiPrefix+name_id,OBJPROP_TOOLTIP,mtips[mi]);
       ObjectSetString(0,UiPrefix+handler_id,OBJPROP_TOOLTIP,mtips[mi]);
    }
@@ -1650,6 +1728,7 @@ bool QueryModel(const string payload,string &reply)
    string response_headers="";
    ResetLastError();
    int code=WebRequest("POST",ModelUrl,headers,RequestTimeoutMs,request,response,response_headers);
+   LastNetworkFinishedMs=GetTickCount64();
    if(code!=200)
    {
       StatusLine="Model HTTP "+IntegerToString(code)+" err "+IntegerToString(GetLastError());
@@ -2557,7 +2636,7 @@ void RecordDealTelemetry(const ulong deal,const string close_detail="")
       // Broker zones use quarter-hour increments; discard stale/ambiguous clock samples.
       offset=(int)(MathRound((double)delta/900.0)*900.0);
       if(MathAbs(offset)>14*3600 || MathAbs(delta-offset)>30) return;
-      version="0.54.9";
+      version=RAMON_EA_VERSION;
    }
    if(close_detail!="") detail=close_detail;
 
@@ -2812,7 +2891,7 @@ bool LocalLossCooldownBlocked(const string direction,string &reason)
       exit_times[count]=msc;
    }
    for(int i=0;i<ArraySize(identifiers);i++)
-      for(int j=i+1;j<ArraySize(identifiers);j++)
+       for(int j=i+1;j<ArraySize(identifiers);j++)
          if(exit_times[j]>exit_times[i])
          {
             long at=exit_times[i]; exit_times[i]=exit_times[j]; exit_times[j]=at;
@@ -2844,11 +2923,20 @@ bool LocalLossCooldownBlocked(const string direction,string &reason)
    return false;
 }
 
+string TradeOutboxPath(const ulong identifier)
+{
+   string server=AccountInfoString(ACCOUNT_SERVER);
+   StringReplace(server,"\\","_"); StringReplace(server,"/","_"); StringReplace(server,":","_");
+   return "RamonTradeOutbox\\"+server+"_"+IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN))
+      +"_"+IntegerToString((long)identifier);
+}
+
 void SyncClosedTrades()
 {
    if(!AccountLockHealthy() || AccountInfoInteger(ACCOUNT_TRADE_MODE)!=ACCOUNT_TRADE_MODE_REAL)
       return;
    datetime now=TimeCurrent();
+   if(LastDecisionRequestTime<=0 || now-LastDecisionRequestTime<1) return;
    if(LastTradeSync>0 && now-LastTradeSync<30) return;
    LastTradeSync=now;
    // Recover unsent outcomes after service/terminal restarts from broker history.
@@ -2869,26 +2957,35 @@ void SyncClosedTrades()
       ArrayResize(identifiers,count+1);
       identifiers[count]=identifier;
    }
-   for(int i=0;i<ArraySize(identifiers);i++)
+   // Recent positions must not wait behind the restart backlog (one upload per 30s).
+   for(int i=ArraySize(identifiers)-1;i>=0;i--)
    {
       string payload="";
       if(!ClosedTradePayload(identifiers[i],payload)) continue;
-      char request[],response[];
-      StringToCharArray(payload,request,0,WHOLE_ARRAY,CP_UTF8);
-      ArrayResize(request,ArraySize(request)-1);
-      string headers="";
-      string url=StringSubstr(ModelUrl,0,StringLen(ModelUrl)-StringLen("/decision"))+"/trades";
-      int code=WebRequest("POST",url,"Content-Type: application/json\r\n",
-         1000,request,response,headers);
-      if(code==200)
+      string outbox=TradeOutboxPath(identifiers[i]);
+      string trade_key=AccountInfoString(ACCOUNT_SERVER)+":"
+         +IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN))+":"+IntegerToString((long)identifiers[i]);
+      int receipt=FileOpen(outbox+".ack",FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
+      if(receipt!=INVALID_HANDLE)
       {
-         int count=ArraySize(SyncedTradeIds);
-         ArrayResize(SyncedTradeIds,count+1);
-         SyncedTradeIds[count]=identifiers[i];
-         TradeLearningStatus="SYNCED "+IntegerToString((long)identifiers[i]);
+         string saved_key=FileReadString(receipt); FileClose(receipt);
+         if(saved_key==trade_key)
+         {
+            int count=ArraySize(SyncedTradeIds);ArrayResize(SyncedTradeIds,count+1);
+            SyncedTradeIds[count]=identifiers[i];
+            TradeLearningStatus="SYNCED "+IntegerToString((long)identifiers[i]);
+            continue;
+         }
       }
-      else TradeLearningStatus="RETRY HTTP "+IntegerToString(code);
-      return; // At most one bounded telemetry request per timer cycle.
+      if(FileIsExist(outbox+".json",FILE_COMMON)) continue;
+      FolderCreate("RamonTradeOutbox",FILE_COMMON);
+      int file=FileOpen(outbox+".tmp",FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON,'\t',CP_UTF8);
+      if(file==INVALID_HANDLE) { TradeLearningStatus="RETRY OUTBOX WRITE"; return; }
+      uint written=FileWriteString(file,payload);FileFlush(file);FileClose(file);
+      if(written==0 || !FileMove(outbox+".tmp",FILE_COMMON,outbox+".json",FILE_COMMON|FILE_REWRITE))
+      { TradeLearningStatus="RETRY OUTBOX PUBLISH"; return; }
+      TradeLearningStatus="QUEUED "+IntegerToString((long)identifiers[i]);
+      return; // At most one atomic outbox item per sync cycle; a separate worker sends it.
    }
 }
 
@@ -2945,6 +3042,7 @@ void ResetTPStageRuntime()
    TPStageHitTime=0;
    TPStageWeakSnapshots=0;
    TPStageLastDecisionTime=LastModelSnapshotTime;
+   TPStageLastWeakCountTime=0;
    TPStageProgress=0.0;
    TPStageStatus="INACTIVE";
    TPStageLockedSL=0.0;
@@ -3005,6 +3103,7 @@ bool LoadTPStagePlan(const ulong ticket)
       ? (datetime)GlobalVariableGet(TPPlanGlobalKey(sample_key,"HIT")) : 0);
    TPStageWeakSnapshots=0;
    TPStageLastDecisionTime=LastModelSnapshotTime;
+   TPStageLastWeakCountTime=0;
    TPStageProgress=0.0;
    TPStageStatus="ACTIVE";
    return true;
@@ -3021,6 +3120,7 @@ void MarkTPStageReached(const int stage,const datetime now,const ulong ticket)
    TPStageHitTime=now;
    TPStageWeakSnapshots=0;
    TPStageLastDecisionTime=LastModelSnapshotTime;
+   TPStageLastWeakCountTime=0;
    GlobalVariableSet(TPPlanGlobalKey(TPStageSampleKey,"STAGE"),(double)stage);
    GlobalVariableSet(TPPlanGlobalKey(TPStageSampleKey,"HIT"),(double)now);
    Print("Ramon TP STAGE ",stage," hit ticket=",ticket,
@@ -3378,7 +3478,7 @@ bool ManageTPStages(const ulong ticket)
    bool fresh_model=(LastModelSnapshotTime>0
       && LastModelSnapshotTime>=TPStageHitTime
       && LastModelSnapshotTime<=now
-      && now-LastModelSnapshotTime<=SnapshotIntervalSeconds*2+15
+      && now-LastModelSnapshotTime<=ExitModelFreshnessSeconds
       && (LastModelDecision=="BUY" || LastModelDecision=="SELL" || LastModelDecision=="WAIT"));
    bool supportive=(fresh_model && TPStageModelSupportive());
    if(!fresh_model)
@@ -3386,8 +3486,8 @@ bool ManageTPStages(const ulong ticket)
    else if(TPStageLastDecisionTime!=LastModelSnapshotTime)
    {
       TPStageLastDecisionTime=LastModelSnapshotTime;
-      if(supportive) TPStageWeakSnapshots=0;
-      else TPStageWeakSnapshots++;
+      UpdateWeakConfirmation(!supportive,LastModelSnapshotTime,
+         TPStageWeakSnapshots,TPStageLastWeakCountTime);
    }
 
    int grace=(TPStage==1 ? TP1GraceSeconds : TP2GraceSeconds);
@@ -3437,6 +3537,7 @@ void ResetMainFastProfitState()
    MainFastProfitTicket=0;
    MainFastProfitWeakSnapshots=0;
    MainFastProfitLastDecisionTime=0;
+   MainFastProfitLastWeakCountTime=0;
    MainFastProfitProgress=0.0;
    MainFastProfitStatus="INACTIVE";
 }
@@ -3497,7 +3598,7 @@ bool ManageMainFastProfit(const ulong ticket,const datetime opened)
 
    datetime now=TimeCurrent();
    if(LastModelSnapshotTime<=0 || LastModelSnapshotTime<opened || LastModelSnapshotTime>now
-      || now-LastModelSnapshotTime>SnapshotIntervalSeconds*2+15)
+      || now-LastModelSnapshotTime>ExitModelFreshnessSeconds)
    {
       MainFastProfitWeakSnapshots=0;
       MainFastProfitStatus="STALE_MODEL";
@@ -3512,10 +3613,8 @@ bool ManageMainFastProfit(const ulong ticket,const datetime opened)
       bool trend_support=(LastAiTrendConfirmed && LastAiTrendDirection==direction);
       bool weak=(!model_support && !intrabar_support && !trend_support);
 
-      if(weak)
-         MainFastProfitWeakSnapshots++;
-      else
-         MainFastProfitWeakSnapshots=0;
+      UpdateWeakConfirmation(weak,LastModelSnapshotTime,
+         MainFastProfitWeakSnapshots,MainFastProfitLastWeakCountTime);
 
       Print("Ramon MAIN FAST PROFIT check ticket=",ticket,
          " age=",age,
@@ -3636,6 +3735,7 @@ void ResetEarlyAdverseState()
    EarlyAdverseAppliedRiskFraction=0.0;
    EarlyAdverseWeakSnapshots=0;
    EarlyAdverseLastDecisionTime=0;
+   EarlyAdverseLastWeakCountTime=0;
    EarlyAdverseTriggered=false;
 }
 
@@ -3680,7 +3780,7 @@ bool ManageEarlyAdverseExit(const ulong ticket,const datetime opened)
 
    // Never interpret missing/stale model data as evidence that the trade is bad.
    if(LastModelSnapshotTime<=0 || LastModelSnapshotTime<opened
-      || now-LastModelSnapshotTime>SnapshotIntervalSeconds*2+15
+      || now-LastModelSnapshotTime>ExitModelFreshnessSeconds
       || (LastModelDecision!="BUY" && LastModelDecision!="SELL" && LastModelDecision!="WAIT"))
    {
       EarlyAdverseWeakSnapshots=0;
@@ -3698,10 +3798,8 @@ bool ManageEarlyAdverseExit(const ulong ticket,const datetime opened)
       bool trend_support=(LastAiTrendConfirmed && LastAiTrendDirection==direction);
       bool weak=(!model_support && !intrabar_support && !trend_support);
 
-      if(weak)
-         EarlyAdverseWeakSnapshots++;
-      else
-         EarlyAdverseWeakSnapshots=0;
+      UpdateWeakConfirmation(weak,LastModelSnapshotTime,
+         EarlyAdverseWeakSnapshots,EarlyAdverseLastWeakCountTime);
 
       Print("Ramon EARLY ADVERSE check ticket=",ticket,
          " loss=",DoubleToString(loss_units,2),
@@ -4051,29 +4149,36 @@ void OnTick()
 void OnTimer()
 {
    ReadControlRiskCap();
-   ShowStatus();
+   ReadDecisionCadence();
+   datetime now=TimeCurrent();
+   bool management_due=(LastPositionManagementTime==0 || now-LastPositionManagementTime>=5);
+   if(management_due) ShowStatus();
    if(!(bool)TerminalInfoInteger(TERMINAL_CONNECTED))
-   { StatusLine="Terminal disconnected"; ShowStatus(); return; }
+   { StatusLine="Terminal disconnected"; if(management_due) ShowStatus(); return; }
    ulong ticket;
    datetime opened;
-   if(EnableAccountLossLimits)
+   if(management_due && EnableAccountLossLimits)
    { string observed_loss_reason=""; AccountLossLimitsBlocked(observed_loss_reason); }
    bool has_managed=ManagedPosition(ticket,opened);
-   if(has_managed) ManageOpenPosition(); // Exits always run before network telemetry.
+   if(management_due)
+   {
+      LastPositionManagementTime=now;
+      if(has_managed) ManageOpenPosition(); // Exits always run before network telemetry.
+   }
    datetime closed=iTime(_Symbol,PERIOD_M15,1);
    if(closed<=0)
       return;
 
-   datetime now=TimeCurrent();
    if(LastDecisionRequestTime>0
-      && now-LastDecisionRequestTime<SnapshotIntervalSeconds)
+      && now-LastDecisionRequestTime<DecisionCadenceSeconds())
    {
-      // Never issue trade telemetry immediately before a live model decision.
-      // On Wine/MT5, back-to-back WebRequest calls can fail locally with 1003/5203.
-      // Use idle timer cycles for learning telemetry and always prioritize /decision.
+      // Write outcomes to the durable outbox; the independent worker owns /trades.
+      // This avoids Wine WebRequest interference with five-second /decision calls.
       SyncClosedTrades();
       return;
    }
+   if(LastNetworkFinishedMs>0 && GetTickCount64()-LastNetworkFinishedMs<1000)
+      return; // Also separate a due model request from a telemetry response.
    LastDecisionRequestTime=now;
 
    string payload,reply;
@@ -4647,6 +4752,7 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
 int OnInit()
 {
    ReadControlRiskCap();
+   ReadDecisionCadence();
    if(_Symbol!=TradeSymbol || _Period!=PERIOD_M15 || StringFind(_Symbol,"XAUUSD")!=0)
    { Print("Attach only to ",TradeSymbol," M15"); return INIT_FAILED; }
    if(SmallOnlyMode && (MagicNumber!=SmallProfitMagicNumber
@@ -4683,7 +4789,7 @@ int OnInit()
       || EarlyAdverseRiskFraction<=0.0 || EarlyAdverseRiskFraction>=1.0
       || SmallEarlyAdverseRiskFraction<=0.0 || SmallEarlyAdverseRiskFraction>=1.0
       || EarlyAdverseWeakSnapshotsRequired<1 || EarlyAdverseMinAgeSeconds<0
-      || SnapshotIntervalSeconds<10
+      || SnapshotIntervalSeconds<5
       || (WriteDiagnosticFile && StringLen(DiagnosticFileName)==0)
       || (WriteCsvLogs && (StringLen(SignalCsvFileName)==0 || StringLen(TradeCsvFileName)==0))
       || (EnableImprovementShadowPack && WriteCsvLogs && StringLen(ShadowCsvFileName)==0)
@@ -4721,10 +4827,10 @@ int OnInit()
    Trade.SetExpertMagicNumber(MagicNumber);
    Trade.SetDeviationInPoints(MaxDeviationPoints);
    Trade.SetTypeFillingBySymbol(_Symbol);
-   EventSetTimer(5);
+   EventSetTimer(1); // Separate network scheduling from five-second position management.
    // Stagger the second chart's WebRequest cadence from the primary chart.
    if(SmallOnlyMode)
-      LastDecisionRequestTime=TimeCurrent()-SnapshotIntervalSeconds+15;
+      LastDecisionRequestTime=TimeCurrent()-DecisionCadenceSeconds()+MathMin(15,MathMax(1,DecisionCadenceSeconds()/2));
    ObjectsDeleteAll(0,UiPrefix);
    ObjectsDeleteAll(0,TpUiPrefix);
    ShowStatus();

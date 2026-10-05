@@ -13,10 +13,11 @@ def source() -> str:
 
 def test_ea_038_keeps_sizing_telemetry_observational():
     text = source()
-    assert '#property version "1.549"' in text
-    assert 'EA version: 0.54.9' in text
-    assert 'RAMON AI TRADER  v0.54.9' in text
-    assert 'version="0.54.9";' in text
+    assert '#property version "1.564"' in text
+    assert '#define RAMON_EA_VERSION "0.56.4"' in text
+    assert '+"EA version: "+RAMON_EA_VERSION+' in text
+    assert '"RAMON AI TRADER  v"+RAMON_EA_VERSION+' in text
+    assert 'version=RAMON_EA_VERSION;' in text
     # Telemetry staging is deliberately not a trade gate.
     assert 'if(!StageEntrySizing' not in text
     assert re.search(
@@ -27,6 +28,13 @@ def test_ea_038_keeps_sizing_telemetry_observational():
         r'// The broker owns SL/TP immediately',
         text,
     )
+
+
+def test_sync_prioritizes_recent_positions_without_increasing_upload_rate():
+    text = source().split('void SyncClosedTrades()', 1)[1].split('string TPPlanGlobalKey', 1)[0]
+    assert 'for(int i=ArraySize(identifiers)-1;i>=0;i--)' in text
+    assert 'now-LastTradeSync<30' in text
+    assert 'return; // At most one atomic outbox item per sync cycle; a separate worker sends it.' in text
 
 
 def test_ea_persists_sizing_by_exact_sample_key_before_closed_trade_upload():

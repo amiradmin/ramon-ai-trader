@@ -61,8 +61,12 @@
     <div id="model-map-tooltip" class="model-map-tooltip" role="tooltip" hidden></div>
     <section class="history-grid">
       <div class="history-panel"><header class="panel-heading"><div><span class="eyebrow">RECORDED DECISIONS</span><h2>آخرین تصمیم‌های مدل</h2></div><span class="muted">زمان دریافت توسط سرویس</span></header><div id="timeline" class="timeline"></div></div>
-      <div class="history-panel"><header class="panel-heading"><div><span class="eyebrow">CLOSED TRADES</span><h2>نتیجهٔ معاملات ثبت‌شده</h2></div><span class="muted">واحد حساب</span></header><div id="trades" class="trades"></div></div>
+      <div class="history-panel"><header class="panel-heading"><div><span class="eyebrow">CLOSED TRADES</span><h2>نتیجهٔ معاملات ثبت‌شده</h2></div><span class="muted">برای دیدن مسیر تصمیم روی معامله کلیک کن · واحد حساب</span></header><div id="trades" class="trades"></div></div>
     </section>
     <footer class="page-footer"><span>RAMON OBSERVABILITY</span><p>داده‌های موجود خوانده می‌شوند. شرطی که ثبت نشده، تأییدشده نمایش داده نمی‌شود.</p></footer>
   </main>
+  <dialog id="trade-dialog" class="trade-dialog" aria-labelledby="trade-dialog-title" dir="rtl">
+    <header class="trade-dialog-header"><div><span class="eyebrow">مسیر ثبت‌شدهٔ معامله</span><h2 id="trade-dialog-title">از تصمیم تا نتیجه</h2></div><button id="trade-dialog-close" type="button" aria-label="بستن جزئیات معامله">بستن ×</button></header>
+    <div id="trade-dialog-content" aria-live="polite"></div>
+  </dialog>
 </body></html>

@@ -73,6 +73,19 @@ services:
       - ./data:/data:ro
       - ${HOME}/.mt5/drive_c/users:/mt5-users
 
+  trade-outbox:
+    image: ramon-ai-trader:local
+    init: true
+    restart: unless-stopped
+    depends_on:
+      model:
+        condition: service_healthy
+    command: ["python", "-m", "ramon.trade_outbox", "--model-url", "http://model:8012/trades"]
+    environment:
+      RAMON_MT5_USERS_ROOT: /mt5-users
+    volumes:
+      - ${HOME}/.mt5/drive_c/users:/mt5-users
+
   tools:
     profiles: ["tools"]
     build:
