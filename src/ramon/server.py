@@ -5,6 +5,7 @@ from dataclasses import asdict, replace
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import os
+import sqlite3
 from pathlib import Path
 from threading import Lock
 from concurrent.futures import ThreadPoolExecutor
@@ -26,6 +27,50 @@ from .range_shadow import observe as observe_range_shadow
 from .range_strategy import live_candidate
 from .market_state import assess_market, apply_market_policy
 
+
+
+ANALYTIC_OVERRIDE_STAGES = {"timing", "extension", "edge", "strength", "market_direction", "entry_timing"}
+
+
+def _ensure_override_table(db: str) -> None:
+    if not db:
+        return
+    with sqlite3.connect(db) as con:
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS manual_gate_overrides (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_utc INTEGER NOT NULL,
+                signal_bar_time INTEGER NOT NULL,
+                sample_key TEXT NOT NULL,
+                stage TEXT NOT NULL,
+                action TEXT NOT NULL,
+                payload_json TEXT NOT NULL
+            )
+            """
+        )
+        con.commit()
+
+
+def _persist_manual_override(db: str, payload: dict[str, object]) -> None:
+    if not db:
+        return
+    _ensure_override_table(db)
+    with sqlite3.connect(db) as con:
+        con.execute(
+            """INSERT INTO manual_gate_overrides
+               (created_utc, signal_bar_time, sample_key, stage, action, payload_json)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (
+                int(time.time()),
+                int(payload["signal_bar_time"]),
+                str(payload["sample_key"]),
+                str(payload["stage"]),
+                str(payload.get("action", "FORCE_PASS")),
+                json.dumps(payload, ensure_ascii=False, sort_keys=True),
+            ),
+        )
+        con.commit()
 
 def persist_market_safely(db: str, market: Market) -> str:
     """Best-effort learning telemetry; never make a trading decision fail."""
@@ -100,6 +145,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
     }
     last_shadow_bar = 0
     last_finbert_event_key = ""
+    manual_overrides_by_bar: dict[int, dict[str, dict[str, object]]] = {}
     news_provider = ForexFactoryNewsProvider(
         enabled=news_enabled,
         url=os.getenv("RAMON_NEWS_URL", DEFAULT_FOREX_FACTORY_JSON).strip() or DEFAULT_FOREX_FACTORY_JSON,
@@ -199,6 +245,29 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 payload = json.loads(self.rfile.read(length))
                 if not isinstance(payload, dict):
                     raise ValueError("request must be a JSON object")
+                if self.path == "/manual-override":
+                    stage = str(payload.get("stage", ""))
+                    sample_key = str(payload.get("sample_key", ""))
+                    signal_bar_time = int(payload.get("signal_bar_time", 0))
+                    if stage not in ANALYTIC_OVERRIDE_STAGES:
+                        raise ValueError("unsupported override stage")
+                    if not sample_key or signal_bar_time <= 0:
+                        raise ValueError("sample_key and signal_bar_time are required")
+                    row = {
+                        "stage": stage,
+                        "sample_key": sample_key,
+                        "signal_bar_time": signal_bar_time,
+                        "action": "FORCE_PASS",
+                        "requested_utc": int(time.time()),
+                        "original_state": payload.get("original_state"),
+                        "original_reason": payload.get("original_reason"),
+                        "node_values": payload.get("node_values") if isinstance(payload.get("node_values"), dict) else {},
+                        "operator": "dashboard",
+                    }
+                    manual_overrides_by_bar.setdefault(signal_bar_time, {})[stage] = row
+                    _persist_manual_override(history_db, row)
+                    self.reply(200, {"saved": True, "active": sorted(manual_overrides_by_bar[signal_bar_time])})
+                    return
                 if self.path == "/trades":
                     if not history_db:
                         raise ValueError("history persistence is disabled")
@@ -244,8 +313,15 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     replace(settings, require_direction_confirmation=False)
                     if account_is_cent else settings
                 )
+                active_override_rows = manual_overrides_by_bar.get(int(market.bars[-1].time), {})
+                active_overrides = frozenset(active_override_rows)
                 with guard:
-                    result = evaluate(market, cached_model, request_settings)
+                    result = evaluate(
+                        market,
+                        cached_model,
+                        request_settings,
+                        manual_overrides=active_overrides,
+                    )
                     audit_forecast = cached_model._forecast if result.forecast_median>0 else None
                     ensemble_payload, feature_snapshot = ensemble.assess(
                         market, result, news_snapshot.features
@@ -437,14 +513,14 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 ):
                     proposed = str(response["decision"])
                     detected = str(response.get("market_direction", "NEUTRAL"))
-                    if detected != proposed:
+                    if detected != proposed and "market_direction" not in active_overrides:
                         response["decision"] = "WAIT"
                         response["reason"] = (
                             "market_direction_neutral"
                             if detected == "NEUTRAL"
                             else "market_direction_conflict"
                         )
-                    elif int(response.get("entry_timing_ready", 0)) != 1:
+                    elif int(response.get("entry_timing_ready", 0)) != 1 and "entry_timing" not in active_overrides:
                         response["decision"] = "WAIT"
                         response["reason"] = "entry_timing_required"
 
@@ -463,6 +539,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 sample_key = uuid4().hex[:16]
                 response["sample_key"] = sample_key
                 response["sample_saved"] = 0
+                response["manual_overrides_active"] = sorted(active_overrides)
+                response["manual_override_count"] = len(active_overrides)
 
                 if history_db:
                     try:
@@ -513,7 +591,9 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                                               "entry_timing_direction": response.get("entry_timing_direction"),
                                               "entry_timing_move_atr": response.get("entry_timing_move_atr"),
                                               "entry_timing_rebound_atr": response.get("entry_timing_rebound_atr"),
-                                              "entry_timing_turn": response.get("entry_timing_turn", 0)},
+                                              "entry_timing_turn": response.get("entry_timing_turn", 0),
+                                              "manual_overrides_active": sorted(active_overrides),
+                                              "manual_override_rows": list(active_override_rows.values())},
                                     "settings": asdict(request_settings),
                                     "handlers": model_handlers(),
                                     "external_models": {
