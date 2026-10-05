@@ -209,7 +209,7 @@ function renderOpportunities(data){
     const tr=document.createElement("tr");
     const p=row.success_probability;
     tr.className=typeof p==="number"&&Number.isFinite(p)?(p>=0.70?"opportunity-confidence-high":p>=0.55?"opportunity-confidence-medium":p>=0.45?"opportunity-confidence-neutral":"opportunity-confidence-low"):"";
-    const disposition=row.executed?"معاملهٔ بسته‌شده ثبت شده":row.model_approved?"سیگنال صادر شده؛ اجرای سفارش تأیید نشده":"مسدود";
+    const disposition=row.position_open?"پوزیشن باز است"+(row.position_ticket?" · #"+row.position_ticket:""):row.entry_queued?"در صف اجرا":row.executed?"معاملهٔ بسته‌شده ثبت شده":row.model_approved?"سیگنال صادر شده؛ اجرای سفارش تأیید نشده":"مسدود";
     const cells=[opportunityDate.format(new Date(row.captured*1000)),row.strategy+" / "+row.direction,
       format(row.entry)+" / "+format(row.stop)+" / "+format(row.target),format(row.edge)+" / "+format(row.minimum_edge),
       format(row.strength),percent(row.success_probability),disposition+" · علت نخست: "+(reasons[row.first_reason]||row.first_reason||"—")+(row.last_reason!==row.first_reason?" · آخرین: "+(reasons[row.last_reason]||row.last_reason||"—"):""),
