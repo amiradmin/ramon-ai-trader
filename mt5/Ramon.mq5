@@ -1715,6 +1715,7 @@ bool BuildRequest(string &payload,datetime &bar_time)
       }
    }
    payload+="],\"quote_time\":"+IntegerToString((long)tick.time)
+      +",\"account_is_cent\":"+(AccountIsCent ? "true" : "false")
       +",\"range_execution_ready\":"+((EnableRangeMain && !SmallOnlyMode) ? "true" : "false")+"}";
    return true;
 }
