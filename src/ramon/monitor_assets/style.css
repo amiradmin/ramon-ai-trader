@@ -136,3 +136,32 @@
   .roadmap-steps{grid-template-columns:repeat(2,minmax(0,1fr))}
   .model-map-table{font-size:12px}
 }
+
+
+.sahar-flow-section{margin-bottom:18px;border:1px solid var(--border);border-radius:14px;background:var(--panel);overflow:hidden}
+.sahar-flow-heading p{margin:5px 0 0;color:var(--muted);font-size:10px}
+.sahar-flow-legend{border-bottom:1px solid var(--border)}
+.sahar-flow-viewport{overflow:auto;direction:ltr;background-color:#0f1723;background-image:radial-gradient(#263044 1px,transparent 1px);background-size:22px 22px}
+#sahar-flow-space{position:relative;width:1020px;height:1190px;margin:auto}
+#sahar-flow-canvas{position:relative;width:1020px;height:1190px;transform-origin:top left}
+#sahar-flow-edges{position:absolute;inset:0;width:1020px;height:1190px;overflow:visible}
+#sahar-flow-edges path.flow{fill:none;stroke:#37455c;stroke-width:1.5}
+#sahar-flow-edges path.flow.pass{stroke:var(--green);opacity:.65}
+#sahar-flow-edges path.flow.shadow{stroke:var(--purple);stroke-dasharray:5 6}
+#sahar-flow-edges path.flow.stale{stroke:#7a6948;stroke-dasharray:4 7}
+#sahar-flow-edges path.flow.blocked{stroke:var(--red)}
+#sahar-flow-edges path.flow.active{stroke:var(--blue)}
+#sahar-flow-edges text{font-size:10px;font-family:Tahoma;fill:var(--muted);paint-order:stroke;stroke:#0f1723;stroke-width:6px;stroke-linejoin:round;direction:rtl}
+.sahar-flow-detail{padding:18px 22px;border-top:1px solid var(--border);background:#101925}
+.sahar-flow-detail .detail-top{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.sahar-flow-detail .detail-top h2{margin:0}
+#sahar-flow-detail-values{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 24px}
+#sahar-flow-detail-values>div{padding:10px 0;border-bottom:1px solid #253044}
+@media(max-width:900px){
+  #sahar-flow-detail-values{grid-template-columns:1fr}
+}
+@media (orientation:portrait) and (min-width:801px){
+  .market-review-main{max-width:none;padding:22px 16px 56px}
+  .sahar-flow-viewport{max-height:none}
+  #sahar-flow-edges text{font-size:11px}
+}
