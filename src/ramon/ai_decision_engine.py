@@ -42,6 +42,11 @@ def apply_ai_decision_engine(
         "ai_engine_v2_minimum_direction_quality": minimum_direction_quality,
         "ai_engine_v2_minimum_quality_margin": minimum_quality_margin,
         "ai_engine_v2_maximum_full_sl_probability": maximum_full_sl_probability,
+        "ai_engine_v2_direction_source": "direction_quality_live",
+        "ai_engine_v2_buy_quality": -1.0,
+        "ai_engine_v2_sell_quality": -1.0,
+        "ai_engine_v2_quality_margin": -1.0,
+        "ai_engine_v2_score": -1.0,
     })
     if not enabled:
         return False
