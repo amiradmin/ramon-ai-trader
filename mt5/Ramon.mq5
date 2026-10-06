@@ -1,6 +1,6 @@
 #property strict
-#property version "1.590"
-#define RAMON_EA_VERSION "0.59.0"
+#property version "1.591"
+#define RAMON_EA_VERSION "0.59.1"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -4478,7 +4478,7 @@ int ReadDashboardManualEntry(
    { why="invalid sample key"; return -1; }
    if(command_risk<=0.0 || command_target<=0.0)
    { why="invalid opportunity geometry"; return -1; }
-   if(command_mode!="NORMAL" && command_mode!="RECHECK")
+   if(command_mode!="NORMAL" && command_mode!="RECHECK" && command_mode!="DISCRETIONARY")
    { why="invalid command mode"; return -1; }
    if(!ValidSampleKey(command_origin))
    { why="invalid origin sample"; return -1; }
@@ -4486,7 +4486,7 @@ int ReadDashboardManualEntry(
    { why="invalid opportunity edge"; return -1; }
    if(command_probability>1.0 || command_probability< -1.0)
    { why="invalid probability"; return -1; }
-   int command_ttl=(command_mode=="RECHECK" ? 120 : 90);
+   int command_ttl=((command_mode=="RECHECK" || command_mode=="DISCRETIONARY") ? 120 : 90);
    if(requested<=0 || utc_now-requested>command_ttl || requested-utc_now>5)
    { why="command expired"; return -1; }
    if(signal_bar!=current_bar)
@@ -5110,7 +5110,11 @@ void OnTimer()
    if(dashboard_command>0)
    {
       decision=dashboard_direction;
-      reason=(dashboard_command_mode=="RECHECK" ? "manual_dashboard_recheck" : "manual_dashboard_opportunity");
+      reason=(dashboard_command_mode=="DISCRETIONARY"
+         ? "manual_dashboard_discretionary"
+         : dashboard_command_mode=="RECHECK"
+            ? "manual_dashboard_recheck"
+            : "manual_dashboard_opportunity");
       manual_execution_override=1.0;
       dashboard_manual_entry=true;
       LastSampleKey=dashboard_sample_key;
