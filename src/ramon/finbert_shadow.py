@@ -54,7 +54,7 @@ class FinBertNewsShadow:
 
     @classmethod
     def from_env(cls, *, lazy: bool = False) -> "FinBertNewsShadow":
-        enabled = os.getenv("RAMON_FINBERT_SHADOW_ENABLED", "0").strip().lower() in {"1","true","yes","on"}
+        enabled = os.getenv("RAMON_FINBERT_ENABLED", os.getenv("RAMON_FINBERT_SHADOW_ENABLED", "0")).strip().lower() in {"1","true","yes","on"}
         return cls(
             enabled=enabled,
             checkpoint=os.getenv("RAMON_FINBERT_CHECKPOINT", DEFAULT_FINBERT_CHECKPOINT).strip() or DEFAULT_FINBERT_CHECKPOINT,
@@ -67,11 +67,11 @@ class FinBertNewsShadow:
 
     def status(self) -> dict[str, object]:
         return {
-            "finbert_shadow_enabled": int(self.enabled),
-            "finbert_shadow_ready": int(self.ready),
-            "finbert_shadow_checkpoint": self.checkpoint,
-            "finbert_shadow_error": self.error,
-            "finbert_shadow_effect": "NONE",
+            "finbert_enabled": int(self.enabled),
+            "finbert_ready": int(self.ready),
+            "finbert_checkpoint": self.checkpoint,
+            "finbert_error": self.error,
+            "finbert_effect": "NONE",
         }
 
     def assess(self, *, title: str, country: str, impact: str) -> dict[str, object]:
@@ -95,8 +95,8 @@ class FinBertNewsShadow:
             neu = scores.get("neutral", 0.0)
             label = max(("positive","negative","neutral"), key=lambda name: scores.get(name, -1.0)).upper()
             payload.update(
-                finbert_shadow_ready=1,
-                finbert_shadow_error="",
+                finbert_ready=1,
+                finbert_error="",
                 finbert_sentiment_label=label,
                 finbert_positive=pos,
                 finbert_negative=neg,
@@ -104,6 +104,6 @@ class FinBertNewsShadow:
                 finbert_directional_score=pos-neg,
             )
         except Exception as exc:
-            payload["finbert_shadow_ready"] = 0
-            payload["finbert_shadow_error"] = f"{type(exc).__name__}: {exc}"
+            payload["finbert_ready"] = 0
+            payload["finbert_error"] = f"{type(exc).__name__}: {exc}"
         return payload
