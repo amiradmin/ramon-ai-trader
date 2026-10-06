@@ -33,6 +33,8 @@ REASONS = {
     "spread_or_atr": "اسپرد یا ATR خارج از شرط ورود است",
     "forecast_up": "پیش‌بینی صعودی تأیید شده",
     "forecast_down": "پیش‌بینی نزولی تأیید شده",
+    "selector_v2_buy": "Selector v2 خرید را با کیفیت مدل و ریسک قابل‌قبول تأیید کرد",
+    "selector_v2_sell": "Selector v2 فروش را با کیفیت مدل و ریسک قابل‌قبول تأیید کرد",
     "range_reversal_buy": "برگشت از کف رنج؛ نامزد خرید",
     "range_reversal_sell": "برگشت از سقف رنج؛ نامزد فروش",
     "range_sample_not_saved": "تصمیم رنج ذخیره نشده؛ ورود متوقف است",
