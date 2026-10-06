@@ -14,6 +14,7 @@ import time
 import tempfile
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo
 from .opportunities import read_opportunities
 
 
@@ -1393,6 +1394,69 @@ def chronos_exit_advice(health_url, open_info):
         return None
 
 
+def daily_profit_summary(db, symbol, opened, diagnostic=None, now=None):
+    """Today's realized Ramon P/L plus current floating P/L, using Tehran calendar day."""
+    now = time.time() if now is None else float(now)
+    tehran = ZoneInfo("Asia/Tehran")
+    today = datetime.fromtimestamp(now, timezone.utc).astimezone(tehran).date()
+    realized = 0.0
+    closed_count = 0
+    path = Path(db).expanduser().resolve()
+    if path.is_file():
+        try:
+            with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=.3) as con:
+                con.row_factory = sqlite3.Row
+                con.execute("PRAGMA query_only=ON")
+                tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                if "trade_outcomes" in tables:
+                    cols = {r[1] for r in con.execute("PRAGMA table_info(trade_outcomes)")}
+                    role_clause = (
+                        " AND (trade_role IS NULL OR trade_role='' OR UPPER(trade_role) IN ('PRIMARY','MAIN'))"
+                        if "trade_role" in cols else ""
+                    )
+                    query = (
+                        "SELECT closed,received,net_units"
+                        + (",closed_utc_offset_seconds" if "closed_utc_offset_seconds" in cols else ",NULL AS closed_utc_offset_seconds")
+                        + " FROM trade_outcomes WHERE symbol=?" + role_clause
+                    )
+                    for row in con.execute(query, (symbol,)):
+                        closed = number(row["closed"])
+                        received = number(row["received"])
+                        offset = number(row["closed_utc_offset_seconds"])
+                        if closed is not None and offset is not None:
+                            utc_stamp = closed - offset
+                        elif received is not None:
+                            # received is recorded by the local service at ingestion and is
+                            # a safer UTC-day fallback than an unqualified broker timestamp.
+                            utc_stamp = received
+                        else:
+                            continue
+                        trade_day = datetime.fromtimestamp(utc_stamp, timezone.utc).astimezone(tehran).date()
+                        if trade_day == today:
+                            realized += number(row["net_units"]) or 0.0
+                            closed_count += 1
+        except (sqlite3.Error, OSError, ValueError, OverflowError):
+            pass
+    floating_values = [
+        number(info.get("profit_units"))
+        for info in (opened or {}).values()
+    ]
+    floating = sum(v for v in floating_values if v is not None)
+    diag, _ = read_diagnostic(diagnostic)
+    account_text = str(diag.get("Account") or diag.get("AccountType") or "").upper()
+    account_is_cent = "CENT" in account_text
+    return {
+        "date_tehran": today.isoformat(),
+        "realized_units": round(realized, 4),
+        "floating_units": round(floating, 4),
+        "total_units": round(realized + floating, 4),
+        "closed_trades": closed_count,
+        "open_positions": len(opened or {}),
+        "unit_label": "سنت" if account_is_cent else "واحد حساب",
+        "timezone": "Asia/Tehran",
+    }
+
+
 def opportunities_with_execution_state(db, diagnostic, symbol, health_url=None):
     data = read_opportunities(db, symbol)
     opened = read_open_dashboard_positions(diagnostic)
@@ -1439,6 +1503,7 @@ def opportunities_with_execution_state(db, diagnostic, symbol, health_url=None):
             row["execution_state"] = "AVAILABLE" if row.get("actionable") else "INACTIVE"
     data["open_dashboard_positions"] = len(opened)
     data["queued_dashboard_entries"] = len(queued)
+    data["today_profit"] = daily_profit_summary(db, symbol, opened, diagnostic)
     return data
 
 
