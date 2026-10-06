@@ -1,6 +1,6 @@
 #property strict
-#property version "1.582"
-#define RAMON_EA_VERSION "0.58.2"
+#property version "1.583"
+#define RAMON_EA_VERSION "0.58.3"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -4252,9 +4252,12 @@ void WriteOpenDashboardPositions()
       datetime opened=(datetime)PositionGetInteger(POSITION_TIME);
       double profit_units=PositionGetDouble(POSITION_PROFIT);
       double volume=PositionGetDouble(POSITION_VOLUME);
+      double open_price=PositionGetDouble(POSITION_PRICE_OPEN);
+      double current_price=PositionGetDouble(POSITION_PRICE_CURRENT);
       FileWriteString(handle,origin_sample+"|"+execution_sample+"|"+direction+"|"
          +IntegerToString((long)ticket)+"|"+IntegerToString((long)opened)+"|"
-         +DoubleToString(profit_units,8)+"|"+DoubleToString(volume,2)+"\r\n");
+         +DoubleToString(profit_units,8)+"|"+DoubleToString(volume,2)+"|"
+         +DoubleToString(open_price,_Digits)+"|"+DoubleToString(current_price,_Digits)+"\r\n");
    }
    FileFlush(handle);
    FileClose(handle);
