@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -10,9 +11,11 @@ import sqlite3
 import threading
 import time
 from urllib.request import Request, urlopen
+from uuid import uuid4
 
-from .bundles import atomic_json
-from .train_roles import load_trade_examples, train_bundle
+from .bundles import FEATURES, atomic_json, load_active_bundle
+from .shadow_roles import SHADOW_EXTRA_FEATURES
+from .train_roles import fit_direction_quality_role, load_trade_examples, train_bundle
 
 
 HTML = r"""<!doctype html>
@@ -75,7 +78,7 @@ function statusText(s){
   if(!s.last_finished)return "هنوز از این داشبورد آموزشی اجرا نشده است.";
   if(s.error)return "آخرین آموزش خطا داشت: "+s.error;
   const map={
-    promoted:"مدل کاندید از Promotion Gate عبور کرد و Role Modelهای Live دوباره بارگذاری شدند.",
+    promoted:"مدل کاندید از Promotion Gate عبور کرد؛ Roleهای تأییدشده به مسیر فعلی Ramon منتقل و بدون restart بارگذاری شدند.",
     validation_rejected:"آموزش انجام شد، اما کاندید از Validation Gate رد شد و مدل فعلی دست‌نخورده ماند.",
     waiting_for_closed_trades:"نمونه‌های بسته برای حداقل تعیین‌شده هنوز کافی نیست.",
     waiting_for_training_classes:"نمونه هست، اما توزیع برد/باخت برای آموزش یکی از Roleها کافی نیست.",
@@ -127,6 +130,58 @@ $("train").addEventListener("click",async()=>{
 refresh();setInterval(refresh,2000);
 </script>
 </body></html>"""
+
+
+def _publish_promoted_shadow(db: Path, out: Path, symbol: str, chronos_model: str) -> dict[str, object]:
+    """Mirror the validated promoted role bundle into the currently used shadow route.
+
+    Base roles are byte-equivalent model objects loaded from the promoted bundle.
+    Direction-quality roles are fitted from all clean aligned trades because the
+    promoted bundle does not contain these display/quality specialists.
+    """
+    manifest, models = load_active_bundle(out, chronos_model)
+    examples = load_trade_examples(db, symbol, chronos_model)
+    roles: dict[str, object] = {}
+    published = dict(models)
+    for name in ("regime", "entry", "news", "meta", "risk"):
+        roles[name] = {
+            "status": "validated_promoted",
+            "source_bundle": manifest.get("bundle_id"),
+        }
+    for direction, name in (("BUY", "buy_quality"), ("SELL", "sell_quality")):
+        try:
+            published[name] = fit_direction_quality_role(examples, direction)
+            roles[name] = {"status": "experimental_ready", "samples": len([r for r in examples if r.direction == direction])}
+        except (ValueError, KeyError, TypeError) as exc:
+            roles[name] = {"status": "waiting_for_data", "reason": str(exc)}
+
+    bundle_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-validated-" + uuid4().hex[:8]
+    directory = out / "shadow" / "versions" / bundle_id
+    directory.mkdir(parents=True, exist_ok=False)
+    hashes: dict[str, str] = {}
+    expected = {**FEATURES, **SHADOW_EXTRA_FEATURES}
+    for role, model in published.items():
+        if role not in expected:
+            continue
+        path = directory / f"{role}.json"
+        model.save(path)
+        hashes[role] = hashlib.sha256(path.read_bytes()).hexdigest()
+    shadow_manifest = {
+        "mode": "shadow",
+        "schema_version": 1,
+        "bundle_id": bundle_id,
+        "chronos_model": chronos_model,
+        "symbol": symbol,
+        "roles": roles,
+        "sha256": hashes,
+        "closed_trade_samples": len(examples),
+        "validation": "mirrored_from_promoted_bundle",
+        "promotion_gate_passed": True,
+        "source_bundle_id": manifest.get("bundle_id"),
+    }
+    atomic_json(directory / "manifest.json", shadow_manifest)
+    atomic_json(out / "shadow" / "current.json", {"bundle_id": bundle_id})
+    return shadow_manifest
 
 
 class TrainingState:
@@ -205,6 +260,7 @@ def serve(host: str, port: int, db: Path, out: Path, symbol: str, chronos_model:
             atomic_json(out / "training_report.json", report)
             reload_result = None
             if report.get("status") == "promoted":
+                shadow_manifest = _publish_promoted_shadow(db, out, symbol, chronos_model)
                 request = Request(
                     model_url.rstrip("/") + "/reload-roles",
                     data=b"{}",
@@ -213,6 +269,8 @@ def serve(host: str, port: int, db: Path, out: Path, symbol: str, chronos_model:
                 )
                 with urlopen(request, timeout=15) as response:
                     reload_result = json.loads(response.read().decode("utf-8"))
+                reload_result["shadow_bundle"] = shadow_manifest.get("bundle_id")
+                reload_result["source_promoted_bundle"] = shadow_manifest.get("source_bundle_id")
             with state.lock:
                 state.report = report
                 state.reload = reload_result
