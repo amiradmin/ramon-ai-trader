@@ -82,3 +82,23 @@ def test_backfill_is_idempotent(tmp_path: Path) -> None:
     _seed(db)
     assert backfill_target_outcomes(db)["inserted"] == 1
     assert backfill_target_outcomes(db)["inserted"] == 0
+
+
+
+def test_backfill_supports_multiple_trades_for_same_sample(tmp_path: Path) -> None:
+    db = tmp_path / "ramon.sqlite3"
+    _seed(db)
+    bars_end = 1_800_000_000 + 127 * 900
+    persist_trade_outcome(db, {
+        "trade_key": "server:1:3", "sample_key": "a" * 16, "symbol": "XAUUSD_l",
+        "direction": "BUY", "opened": bars_end + 910, "closed": bars_end + 1800,
+        "net_units": 5.0, "initial_risk_units": 6.0, "exit_reason": "DEAL_REASON_TP",
+    }, 1_900_001_001)
+
+    result = backfill_target_outcomes(db)
+    assert result["inserted"] == 2
+    with sqlite3.connect(db) as con:
+        rows = con.execute(
+            "SELECT trade_key,sample_key FROM target_outcomes ORDER BY trade_key"
+        ).fetchall()
+    assert rows == [("server:1:2", "a" * 16), ("server:1:3", "a" * 16)]
