@@ -41,6 +41,78 @@ def _live_direction(audit):
     return ("BUY" if buy > sell else "SELL"), best, buy, sell
 
 
+def _market_trade_scenarios(market_state, ai_side, buy_probability, sell_probability):
+    """Return practical manual trade choices for the observed market state.
+
+    These are decision-support scenarios, not automatic authorizations.
+    """
+    state = str(market_state or "UNCERTAIN").upper()
+    scenarios = []
+
+    def add(code, label, direction, setup, risk="normal"):
+        if direction not in {"BUY", "SELL"}:
+            return
+        probability = buy_probability if direction == "BUY" else sell_probability
+        key = (code, direction)
+        if any((row["code"], row["direction"]) == key for row in scenarios):
+            return
+        scenarios.append({
+            "code": code,
+            "label": label,
+            "direction": direction,
+            "setup": setup,
+            "risk": risk,
+            "probability": probability,
+        })
+
+    if ai_side in {"BUY", "SELL"}:
+        add("AI_DIRECTION", "انتخاب Direction AI", ai_side, "جهت پیشنهادی مدل")
+
+    if state == "TREND_UP":
+        add("TREND_CONTINUATION", "ادامه روند", "BUY", "همراه روند صعودی")
+        add("PULLBACK_ENTRY", "خرید روی پولبک", "BUY", "ورود بعد از اصلاح")
+        add("COUNTERTREND_REVERSAL", "برگشت خلاف روند", "SELL", "فقط با نشانه برگشت", "high")
+    elif state == "TREND_DOWN":
+        add("TREND_CONTINUATION", "ادامه روند", "SELL", "همراه روند نزولی")
+        add("PULLBACK_ENTRY", "فروش روی پولبک", "SELL", "ورود بعد از اصلاح")
+        add("COUNTERTREND_REVERSAL", "برگشت خلاف روند", "BUY", "فقط با نشانه برگشت", "high")
+    elif state == "PULLBACK_UP":
+        add("PULLBACK_ENTRY", "پایان پولبک و خرید", "BUY", "بازگشت به روند صعودی")
+        add("PULLBACK_BREAK", "شکست پولبک", "SELL", "اگر اصلاح به برگشت تبدیل شود", "high")
+    elif state == "PULLBACK_DOWN":
+        add("PULLBACK_ENTRY", "پایان پولبک و فروش", "SELL", "بازگشت به روند نزولی")
+        add("PULLBACK_BREAK", "شکست پولبک", "BUY", "اگر اصلاح به برگشت تبدیل شود", "high")
+    elif state == "RANGE_LOW":
+        add("RANGE_REVERSAL", "برگشت از کف رنج", "BUY", "خرید نزدیک کف")
+        add("RANGE_BREAKOUT", "شکست کف رنج", "SELL", "فروش در شکست معتبر")
+    elif state == "RANGE_HIGH":
+        add("RANGE_REVERSAL", "برگشت از سقف رنج", "SELL", "فروش نزدیک سقف")
+        add("RANGE_BREAKOUT", "شکست سقف رنج", "BUY", "خرید در شکست معتبر")
+    elif state == "RANGE_MIDDLE":
+        add("RANGE_WAIT_BUY", "خرید در لبه پایین", "BUY", "فعلاً صبر تا کف رنج", "high")
+        add("RANGE_WAIT_SELL", "فروش در لبه بالا", "SELL", "فعلاً صبر تا سقف رنج", "high")
+    elif state in {"BREAKOUT_UP", "BREAKOUT_RETEST_UP"}:
+        add("BREAKOUT_CONTINUATION", "ادامه شکست", "BUY", "همراه شکست صعودی")
+        add("FAILED_BREAKOUT", "شکست ناموفق", "SELL", "اگر قیمت دوباره زیر سطح برگردد", "high")
+    elif state in {"BREAKOUT_DOWN", "BREAKOUT_RETEST_DOWN"}:
+        add("BREAKOUT_CONTINUATION", "ادامه شکست", "SELL", "همراه شکست نزولی")
+        add("FAILED_BREAKOUT", "شکست ناموفق", "BUY", "اگر قیمت دوباره بالای سطح برگردد", "high")
+    elif state == "FALSE_BREAKOUT_UP":
+        add("FALSE_BREAKOUT_REVERSAL", "برگشت بعد شکست کاذب", "SELL", "فروش پس از رد سقف")
+        add("RECLAIM", "بازپس‌گیری شکست", "BUY", "اگر شکست دوباره تأیید شود", "high")
+    elif state == "FALSE_BREAKOUT_DOWN":
+        add("FALSE_BREAKOUT_REVERSAL", "برگشت بعد شکست کاذب", "BUY", "خرید پس از رد کف")
+        add("RECLAIM", "بازپس‌گیری شکست", "SELL", "اگر شکست دوباره تأیید شود", "high")
+    elif state in {"REGIME_TRANSITION", "CONFLICTING_STRUCTURE", "UNCERTAIN"}:
+        add("DISCRETIONARY_BUY", "خرید دستی", "BUY", "ساختار نامشخص؛ فقط با بررسی خودت", "high")
+        add("DISCRETIONARY_SELL", "فروش دستی", "SELL", "ساختار نامشخص؛ فقط با بررسی خودت", "high")
+    elif state in {"VOLATILITY_SHOCK", "DISORDERLY_MARKET", "PRICE_GAP", "LOW_LIQUIDITY"}:
+        add("HIGH_RISK_BUY", "خرید پرریسک", "BUY", "شرایط غیرعادی", "very_high")
+        add("HIGH_RISK_SELL", "فروش پرریسک", "SELL", "شرایط غیرعادی", "very_high")
+
+    return scenarios
+
+
 def read_opportunities(db, symbol='XAUUSD_l', limit=200):
     path=Path(db)
     if not path.exists():
@@ -92,6 +164,9 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
                     'full_sl_probability':final.get('ai_engine_v2_full_sl_probability',final.get('full_sl_probability',final.get('shadow_full_sl_probability'))),
                     'market_state':final.get('market_state'),
                     'market_state_route':final.get('market_state_route'),
+                    'trade_scenarios':_market_trade_scenarios(
+                        final.get('market_state'), side, buy_probability, sell_probability
+                    ),
                     'market_direction':final.get('market_direction'),
                     'market_direction_score':final.get('market_direction_score'),
                     'entry_timing_ready':final.get('entry_timing_ready'),
@@ -136,7 +211,7 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
             )
         return {'opportunities':sorted(grouped.values(),key=lambda x:x['captured'],reverse=True)[:max(1,min(limit,200))],
                 'as_of':latest,'actionable_seconds':ACTIONABLE_SECONDS,
-                'scope':'LIVE_DIRECTION_QUALITY selects BUY/SELL with quality>=0.55 and margin>=0.05; historical opportunity ledger supplies geometry; quote sampled; spread included; no commission/slippage; manual execution requires fresh EA-side revalidation'}
+                'scope':'Decision desk shows all practical market-state scenarios. Manual table execution may override analytical Ramon gates, while hard broker/account/risk/quote safety remains active.'}
     except sqlite3.Error as exc:
         return {'opportunities':[], 'error':str(exc),'scope':'positive_model_edge'}
     finally:con.close()
