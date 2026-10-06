@@ -164,3 +164,84 @@ class DirectionHGBEnsemble:
         if len(model.models) < 2:
             raise ValueError("Direction AI v2 ensemble is incomplete")
         return model
+
+
+def classification_metrics(probabilities: Sequence[float], labels: Sequence[int]) -> dict[str, float]:
+    if len(probabilities) != len(labels) or not labels:
+        raise ValueError("invalid Direction AI v2 evaluation inputs")
+    tp = tn = fp = fn = 0
+    brier = 0.0
+    for probability, raw_label in zip(probabilities, labels):
+        label = int(raw_label)
+        prediction = int(float(probability) >= 0.5)
+        brier += (float(probability) - label) ** 2
+        if label == 1 and prediction == 1:
+            tp += 1
+        elif label == 0 and prediction == 0:
+            tn += 1
+        elif label == 0:
+            fp += 1
+        else:
+            fn += 1
+    positive_recall = tp / max(tp + fn, 1)
+    negative_recall = tn / max(tn + fp, 1)
+    return {
+        "balanced_accuracy": 0.5 * (positive_recall + negative_recall),
+        "accuracy": (tp + tn) / len(labels),
+        "brier": brier / len(labels),
+        "positive_recall": positive_recall,
+        "negative_recall": negative_recall,
+        "samples": len(labels),
+    }
+
+
+def walk_forward_validate(
+    rows: Sequence[Mapping[str, float]],
+    labels: Sequence[int],
+    *,
+    folds: int = 3,
+) -> dict[str, object]:
+    """Expanding-window validation with no random train/test shuffle."""
+    if len(rows) != len(labels) or len(rows) < 60:
+        raise ValueError("Direction AI v2 walk-forward needs >=60 samples")
+    if folds < 2:
+        raise ValueError("Direction AI v2 walk-forward needs >=2 folds")
+
+    n = len(rows)
+    first_test = max(40, int(n * 0.60))
+    remaining = n - first_test
+    if remaining < folds * 5:
+        raise ValueError("Direction AI v2 holdout window is too small")
+    fold_size = max(5, remaining // folds)
+
+    all_probabilities: list[float] = []
+    all_labels: list[int] = []
+    per_fold: list[dict[str, object]] = []
+
+    for fold in range(folds):
+        train_end = first_test + fold * fold_size
+        test_end = n if fold == folds - 1 else min(n, train_end + fold_size)
+        if test_end <= train_end:
+            continue
+        train_rows = rows[:train_end]
+        train_labels = labels[:train_end]
+        test_rows = rows[train_end:test_end]
+        test_labels = labels[train_end:test_end]
+        if set(int(v) for v in train_labels) != {0, 1}:
+            continue
+        model = DirectionHGBEnsemble.train(train_rows, train_labels)
+        probabilities = [model.predict_proba(row) for row in test_rows]
+        metrics = classification_metrics(probabilities, test_labels)
+        per_fold.append({
+            "fold": fold + 1,
+            "train_samples": len(train_rows),
+            "test_samples": len(test_rows),
+            **metrics,
+        })
+        all_probabilities.extend(probabilities)
+        all_labels.extend(int(v) for v in test_labels)
+
+    if not all_labels:
+        raise ValueError("Direction AI v2 produced no valid walk-forward folds")
+    pooled = classification_metrics(all_probabilities, all_labels)
+    return {"folds": per_fold, "pooled": pooled}
