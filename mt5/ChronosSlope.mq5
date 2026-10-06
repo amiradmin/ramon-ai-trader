@@ -1,5 +1,5 @@
 #property copyright "Ramon AI Trader"
-#property version "1.033"
+#property version "1.034"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -13,8 +13,10 @@ input int MaxDataAgeSeconds = 120;
 
 const string Prefix="CHRONOS_SLOPE_";
 double LastCurrentMid=0.0,LastForecastMedian=0.0,LastStep15=0.0,LastStep30=0.0;
+double LastBiasConfidence=0.0,LastBiasScore=0.0;
 int LastHorizonBars=4;
 string LastDirection="NONE";
+string LastBiasDirection="MIXED";
 string LastStatus="Waiting for ChronosSlopeBridge";
 
 string Key(const string suffix) { return Prefix+_Symbol+"_"+suffix; }
@@ -29,7 +31,10 @@ void StatusLabel()
    ObjectSetInteger(0,obj,OBJPROP_YDISTANCE,42);
    ObjectSetInteger(0,obj,OBJPROP_COLOR,LastStatus=="OK" ? clrLimeGreen : clrOrange);
    ObjectSetInteger(0,obj,OBJPROP_FONTSIZE,10);
-   ObjectSetString(0,obj,OBJPROP_TEXT,"ChronosSlope: "+(LastStatus=="OK" ? LastDirection : LastStatus));
+   string text="Chronos 30m: "+(LastStatus=="OK" ? LastDirection : LastStatus);
+   if(LastStatus=="OK")
+      text+=" | Bias: "+LastBiasDirection+" "+DoubleToString(LastBiasConfidence*100.0,0)+"%";
+   ObjectSetString(0,obj,OBJPROP_TEXT,text);
 }
 
 bool LoadForecast()
@@ -37,7 +42,9 @@ bool LoadForecast()
    if(!GlobalVariableCheck(Key("UPDATED")) || !GlobalVariableCheck(Key("MID"))
       || !GlobalVariableCheck(Key("MEDIAN")) || !GlobalVariableCheck(Key("DIR"))
       || !GlobalVariableCheck(Key("HORIZON"))
-      || !GlobalVariableCheck(Key("STEP1")) || !GlobalVariableCheck(Key("STEP2")))
+      || !GlobalVariableCheck(Key("STEP1")) || !GlobalVariableCheck(Key("STEP2"))
+      || !GlobalVariableCheck(Key("BIAS_DIR")) || !GlobalVariableCheck(Key("BIAS_CONF"))
+      || !GlobalVariableCheck(Key("BIAS_SCORE")))
    {
       LastStatus="Bridge not running";
       return false;
@@ -54,7 +61,12 @@ bool LoadForecast()
    double step15=GlobalVariableGet(Key("STEP1"));
    double step30=GlobalVariableGet(Key("STEP2"));
    int direction=(int)GlobalVariableGet(Key("DIR"));
-   if(mid<=0 || median<=0 || step15<=0 || step30<=0 || horizon!=2 || direction < -1 || direction > 1)
+   int bias_direction=(int)GlobalVariableGet(Key("BIAS_DIR"));
+   double bias_confidence=GlobalVariableGet(Key("BIAS_CONF"));
+   double bias_score=GlobalVariableGet(Key("BIAS_SCORE"));
+   if(mid<=0 || median<=0 || step15<=0 || step30<=0 || horizon!=2
+      || direction < -1 || direction > 1 || bias_direction < -1 || bias_direction > 1
+      || bias_confidence<0.0 || bias_confidence>1.0 || !MathIsValidNumber(bias_score))
    {
       LastStatus="Invalid bridge data";
       return false;
@@ -65,6 +77,9 @@ bool LoadForecast()
    LastStep30=step30;
    LastHorizonBars=horizon;
    LastDirection=direction>0 ? "UP" : direction<0 ? "DOWN" : "FLAT";
+   LastBiasDirection=bias_direction>0 ? "BUY" : bias_direction<0 ? "SELL" : "MIXED";
+   LastBiasConfidence=bias_confidence;
+   LastBiasScore=bias_score;
    LastStatus="OK";
    return true;
 }
@@ -107,7 +122,10 @@ void DrawForecast()
       else ObjectMove(0,point,0,times[j],prices[j]);
       ObjectSetInteger(0,point,OBJPROP_ARROWCODE,159);
       ObjectSetInteger(0,point,OBJPROP_WIDTH,2);
-      ObjectSetInteger(0,point,OBJPROP_COLOR,j==2 ? overall : clrAqua);
+      color endpoint_color=overall;
+      if(j==2 && LastBiasConfidence>=0.50)
+         endpoint_color=(LastBiasDirection=="BUY" ? clrLimeGreen : LastBiasDirection=="SELL" ? clrTomato : clrSilver);
+      ObjectSetInteger(0,point,OBJPROP_COLOR,j==2 ? endpoint_color : clrAqua);
       ObjectSetInteger(0,point,OBJPROP_SELECTABLE,false);
       string label=Prefix+"STEP_LABEL"+IntegerToString(j);
       if(ShowLabel)
