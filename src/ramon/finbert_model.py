@@ -49,8 +49,8 @@ class FinBertNewsModel:
             return False
 
     @classmethod
-    def from_env(cls, *, lazy: bool = False) -> "FinBertNewsShadow":
-        enabled = os.getenv("RAMON_FINBERT_ENABLED", os.getenv("RAMON_FINBERT_SHADOW_ENABLED", "0")).strip().lower() in {"1","true","yes","on"}
+    def from_env(cls, *, lazy: bool = False) -> "FinBertNewsModel":
+        enabled = os.getenv("RAMON_FINBERT_ENABLED", "0").strip().lower() in {"1","true","yes","on"}
         return cls(
             enabled=enabled,
             checkpoint=os.getenv("RAMON_FINBERT_CHECKPOINT", DEFAULT_FINBERT_CHECKPOINT).strip() or DEFAULT_FINBERT_CHECKPOINT,
