@@ -188,15 +188,19 @@ function render(){const changed=lastKey!==snapshot.sample_key;$("decision").text
 const opportunityDate=new Intl.DateTimeFormat("fa-IR",{timeZone:"Asia/Tehran",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
 const opportunitySet=(id,text)=>{$(id).textContent=text;};
 function percent(v){return typeof v==="number"&&Number.isFinite(v)&&v>=0&&v<=1?(v*100).toFixed(1)+"%":"—";}
-async function manualOpportunity(row,button,recheck=false){
+async function manualOpportunity(row,button,recheck=false,manualUnlocked=false,directionOverride=null){
   if(button.disabled)return;
   button.disabled=true;const old=button.textContent;button.textContent="در حال ارسال…";
+  const selectedDirection=(directionOverride||row.direction||"").toUpperCase();
   try{
-    const response=await fetch("/api/manual-entry",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({direction:row.direction,signal_bar_time:row.signal_bar_time,recheck})});
+    const response=await fetch("/api/manual-entry",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({direction:selectedDirection,signal_bar_time:row.signal_bar_time,recheck,manual_unlocked:manualUnlocked})});
     let data={};try{data=await response.json();}catch{}
     if(!response.ok||!data.queued)throw new Error(data.error||("HTTP "+response.status));
     button.textContent="ارسال شد";
-    opportunitySet("opportunity-status",(recheck?"جهت انتخابی روی snapshot تازه بازبینی و ارسال شد؛ ":"فرمان "+row.direction+" ارسال شد؛ ")+"EA قبل از بازکردن پوزیشن همهٔ قفل‌های اجرایی و ریسک را دوباره بررسی می‌کند.");
+    opportunitySet("opportunity-status",
+      manualUnlocked
+        ?"فرمان دستی "+selectedDirection+" ارسال شد؛ قفل‌های تحلیلی Ramon دخالت نمی‌کنند و فقط کنترل‌های سخت اجرای سفارش/ریسک باقی می‌مانند."
+        :(recheck?"جهت انتخابی روی snapshot تازه بازبینی و ارسال شد؛ ":"فرمان "+selectedDirection+" ارسال شد؛ ")+"EA قبل از بازکردن پوزیشن کنترل‌های اجرایی و ریسک را دوباره بررسی می‌کند.");
     setTimeout(()=>void refreshOpportunities(),1500);
   }catch(err){button.textContent="رد شد";opportunitySet("opportunity-status","ورود دستی انجام نشد: "+err.message);setTimeout(()=>{button.disabled=!row.actionable;button.textContent=old;},1800);}
 }
@@ -454,6 +458,18 @@ function renderOpportunities(data){
     });
     const action=document.createElement("td"),button=document.createElement("button");
     button.type="button";button.className="opportunity-entry "+(row.direction==="BUY"?"buy":"sell");
+    const scenarioWrap=document.createElement("div");scenarioWrap.className="manual-scenario-list";
+    for(const scenario of (row.trade_scenarios||[])){
+      const scenarioBtn=document.createElement("button");
+      scenarioBtn.type="button";
+      scenarioBtn.className="scenario-entry "+(scenario.direction==="BUY"?"buy":"sell")+(scenario.risk==="high"||scenario.risk==="very_high"?" high-risk":"");
+      const p=typeof scenario.probability==="number"?" · "+Math.round(scenario.probability*100)+"٪":"";
+      scenarioBtn.textContent=scenario.label+" · "+scenario.direction+p;
+      scenarioBtn.title=scenario.setup+(scenario.risk==="very_high"?" · ریسک بسیار بالا":scenario.risk==="high"?" · ریسک بالا":"");
+      scenarioBtn.disabled=!compatibility.supported||row.position_open||row.entry_queued;
+      if(!scenarioBtn.disabled)scenarioBtn.addEventListener("click",()=>manualOpportunity(row,scenarioBtn,true,true,scenario.direction));
+      scenarioWrap.append(scenarioBtn);
+    }
     if(row.position_open){
       const actions=document.createElement("div");actions.className="opportunity-actions";
       const closeNow=document.createElement("button");
@@ -498,7 +514,12 @@ function renderOpportunities(data){
       button.disabled=!compatibility.supported;
       if(!compatibility.supported){
         button.title=compatibility.reason;
-        action.append(button);tr.append(action);body.append(tr);
+        if((row.trade_scenarios||[]).length){
+      action.append(scenarioWrap);
+    }else{
+      action.append(button);
+    }
+    tr.append(action);body.append(tr);
         continue;
       }
       button.title=recheck
