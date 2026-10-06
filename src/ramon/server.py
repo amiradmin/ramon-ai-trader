@@ -421,32 +421,36 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     path = [float(x) for x in forecast.median_path]
                     if not path:
                         raise ValueError("Chronos returned an empty median path")
+                    sign = 1.0 if direction == "BUY" else -1.0
+                    current_progress = sign * (current_price - entry_price)
                     if direction == "BUY":
                         peak_index = max(range(len(path)), key=lambda i: path[i])
-                        model_target = path[peak_index]
-                        profitable_forecast = model_target > entry_price
-                        if current_price > entry_price and model_target <= current_price:
+                    else:
+                        peak_index = min(range(len(path)), key=lambda i: path[i])
+                    model_target = path[peak_index]
+                    best_progress = sign * (model_target - entry_price)
+
+                    if current_progress >= 0.0:
+                        if best_progress <= current_progress:
                             action = "EXIT_NOW"
                             suggested = current_price
-                        elif profitable_forecast:
+                        elif best_progress > 0.0:
                             action = "TARGET"
                             suggested = model_target
                         else:
                             action = "NO_PROFIT_TARGET"
                             suggested = None
                     else:
-                        peak_index = min(range(len(path)), key=lambda i: path[i])
-                        model_target = path[peak_index]
-                        profitable_forecast = model_target < entry_price
-                        if current_price < entry_price and model_target >= current_price:
-                            action = "EXIT_NOW"
-                            suggested = current_price
-                        elif profitable_forecast:
-                            action = "TARGET"
+                        # Losing position: use Chronos' best directional recovery
+                        # inside the horizon as a loss-reduction exit. If no
+                        # recovery above the current mark is forecast, advise a
+                        # near exit rather than inventing a recovery target.
+                        if best_progress > current_progress:
+                            action = "RECOVERY_EXIT"
                             suggested = model_target
                         else:
-                            action = "NO_PROFIT_TARGET"
-                            suggested = None
+                            action = "LOSS_EXIT_NOW"
+                            suggested = current_price
                     self.reply(200, {
                         "model": model.model_id,
                         "direction": direction,
@@ -458,6 +462,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         "suggested_exit_price": suggested,
                         "forecast_peak_price": model_target,
                         "forecast_peak_step": peak_index + 1,
+                        "current_progress_price": current_progress,
+                        "best_progress_price": best_progress,
                         "forecast_final_low": forecast.low,
                         "forecast_final_median": forecast.median,
                         "forecast_final_high": forecast.high,
