@@ -1,6 +1,6 @@
 #property strict
-#property version "1.589"
-#define RAMON_EA_VERSION "0.58.9"
+#property version "1.590"
+#define RAMON_EA_VERSION "0.59.0"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -135,8 +135,8 @@ bool LastEnsembleReady = false;
 bool LastEnsembleActive = false;
 double LastRegimeProbability = -1.0;
 bool LastRoleShadow = false;
-string LastShadowRegimeLabel = "UNAVAILABLE";
-double LastShadowRiskProbability = -1.0;
+string LastRegimeLabel = "UNAVAILABLE";
+double LastFullSLProbability = -1.0;
 double LastEntryProbability = -1.0;
 double LastNewsProbability = -1.0;
 double LastMetaProbability = -1.0;
@@ -146,7 +146,7 @@ double LastRiskMultiplier = 1.0;
 bool LastNewsSourceReady = false;
 bool LastNewsModelReady = false;
 string LastForecastModelHandler = "chronos-2-small";
-string LastForecastShadowModelHandler = "OFF";
+string LastForecastExperimentalModelHandler = "OFF";
 bool LastTimesFMReady = false;
 string LastTimesFMDirection = "UNAVAILABLE";
 double LastTimesFMLow = -1.0;
@@ -168,11 +168,11 @@ string LastMarketStateHandler = "market-state-v1";
 string LastTargetModelHandler = "Ramon/TargetStructure";
 string LastAnomalyModelHandler = "OFF";
 string LastNewsSentimentModelHandler = "OFF";
-bool LastMomentShadowReady = false;
+bool LastMomentReady = false;
 double LastMomentAnomalyScore = -1.0;
 double LastMomentAnomalyRatio = -1.0;
 string LastMomentAnomalyLabel = "UNAVAILABLE";
-bool LastFinbertShadowReady = false;
+bool LastFinbertReady = false;
 string LastFinbertSentimentLabel = "UNAVAILABLE";
 double LastFinbertDirectionalScore = 0.0;
 bool LastMomentLiveActive = false;
@@ -680,14 +680,14 @@ string BuildDiagnosticText()
       +"  SELL="+DoubleToString(LastAISellQuality,3)
       +"  Margin="+DoubleToString(LastAIQualityMargin,3)
       +"  Score="+DoubleToString(LastAIScore,3)+"\n"
-      +"RoleModels: "+(LastRoleShadow ? "*SHADOW* (display only)" : (LastEnsembleReady ? "READY" : "*LEARNING*"))
+      +"RoleModels: "+(LastRoleShadow ? "DIRECTION LIVE" : (LastEnsembleReady ? "READY" : "*LEARNING*"))
       +"  Active: "+BoolText(LastEnsembleActive)
       +"  RegimeP: "+DoubleToString(LastRegimeProbability,3)
       +"  EntryP: "+DoubleToString(LastEntryProbability,3)
       +"  NewsP: "+DoubleToString(LastNewsProbability,3)
       +"  MetaP: "+DoubleToString(LastMetaProbability,3)
-      +"  *ShadowRegime: "+LastShadowRegimeLabel
-      +"  *ShadowRiskP: "+DoubleToString(LastShadowRiskProbability,3)
+      +"  Regime: "+LastRegimeLabel
+      +"  FullSLP: "+DoubleToString(LastFullSLProbability,3)
       +"  RiskReady: "+BoolText(LastRiskModelReady)
       +"  RiskP: "+DoubleToString(LastRiskProbability,3)
       +"  RiskMult: "+DoubleToString(LastRiskMultiplier,2)+"x\n"
@@ -1282,14 +1282,14 @@ string ModelMapConditionState(const int row)
    if(row==3)
    {
       if(!LastMomentLiveActive) return "OFF";
-      if(!LastMomentShadowReady || !LastMomentLiveFresh) return "UNKNOWN";
+      if(!LastMomentReady || !LastMomentLiveFresh) return "UNKNOWN";
       return (LastMomentLiveVeto ? "VETO" : "OK");
    }
    if(row==5) return (LastNewsSourceReady ? "OK" : "BLOCKED");
    if(row==7)
    {
       if(!LastFinbertLiveActive) return "OFF";
-      if(!LastFinbertShadowReady) return "UNKNOWN";
+      if(!LastFinbertReady) return "UNKNOWN";
       return (LastFinbertLiveVeto ? "VETO" : "OK");
    }
    if(row==10) return (LastMarketStateRoute=="CONFIRMED_MODEL"
@@ -1348,7 +1348,7 @@ void DrawDashboard()
    UiLabel("TITLE","RAMON AI TRADER  v"+RAMON_EA_VERSION+" "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
    UiLabel("SUB",_Symbol+" M15 | Forecast ["+ModelTag(LastForecastModelHandler)
-      +"] | Shadow ["+ModelTag(LastForecastShadowModelHandler)+"] | "
+      +"] | Experimental ["+ModelTag(LastForecastExperimentalModelHandler)+"] | "
       +IntegerToString(DecisionCadenceSeconds())+"s",28,56,clrWhite,9);
 
    UiLabel("LIVE","LIVE: "+LiveStateText()
@@ -1368,12 +1368,12 @@ void DrawDashboard()
 
 
    string role_mark=(LastRoleShadow || !LastEnsembleReady ? "*" : "");
-   UiLabel("ROLE_MODELS",(LastRoleShadow ? "*SHADOW* | "+LastShadowRegimeLabel : "ROLE MODELS "+(LastEnsembleReady ? "READY" : "*LEARNING*"))
+   UiLabel("ROLE_MODELS",(LastRoleShadow ? "DIRECTION LIVE | "+LastRegimeLabel : "ROLE MODELS "+(LastEnsembleReady ? "READY" : "*LEARNING*"))
       +" R["+ModelTag(LastRegimeModelHandler)+"]"+role_mark+":"+RoleProbabilityText(LastRegimeProbability)
       +" E["+ModelTag(LastEntryModelHandler)+"]"+role_mark+":"+RoleProbabilityText(LastEntryProbability)
       +" N["+ModelTag(LastNewsModelHandler)+"]"+role_mark+":"+RoleProbabilityText(LastNewsProbability)
       +" M["+ModelTag(LastMetaModelHandler)+"]"+role_mark+":"+RoleProbabilityText(LastMetaProbability)
-      +" SL["+ModelTag(LastRiskModelHandler)+"]"+role_mark+":"+RoleProbabilityText(LastRoleShadow ? LastShadowRiskProbability : LastRiskProbability),
+      +" SL["+ModelTag(LastRiskModelHandler)+"]"+role_mark+":"+RoleProbabilityText(LastRoleShadow ? LastFullSLProbability : LastRiskProbability),
       28,178,clrWhite,8);
    ObjectSetString(0,UiPrefix+"ROLE_MODELS",OBJPROP_TOOLTIP,
       "حالت سایه: فقط نمایش؛ بدون دخالت در معامله\n"
@@ -1381,12 +1381,12 @@ void DrawDashboard()
       "E: احتمال نتیجه مثبت ورود | N: برآورد مدل خبر\n"
       "M: برآورد ترکیبی | SL: احتمال برخورد به حد ضرر\n"
       "N/A: پیش‌بینی معتبر موجود نیست. درصدها دقت مدل نیستند.\n"
-      "* = SHADOW / LEARNING / COLLECTING؛ هنوز Live نیست.");
+      "* = EXPERIMENTAL / LEARNING only; no execution effect.");
 
-   string moment_state=(LastMomentShadowReady
+   string moment_state=(LastMomentReady
       ? LastMomentAnomalyLabel+" x"+DoubleToString(LastMomentAnomalyRatio,2)
       : "OFF");
-   string finbert_state=(LastFinbertShadowReady
+   string finbert_state=(LastFinbertReady
       ? LastFinbertSentimentLabel+" "+DoubleToString(LastFinbertDirectionalScore,2)
       : "OFF");
    string moment_gate=(LastMomentLiveActive
@@ -1452,12 +1452,12 @@ void DrawDashboard()
    UiRect("MODEL_MAP_HEAD",mx+4,my+4,mw-8,26,C'30,41,59',C'71,85,105');
    UiLabel("MODEL_MAP_TITLE","MODEL / HANDLER MAP",mx+12,my+9,clrWhite,10);
 
-   string mnames[12]={"Forecast","Forecast Shadow","Regime","Anomaly Detection",
+   string mnames[12]={"Forecast","Forecast Experimental","Regime","Anomaly Detection",
       "Entry","News Calendar","News Model","News Sentiment",
       "Meta","Risk / SL","Market State","TP Structure"};
    string mhandlers[12]={
       ModelTag(LastForecastModelHandler),
-      ModelTag(LastForecastShadowModelHandler),
+      ModelTag(LastForecastExperimentalModelHandler),
       ModelTag(LastRegimeModelHandler),
       ModelTag(LastAnomalyModelHandler)+" [LIVE GATE]",
       ModelTag(LastEntryModelHandler),
@@ -1478,17 +1478,17 @@ void DrawDashboard()
       +"BUY edge: "+DoubleToString(LastBuyEdge,3)+" | SELL edge: "+DoubleToString(LastSellEdge,3)+"\n"
       +"Strength: "+DoubleToString(LastSignalStrength,3)+" / min "+DoubleToString(LastMinimumStrength,3);
 
-   mtips[1]="Forecast Shadow | "+ModelTag(LastForecastShadowModelHandler)+"\n"
+   mtips[1]="Forecast Experimental | "+ModelTag(LastForecastExperimentalModelHandler)+"\n"
       +"Ready: "+BoolText(LastTimesFMReady)+" | Direction: "+LastTimesFMDirection+"\n"
       +"Low/Median/High: "+DoubleToString(LastTimesFMLow,_Digits)+" / "
       +DoubleToString(LastTimesFMMedian,_Digits)+" / "+DoubleToString(LastTimesFMHigh,_Digits)+"\n"
       +"Move ATR: "+DoubleToString(LastTimesFMMoveAtr,3)
       +" | Agrees Chronos: "+BoolText(LastTimesFMAgreesChronos)+"\n"
-      +"SHADOW: does not create or veto trades.";
+      +"EXPERIMENTAL: no execution effect.";
 
    mtips[2]="Regime | "+ModelTag(LastRegimeModelHandler)+"\n"
       +"Probability: "+RoleProbabilityText(LastRegimeProbability)+"\n"
-      +"Label: "+LastShadowRegimeLabel+"\n"
+      +"Label: "+LastRegimeLabel+"\n"
       +"Current market state: "+LastMarketState+" | route "+LastMarketStateRoute+"\n"
       +"Role active: "+BoolText(LastEnsembleActive);
 
@@ -4913,20 +4913,20 @@ void OnTimer()
    LastRiskProbability=risk_probability;
    LastRiskMultiplier=risk_multiplier;
    // Optional telemetry only: these values are never read by entry/exit/sizing.
-   double role_shadow=0.0,shadow_risk_probability=-1.0;
-   string shadow_regime_label="UNAVAILABLE";
-   JsonNumber(reply,"role_shadow",role_shadow);
-   JsonNumber(reply,"shadow_risk_probability",shadow_risk_probability);
-   JsonText(reply,"shadow_regime_label",shadow_regime_label);
-   LastRoleShadow=(role_shadow>=0.5);
-   LastShadowRegimeLabel=shadow_regime_label;
-   LastShadowRiskProbability=shadow_risk_probability;
+   double role_live=1.0,full_sl_probability=-1.0;
+   string regime_label="UNAVAILABLE";
+   JsonNumber(reply,"direction_quality_live",role_live);
+   JsonNumber(reply,"full_sl_probability",full_sl_probability);
+   JsonText(reply,"regime_label",regime_label);
+   LastRoleShadow=(role_live<0.5);
+   LastRegimeLabel=regime_label;
+   LastFullSLProbability=full_sl_probability;
    LastNewsSource=news_source;
    LastNewsSourceReady=(news_source_ready>=0.5);
    LastNewsModelReady=(news_model_ready>=0.5);
    // Optional model identity telemetry. Older servers remain compatible.
    JsonText(reply,"forecast_model_handler",LastForecastModelHandler);
-   JsonText(reply,"forecast_shadow_model_handler",LastForecastShadowModelHandler);
+   JsonText(reply,"forecast_shadow_model_handler",LastForecastExperimentalModelHandler);
    JsonText(reply,"regime_model_handler",LastRegimeModelHandler);
    JsonText(reply,"entry_model_handler",LastEntryModelHandler);
    JsonText(reply,"news_model_handler",LastNewsModelHandler);
@@ -4941,13 +4941,13 @@ void OnTimer()
    // Optional live snapshot telemetry used only by dashboard tooltips.
    double timesfm_ready=0.0,timesfm_low=-1.0,timesfm_median=-1.0,timesfm_high=-1.0,timesfm_move_atr=-1.0,timesfm_agrees=0.0;
    string timesfm_direction="UNAVAILABLE";
-   JsonNumber(reply,"timesfm3_shadow_ready",timesfm_ready);
-   JsonText(reply,"timesfm3_shadow_direction",timesfm_direction);
-   JsonNumber(reply,"timesfm3_shadow_low",timesfm_low);
-   JsonNumber(reply,"timesfm3_shadow_median",timesfm_median);
-   JsonNumber(reply,"timesfm3_shadow_high",timesfm_high);
-   JsonNumber(reply,"timesfm3_shadow_move_atr",timesfm_move_atr);
-   JsonNumber(reply,"timesfm3_shadow_agrees_chronos",timesfm_agrees);
+   JsonNumber(reply,"timesfm3_experimental_ready",timesfm_ready);
+   JsonText(reply,"timesfm3_experimental_direction",timesfm_direction);
+   JsonNumber(reply,"timesfm3_experimental_low",timesfm_low);
+   JsonNumber(reply,"timesfm3_experimental_median",timesfm_median);
+   JsonNumber(reply,"timesfm3_experimental_high",timesfm_high);
+   JsonNumber(reply,"timesfm3_experimental_move_atr",timesfm_move_atr);
+   JsonNumber(reply,"timesfm3_experimental_agrees_chronos",timesfm_agrees);
    LastTimesFMReady=(timesfm_ready>=0.5);
    LastTimesFMDirection=timesfm_direction;
    LastTimesFMLow=timesfm_low;
@@ -4964,18 +4964,18 @@ void OnTimer()
    double moment_ready=0.0,moment_score=-1.0,moment_ratio=-1.0;
    double finbert_ready=0.0,finbert_directional=0.0;
    string moment_label="UNAVAILABLE",finbert_label="UNAVAILABLE";
-   JsonNumber(reply,"moment_shadow_ready",moment_ready);
+   JsonNumber(reply,"moment_ready",moment_ready);
    JsonNumber(reply,"moment_anomaly_score",moment_score);
    JsonNumber(reply,"moment_anomaly_ratio",moment_ratio);
    JsonText(reply,"moment_anomaly_label",moment_label);
-   JsonNumber(reply,"finbert_shadow_ready",finbert_ready);
+   JsonNumber(reply,"finbert_ready",finbert_ready);
    JsonText(reply,"finbert_sentiment_label",finbert_label);
    JsonNumber(reply,"finbert_directional_score",finbert_directional);
-   LastMomentShadowReady=(moment_ready>=0.5);
+   LastMomentReady=(moment_ready>=0.5);
    LastMomentAnomalyScore=moment_score;
    LastMomentAnomalyRatio=moment_ratio;
    LastMomentAnomalyLabel=moment_label;
-   LastFinbertShadowReady=(finbert_ready>=0.5);
+   LastFinbertReady=(finbert_ready>=0.5);
    LastFinbertSentimentLabel=finbert_label;
    LastFinbertDirectionalScore=finbert_directional;
    double moment_live_active=0.0,moment_live_fresh=0.0,moment_live_veto=0.0,moment_live_threshold=2.0;
