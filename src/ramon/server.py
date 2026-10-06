@@ -298,6 +298,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     "forecast_context": "completed_m15_cached",
                     "live_quote_decisions": True,
                     "position_exit_advice": True,
+                    "opportunity_entry_advice": True,
                     "history_enabled": bool(history_db),
                     "allow_weak_intrabar_entries": settings.allow_weak_intrabar_entries,
                     "minimum_strength": settings.minimum_strength,
@@ -343,7 +344,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
             nonlocal moment_future, finbert_future, latest_moment_payload
             nonlocal latest_finbert_payload, last_shadow_bar, last_finbert_event_key
             nonlocal latest_market, latest_market_received_utc
-            if self.path not in {"/decision", "/trades", "/manual-override", "/manual-overrides/reset", "/human-opinion", "/position-exit-advice"}:
+            if self.path not in {"/decision", "/trades", "/manual-override", "/manual-overrides/reset", "/human-opinion", "/position-exit-advice", "/opportunity-entry-advice"}:
                 self.send_error(404)
                 return
             try:
@@ -400,6 +401,72 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         "saved": True,
                         "action": action,
                         "active": sorted(manual_overrides_by_bar.get(signal_bar_time, {})),
+                    })
+                    return
+                if self.path == "/opportunity-entry-advice":
+                    if latest_market is None or int(time.time()) - latest_market_received_utc > 120:
+                        raise ValueError("fresh market context unavailable")
+                    direction = str(payload.get("direction", "")).upper()
+                    probability = float(payload.get("success_probability", -1.0))
+                    horizon = int(payload.get("horizon", settings.horizon))
+                    if direction not in {"BUY", "SELL"}:
+                        raise ValueError("direction must be BUY or SELL")
+                    if probability < 0.70 or probability > 1.0:
+                        raise ValueError("entry advice requires success_probability >= 0.70")
+                    if horizon < 1 or horizon > 16:
+                        raise ValueError("horizon must be 1..16")
+                    closes = [float(bar.close) for bar in latest_market.bars[-settings.context:]]
+                    with guard:
+                        forecast = cached_model.forecast(closes, horizon)
+                    path = [float(x) for x in forecast.median_path]
+                    if not path:
+                        raise ValueError("Chronos returned an empty median path")
+                    current_price = (
+                        float(latest_market.ask) if direction == "BUY"
+                        else float(latest_market.bid)
+                    )
+                    if direction == "BUY":
+                        candidate_index = min(range(len(path)), key=lambda i: path[i])
+                        candidate_price = path[candidate_index]
+                        later_best = max(path[candidate_index:])
+                        continuation = later_best > candidate_price
+                        if candidate_price >= current_price or not continuation:
+                            action = "ENTER_NEAR"
+                            suggested_price = current_price
+                            step = 0
+                        else:
+                            action = "WAIT_PULLBACK"
+                            suggested_price = candidate_price
+                            step = candidate_index + 1
+                    else:
+                        candidate_index = max(range(len(path)), key=lambda i: path[i])
+                        candidate_price = path[candidate_index]
+                        later_best = min(path[candidate_index:])
+                        continuation = later_best < candidate_price
+                        if candidate_price <= current_price or not continuation:
+                            action = "ENTER_NEAR"
+                            suggested_price = current_price
+                            step = 0
+                        else:
+                            action = "WAIT_PULLBACK"
+                            suggested_price = candidate_price
+                            step = candidate_index + 1
+                    self.reply(200, {
+                        "model": model.model_id,
+                        "direction": direction,
+                        "success_probability": probability,
+                        "action": action,
+                        "suggested_entry_price": suggested_price,
+                        "forecast_entry_step": step,
+                        "forecast_entry_minutes": step * 15,
+                        "current_price": current_price,
+                        "median_path": path,
+                        "forecast_final_low": forecast.low,
+                        "forecast_final_median": forecast.median,
+                        "forecast_final_high": forecast.high,
+                        "market_bar_time": latest_market.bars[-1].time,
+                        "market_context_age_seconds": max(0, int(time.time()) - latest_market_received_utc),
+                        "advisory_only": True,
                     })
                     return
                 if self.path == "/position-exit-advice":
