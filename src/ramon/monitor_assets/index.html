@@ -60,8 +60,8 @@
     </section>
     <div id="model-map-tooltip" class="model-map-tooltip" role="tooltip" hidden></div>
     <section class="market-detail-card">
-      <span class="eyebrow">OPPORTUNITY LEDGER</span><h2>فرصت‌های دارای مزیت مثبت مدل</h2>
-      <p>مزیت مثبت، سود تضمین‌شده نیست. درصد موفقیت از مدل Direction Quality می‌آید؛ اگر مدل نمونهٔ معتبر نداشته باشد «—» نمایش داده می‌شود. دکمهٔ ورود فقط برای فرصت تازه فعال است و EA پیش از سفارش همهٔ کنترل‌های اجرایی و ریسک را دوباره بررسی می‌کند.</p>
+      <span class="eyebrow">LIVE DECISION DESK</span><h2>میز تصمیم زندهٔ معامله</h2>
+      <p>جهت BUY/SELL/WAIT از Direction AI می‌آید و Chronos، Market State، Intrabar، Risk، MOMENT و News برای زمان‌بندی و کنترل ریسک کنار آن نمایش داده می‌شوند. «قابل بررسی» تضمین سود نیست؛ EA پیش از سفارش کنترل‌های اجرایی و ریسک را دوباره بررسی می‌کند.</p>
       <div id="today-profit-summary" class="today-profit-summary" aria-live="polite">
         <span>سود امروز: —</span><span>پوزیشن‌های باز: —</span><span>جمع امروز: —</span>
       </div>
@@ -70,7 +70,7 @@
         <span id="trade-guidance-reason">این راهنما از پیش‌بینی مستقل ChronosSlope در ۳۰ دقیقه آینده می‌آید و مجوز قطعی معامله نیست.</span>
       </div>
       <p id="live-market-sync" class="opportunity-live-state" aria-live="polite">آخرین تصمیم زنده Ramon در حال دریافت است…</p>
-      <p class="opportunity-data-note">این جدول دفتر ثبت فرصت‌های ۲۴ ساعت اخیر است، نه پیش‌بینی زنده ChronosSlope. قیمت‌های هر ردیف مربوط به زمان ثبت آن فرصت‌اند؛ فلش ۳۰ دقیقه‌ای ChronosSlope جداگانه از سرویس پیش‌بینی می‌آید.</p>
+      <p class="opportunity-data-note">ردیف‌ها از تصمیم‌های ۲۴ ساعت اخیر ساخته می‌شوند و تازه‌ترین snapshot هر کندل M15 مبناست. Direction AI منبع اصلی جهت است؛ قیمت ورود/خروج پیشنهادی Chronos مستقل و در لحظهٔ کلیک دوباره اعتبارسنجی می‌شود.</p>
       <p id="opportunity-status" aria-live="polite">در حال دریافت…</p>
       <div class="opportunity-scroll"><table class="opportunity-table"><thead><tr><th>زمان تهران</th><th>Direction AI</th><th>بازار / تایمینگ</th><th>کیفیت / ریسک</th><th>ورود / SL / TP</th><th>قیمت ورود خودکار</th><th>خروج پیشنهادی</th><th>چرا بگیر / نگیر</th><th>وضعیت</th><th>نتیجهٔ فرضی</th><th>P/L زنده</th><th>اقدام</th></tr></thead><tbody id="opportunity-rows"></tbody></table></div>
     </section>
