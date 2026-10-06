@@ -596,6 +596,10 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
         "decision": "AI+Logic",
     }
 
+    def pct(value):
+        parsed = number(value)
+        return "—" if parsed is None or parsed < 0 else f"{parsed * 100:.0f}%"
+
     def probability_badge(value, label):
         parsed = number(value)
         if parsed is None or parsed < 0.0:
@@ -604,14 +608,14 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
             return f"{label} {parsed * 100:.0f}%"
         return f"{label} {parsed:.2f}"
 
-    def node(id, title, status, detail, *, source="model", values=None, score=None):
+    def node(id, title, status, detail, *, source="model", values=None, score=None, metrics=None):
         stamp = ea_time if source == "ea" else model_time
         if source == "health":
             stamp = {"state": "fresh" if health and health.get("ready") else "unknown", "at": utc_time(now), "age_seconds": 0}
         effective = status if stamp["state"] == "fresh" else "stale" if stamp["state"] in {"stale", "clock_error"} else "unknown"
         nodes.append({"id": id, "title": title, "state": effective, "observed_state": status,
                       "detail": detail, "source": source, "engine": engine_labels.get(id),
-                      "score": score,
+                      "score": score, "metrics": metrics,
                       "manual_override_supported": id in {"timing", "extension", "edge", "strength", "market_direction", "entry_timing", "base", "decision", "range"},
                       "manual_review_supported": id in {"news", "account", "limits", "risk", "order", "position"},
                       "observed_at": stamp["at"], "age_seconds": stamp["age_seconds"],
@@ -631,6 +635,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
     node("forecast", "پیش‌بینی Chronos", "observed" if base.get("forecast_median", 0) else "unknown",
          f"قدرت Chronos {pct(number(base.get('signal_strength')))} · پیش‌بینی از کندل‌های بستهٔ M15",
          score=probability_badge(base.get("signal_strength"), "قدرت"),
+         metrics=f"Chronos {pct(base.get('signal_strength'))}",
          values={"کف / میانه / سقف": " / ".join(metric(base.get(k)) for k in ("forecast_low", "forecast_median", "forecast_high")),
                  "ATR": base.get("atr"), "مدل ثبت‌شده": sample.get("chronos_model")})
     edge, minimum = number(max(number(base.get("buy_edge")) or 0, number(base.get("sell_edge")) or 0)), number(base.get("minimum_edge"))
@@ -641,6 +646,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
     node("strength", "قدرت پیش‌بینی", "pass" if strength is not None and floor is not None and strength >= floor else "blocked" if strength is not None and floor is not None else "unknown",
          f"قدرت Chronos {pct(strength)} · حد عادی {pct(floor)}",
          score=probability_badge(strength, "Chronos"),
+         metrics=f"Chronos {pct(strength)}",
          values={"قدرت": strength, "حداقل قدرت عادی": floor, "ورود ضعیف مجاز": settings.get("allow_weak_intrabar_entries")})
     entry_p = number(final.get("entry_probability"))
     regime_p = number(final.get("regime_probability"))
@@ -650,9 +656,6 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
     buy_quality_p = number(final.get("shadow_buy_success_probability"))
     sell_quality_p = number(final.get("shadow_sell_success_probability"))
     ai_score_p = number(final.get("ai_engine_v2_score"))
-
-    def pct(value):
-        return "—" if value is None or value < 0 else f"{value * 100:.0f}%"
 
     proposed_direction = (
         base.get("decision")
@@ -679,6 +682,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
          "جهت مستقل بازار خلاف سیگنال است؛ ورود متوقف می‌شود" if direction_known else
          f"BUY Quality {pct(buy_quality_p)} · SELL Quality {pct(sell_quality_p)}",
          score=direction_quality_badge,
+         metrics=f"BUY {pct(buy_quality_p)} · SELL {pct(sell_quality_p)}",
          values={"فعال روی حساب سنتی": "بله" if cent_gate_active else "خیر",
                  "جهت سیگنال": proposed_direction,
                  "جهت مستقل بازار": detected_direction,
@@ -705,6 +709,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
              "زمان ورود تأیید شده" if signal_timing_ready else "زمان ورود هنوز تأیید نشده"
          ),
          score=probability_badge(final.get("entry_probability"), "Entry AI"),
+         metrics=f"Entry AI {pct(entry_p)}",
          values={"جهت بررسی": timing_direction,
                  "جهت سیگنال": proposed_direction,
                  "زمان جهت بررسی تأیید شده": "بله" if timing_ready else "خیر",
@@ -782,6 +787,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
     node("shadow", "تشخیص رژیم و مدل‌های ناظر", "shadow" if shadow else "observed" if final else "unknown",
          f"Regime {pct(regime_p)} · Full-SL Risk {pct(full_sl_p)}",
          score=shadow_badge,
+         metrics=f"Regime {pct(regime_p)} · Full-SL {pct(full_sl_p)}",
          values={"رژیم ناظر": final.get("shadow_regime_label"), "احتمال رژیم": final.get("regime_probability"),
                  "نقش‌های فعال": final.get("ensemble_active"), "توجه": "RANGE/UNCLEAR رنج قطعی نیست"})
     final_ai_badge = (
@@ -793,6 +799,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
              f"AI Score {pct(ai_score_p)} · Meta {pct(meta_p)} · "
              f"Entry {pct(entry_p)} · Risk {pct(full_sl_p)}"
          ), score=final_ai_badge,
+         metrics=f"AI {pct(ai_score_p)} · Meta {pct(meta_p)} · Risk {pct(full_sl_p)}",
          values={"تصمیم": decision, "دلیل": reason, "شناسه": sample.get("sample_key"),
                                              "مسیر": "RANGE" if range_execution else "CHRONOS",
                                              "حالت بازار": assessment.get("state", "ثبت نشده"),
@@ -803,6 +810,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
     node("news", "قفل خبر", "blocked" if "NEWS GUARD" in ea_status else "pass" if diag.get("News") else "unknown",
          f"News AI {pct(news_p)} · تقویم خبر همچنان Safety Gate است",
          score=probability_badge(final.get("news_probability"), "News AI"),
+         metrics=f"News AI {pct(news_p)}",
          source="ea", values={"آخرین خبر": diag.get("News"), "وضعیت اکسپرت": ea_status if "NEWS GUARD" in ea_status else "عبور از این گیت در هر تصمیم ثبت نشده"})
     live = match(diag.get("Live"), r"^(\w+)")
     permissions = diag.get("Trade permissions", "")
@@ -822,6 +830,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
     node("risk", "حجم، ریسک و مارجین", "blocked" if "BLOCK" in risk or any(x in ea_status for x in ("risk >", "hard risk cap", "Insufficient margin", "SL risk >", "TP not inside", "reward/risk <")) else "pass" if risk else "unknown",
          f"Full-SL Risk AI {pct(full_sl_p)} · ریسک اجرایی MT5 جداگانه کنترل می‌شود", source="ea",
          score=probability_badge(final.get("shadow_full_sl_probability"), "Full-SL"),
+         metrics=f"Full-SL Risk {pct(full_sl_p)}",
          values={"پیش‌نمایش ریسک": risk or None,
                  "بودجهٔ ترجیحی، دلار": number(match(diag.get("RiskPerTradeUSD"), r"^([\d.]+)")),
                  "سقف اجرای لات حداقل، دلار": number(match(diag.get("MinLotOverride"), r"MaxExecutableRiskUSD: ([\d.]+)")),
@@ -1346,8 +1355,10 @@ def queue_manual_entry(db, diagnostic, symbol, payload):
         raise ValueError("مسیر فایل اکسپرت در دسترس نیست")
     direction = str(payload.get("direction", "")).upper()
     signal_bar_time = int(payload.get("signal_bar_time", 0))
+    recheck = bool(payload.get("recheck"))
     if direction not in {"BUY", "SELL"} or signal_bar_time <= 0:
         raise ValueError("فرصت انتخاب‌شده نامعتبر است")
+
     data = opportunities_with_execution_state(db, diagnostic, symbol)
     row = next(
         (
@@ -1363,21 +1374,54 @@ def queue_manual_entry(db, diagnostic, symbol, payload):
         raise ValueError("برای این فرصت همین حالا پوزیشن باز است")
     if row.get("entry_queued"):
         raise ValueError("فرمان این فرصت قبلاً در صف اجراست")
-    if not row.get("actionable"):
-        raise ValueError("این فرصت دیگر تازه و قابل اجرا نیست")
+    if row.get("executed"):
+        raise ValueError("این فرصت قبلاً معاملهٔ ثبت‌شده دارد")
+
     common_dir = Path(diagnostic).parent
     queue_path = common_dir / "Ramon_ManualEntries.txt"
-    sample_key = str(row.get("sample_key") or "")
-    risk_distance = float(row.get("risk_distance") or 0.0)
-    target_distance = abs(float(row.get("target") or 0.0) - float(row.get("entry") or 0.0))
-    edge = float(row.get("edge") or 0.0)
-    probability = row.get("success_probability")
-    if not re.fullmatch(r"[a-f0-9]{16}", sample_key) or risk_distance <= 0 or target_distance <= 0 or edge <= 0:
-        raise ValueError("اطلاعات فرصت برای اجرای دستی کامل نیست")
+
+    if recheck:
+        # Re-anchor a human-selected direction to the newest immutable decision
+        # snapshot. This avoids executing stale prices/sample attribution.
+        current, _, _, error = read_history(db, symbol, "")
+        if error or not current:
+            raise ValueError("snapshot تازه برای بازبینی دستی در دسترس نیست")
+        metadata = object_json(current.get("model_metadata"))
+        audit = metadata.get("decision_audit") if isinstance(metadata.get("decision_audit"), dict) else {}
+        base = audit.get("base") if isinstance(audit.get("base"), dict) else {}
+        final = audit.get("final") if isinstance(audit.get("final"), dict) else {}
+        captured = number(current.get("captured"))
+        if captured is None or time.time() - captured > 45:
+            raise ValueError("snapshot مدل برای ورود دستی تازه نیست")
+        sample_key = str(current.get("sample_key") or "")
+        signal_bar_time = int(number(base.get("signal_bar_time")) or 0)
+        risk_distance = float(number(base.get("stop_distance")) or 0.0)
+        target_distance = float(number(base.get("target_distance")) or 0.0)
+        edge = float(number(base.get("buy_edge" if direction == "BUY" else "sell_edge")) or 0.0)
+        probability = number(final.get(
+            "shadow_buy_success_probability" if direction == "BUY"
+            else "shadow_sell_success_probability"
+        ))
+        mode = "RECHECK"
+    else:
+        if not row.get("actionable"):
+            raise ValueError("فرصت منقضی شده؛ از دکمهٔ بازبینی دستی استفاده کنید")
+        sample_key = str(row.get("sample_key") or "")
+        risk_distance = float(row.get("risk_distance") or 0.0)
+        target_distance = abs(float(row.get("target") or 0.0) - float(row.get("entry") or 0.0))
+        edge = float(row.get("edge") or 0.0)
+        probability = row.get("success_probability")
+        mode = "NORMAL"
+
+    if not re.fullmatch(r"[a-f0-9]{16}", sample_key) or signal_bar_time <= 0:
+        raise ValueError("شناسه snapshot برای اجرای دستی معتبر نیست")
+    if risk_distance <= 0 or target_distance <= 0:
+        raise ValueError("SL/TP snapshot تازه برای اجرای دستی معتبر نیست")
     probability_value = -1.0 if probability is None else float(probability)
     command = (
         f"{int(time.time())}|{signal_bar_time}|{direction}|{sample_key}|"
-        f"{risk_distance:.10f}|{target_distance:.10f}|{edge:.10f}|{probability_value:.10f}\n"
+        f"{risk_distance:.10f}|{target_distance:.10f}|{edge:.10f}|"
+        f"{probability_value:.10f}|{mode}\n"
     )
     with open(queue_path, "a", encoding="ascii", newline="") as out:
         out.write(command)
@@ -1387,8 +1431,9 @@ def queue_manual_entry(db, diagnostic, symbol, payload):
         "queued": True,
         "direction": direction,
         "signal_bar_time": signal_bar_time,
-        "success_probability": row.get("success_probability"),
-        "expires_in_seconds": data.get("actionable_seconds", 90),
+        "success_probability": probability,
+        "mode": mode,
+        "safety": "EA hard execution gates remain active",
     }
 
 
