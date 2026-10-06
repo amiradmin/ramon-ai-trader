@@ -1310,6 +1310,16 @@ def read_open_dashboard_positions(diagnostic):
     try:
         if not path.exists():
             return result
+        # The MT5 side publishes a snapshot, not a durable position ledger.
+        # Never treat an old snapshot as proof that a position is still open.
+        if abs(time.time() - path.stat().st_mtime) > 90:
+            return result
+        diag, error = read_diagnostic(diagnostic)
+        if error or abs(time.time() - float(diag.get("captured_epoch") or 0)) > 90:
+            return result
+        managed = str(diag.get("Managed position") or "").strip()
+        if not managed or managed.upper().startswith("NONE") or managed.lower().startswith("no "):
+            return result
         for raw in path.read_text(encoding="ascii", errors="ignore").splitlines():
             parts = raw.strip().split("|")
             if len(parts) == 9:
