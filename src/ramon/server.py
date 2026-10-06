@@ -156,6 +156,77 @@ def persist_market_safely(db: str, market: Market) -> str:
     return ""
 
 
+def _direction_sign(value: object) -> float:
+    text = str(value or "").upper()
+    if text in {"BUY", "UP"}:
+        return 1.0
+    if text in {"SELL", "DOWN"}:
+        return -1.0
+    return 0.0
+
+
+def combined_30m_bias(
+    chronos_direction: str,
+    decision_snapshot: dict[str, object] | None,
+    *,
+    snapshot_age_seconds: int,
+) -> dict[str, object]:
+    """Blend Chronos with the latest live Ramon directional context.
+
+    Chronos remains the displayed price path. This score is advisory and is
+    intentionally simple/traceable rather than another trading model.
+    """
+    chronos_score = _direction_sign(chronos_direction)
+    if not decision_snapshot or snapshot_age_seconds < 0 or snapshot_age_seconds > 90:
+        return {
+            "bias_direction": chronos_direction if chronos_direction in {"UP", "DOWN"} else "MIXED",
+            "bias_confidence": 0.30 if chronos_score else 0.0,
+            "bias_score": 0.30 * chronos_score,
+            "bias_source": "chronos_only_stale_ramon_context",
+            "direction_ai_score": 0.0,
+            "market_direction_score_30m": 0.0,
+            "intrabar_score_30m": 0.0,
+        }
+
+    buy = decision_snapshot.get("ai_engine_v2_buy_quality")
+    sell = decision_snapshot.get("ai_engine_v2_sell_quality")
+    try:
+        buy_p = float(buy)
+        sell_p = float(sell)
+        ai_score = max(-1.0, min(1.0, buy_p - sell_p)) if 0 <= buy_p <= 1 and 0 <= sell_p <= 1 else 0.0
+    except (TypeError, ValueError):
+        ai_score = 0.0
+
+    market_score = _direction_sign(decision_snapshot.get("market_direction"))
+    intrabar_score = (
+        _direction_sign(decision_snapshot.get("intrabar_direction"))
+        if float(decision_snapshot.get("intrabar_confirmed", 0) or 0) >= 0.5
+        else 0.0
+    )
+
+    score = (
+        0.45 * ai_score
+        + 0.30 * chronos_score
+        + 0.15 * market_score
+        + 0.10 * intrabar_score
+    )
+    confidence = min(1.0, abs(score))
+    if abs(score) < 0.15:
+        direction = "MIXED"
+    else:
+        direction = "BUY" if score > 0 else "SELL"
+
+    return {
+        "bias_direction": direction,
+        "bias_confidence": confidence,
+        "bias_score": score,
+        "bias_source": "chronos_direction_ai_market_intrabar",
+        "direction_ai_score": ai_score,
+        "market_direction_score_30m": market_score,
+        "intrabar_score_30m": intrabar_score,
+    }
+
+
 class CachedForecaster:
     """Reuse the Chronos forecast while the completed M15 context is unchanged."""
 
@@ -180,6 +251,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
     latest_market: Market | None = None
     latest_market_received_utc = 0
     latest_display_forecast: dict[str, object] | None = None
+    latest_decision_snapshot: dict[str, object] | None = None
+    latest_decision_snapshot_utc = 0
     history_db = os.getenv("RAMON_HISTORY_DB", "").strip()
     range_live_enabled = os.getenv("RAMON_RANGE_LIVE_ENABLED", "0") == "1"
     reversal_live_enabled = os.getenv("RAMON_REVERSAL_LIVE_ENABLED", "0") == "1"
@@ -353,7 +426,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
             nonlocal moment_future, finbert_future, latest_moment_payload
             nonlocal latest_finbert_payload, last_moment_bar, last_finbert_event_key
             nonlocal latest_market, latest_market_received_utc, ensemble
-            nonlocal latest_display_forecast
+            nonlocal latest_display_forecast, latest_decision_snapshot, latest_decision_snapshot_utc
             if self.path not in {"/decision", "/trades", "/manual-override", "/manual-overrides/reset", "/human-opinion", "/position-exit-advice", "/opportunity-entry-advice", "/reload-roles", "/forecast-only"}:
                 self.send_error(404)
                 return
@@ -428,6 +501,15 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     move = float(forecast.median) - midpoint
                     deadband = max(float(market.point) * 5.0, abs(midpoint) * 1e-7)
                     direction = "UP" if move > deadband else "DOWN" if move < -deadband else "FLAT"
+                    decision_age = (
+                        int(time.time()) - int(latest_decision_snapshot_utc)
+                        if latest_decision_snapshot_utc else 10**9
+                    )
+                    bias = combined_30m_bias(
+                        direction,
+                        latest_decision_snapshot,
+                        snapshot_age_seconds=decision_age,
+                    )
                     if horizon == 2:
                         latest_display_forecast = {
                             "model": model.model_id,
@@ -438,6 +520,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                             "forecast_step_2": float(forecast.median_path[1]),
                             "horizon_minutes": 30,
                             "captured_utc": int(time.time()),
+                            "ramon_context_age_seconds": decision_age,
+                            **bias,
                             "advisory_only": True,
                         }
                     self.reply(200, {
@@ -453,6 +537,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         "forecast_horizon_bars": horizon,
                         "forecast_horizon_minutes": horizon * 15,
                         "signal_bar_time": market.bars[-1].time,
+                        "ramon_context_age_seconds": decision_age,
+                        **bias,
                         "advisory_only": True,
                         "ramon_decision_independent": True,
                     })
@@ -1125,6 +1211,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     response["decision"] = "WAIT"
                     response["reason"] = "reversal_sample_not_saved"
                     response["reversal_execution"] = 0
+                latest_decision_snapshot = dict(response)
+                latest_decision_snapshot_utc = int(time.time())
                 self.reply(200, response)
             except (ValueError, TypeError, KeyError, OverflowError, json.JSONDecodeError) as exc:
                 self.reply(400, {"error": str(exc)})
