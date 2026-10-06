@@ -100,6 +100,7 @@
 .opportunity-entry{min-width:108px;border:1px solid var(--border);border-radius:8px;padding:7px 10px;background:#172131;color:var(--text);cursor:pointer;font:700 10px monospace;white-space:nowrap}
 .opportunity-entry.buy{border-color:#3f7565;color:var(--green);background:#173a32}
 .opportunity-entry.sell{border-color:#75434a;color:var(--red);background:#3e272e}
+.opportunity-entry.close{border-color:#8a5a36;color:#f0b26b;background:#3a2a1e}
 .opportunity-entry:disabled{opacity:.38;cursor:not-allowed;filter:grayscale(.4)}
 .opportunity-table th:last-child,.opportunity-table td:last-child{text-align:center;white-space:nowrap}
 
