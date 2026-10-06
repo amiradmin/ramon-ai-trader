@@ -21,7 +21,7 @@ from .model import ChronosForecaster, model_name
 from .news import DEFAULT_FOREX_FACTORY_JSON, ForexFactoryNewsProvider
 from .target_learning import build_target_structure
 from .target_outcomes import backfill_target_outcomes
-from .timesfm_shadow import TimesFM3Shadow
+from .timesfm_shadow import TimesFM3Experimental
 from .moment_shadow import MomentAnomalyShadow
 from .finbert_shadow import FinBertNewsShadow
 from .range_shadow import observe as observe_range_shadow
@@ -193,7 +193,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
     coordinator = DirectionCoordinator if role_mode == "direction_live" else EnsembleCoordinator
     ensemble = coordinator(ensemble_dir, model.model_id)
     news_enabled = os.getenv("RAMON_NEWS_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
-    timesfm3_shadow = TimesFM3Shadow.from_env()
+    timesfm3_experimental = TimesFM3Experimental.from_env()
     moment_shadow = MomentAnomalyShadow.from_env(lazy=True)
     finbert_shadow = FinBertNewsShadow.from_env(lazy=True)
     moment_live_enabled = os.getenv("RAMON_MOMENT_LIVE_ENABLED", "1").strip().lower() in {"1","true","yes","on"}
@@ -252,8 +252,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
         return {
             "forecast_model_handler": model.model_id.split("/")[-1],
             "forecast_shadow_model_handler": (
-                timesfm3_shadow.checkpoint.split("/")[-1]
-                if timesfm3_shadow.enabled else "OFF"
+                timesfm3_experimental.checkpoint.split("/")[-1]
+                if timesfm3_experimental.enabled else "OFF"
             ),
             "anomaly_model_handler": (
                 moment_shadow.checkpoint.split("/")[-1]
@@ -331,7 +331,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     "history_last_error": str(history_status["last_error"]),
                     "history_last_persisted_bar": int(history_status["last_persisted_bar"]),
                     **ensemble.status(),
-                    **timesfm3_shadow.status(),
+                    **timesfm3_experimental.status(),
                     **moment_shadow.status(),
                     **finbert_shadow.status(),
                     **news_provider.status(),
@@ -677,7 +677,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     ensemble_payload, feature_snapshot = ensemble.assess(
                         market, result, news_snapshot.features
                     )
-                    timesfm3_payload = timesfm3_shadow.assess(
+                    timesfm3_payload = timesfm3_experimental.assess(
                         market, result, settings.horizon
                     )
 
@@ -689,8 +689,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     except Exception as exc:
                         latest_moment_payload = {
                             **moment_shadow.status(),
-                            "moment_shadow_ready": 0,
-                            "moment_shadow_error": f"{type(exc).__name__}: {exc}",
+                            "moment_ready": 0,
+                            "moment_error": f"{type(exc).__name__}: {exc}",
                             "moment_anomaly_score": -1.0,
                             "moment_anomaly_ratio": -1.0,
                             "moment_anomaly_label": "ERROR",
@@ -707,8 +707,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     except Exception as exc:
                         latest_finbert_payload = {
                             **finbert_shadow.status(),
-                            "finbert_shadow_ready": 0,
-                            "finbert_shadow_error": f"{type(exc).__name__}: {exc}",
+                            "finbert_ready": 0,
+                            "finbert_error": f"{type(exc).__name__}: {exc}",
                             "finbert_sentiment_label": "ERROR",
                             "finbert_positive": -1.0,
                             "finbert_negative": -1.0,
@@ -931,7 +931,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 # entry into WAIT; they can never create or reverse a trade.
                 current_bar = int(market.bars[-1].time)
                 moment_fresh = (
-                    int(response.get("moment_shadow_ready", 0)) == 1
+                    int(response.get("moment_ready", 0)) == 1
                     and int(response.get("moment_anomaly_bar_time", 0)) == current_bar
                 )
                 moment_ratio = float(response.get("moment_anomaly_ratio", -1.0))
@@ -940,7 +940,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     and moment_fresh
                     and moment_ratio >= moment_hard_veto_threshold
                 )
-                finbert_ready = int(response.get("finbert_shadow_ready", 0)) == 1
+                finbert_ready = int(response.get("finbert_ready", 0)) == 1
                 finbert_score = abs(float(response.get("finbert_directional_score", 0.0)))
                 # Raw FinBERT sentiment is context, not a directionally reliable
                 # XAUUSD hard veto. The trained news specialist is consumed by
