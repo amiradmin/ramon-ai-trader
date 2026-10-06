@@ -216,7 +216,26 @@ async function manualCloseOpportunity(row,button){
     setTimeout(()=>{button.disabled=false;button.textContent=old;},1800);
   }
 }
+function renderTradingGuidance(){
+  const title=$("trade-guidance-title"),reason=$("trade-guidance-reason"),container=title?.parentElement;
+  if(!title||!reason||!container)return;
+  const state=String(snapshot?.decision||"UNKNOWN").toUpperCase();
+  const modelFresh=snapshot?.model_freshness?.state==="fresh";
+  const eaFresh=snapshot?.ea_freshness?.state==="fresh";
+  const joined=snapshot?.joined===true;
+  const eligible=modelFresh&&eaFresh&&joined;
+  let mode="wait",heading="صبر — سیگنال ورود تأیید نشده";
+  if(eligible&&state==="BUY"){mode="buy";heading="سیگنال BUY (خرید) — منتظر تأیید اجرای EA";}
+  else if(eligible&&state==="SELL"){mode="sell";heading="سیگنال SELL (فروش) — منتظر تأیید اجرای EA";}
+  else if(!eligible){heading="صبر — داده مدل و EA هم‌زمان و تازه نیست";}
+  title.textContent=heading;
+  reason.textContent=(snapshot?.reason_fa||snapshot?.reason||"تصمیم معتبری دریافت نشده")+
+    " · "+(eligible?"تصمیم تازه و شناسه مشترک تأیید شده؛ ریسک، اسپرد، خبر و مجوز سفارش همچنان باید توسط EA بررسی شود.":"تصمیم‌های تاریخی یا پیش‌بینی ChronosSlope مجوز ورود دستی نیستند.")+
+    " · تصمیم: "+state;
+  container.className="trade-guidance "+mode;
+}
 function renderLiveMarketSync(){
+  renderTradingGuidance();
   const target=$("live-market-sync");
   if(!target)return;
   if(!snapshot){
