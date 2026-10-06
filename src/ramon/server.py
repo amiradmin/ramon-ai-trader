@@ -482,8 +482,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     horizon = int(payload.get("horizon", settings.horizon))
                     if direction not in {"BUY", "SELL"}:
                         raise ValueError("direction must be BUY or SELL")
-                    if probability < 0.70 or probability > 1.0:
-                        raise ValueError("entry advice requires success_probability >= 0.70")
+                    if probability < 0.60 or probability > 1.0:
+                        raise ValueError("entry advice requires success_probability >= 0.60")
                     if horizon < 1 or horizon > 16:
                         raise ValueError("horizon must be 1..16")
                     closes = [float(bar.close) for bar in latest_market.bars[-settings.context:]]
