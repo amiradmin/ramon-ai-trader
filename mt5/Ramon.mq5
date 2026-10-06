@@ -1,6 +1,6 @@
 #property strict
-#property version "1.584"
-#define RAMON_EA_VERSION "0.58.4"
+#property version "1.585"
+#define RAMON_EA_VERSION "0.58.5"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -103,6 +103,7 @@ input string DiagnosticFileName = "Ramon_Diagnostic.txt";
 input bool ShowDashboard = true;
 input bool ShowTPLevelsOnChart = true; // Draw active MAIN TP1/TP2/TP3 levels and stage state on the chart.
 input bool ShowChronosSlopeArrow = true; // Visual-only arrow from current quote toward Chronos median forecast.
+input int ChronosSlopeArrowLengthMultiplier = 3; // Visual time-axis length only; does not change Chronos forecast or trading.
 input bool EnableClipboardButton = true;
 input bool WriteCsvLogs = true;
 input string SignalCsvFileName = "Ramon_Signals.csv";
@@ -1656,7 +1657,8 @@ void UpdateChronosSlopeArrow()
 
    datetime start_time=TimeCurrent();
    int horizon=MathMax(1,LastForecastHorizonBars);
-   datetime end_time=start_time+(datetime)(horizon*PeriodSeconds(PERIOD_M15));
+   int visual_multiplier=MathMax(1,ChronosSlopeArrowLengthMultiplier);
+   datetime end_time=start_time+(datetime)(horizon*PeriodSeconds(PERIOD_M15)*visual_multiplier);
    double start_price=(LastSignalBid+LastSignalAsk)/2.0;
    double end_price=LastForecast;
    double deadband=MathMax(SymbolInfoDouble(_Symbol,SYMBOL_POINT)*5.0,LastAtr*0.01);
@@ -1689,7 +1691,8 @@ void UpdateChronosSlopeArrow()
    ObjectSetInteger(0,name,OBJPROP_SELECTED,false);
    ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
    ObjectSetString(0,name,OBJPROP_TOOLTIP,
-      "Chronos median forecast | "+IntegerToString(horizon)+"×M15 | "
+      "Chronos median forecast | real horizon "+IntegerToString(horizon)+"×M15"
+      +" | visual length x"+IntegerToString(visual_multiplier)+" | "
       +DoubleToString(start_price,_Digits)+" → "+DoubleToString(end_price,_Digits));
    ChartRedraw(0);
 }
@@ -5278,6 +5281,7 @@ int OnInit()
       || SmallEarlyAdverseRiskFraction<=0.0 || SmallEarlyAdverseRiskFraction>=1.0
       || EarlyAdverseWeakSnapshotsRequired<1 || EarlyAdverseMinAgeSeconds<0
       || SnapshotIntervalSeconds<5
+      || ChronosSlopeArrowLengthMultiplier<1 || ChronosSlopeArrowLengthMultiplier>12
       || (WriteDiagnosticFile && StringLen(DiagnosticFileName)==0)
       || (WriteCsvLogs && (StringLen(SignalCsvFileName)==0 || StringLen(TradeCsvFileName)==0))
       || (EnableImprovementShadowPack && WriteCsvLogs && StringLen(ShadowCsvFileName)==0)
