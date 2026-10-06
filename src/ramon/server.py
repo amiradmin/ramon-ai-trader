@@ -736,6 +736,16 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     last_finbert_event_key = event_key
 
                 response = result.to_dict()
+                # Stable Direction AI telemetry schema for every route, including
+                # RANGE/reversal paths that bypass the analytical AI engine.
+                response.update({
+                    "ai_engine_v2_selected": 0,
+                    "ai_engine_v2_direction_source": "direction_quality_live",
+                    "ai_engine_v2_buy_quality": -1.0,
+                    "ai_engine_v2_sell_quality": -1.0,
+                    "ai_engine_v2_quality_margin": -1.0,
+                    "ai_engine_v2_score": -1.0,
+                })
                 response["forecast_horizon_bars"] = settings.horizon
                 response.update(ensemble_payload)
                 response.update(timesfm3_payload)
