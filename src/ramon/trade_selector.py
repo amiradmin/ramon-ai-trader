@@ -19,13 +19,27 @@ def apply_live_selector(
     minimum_quality: float,
     maximum_full_sl_probability: float,
     minimum_quality_margin: float,
+    anomaly_ratio: float = -1.0,
+    anomaly_soft_threshold: float = 2.0,
 ) -> bool:
+    anomaly_penalty = (
+        min(0.15, max(0.0, anomaly_ratio - anomaly_soft_threshold) * 0.04)
+        if anomaly_ratio >= 0.0 else 0.0
+    )
+    effective_minimum_quality = min(0.85, minimum_quality + anomaly_penalty)
+    effective_maximum_full_sl = max(
+        0.25, maximum_full_sl_probability - anomaly_penalty * 0.5
+    )
     response.update({
         "selector_live_enabled": int(enabled),
         "selector_live_selected": 0,
         "selector_minimum_quality": minimum_quality,
         "selector_maximum_full_sl_probability": maximum_full_sl_probability,
         "selector_minimum_quality_margin": minimum_quality_margin,
+        "selector_anomaly_ratio": anomaly_ratio,
+        "selector_anomaly_penalty": anomaly_penalty,
+        "selector_effective_minimum_quality": effective_minimum_quality,
+        "selector_effective_maximum_full_sl_probability": effective_maximum_full_sl,
     })
     if not enabled:
         return False
@@ -78,13 +92,13 @@ def apply_live_selector(
         and decision.intrabar_turn_confirmed
     ):
         return False
-    if not (0.0 <= quality <= 1.0 and quality >= minimum_quality):
+    if not (0.0 <= quality <= 1.0 and quality >= effective_minimum_quality):
         return False
     if not (0.0 <= opposite <= 1.0 and quality - opposite >= minimum_quality_margin):
         return False
     if not (
         0.0 <= full_sl <= 1.0
-        and full_sl <= maximum_full_sl_probability
+        and full_sl <= effective_maximum_full_sl
     ):
         return False
 
