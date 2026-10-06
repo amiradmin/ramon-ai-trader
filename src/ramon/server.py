@@ -180,6 +180,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
     cached_model = CachedForecaster(model)
     latest_market: Market | None = None
     latest_market_received_utc = 0
+    latest_display_forecast: dict[str, object] | None = None
     history_db = os.getenv("RAMON_HISTORY_DB", "").strip()
     range_live_enabled = os.getenv("RAMON_RANGE_LIVE_ENABLED", "0") == "1"
     reversal_live_enabled = os.getenv("RAMON_REVERSAL_LIVE_ENABLED", "0") == "1"
@@ -279,6 +280,15 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             route = self.path.split("?", 1)[0]
+            if route == "/forecast-display":
+                # Read-only snapshot produced exclusively by /forecast-only (Bridge).
+                result = latest_display_forecast
+                age = int(time.time()) - int(result.get("captured_utc", 0)) if result else 10**9
+                if not result or age < 0 or age > 90:
+                    self.reply(200, {"ready": False, "reason": "no_fresh_bridge_forecast", "advisory_only": True})
+                else:
+                    self.reply(200, {**result, "ready": True, "age_seconds": age})
+                return
             if route == "/human-opinions":
                 params = parse_qs(urlsplit(self.path).query)
                 symbol = str(params.get("symbol", ["XAUUSD_l"])[0])
@@ -344,6 +354,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
             nonlocal moment_future, finbert_future, latest_moment_payload
             nonlocal latest_finbert_payload, last_shadow_bar, last_finbert_event_key
             nonlocal latest_market, latest_market_received_utc, ensemble
+            nonlocal latest_display_forecast
             if self.path not in {"/decision", "/trades", "/manual-override", "/manual-overrides/reset", "/human-opinion", "/position-exit-advice", "/opportunity-entry-advice", "/reload-roles", "/forecast-only"}:
                 self.send_error(404)
                 return
@@ -418,6 +429,18 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     move = float(forecast.median) - midpoint
                     deadband = max(float(market.point) * 5.0, abs(midpoint) * 1e-7)
                     direction = "UP" if move > deadband else "DOWN" if move < -deadband else "FLAT"
+                    if horizon == 2:
+                        latest_display_forecast = {
+                            "model": model.model_id,
+                            "symbol": market.symbol,
+                            "direction": direction,
+                            "current_mid": midpoint,
+                            "forecast_step_1": float(forecast.median_path[0]),
+                            "forecast_step_2": float(forecast.median_path[1]),
+                            "horizon_minutes": 30,
+                            "captured_utc": int(time.time()),
+                            "advisory_only": True,
+                        }
                     self.reply(200, {
                         "model": model.model_id,
                         "direction": direction,
