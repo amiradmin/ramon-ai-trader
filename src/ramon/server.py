@@ -344,7 +344,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
             nonlocal moment_future, finbert_future, latest_moment_payload
             nonlocal latest_finbert_payload, last_shadow_bar, last_finbert_event_key
             nonlocal latest_market, latest_market_received_utc, ensemble
-            if self.path not in {"/decision", "/trades", "/manual-override", "/manual-overrides/reset", "/human-opinion", "/position-exit-advice", "/opportunity-entry-advice", "/reload-roles"}:
+            if self.path not in {"/decision", "/trades", "/manual-override", "/manual-overrides/reset", "/human-opinion", "/position-exit-advice", "/opportunity-entry-advice", "/reload-roles", "/forecast-only"}:
                 self.send_error(404)
                 return
             try:
@@ -401,6 +401,31 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         "saved": True,
                         "action": action,
                         "active": sorted(manual_overrides_by_bar.get(signal_bar_time, {})),
+                    })
+                    return
+                if self.path == "/forecast-only":
+                    market = Market.from_dict(payload)
+                    quote_time = int(payload["quote_time"]) if "quote_time" in payload else None
+                    market.validate_quote_context(quote_time)
+                    closes = [float(bar.close) for bar in market.bars[-settings.context:]]
+                    with guard:
+                        forecast = cached_model.forecast(closes, settings.horizon)
+                    midpoint = (float(market.bid) + float(market.ask)) / 2.0
+                    move = float(forecast.median) - midpoint
+                    deadband = max(float(market.point) * 5.0, abs(midpoint) * 1e-7)
+                    direction = "UP" if move > deadband else "DOWN" if move < -deadband else "FLAT"
+                    self.reply(200, {
+                        "model": model.model_id,
+                        "direction": direction,
+                        "current_mid": midpoint,
+                        "forecast_low": forecast.low,
+                        "forecast_median": forecast.median,
+                        "forecast_high": forecast.high,
+                        "forecast_horizon_bars": settings.horizon,
+                        "forecast_horizon_minutes": settings.horizon * 15,
+                        "signal_bar_time": market.bars[-1].time,
+                        "advisory_only": True,
+                        "ramon_decision_independent": True,
                     })
                     return
                 if self.path == "/reload-roles":
