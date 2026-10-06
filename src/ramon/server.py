@@ -29,6 +29,7 @@ from .range_strategy import candidate as range_candidate, live_candidate
 from .market_state import POLICY_VERSION, assess_market, apply_market_policy
 from .reversal_strategy import apply_reversal
 from .trade_selector import apply_live_selector
+from .ai_decision_engine import apply_ai_decision_engine
 
 
 
@@ -200,6 +201,9 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
     selector_minimum_quality = float(os.getenv("RAMON_SELECTOR_MIN_QUALITY", "0.55"))
     selector_maximum_full_sl = float(os.getenv("RAMON_SELECTOR_MAX_FULL_SL", "0.50"))
     selector_minimum_margin = float(os.getenv("RAMON_SELECTOR_MIN_MARGIN", "0.05"))
+    ai_engine_v2_enabled = os.getenv("RAMON_AI_ENGINE_V2_ENABLED", "1").strip().lower() in {"1","true","yes","on"}
+    ai_engine_v2_minimum_score = float(os.getenv("RAMON_AI_ENGINE_V2_MIN_SCORE", "0.56"))
+    ai_engine_v2_minimum_margin = float(os.getenv("RAMON_AI_ENGINE_V2_MIN_MARGIN", "0.03"))
     shadow_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ramon-shadow")
     # Warm heavyweight external models in the background so /health becomes
     # available immediately after Chronos is ready.
@@ -323,6 +327,9 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     "selector_minimum_quality": selector_minimum_quality,
                     "selector_maximum_full_sl_probability": selector_maximum_full_sl,
                     "selector_minimum_quality_margin": selector_minimum_margin,
+                    "ai_engine_v2_enabled": int(ai_engine_v2_enabled),
+                    "ai_engine_v2_minimum_score": ai_engine_v2_minimum_score,
+                    "ai_engine_v2_minimum_quality_margin": ai_engine_v2_minimum_margin,
                 },
             )
 
@@ -606,17 +613,45 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     response, result, request_settings, market_assessment,
                     enabled=reversal_live_enabled, manual_overrides=active_overrides,
                 )
-                if settings.market_state_policy_enabled and not reversal_selected:
+                ai_engine_authoritative = False
+                if (
+                    account_is_cent
+                    and not bool(response.get("range_execution"))
+                    and not reversal_selected
+                ):
+                    ai_engine_authoritative = apply_ai_decision_engine(
+                        response,
+                        result,
+                        market_assessment,
+                        enabled=ai_engine_v2_enabled,
+                        minimum_score=ai_engine_v2_minimum_score,
+                        minimum_quality_margin=ai_engine_v2_minimum_margin,
+                        anomaly_soft_threshold=moment_live_threshold,
+                        anomaly_hard_threshold=moment_hard_veto_threshold,
+                    )
+
+                if ai_engine_authoritative:
+                    # AI owns analytical direction/timing/quality. Market-state
+                    # hazards remain authoritative because the engine refuses
+                    # every assessment route marked WAIT.
+                    response.update(
+                        market_state=market_assessment["state"],
+                        market_state_route="AI_ENGINE_V2",
+                        market_state_policy=market_assessment["version"],
+                    )
+                elif settings.market_state_policy_enabled and not reversal_selected:
                     apply_market_policy(response, market_assessment)
                 elif not reversal_selected:
                     response.update(market_state=market_assessment["state"], market_state_route="OBSERVE",
                                     market_state_policy=market_assessment["version"])
 
-                # Learned Selector v2 may recover only a low-edge Chronos WAIT.
-                # It cannot bypass structural hazards because the market route
-                # must already be CONFIRMED_MODEL. External vetoes and the cent
-                # direction/timing gates below remain authoritative.
-                if account_is_cent and not bool(response.get("range_execution")):
+                # Legacy selector remains available for rollback/testing, but the
+                # AI engine is the primary analytical path when authoritative.
+                if (
+                    not ai_engine_authoritative
+                    and account_is_cent
+                    and not bool(response.get("range_execution"))
+                ):
                     apply_live_selector(
                         response,
                         result,
@@ -652,12 +687,10 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 )
                 finbert_ready = int(response.get("finbert_shadow_ready", 0)) == 1
                 finbert_score = abs(float(response.get("finbert_directional_score", 0.0)))
-                finbert_veto = (
-                    finbert_live_enabled
-                    and finbert_ready
-                    and finbert_score >= finbert_live_threshold
-                    and str(response.get("finbert_sentiment_label", "UNAVAILABLE")) != "NEUTRAL"
-                )
+                # Raw FinBERT sentiment is context, not a directionally reliable
+                # XAUUSD hard veto. The trained news specialist is consumed by
+                # AI Engine v2 instead.
+                finbert_veto = False
                 response["moment_live_active"] = int(moment_live_enabled)
                 response["moment_live_fresh"] = int(moment_fresh)
                 response["moment_live_veto"] = int(moment_veto)
@@ -667,10 +700,12 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 response["finbert_live_active"] = int(finbert_live_enabled)
                 response["finbert_live_veto"] = int(finbert_veto)
                 response["finbert_live_threshold"] = finbert_live_threshold
+                response["finbert_risk_mode"] = "AI_FEATURE_NO_HARD_VETO"
 
                 if (
                     account_is_cent
                     and not bool(response.get("range_execution"))
+                    and not bool(response.get("ai_engine_v2_active"))
                     and str(response.get("decision", "")) in {"BUY", "SELL"}
                 ):
                     proposed = str(response["decision"])
@@ -745,7 +780,13 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                                 "ensemble_mode": ensemble.status()["ensemble_mode"],
                                 "ensemble_active": response.get("ensemble_active", 0),
                                 "role_manifest": ensemble.manifest,
-                                "execution_strategy": "range-reversal-v1" if range_setup else "confirmed-reversal-v1" if response.get("reversal_execution") else "chronos",
+                                "execution_strategy": (
+                                    "range-reversal-v1" if range_setup
+                                    else "confirmed-reversal-v1" if response.get("reversal_execution")
+                                    else "ai-engine-v2" if response.get("ai_engine_v2_active")
+                                    else "selector-v2" if response.get("selector_live_selected")
+                                    else "chronos"
+                                ),
                                 "range_setup": range_setup,
                                 "market_assessment": (
                                     {**market_assessment, "base_route": market_assessment["route"],
@@ -774,6 +815,16 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                                               "entry_timing_move_atr": response.get("entry_timing_move_atr"),
                                               "entry_timing_rebound_atr": response.get("entry_timing_rebound_atr"),
                                               "entry_timing_turn": response.get("entry_timing_turn", 0),
+                                              "ai_engine_v2_active": response.get("ai_engine_v2_active", 0),
+                                              "ai_engine_v2_selected": response.get("ai_engine_v2_selected", 0),
+                                              "ai_engine_v2_score": response.get("ai_engine_v2_score", -1.0),
+                                              "ai_engine_v2_raw_score": response.get("ai_engine_v2_raw_score", -1.0),
+                                              "ai_engine_v2_candidate_direction": response.get("ai_engine_v2_candidate_direction"),
+                                              "ai_engine_v2_score_source": response.get("ai_engine_v2_score_source"),
+                                              "ai_engine_v2_quality_margin": response.get("ai_engine_v2_quality_margin", -1.0),
+                                              "ai_engine_v2_entry_probability": response.get("ai_engine_v2_entry_probability", -1.0),
+                                              "ai_engine_v2_full_sl_probability": response.get("ai_engine_v2_full_sl_probability", -1.0),
+                                              "ai_engine_v2_anomaly_penalty": response.get("ai_engine_v2_anomaly_penalty", 0.0),
                                               "manual_overrides_active": sorted(active_overrides),
                                               "manual_override_rows": list(active_override_rows.values()),
                                               "manual_execution_override": response.get("manual_execution_override", 0)},
