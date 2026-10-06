@@ -28,6 +28,7 @@ from .range_shadow import observe as observe_range_shadow
 from .range_strategy import candidate as range_candidate, live_candidate
 from .market_state import POLICY_VERSION, assess_market, apply_market_policy
 from .reversal_strategy import apply_reversal
+from .trade_selector import apply_live_selector
 
 
 
@@ -194,6 +195,10 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
     moment_live_threshold = float(os.getenv("RAMON_MOMENT_LIVE_THRESHOLD", "2.0"))
     finbert_live_enabled = os.getenv("RAMON_FINBERT_LIVE_ENABLED", "1").strip().lower() in {"1","true","yes","on"}
     finbert_live_threshold = float(os.getenv("RAMON_FINBERT_LIVE_THRESHOLD", "0.35"))
+    selector_live_enabled = os.getenv("RAMON_SELECTOR_LIVE_ENABLED", "1").strip().lower() in {"1","true","yes","on"}
+    selector_minimum_quality = float(os.getenv("RAMON_SELECTOR_MIN_QUALITY", "0.55"))
+    selector_maximum_full_sl = float(os.getenv("RAMON_SELECTOR_MAX_FULL_SL", "0.50"))
+    selector_minimum_margin = float(os.getenv("RAMON_SELECTOR_MIN_MARGIN", "0.05"))
     shadow_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ramon-shadow")
     # Warm heavyweight external models in the background so /health becomes
     # available immediately after Chronos is ready.
@@ -312,6 +317,10 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     "moment_live_threshold": moment_live_threshold,
                     "finbert_live_enabled": int(finbert_live_enabled),
                     "finbert_live_threshold": finbert_live_threshold,
+                    "selector_live_enabled": int(selector_live_enabled),
+                    "selector_minimum_quality": selector_minimum_quality,
+                    "selector_maximum_full_sl_probability": selector_maximum_full_sl,
+                    "selector_minimum_quality_margin": selector_minimum_margin,
                 },
             )
 
@@ -600,6 +609,29 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 elif not reversal_selected:
                     response.update(market_state=market_assessment["state"], market_state_route="OBSERVE",
                                     market_state_policy=market_assessment["version"])
+
+                # Learned Selector v2 may recover only a low-edge Chronos WAIT.
+                # It cannot bypass structural hazards because the market route
+                # must already be CONFIRMED_MODEL. External vetoes and the cent
+                # direction/timing gates below remain authoritative.
+                if account_is_cent and not bool(response.get("range_execution")):
+                    apply_live_selector(
+                        response,
+                        result,
+                        market_assessment,
+                        enabled=selector_live_enabled,
+                        minimum_quality=selector_minimum_quality,
+                        maximum_full_sl_probability=selector_maximum_full_sl,
+                        minimum_quality_margin=selector_minimum_margin,
+                    )
+                else:
+                    response.update({
+                        "selector_live_enabled": int(selector_live_enabled),
+                        "selector_live_selected": 0,
+                        "selector_minimum_quality": selector_minimum_quality,
+                        "selector_maximum_full_sl_probability": selector_maximum_full_sl,
+                        "selector_minimum_quality_margin": selector_minimum_margin,
+                    })
 
                 # Active external-model vetoes. They may only turn a proposed
                 # entry into WAIT; they can never create or reverse a trade.
