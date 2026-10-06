@@ -20,7 +20,7 @@ function addValue(k,v){const d=el("div");const dd=el("dd",null,v);if(/[0-9]/.tes
 async function manualPass(node,button){if(overrideBusy)return;overrideBusy=true;button.disabled=true;button.textContent="در حال ثبت...";try{const response=await fetch("/api/override",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({stage:node.id})});if(!response.ok){let msg=`HTTP ${response.status}`;try{const data=await response.json();msg=data.error||msg;}catch{}throw new Error(msg);}button.textContent="ثبت شد — MANUAL PASS";await refresh();}catch(err){button.disabled=false;button.textContent="خطا: "+err.message;}finally{overrideBusy=false;}}
 async function manualReview(node,button){if(overrideBusy)return;overrideBusy=true;button.disabled=true;button.textContent="در حال ثبت...";try{const response=await fetch("/api/override",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({stage:node.id})});if(!response.ok){let msg=`HTTP ${response.status}`;try{const data=await response.json();msg=data.error||msg;}catch{}throw new Error(msg);}button.textContent="ثبت شد — REVIEW ONLY";}catch(err){button.disabled=false;button.textContent="خطا: "+err.message;}finally{overrideBusy=false;}}
 const nodeNumbers={market:"01 · آقای احمدی",service:"02 · آقای محمدی",forecast:"03 · خانم حسینی",timing:"04 · آقای رضایی",extension:"05 · آقای کریمی",edge:"06 · خانم مرادی",strength:"07 · آقای جعفری",market_direction:"08 · خانم محمودی",entry_timing:"09 · آقای کاظمی",base:"10 · آقای رحیمی",range:"R1",shadow:"S1",decision:"11 · خانم اکبری",news:"12 · آقای صادقی",account:"13 · خانم قاسمی",limits:"14 · آقای یوسفی",risk:"15 · خانم نادری",order:"16 · آقای شریفی",position:"17 · آقای حیدری"};
-function renderNodes(){for(const n of snapshot.nodes){let b=$(`node-${n.id}`);if(!b){b=el("button",`node ${n.state}`);b.id=`node-${n.id}`;b.type="button";b.addEventListener("click",()=>{selected=n.id;detail();});const top=el("span","node-top");top.append(el("span","state-badge"),el("span","node-engine"),el("span","node-number",nodeNumbers[n.id]||"—"));b.append(top,el("span","node-title"),el("span","node-score"),el("span","node-detail"));$("nodes").append(b);}b.style.left=`${coords[n.id][0]}px`;b.style.top=`${coords[n.id][1]}px`;const viewState=displayState(n);b.className=`node ${viewState}`;b.querySelector(".state-badge").className=`state-badge ${viewState}`;b.querySelector(".state-badge").textContent=labels[viewState];const engine=b.querySelector(".node-engine");engine.textContent=n.engine||"";engine.hidden=!n.engine;b.querySelector(".node-title").textContent=n.title;const score=b.querySelector(".node-score");score.textContent=n.score||"";score.hidden=!n.score;b.querySelector(".node-detail").textContent=n.detail;b.setAttribute("aria-label",`${n.title}، ${n.engine||"Logic"}، ${labels[n.state]}، ${n.detail}`);}}
+function renderNodes(){for(const n of snapshot.nodes){let b=$(`node-${n.id}`);if(!b){b=el("button",`node ${n.state}`);b.id=`node-${n.id}`;b.type="button";b.addEventListener("click",()=>{selected=n.id;detail();});const top=el("span","node-top");top.append(el("span","state-badge"),el("span","node-engine"),el("span","node-number",nodeNumbers[n.id]||"—"));b.append(top,el("span","node-title"),el("span","node-metrics"),el("span","node-detail"));$("nodes").append(b);}b.style.left=`${coords[n.id][0]}px`;b.style.top=`${coords[n.id][1]}px`;const viewState=displayState(n);b.className=`node ${viewState}`;b.querySelector(".state-badge").className=`state-badge ${viewState}`;b.querySelector(".state-badge").textContent=labels[viewState];const engine=b.querySelector(".node-engine");engine.textContent=n.engine||"";engine.hidden=!n.engine;b.querySelector(".node-title").textContent=n.title;const metrics=b.querySelector(".node-metrics");metrics.textContent=n.metrics||n.score||"";metrics.hidden=!(n.metrics||n.score);b.querySelector(".node-detail").textContent=n.detail;b.setAttribute("aria-label",`${n.title}، ${n.engine||"Logic"}، ${labels[n.state]}، ${n.detail}`);}}
 const ns="http://www.w3.org/2000/svg";
 function svgEl(name,attrs){const e=document.createElementNS(ns,name);for(const [k,v] of Object.entries(attrs))e.setAttribute(k,v);return e;}
 function route(a,b){const [ax,ay]=coords[a],[bx,by]=coords[b],w=206,h=127;
@@ -188,15 +188,15 @@ function render(){const changed=lastKey!==snapshot.sample_key;$("decision").text
 const opportunityDate=new Intl.DateTimeFormat("fa-IR",{timeZone:"Asia/Tehran",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
 const opportunitySet=(id,text)=>{$(id).textContent=text;};
 function percent(v){return typeof v==="number"&&Number.isFinite(v)&&v>=0&&v<=1?(v*100).toFixed(1)+"%":"—";}
-async function manualOpportunity(row,button){
+async function manualOpportunity(row,button,recheck=false){
   if(button.disabled)return;
   button.disabled=true;const old=button.textContent;button.textContent="در حال ارسال…";
   try{
-    const response=await fetch("/api/manual-entry",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({direction:row.direction,signal_bar_time:row.signal_bar_time})});
+    const response=await fetch("/api/manual-entry",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({direction:row.direction,signal_bar_time:row.signal_bar_time,recheck})});
     let data={};try{data=await response.json();}catch{}
     if(!response.ok||!data.queued)throw new Error(data.error||("HTTP "+response.status));
     button.textContent="ارسال شد";
-    opportunitySet("opportunity-status","فرمان "+row.direction+" ارسال شد؛ EA قبل از بازکردن پوزیشن همهٔ قفل‌های اجرایی و ریسک را دوباره بررسی می‌کند.");
+    opportunitySet("opportunity-status",(recheck?"جهت انتخابی روی snapshot تازه بازبینی و ارسال شد؛ ":"فرمان "+row.direction+" ارسال شد؛ ")+"EA قبل از بازکردن پوزیشن همهٔ قفل‌های اجرایی و ریسک را دوباره بررسی می‌کند.");
     setTimeout(()=>void refreshOpportunities(),1500);
   }catch(err){button.textContent="رد شد";opportunitySet("opportunity-status","ورود دستی انجام نشد: "+err.message);setTimeout(()=>{button.disabled=!row.actionable;button.textContent=old;},1800);}
 }
@@ -225,12 +225,20 @@ function renderOpportunities(data){
       button.textContent="در صف اجرا";
       button.disabled=true;
       button.title="فرمان این فرصت قبلاً برای EA ارسال شده است";
+    }else if(row.executed){
+      button.textContent="قبلاً اجرا شده";
+      button.disabled=true;
+      button.title="برای حفظ attribution آموزشی، همان فرصت دوباره اجرا نمی‌شود";
     }else{
-      button.textContent=row.actionable?"باز کردن "+row.direction:"منقضی";
-      button.disabled=!row.actionable;
-      button.title=row.actionable?"فرمان ورود به EA ارسال می‌شود؛ EA دوباره ریسک و قفل‌های اجرایی را بررسی می‌کند":"فقط فرصت‌های تازهٔ ۹۰ ثانیهٔ اخیر قابل اجرا هستند";
+      const recheck=!row.actionable;
+      button.textContent=recheck?"بازبینی و ورود "+row.direction:"باز کردن "+row.direction;
+      button.disabled=false;
+      button.title=recheck
+        ?"جهت این ردیف روی snapshot تازه بررسی می‌شود؛ فقط Safety Gateهای اجرایی می‌توانند مانع سفارش شوند"
+        :"فرمان ورود به EA ارسال می‌شود؛ EA دوباره ریسک و قفل‌های اجرایی را بررسی می‌کند";
+      button.addEventListener("click",()=>manualOpportunity(row,button,recheck));
     }
-    button.addEventListener("click",()=>manualOpportunity(row,button));action.append(button);tr.append(action);body.append(tr);
+    action.append(button);tr.append(action);body.append(tr);
   }
   const perf=snapshot&&snapshot.dashboard_opportunity_performance;
   const perfText=perf&&perf.closed?(" · دستی جدول: "+perf.closed+" بسته · برد "+(perf.win_rate*100).toFixed(1)+"% · خالص "+perf.net_units.toFixed(2)):"";
