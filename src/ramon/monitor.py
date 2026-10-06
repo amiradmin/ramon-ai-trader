@@ -1375,7 +1375,8 @@ def read_open_dashboard_positions(diagnostic):
                 or direction not in {"BUY", "SELL"}
             ):
                 continue
-            result[sample_key] = {
+            result[ticket] = {
+                "sample_key": sample_key,
                 "execution_sample_key": execution_sample_key,
                 "direction": direction,
                 "ticket": ticket,
@@ -1644,52 +1645,96 @@ def opportunities_with_execution_state(db, diagnostic, symbol, health_url=None):
     except OSError:
         pass
     # Historical rows must not trigger model inference on every dashboard poll.
-    # Only live positions and the newest actionable candidates need advice.
+    # Each open MT5 ticket becomes its own table row so multiple manual entries
+    # from the same market snapshot never overwrite one another.
     now = time.time()
     advice_budget = 2
-    for row in data.get("opportunities", []):
-        sample_key = str(row.get("sample_key") or "")
-        open_info = opened.get(sample_key)
-        row["position_open"] = bool(open_info)
-        row["position_ticket"] = open_info.get("ticket") if open_info else None
-        row["execution_sample_key"] = open_info.get("execution_sample_key") if open_info else None
-        row["live_profit_units"] = open_info.get("profit_units") if open_info else None
-        row["position_volume"] = open_info.get("volume") if open_info else None
-        row["position_open_price"] = open_info.get("open_price") if open_info else None
-        row["position_current_price"] = open_info.get("current_price") if open_info else None
-        row["auto_close_target"] = open_info.get("auto_close_target") if open_info else None
-        row["auto_close_armed"] = bool(open_info and number(open_info.get("auto_close_target")) is not None and number(open_info.get("auto_close_target")) > 0)
-        advice = chronos_exit_advice(health_url, open_info) if open_info else None
-        row["chronos_exit_advice"] = advice
-        row["chronos_exit_price"] = number(advice.get("suggested_exit_price")) if advice else None
-        row["chronos_exit_action"] = advice.get("action") if advice else None
-        row["chronos_exit_step"] = advice.get("forecast_peak_step") if advice else None
-        captured = number(row.get("latest_captured") or row.get("captured"))
-        recent_candidate = (
-            not open_info and not row.get("executed") and sample_key not in queued
-            and (number(row.get("success_probability")) or 0) >= 0.60
-            and captured is not None and 0 <= now - captured <= 90
-        )
-        # Keep inference bounded even when many snapshots arrive simultaneously.
-        ask_entry = recent_candidate and advice_budget > 0
-        if ask_entry:
-            advice_budget -= 1
-        entry_advice = chronos_entry_advice(health_url, row) if ask_entry else None
-        row["chronos_entry_advice"] = entry_advice
-        row["chronos_entry_action"] = entry_advice.get("action") if entry_advice else None
-        row["chronos_entry_price"] = number(entry_advice.get("suggested_entry_price")) if entry_advice else None
-        row["chronos_entry_minutes"] = entry_advice.get("forecast_entry_minutes") if entry_advice else None
-        row["entry_queued"] = sample_key in queued
-        if row["position_open"]:
-            row["actionable"] = False
-            row["execution_state"] = "OPEN"
-        elif row["entry_queued"]:
-            row["actionable"] = False
-            row["execution_state"] = "QUEUED"
-        elif row.get("executed"):
-            row["execution_state"] = "CLOSED_RECORDED"
-        else:
-            row["execution_state"] = "AVAILABLE" if row.get("actionable") else "INACTIVE"
+    by_sample = {}
+    for info in opened.values():
+        by_sample.setdefault(str(info.get("sample_key") or ""), []).append(info)
+
+    expanded = []
+    for source_row in data.get("opportunities", []):
+        sample_key = str(source_row.get("sample_key") or "")
+        matches = by_sample.get(sample_key) or [None]
+        for open_info in matches:
+            row = dict(source_row)
+            row["position_open"] = bool(open_info)
+            row["position_ticket"] = open_info.get("ticket") if open_info else None
+            row["execution_sample_key"] = open_info.get("execution_sample_key") if open_info else None
+            row["live_profit_units"] = open_info.get("profit_units") if open_info else None
+            row["position_volume"] = open_info.get("volume") if open_info else None
+            row["position_open_price"] = open_info.get("open_price") if open_info else None
+            row["position_current_price"] = open_info.get("current_price") if open_info else None
+            row["auto_close_target"] = open_info.get("auto_close_target") if open_info else None
+            row["auto_close_armed"] = bool(
+                open_info
+                and number(open_info.get("auto_close_target")) is not None
+                and number(open_info.get("auto_close_target")) > 0
+            )
+            advice = chronos_exit_advice(health_url, open_info) if open_info else None
+            row["chronos_exit_advice"] = advice
+            row["chronos_exit_price"] = number(advice.get("suggested_exit_price")) if advice else None
+            row["chronos_exit_action"] = advice.get("action") if advice else None
+            row["chronos_exit_step"] = advice.get("forecast_peak_step") if advice else None
+            captured = number(row.get("latest_captured") or row.get("captured"))
+            recent_candidate = (
+                not open_info and sample_key not in queued
+                and (number(row.get("success_probability")) or 0) >= 0.60
+                and captured is not None and 0 <= now - captured <= 90
+            )
+            ask_entry = recent_candidate and advice_budget > 0
+            if ask_entry:
+                advice_budget -= 1
+            entry_advice = chronos_entry_advice(health_url, row) if ask_entry else None
+            row["chronos_entry_advice"] = entry_advice
+            row["chronos_entry_action"] = entry_advice.get("action") if entry_advice else None
+            row["chronos_entry_price"] = number(entry_advice.get("suggested_entry_price")) if entry_advice else None
+            row["chronos_entry_minutes"] = entry_advice.get("forecast_entry_minutes") if entry_advice else None
+            row["entry_queued"] = sample_key in queued
+            if row["position_open"]:
+                row["actionable"] = False
+                row["execution_state"] = "OPEN"
+            elif row["entry_queued"]:
+                row["actionable"] = False
+                row["execution_state"] = "QUEUED"
+            elif row.get("executed"):
+                row["execution_state"] = "CLOSED_RECORDED"
+            else:
+                row["execution_state"] = "AVAILABLE" if row.get("actionable") else "INACTIVE"
+            expanded.append(row)
+
+    # If a manual position's originating sample is older than the 24h ledger,
+    # keep it visible anyway so it can still be managed by its ticket.
+    known_tickets = {str(row.get("position_ticket")) for row in expanded if row.get("position_ticket")}
+    for ticket, open_info in opened.items():
+        if str(ticket) in known_tickets:
+            continue
+        expanded.append({
+            "sample_key": open_info.get("sample_key"),
+            "execution_sample_key": open_info.get("execution_sample_key"),
+            "signal_bar_time": 0,
+            "direction": open_info.get("direction"),
+            "strategy": "پوزیشن دستی باز",
+            "success_probability": None,
+            "buy_success_probability": None,
+            "sell_success_probability": None,
+            "trade_scenarios": [],
+            "position_open": True,
+            "position_ticket": open_info.get("ticket"),
+            "live_profit_units": open_info.get("profit_units"),
+            "position_volume": open_info.get("volume"),
+            "position_open_price": open_info.get("open_price"),
+            "position_current_price": open_info.get("current_price"),
+            "auto_close_target": open_info.get("auto_close_target"),
+            "auto_close_armed": bool(number(open_info.get("auto_close_target")) and number(open_info.get("auto_close_target")) > 0),
+            "chronos_exit_advice": chronos_exit_advice(health_url, open_info),
+            "entry_queued": False,
+            "execution_state": "OPEN",
+            "captured": open_info.get("opened") or 0,
+            "latest_captured": open_info.get("opened") or 0,
+        })
+    data["opportunities"] = expanded
     data["open_dashboard_positions"] = len(opened)
     data["queued_dashboard_entries"] = len(queued)
     data["today_profit"] = daily_profit_summary(db, symbol, opened, diagnostic)
@@ -1806,8 +1851,8 @@ def queue_manual_close(diagnostic, payload):
     if not re.fullmatch(r"[a-f0-9]{16}", sample_key) or not ticket.isdigit():
         raise ValueError("شناسهٔ پوزیشن نامعتبر است")
     opened = read_open_dashboard_positions(diagnostic)
-    row = opened.get(sample_key)
-    if not row or str(row.get("ticket")) != ticket:
+    row = opened.get(ticket)
+    if not row or str(row.get("sample_key")) != sample_key:
         raise ValueError("این پوزیشن دیگر در لیست بازهای Ramon نیست")
     queue_path = Path(diagnostic).with_name("Ramon_ManualCloses.txt")
     with open(queue_path, "a", encoding="ascii", newline="") as out:
@@ -1836,8 +1881,8 @@ def queue_predicted_auto_close(diagnostic, symbol, health_url, payload):
         raise ValueError("شناسهٔ پوزیشن نامعتبر است")
 
     opened = read_open_dashboard_positions(diagnostic)
-    row = opened.get(sample_key)
-    if not row or str(row.get("ticket")) != ticket:
+    row = opened.get(ticket)
+    if not row or str(row.get("sample_key")) != sample_key:
         raise ValueError("این پوزیشن دیگر در لیست بازهای Ramon نیست")
 
     advice = chronos_exit_advice(health_url, row)
