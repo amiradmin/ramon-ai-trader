@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 
 import pytest
 
-from ramon.monitor import build_snapshot, dollar_readiness, freshness, handler_for, income_roadmap, read_diagnostic, read_history, read_open_dashboard_positions
+from ramon.monitor import build_snapshot, dollar_readiness, freshness, handler_for, income_roadmap, read_diagnostic, read_history, read_open_dashboard_positions, dashboard_entry_compatibility
 
 
 NOW = 1_800_000_000
@@ -513,3 +513,17 @@ def test_open_position_snapshot_requires_fresh_mt5_confirmation(tmp_path, monkey
     os.utime(opened, (stamp, stamp))
     diagnostic(diag, now=stamp - 180, position="BUY #50379117083")
     assert read_open_dashboard_positions(diag) == {}
+
+
+def test_dashboard_manual_entry_requires_ea_version_that_consumes_queue(tmp_path, monkeypatch):
+    from ramon import monitor
+    stamp = 1_800_000_000
+    monkeypatch.setattr(monitor.time, "time", lambda: stamp)
+    diag = tmp_path / "Ramon_Diagnostic.txt"
+    diagnostic(diag, now=stamp)
+    assert dashboard_entry_compatibility(diag)["supported"] is False
+    text = diag.read_text().replace("EA version: 0.54.8", "EA version: 0.58.6")
+    diag.write_text(text)
+    assert dashboard_entry_compatibility(diag)["supported"] is True
+    diagnostic(diag, now=stamp - 200)
+    assert dashboard_entry_compatibility(diag)["supported"] is False
