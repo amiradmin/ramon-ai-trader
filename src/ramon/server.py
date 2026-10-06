@@ -15,7 +15,7 @@ from uuid import uuid4
 
 from .core import Forecast, Market, Settings, evaluate, independent_market_direction, independent_entry_timing
 from .ensemble import EnsembleCoordinator, dominant_direction
-from .shadow_roles import ShadowCoordinator, DirectionCoordinator
+from .shadow_roles import DirectionCoordinator
 from .history import persist_decision_sample, persist_market, persist_trade_outcome, persist_replay_input
 from .model import ChronosForecaster, model_name
 from .news import DEFAULT_FOREX_FACTORY_JSON, ForexFactoryNewsProvider
@@ -188,13 +188,9 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
     # Direction-live uses the independently trained BUY/SELL quality roles as
     # an operational source while retaining the validated bundle path for full live mode.
     role_mode = os.getenv("RAMON_ROLE_MODE", "direction_live").strip().lower()
-    if role_mode not in {"shadow", "direction_live", "live"}:
-        raise ValueError("RAMON_ROLE_MODE must be shadow, direction_live or live")
-    coordinator = (
-        ShadowCoordinator if role_mode == "shadow"
-        else DirectionCoordinator if role_mode == "direction_live"
-        else EnsembleCoordinator
-    )
+    if role_mode not in {"direction_live", "live"}:
+        raise ValueError("RAMON_ROLE_MODE must be direction_live or live")
+    coordinator = DirectionCoordinator if role_mode == "direction_live" else EnsembleCoordinator
     ensemble = coordinator(ensemble_dir, model.model_id)
     news_enabled = os.getenv("RAMON_NEWS_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
     timesfm3_shadow = TimesFM3Shadow.from_env()
@@ -1094,19 +1090,21 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                                         "finbert": dict(latest_finbert_payload),
                                     },
                                     "news_snapshot": news_snapshot.payload(),
-                                    "shadow_forecasts": {
-                                        "timesfm3": timesfm3_payload,
+                                    "direction_models": {
                                         "direction_quality": {
                                             "buy_success_probability": response.get(
-                                                "shadow_buy_success_probability", -1.0
+                                                "buy_success_probability", -1.0
                                             ),
                                             "sell_success_probability": response.get(
-                                                "shadow_sell_success_probability", -1.0
+                                                "sell_success_probability", -1.0
                                             ),
                                             "full_sl_probability": response.get(
-                                                "shadow_full_sl_probability", -1.0
+                                                "full_sl_probability", -1.0
                                             ),
                                         },
+                                    },
+                                    "experimental_models": {
+                                        "timesfm3": timesfm3_payload,
                                     },
                                 },
                             },
