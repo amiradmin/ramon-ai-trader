@@ -120,3 +120,39 @@ def test_legacy_trade_outcome_schema_migrates_shared_sample_key(tmp_path: Path) 
         assert con.execute(
             "SELECT COUNT(*) FROM trade_outcomes WHERE sample_key=?", ("b" * 16,)
         ).fetchone()[0] == 2
+
+
+
+def test_legacy_trade_migration_recovers_from_stale_staging_table(tmp_path: Path) -> None:
+    db = tmp_path / "history.sqlite3"
+    with sqlite3.connect(db) as con:
+        con.execute("""CREATE TABLE trade_outcomes (
+            trade_key TEXT PRIMARY KEY, sample_key TEXT NOT NULL UNIQUE, symbol TEXT NOT NULL,
+            direction TEXT NOT NULL, opened INTEGER NOT NULL, closed INTEGER NOT NULL,
+            net_units REAL NOT NULL, initial_risk_units REAL NOT NULL,
+            net_r REAL NOT NULL, exit_reason TEXT NOT NULL, received INTEGER NOT NULL
+        )""")
+        con.execute("""CREATE TABLE trade_outcomes_v2 (
+            trade_key TEXT PRIMARY KEY, sample_key TEXT NOT NULL, symbol TEXT NOT NULL,
+            direction TEXT NOT NULL, opened INTEGER NOT NULL, closed INTEGER NOT NULL,
+            net_units REAL NOT NULL, initial_risk_units REAL NOT NULL,
+            net_r REAL NOT NULL, exit_reason TEXT NOT NULL, received INTEGER NOT NULL
+        )""")
+        con.execute(
+            "INSERT INTO trade_outcomes VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            ("legacy:stale", "c" * 16, "XAUUSD_l", "BUY", 10, 20, 1.0, 2.0, 0.5, "DEAL_REASON_TP", 30),
+        )
+
+    ensure_history_db(db)
+
+    with sqlite3.connect(db) as con:
+        table_sql = con.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='trade_outcomes'"
+        ).fetchone()[0]
+        assert "sample_key TEXT NOT NULL UNIQUE" not in table_sql
+        assert con.execute(
+            "SELECT trade_key,sample_key FROM trade_outcomes"
+        ).fetchall() == [("legacy:stale", "c" * 16)]
+        assert con.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='trade_outcomes_v2'"
+        ).fetchone() is None
