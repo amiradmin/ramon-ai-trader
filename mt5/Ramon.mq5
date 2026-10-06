@@ -55,10 +55,10 @@ const double MainFastProfitMinProgressToTP1 = 0.35; // Below 35% of entry->TP1 a
 const int MainFastProfitWeakSnapshotsRequired = 2; // Require repeated weak 30s snapshots.
 input bool EnableSmallProfitTrades = false; // SMALL is out of scope unless explicitly enabled on a separate instance.
 const double SmallProfitTargetUnits = 4.0; // CENT account units = USD 0.04 when MoneyUnitsPerUSD=100.
-const double ShadowSmallTP1Units = 2.0; // Observe-only SMALL stage 1.
-const double ShadowSmallTP2Units = 2.5; // Observe-only SMALL stage 2.
-const double ShadowSmallTP3Units = 3.0; // Observe-only SMALL stage 3.
-const double ShadowSmallStrongTargetUnits = ShadowSmallTP2Units; // Current strong-entry candidate.
+const double ExperimentalSmallTP1Units = 2.0; // Observe-only SMALL stage 1.
+const double ExperimentalSmallTP2Units = 2.5; // Observe-only SMALL stage 2.
+const double ExperimentalSmallTP3Units = 3.0; // Observe-only SMALL stage 3.
+const double ExperimentalSmallStrongTargetUnits = ExperimentalSmallTP2Units; // Current strong-entry candidate.
 const double SmallProfitMaxLossUnits = 2.0; // Broker SL for new small entries: at most USD 0.02 on a 100-units/USD account.
 const double SmallProfitProtectionActivationUnits = 1.0;
 const double SmallProfitProtectionGivebackUnits = 0.5;
@@ -106,8 +106,8 @@ input bool EnableClipboardButton = true;
 input bool WriteCsvLogs = true;
 input string SignalCsvFileName = "Ramon_Signals.csv";
 input string TradeCsvFileName = "Ramon_Trades.csv";
-input bool EnableImprovementShadowPack = true; // Observe-only: never blocks/opens/closes/resizes trades.
-input string ShadowCsvFileName = "Ramon_Shadow_Improvements.csv";
+input bool EnableExperimentalImprovementPack = false; // Observe-only: never blocks/opens/closes/resizes trades.
+input string ExperimentalCsvFileName = "Ramon_Experimental_Improvements.csv";
 
 CTrade Trade;
 string AccountLossLimitStatus = "DISABLED";
@@ -134,7 +134,7 @@ string LastBaseReason = "NONE";
 bool LastEnsembleReady = false;
 bool LastEnsembleActive = false;
 double LastRegimeProbability = -1.0;
-bool LastRoleShadow = false;
+bool LastDirectionLive = true;
 string LastRegimeLabel = "UNAVAILABLE";
 double LastFullSLProbability = -1.0;
 double LastEntryProbability = -1.0;
@@ -278,10 +278,10 @@ double ProfitProtectionInitialRiskUnits = 0.0;
 double ProfitProtectionActivationUnits = ProfitProtectionFallbackActivationUnits;
 double ProfitProtectionGivebackUnits = 4.2;
 bool ProfitProtectionArmed = false;
-bool ProfitProtectionShadowTriggered = false;
-datetime ProfitProtectionShadowTriggerTime = 0;
-bool EarlyReversalShadowTriggered = false;
-datetime EarlyReversalShadowTriggerTime = 0;
+bool ProfitProtectionObservedTrigger = false;
+datetime ProfitProtectionObservedTriggerTime = 0;
+bool EarlyReversalObserved = false;
+datetime EarlyReversalObservedTime = 0;
 ulong EarlyAdverseTicket = 0;
 double EarlyAdverseInitialRiskUnits = 0.0;
 double EarlyAdverseTriggerLossUnits = 0.0;
@@ -316,18 +316,18 @@ double MainFastProfitProgress = 0.0;
 string MainFastProfitStatus = "INACTIVE";
 
 // v0.50 improvement pack: telemetry only. These values MUST NOT be used by execution gates.
-bool ShadowBuyCaution = false;
-bool ShadowSellCaution = false;
-double ShadowRiskMultiplier = 1.0;
-double ShadowSmallTargetUnits = SmallProfitTargetUnits;
-bool ShadowSmallStrongTargetCandidate = false;
-int ShadowSmallTPStage = 0;
-string ShadowSmallTPPlan = "TP1=2.00 TP2=2.50 TP3=3.00";
-string ShadowSmallTPNextAction = "NONE";
-bool ShadowDeadTrade = false;
-double ShadowDeadTradePeakR = 0.0;
-double ShadowDeadTradeCurrentR = 0.0;
-string ShadowReason = "NONE";
+bool ExperimentalBuyCaution = false;
+bool ExperimentalSellCaution = false;
+double ExperimentalRiskMultiplier = 1.0;
+double ExperimentalSmallTargetUnits = SmallProfitTargetUnits;
+bool ExperimentalSmallStrongTargetCandidate = false;
+int ExperimentalSmallTPStage = 0;
+string ExperimentalSmallTPPlan = "TP1=2.00 TP2=2.50 TP3=3.00";
+string ExperimentalSmallTPNextAction = "NONE";
+bool ExperimentalDeadTrade = false;
+double ExperimentalDeadTradePeakR = 0.0;
+double ExperimentalDeadTradeCurrentR = 0.0;
+string ExperimentalReason = "NONE";
 
 bool IsAllowedModelUrl(const string url)
 {
@@ -471,11 +471,11 @@ string EffectiveTradeCsvFileName()
    return (SmallOnlyMode ? "Ramon_Small_Trades.csv" : TradeCsvFileName);
 }
 
-string EffectiveShadowCsvFileName()
+string EffectiveExperimentalCsvFileName()
 {
-   if(!EnableImprovementShadowPack)
+   if(!EnableExperimentalImprovementPack)
       return "";
-   return (SmallOnlyMode ? "Ramon_Small_Shadow_Improvements.csv" : ShadowCsvFileName);
+   return (SmallOnlyMode ? "Ramon_Small_Experimental_Improvements.csv" : ExperimentalCsvFileName);
 }
 
 string BoolText(const bool value)
@@ -680,7 +680,7 @@ string BuildDiagnosticText()
       +"  SELL="+DoubleToString(LastAISellQuality,3)
       +"  Margin="+DoubleToString(LastAIQualityMargin,3)
       +"  Score="+DoubleToString(LastAIScore,3)+"\n"
-      +"RoleModels: "+(LastRoleShadow ? "DIRECTION LIVE" : (LastEnsembleReady ? "READY" : "*LEARNING*"))
+      +"RoleModels: "+(LastDirectionLive ? "DIRECTION LIVE" : (LastEnsembleReady ? "READY" : "*LEARNING*"))
       +"  Active: "+BoolText(LastEnsembleActive)
       +"  RegimeP: "+DoubleToString(LastRegimeProbability,3)
       +"  EntryP: "+DoubleToString(LastEntryProbability,3)
@@ -761,24 +761,24 @@ string BuildDiagnosticText()
       +" / "+DoubleToString(LastTargetTP3,_Digits)
       +"  LegacyTP: "+DoubleToString(LastLegacyTargetPrice,_Digits)+"\n"
       +"ExecutionTargetMode: MAIN_TP3_BROKER_FAILSAFE_WHEN_VALID\n"      +"MainExitMode: TP1_TP2_TP3 + EARLY_ADVERSE + MAX_HOLD (60% risk, 2 weak snapshots)\n\n"
-      +"=== * V0.50 IMPROVEMENT SHADOWS (OBSERVE ONLY) ===\n"
-      +"*ShadowPack: "+BoolText(EnableImprovementShadowPack)
-      +"  Reason: "+ShadowReason+"\n"
-      +"*DirectionCaution: BUY="+BoolText(ShadowBuyCaution)
-      +" SELL="+BoolText(ShadowSellCaution)+"\n"
-      +"*ShadowRiskMultiplier: "+DoubleToString(ShadowRiskMultiplier,2)+"x"
+      +"=== * V0.50 EXPERIMENTAL IMPROVEMENTS (OFF BY DEFAULT) ===\n"
+      +"ExperimentalPack: "+BoolText(EnableExperimentalImprovementPack)
+      +"  Reason: "+ExperimentalReason+"\n"
+      +"*DirectionCaution: BUY="+BoolText(ExperimentalBuyCaution)
+      +" SELL="+BoolText(ExperimentalSellCaution)+"\n"
+      +"*ExperimentalRiskMultiplier: "+DoubleToString(ExperimentalRiskMultiplier,2)+"x"
       +"  ActualRiskMultiplier: "+DoubleToString(LastRiskMultiplier,2)+"x\n"
-      +"*ShadowSmallTargetUnits: "+DoubleToString(ShadowSmallTargetUnits,2)
+      +"*ExperimentalSmallTargetUnits: "+DoubleToString(ExperimentalSmallTargetUnits,2)
       +"  ActualTargetUnits: "+DoubleToString(SmallProfitTargetUnits,2)
-      +"  StrongTargetCandidate: "+BoolText(ShadowSmallStrongTargetCandidate)+"\n"
-      +"*ShadowSmallTPPlan: "+ShadowSmallTPPlan
-      +"  Stage: "+IntegerToString(ShadowSmallTPStage)
-      +"  Next: "+ShadowSmallTPNextAction+"\n"
-      +"*DeadTradeShadow: "+BoolText(ShadowDeadTrade)
-      +"  PeakR="+DoubleToString(ShadowDeadTradePeakR,3)
-      +"  CurrentR="+DoubleToString(ShadowDeadTradeCurrentR,3)+"\n"
-      +"*ShadowExecutionEffect: NONE\n"
-      +"* = SHADOW / LEARNING / COLLECTING; not a live decision input unless explicitly activated.\n\n"
+      +"  StrongTargetCandidate: "+BoolText(ExperimentalSmallStrongTargetCandidate)+"\n"
+      +"*ExperimentalSmallTPPlan: "+ExperimentalSmallTPPlan
+      +"  Stage: "+IntegerToString(ExperimentalSmallTPStage)
+      +"  Next: "+ExperimentalSmallTPNextAction+"\n"
+      +"ExperimentalDeadTrade: "+BoolText(ExperimentalDeadTrade)
+      +"  PeakR="+DoubleToString(ExperimentalDeadTradePeakR,3)
+      +"  CurrentR="+DoubleToString(ExperimentalDeadTradeCurrentR,3)+"\n"
+      +"ExperimentalExecutionEffect: NONE\n"
+      +"Experimental pack is OFF by default and has no execution effect.\n\n"
       +"=== ACCOUNT / EXECUTION ===\n"
       +"Live: "+LiveStateText()
       +"  AccountLock: "+(AccountLockHealthy() ? "OK" : "FAIL")
@@ -803,7 +803,7 @@ string BuildDiagnosticText()
       +"  PauseTick: "+(MarketClosedExitPauseTickTime>0 ? UTCText(MarketClosedExitPauseTickTime,TIME_DATE|TIME_SECONDS) : "NONE")+"\n"
       +"ProfitProtection: "+(EnableProfitProtection ? "ACTIVE" : "OFF")
       +"  Armed: "+BoolText(ProfitProtectionArmed)
-      +"  ShadowTrigger: "+BoolText(ProfitProtectionShadowTriggered)+"\n"
+      +"  ObservedTrigger: "+BoolText(ProfitProtectionObservedTrigger)+"\n"
       +"ProfitProtectionUnits: current="+DoubleToString(ProfitProtectionCurrentUnits,2)
       +"  peak="+DoubleToString(ProfitProtectionPeakUnits,2)
       +"  giveback="+DoubleToString(ProfitProtectionGivebackNowUnits,2)
@@ -833,7 +833,7 @@ string BuildDiagnosticText()
       +"  minProgress="+DoubleToString(MainFastProfitMinProgressToTP1*100.0,1)+"%"
       +"  weak="+IntegerToString(MainFastProfitWeakSnapshots)+"/"+IntegerToString(MainFastProfitWeakSnapshotsRequired)
       +"  minProfit="+DoubleToString(MainFastProfitMinProfitUnits,2)+"\n"
-      +"EarlyReversalShadow: "+BoolText(EarlyReversalShadowTriggered)
+      +"EarlyReversalObserved: "+BoolText(EarlyReversalObserved)
       +"  observe="+BoolText(ObserveEarlyReversalExit)
       +"  minPeak="+DoubleToString(EarlyReversalMinPeakUnits,2)
       +"  giveback="+DoubleToString(EarlyReversalGivebackUnits,2)
@@ -1278,7 +1278,7 @@ string ModelMapConditionState(const int row)
       return "STALE";
    if(row==0) return (LastBaseDecision=="BUY" || LastBaseDecision=="SELL" ? "OK"
       : LastBaseDecision=="WAIT" ? "BLOCKED" : "UNKNOWN");
-   if(row==1) return (LastTimesFMReady ? "SHADOW" : "OFF");
+   if(row==1) return (LastTimesFMReady ? "EXPERIMENTAL" : "OFF");
    if(row==3)
    {
       if(!LastMomentLiveActive) return "OFF";
@@ -1297,7 +1297,7 @@ string ModelMapConditionState(const int row)
       : LastMarketStateRoute=="WAIT" ? "BLOCKED" : "UNKNOWN");
    if(row==11) return (LastTargetStructureReady ? "OK" : "UNKNOWN");
    // Shadow role probabilities are observations, not passed execution gates.
-   return (LastRoleShadow ? "SHADOW" : "OBSERVED");
+   return (LastDirectionLive ? "LIVE" : "UNKNOWN");
 }
 
 void DrawDashboard()
@@ -1367,13 +1367,13 @@ void DrawDashboard()
    ObjectDelete(0,UiPrefix+"SIGNAL_PRICE");
 
 
-   string role_mark=(LastRoleShadow || !LastEnsembleReady ? "*" : "");
-   UiLabel("ROLE_MODELS",(LastRoleShadow ? "DIRECTION LIVE | "+LastRegimeLabel : "ROLE MODELS "+(LastEnsembleReady ? "READY" : "*LEARNING*"))
+   string role_mark=(!LastDirectionLive && !LastEnsembleReady ? "*" : "");
+   UiLabel("ROLE_MODELS",(LastDirectionLive ? "DIRECTION LIVE | "+LastRegimeLabel : "ROLE MODELS "+(LastEnsembleReady ? "READY" : "*LEARNING*"))
       +" R["+ModelTag(LastRegimeModelHandler)+"]"+role_mark+":"+RoleProbabilityText(LastRegimeProbability)
       +" E["+ModelTag(LastEntryModelHandler)+"]"+role_mark+":"+RoleProbabilityText(LastEntryProbability)
       +" N["+ModelTag(LastNewsModelHandler)+"]"+role_mark+":"+RoleProbabilityText(LastNewsProbability)
       +" M["+ModelTag(LastMetaModelHandler)+"]"+role_mark+":"+RoleProbabilityText(LastMetaProbability)
-      +" SL["+ModelTag(LastRiskModelHandler)+"]"+role_mark+":"+RoleProbabilityText(LastRoleShadow ? LastFullSLProbability : LastRiskProbability),
+      +" SL["+ModelTag(LastRiskModelHandler)+"]"+role_mark+":"+RoleProbabilityText(LastDirectionLive ? LastFullSLProbability : LastRiskProbability),
       28,178,clrWhite,8);
    ObjectSetString(0,UiPrefix+"ROLE_MODELS",OBJPROP_TOOLTIP,
       "حالت سایه: فقط نمایش؛ بدون دخالت در معامله\n"
@@ -1556,7 +1556,7 @@ void DrawDashboard()
       string condition=ModelMapConditionState(mi);
       color map_color=(condition=="OK" ? clrLimeGreen
          : condition=="VETO" || condition=="BLOCKED" ? clrTomato
-         : condition=="SHADOW" ? C'192,155,235'
+         : condition=="EXPERIMENTAL" ? C'192,155,235'
          : condition=="STALE" ? clrOrange
          : condition=="OFF" || condition=="UNKNOWN" ? clrGray : clrWhite);
       mtips[mi]+="\nCondition: "+condition
@@ -2220,21 +2220,21 @@ void UpdateSizingPreview()
    }
 }
 
-void UpdateImprovementShadows()
+void UpdateExperimentalImprovements()
 {
-   ShadowBuyCaution=false;
-   ShadowSellCaution=false;
-   ShadowRiskMultiplier=1.0;
-   ShadowSmallTargetUnits=SmallProfitTargetUnits;
-   ShadowSmallStrongTargetCandidate=false;
-   ShadowSmallTPStage=0;
-   ShadowSmallTPNextAction="NONE";
-   ShadowDeadTrade=false;
-   ShadowDeadTradePeakR=0.0;
-   ShadowDeadTradeCurrentR=0.0;
-   ShadowReason="NONE";
+   ExperimentalBuyCaution=false;
+   ExperimentalSellCaution=false;
+   ExperimentalRiskMultiplier=1.0;
+   ExperimentalSmallTargetUnits=SmallProfitTargetUnits;
+   ExperimentalSmallStrongTargetCandidate=false;
+   ExperimentalSmallTPStage=0;
+   ExperimentalSmallTPNextAction="NONE";
+   ExperimentalDeadTrade=false;
+   ExperimentalDeadTradePeakR=0.0;
+   ExperimentalDeadTradeCurrentR=0.0;
+   ExperimentalReason="NONE";
 
-   if(!EnableImprovementShadowPack)
+   if(!EnableExperimentalImprovementPack)
       return;
 
    string direction=(LastModelDecision=="BUY" || LastModelDecision=="SELL"
@@ -2253,27 +2253,27 @@ void UpdateImprovementShadows()
    if(edge_support) support_count++;
    if(strength_support) support_count++;
 
-   // Direction-specific shadow: BUY has historically underperformed SELL in the current report.
+   // Direction-specific experimental observation: BUY has historically underperformed SELL in the current report.
    // Observe only whether requiring at least one short-horizon confirmation would have filtered it.
-   ShadowBuyCaution=(direction=="BUY" && !intrabar_support && !trend_support);
-   ShadowSellCaution=(direction=="SELL" && !intrabar_support && !trend_support);
+   ExperimentalBuyCaution=(direction=="BUY" && !intrabar_support && !trend_support);
+   ExperimentalSellCaution=(direction=="SELL" && !intrabar_support && !trend_support);
 
    // Proposed future sizing policy, telemetry only.
-   if(support_count<=1) ShadowRiskMultiplier=0.50;
-   else if(support_count==2) ShadowRiskMultiplier=0.75;
-   else ShadowRiskMultiplier=1.00;
+   if(support_count<=1) ExperimentalRiskMultiplier=0.50;
+   else if(support_count==2) ExperimentalRiskMultiplier=0.75;
+   else ExperimentalRiskMultiplier=1.00;
 
    // Proposed SMALL target extension, telemetry only. Actual broker TP remains unchanged.
    // Require all three short-horizon confirmations so the normal 2-cent target
    // remains untouched for ordinary SMALL entries.
-   ShadowSmallStrongTargetCandidate=(
+   ExperimentalSmallStrongTargetCandidate=(
       SmallOnlyMode
       && intrabar_support
       && trend_support
       && edge_support
    );
-   if(ShadowSmallStrongTargetCandidate)
-      ShadowSmallTargetUnits=ShadowSmallStrongTargetUnits;
+   if(ExperimentalSmallStrongTargetCandidate)
+      ExperimentalSmallTargetUnits=ExperimentalSmallStrongTargetUnits;
 
    ulong ticket=0;
    datetime opened=0;
@@ -2282,69 +2282,69 @@ void UpdateImprovementShadows()
       double current=PositionGetDouble(POSITION_PROFIT);
       if(SmallOnlyMode)
       {
-         if(current>=ShadowSmallTP3Units)
+         if(current>=ExperimentalSmallTP3Units)
          {
-            ShadowSmallTPStage=3;
-            ShadowSmallTPNextAction="WOULD_CLOSE_AT_TP3";
+            ExperimentalSmallTPStage=3;
+            ExperimentalSmallTPNextAction="WOULD_CLOSE_AT_TP3";
          }
-         else if(current>=ShadowSmallTP2Units)
+         else if(current>=ExperimentalSmallTP2Units)
          {
-            ShadowSmallTPStage=2;
-            ShadowSmallTPNextAction=(intrabar_support && trend_support && edge_support
+            ExperimentalSmallTPStage=2;
+            ExperimentalSmallTPNextAction=(intrabar_support && trend_support && edge_support
                ? "WOULD_HOLD_FOR_TP3" : "WOULD_CLOSE_AT_TP2");
          }
-         else if(current>=ShadowSmallTP1Units)
+         else if(current>=ExperimentalSmallTP1Units)
          {
-            ShadowSmallTPStage=1;
-            ShadowSmallTPNextAction=(intrabar_support && trend_support && edge_support
+            ExperimentalSmallTPStage=1;
+            ExperimentalSmallTPNextAction=(intrabar_support && trend_support && edge_support
                ? "WOULD_HOLD_FOR_TP2" : "WOULD_CLOSE_AT_TP1");
          }
          else
-            ShadowSmallTPNextAction="WAITING_FOR_TP1";
+            ExperimentalSmallTPNextAction="WAITING_FOR_TP1";
       }
 
       double risk=ManagedPositionInitialRiskUnits(ticket);
       double peak=ProfitProtectionPeakUnits;
       if(risk>0.0)
       {
-         ShadowDeadTradePeakR=peak/risk;
-         ShadowDeadTradeCurrentR=current/risk;
+         ExperimentalDeadTradePeakR=peak/risk;
+         ExperimentalDeadTradeCurrentR=current/risk;
          int age_sec=(opened>0 ? (int)(TimeCurrent()-opened) : 0);
 
          // "Dead-trade" candidate: after two minutes, little favorable excursion,
          // already materially adverse, and no fresh directional confirmation.
-         ShadowDeadTrade=(
+         ExperimentalDeadTrade=(
             age_sec>=120
-            && ShadowDeadTradePeakR<0.25
-            && ShadowDeadTradeCurrentR<=-0.35
+            && ExperimentalDeadTradePeakR<0.25
+            && ExperimentalDeadTradeCurrentR<=-0.35
             && !intrabar_support
             && !trend_support
          );
       }
    }
 
-   if(ShadowDeadTrade) ShadowReason="dead_trade_candidate";
-   else if(ShadowBuyCaution) ShadowReason="buy_confirmation_caution";
-   else if(ShadowSellCaution) ShadowReason="sell_confirmation_caution";
-   else if(ShadowRiskMultiplier<1.0) ShadowReason="reduced_risk_candidate";
-   else if(ShadowSmallTargetUnits>SmallProfitTargetUnits) ShadowReason="small_tp_extension_candidate";
-   else ShadowReason="no_shadow_action";
+   if(ExperimentalDeadTrade) ExperimentalReason="dead_trade_candidate";
+   else if(ExperimentalBuyCaution) ExperimentalReason="buy_confirmation_caution";
+   else if(ExperimentalSellCaution) ExperimentalReason="sell_confirmation_caution";
+   else if(ExperimentalRiskMultiplier<1.0) ExperimentalReason="reduced_risk_candidate";
+   else if(ExperimentalSmallTargetUnits>SmallProfitTargetUnits) ExperimentalReason="small_tp_extension_candidate";
+   else ExperimentalReason="no_experimental_action";
 }
 
-void AppendImprovementShadowCsv()
+void AppendExperimentalImprovementCsv()
 {
-   if(!WriteCsvLogs || !EnableImprovementShadowPack
-      || StringLen(EffectiveShadowCsvFileName())==0)
+   if(!WriteCsvLogs || !EnableExperimentalImprovementPack
+      || StringLen(EffectiveExperimentalCsvFileName())==0)
       return;
 
    int handle=FileOpen(
-      EffectiveShadowCsvFileName(),
+      EffectiveExperimentalCsvFileName(),
       FILE_READ|FILE_WRITE|FILE_CSV|FILE_ANSI|FILE_COMMON,
       ','
    );
    if(handle==INVALID_HANDLE)
    {
-      Print("Ramon shadow CSV open failed err=",GetLastError());
+      Print("Ramon experimental CSV open failed err=",GetLastError());
       return;
    }
 
@@ -2355,15 +2355,15 @@ void AppendImprovementShadowCsv()
       FileWrite(handle,
          "captured","signal_bar_time","symbol","role","sample_key",
          "decision","reason","buy_caution","sell_caution",
-         "shadow_risk_multiplier","actual_risk_multiplier",
-         "shadow_small_target_units","actual_small_target_units",
-         "shadow_small_strong_target_candidate","shadow_small_tp_stage",
-         "shadow_small_tp_next_action",
+         "experimental_risk_multiplier","actual_risk_multiplier",
+         "experimental_small_target_units","actual_small_target_units",
+         "experimental_small_strong_target_candidate","experimental_small_tp_stage",
+         "experimental_small_tp_next_action",
          "dead_trade_candidate","dead_trade_peak_r","dead_trade_current_r",
          "intrabar_confirmed","intrabar_direction",
          "ai_trend_confirmed","ai_trend_direction",
          "buy_edge","sell_edge","minimum_edge",
-         "signal_strength","minimum_strength","shadow_reason");
+         "signal_strength","minimum_strength","experimental_reason");
    }
 
    FileWrite(handle,
@@ -2371,18 +2371,18 @@ void AppendImprovementShadowCsv()
       TimeToString(LastSignalBarTime,TIME_DATE|TIME_MINUTES),
       _Symbol,(SmallOnlyMode ? "SMALL" : "MAIN"),LastSampleKey,
       LastModelDecision,LastModelReason,
-      BoolText(ShadowBuyCaution),BoolText(ShadowSellCaution),
-      DoubleToString(ShadowRiskMultiplier,2),DoubleToString(LastRiskMultiplier,2),
-      DoubleToString(ShadowSmallTargetUnits,2),DoubleToString(SmallProfitTargetUnits,2),
-      BoolText(ShadowSmallStrongTargetCandidate),IntegerToString(ShadowSmallTPStage),
-      ShadowSmallTPNextAction,
-      BoolText(ShadowDeadTrade),DoubleToString(ShadowDeadTradePeakR,4),
-      DoubleToString(ShadowDeadTradeCurrentR,4),
+      BoolText(ExperimentalBuyCaution),BoolText(ExperimentalSellCaution),
+      DoubleToString(ExperimentalRiskMultiplier,2),DoubleToString(LastRiskMultiplier,2),
+      DoubleToString(ExperimentalSmallTargetUnits,2),DoubleToString(SmallProfitTargetUnits,2),
+      BoolText(ExperimentalSmallStrongTargetCandidate),IntegerToString(ExperimentalSmallTPStage),
+      ExperimentalSmallTPNextAction,
+      BoolText(ExperimentalDeadTrade),DoubleToString(ExperimentalDeadTradePeakR,4),
+      DoubleToString(ExperimentalDeadTradeCurrentR,4),
       BoolText(LastIntrabarConfirmed),LastIntrabarDirection,
       BoolText(LastAiTrendConfirmed),LastAiTrendDirection,
       DoubleToString(LastBuyEdge,6),DoubleToString(LastSellEdge,6),
       DoubleToString(LastMinimumEdge,6),DoubleToString(LastSignalStrength,6),
-      DoubleToString(LastMinimumStrength,6),ShadowReason);
+      DoubleToString(LastMinimumStrength,6),ExperimentalReason);
 
    FileFlush(handle);
    FileClose(handle);
@@ -3733,10 +3733,10 @@ void ResetProfitProtectionState()
          ProfitProtectionFallbackActivationUnits*ProfitProtectionGivebackFraction)
    );
    ProfitProtectionArmed=false;
-   ProfitProtectionShadowTriggered=false;
-   ProfitProtectionShadowTriggerTime=0;
-   EarlyReversalShadowTriggered=false;
-   EarlyReversalShadowTriggerTime=0;
+   ProfitProtectionObservedTrigger=false;
+   ProfitProtectionObservedTriggerTime=0;
+   EarlyReversalObserved=false;
+   EarlyReversalObservedTime=0;
 }
 
 double ManagedPositionInitialRiskUnits(const ulong ticket)
@@ -3954,11 +3954,11 @@ void ObserveOpenPositionProfit(const ulong ticket)
    );
 
    if(ProfitProtectionArmed
-      && !ProfitProtectionShadowTriggered
+      && !ProfitProtectionObservedTrigger
       && ProfitProtectionGivebackNowUnits>=ProfitProtectionGivebackUnits)
    {
-      ProfitProtectionShadowTriggered=true;
-      ProfitProtectionShadowTriggerTime=TimeCurrent();
+      ProfitProtectionObservedTrigger=true;
+      ProfitProtectionObservedTriggerTime=TimeCurrent();
       Print("Ramon PROFIT PROTECTION trigger ticket=",ticket,
          " current=",DoubleToString(ProfitProtectionCurrentUnits,2),
          " peak=",DoubleToString(ProfitProtectionPeakUnits,2),
@@ -3968,16 +3968,16 @@ void ObserveOpenPositionProfit(const ulong ticket)
    }
 
    if(ObserveEarlyReversalExit
-      && !EarlyReversalShadowTriggered
+      && !EarlyReversalObserved
       && ProfitProtectionPeakUnits>=EarlyReversalMinPeakUnits
       && ProfitProtectionGivebackNowUnits>=EarlyReversalGivebackUnits
       && ProfitProtectionCurrentUnits<=EarlyReversalMaxCurrentUnits
       && !LastIntrabarConfirmed
       && !LastAiTrendConfirmed)
    {
-      EarlyReversalShadowTriggered=true;
-      EarlyReversalShadowTriggerTime=TimeCurrent();
-      Print("Ramon EARLY REVERSAL SHADOW ticket=",ticket,
+      EarlyReversalObserved=true;
+      EarlyReversalObservedTime=TimeCurrent();
+      Print("Ramon EARLY REVERSAL OBSERVED ticket=",ticket,
          " current=",DoubleToString(ProfitProtectionCurrentUnits,2),
          " peak=",DoubleToString(ProfitProtectionPeakUnits,2),
          " giveback=",DoubleToString(ProfitProtectionGivebackNowUnits,2),
@@ -4162,7 +4162,7 @@ void ManageOpenPosition()
    ObserveOpenPositionProfit(ticket);
    if(ManageEarlyAdverseExit(ticket,opened))
       return;
-   if(EnableProfitProtection && ProfitProtectionShadowTriggered)
+   if(EnableProfitProtection && ProfitProtectionObservedTrigger)
    {
       if(ManagedExitPausedForMarketClosed(ticket))
       {
@@ -4918,7 +4918,7 @@ void OnTimer()
    JsonNumber(reply,"direction_quality_live",role_live);
    JsonNumber(reply,"full_sl_probability",full_sl_probability);
    JsonText(reply,"regime_label",regime_label);
-   LastRoleShadow=(role_live<0.5);
+   LastDirectionLive=(role_live>=0.5);
    LastRegimeLabel=regime_label;
    LastFullSLProbability=full_sl_probability;
    LastNewsSource=news_source;
@@ -4926,7 +4926,7 @@ void OnTimer()
    LastNewsModelReady=(news_model_ready>=0.5);
    // Optional model identity telemetry. Older servers remain compatible.
    JsonText(reply,"forecast_model_handler",LastForecastModelHandler);
-   JsonText(reply,"forecast_shadow_model_handler",LastForecastExperimentalModelHandler);
+   JsonText(reply,"forecast_experimental_model_handler",LastForecastExperimentalModelHandler);
    JsonText(reply,"regime_model_handler",LastRegimeModelHandler);
    JsonText(reply,"entry_model_handler",LastEntryModelHandler);
    JsonText(reply,"news_model_handler",LastNewsModelHandler);
@@ -5081,9 +5081,9 @@ void OnTimer()
    LastLegacyTargetPrice=legacy_target_price;
    StatusLine=reason;
    UpdateSizingPreview();
-   UpdateImprovementShadows();
+   UpdateExperimentalImprovements();
    AppendSignalCsv();
-   AppendImprovementShadowCsv();
+   AppendExperimentalImprovementCsv();
    Print("Ramon ",UTCText(bar_time,TIME_DATE|TIME_SECONDS)," ",decision," ",reason,
       " median=",DoubleToString(median,_Digits));
 
@@ -5495,7 +5495,7 @@ int OnInit()
       || SnapshotIntervalSeconds<5
       || (WriteDiagnosticFile && StringLen(DiagnosticFileName)==0)
       || (WriteCsvLogs && (StringLen(SignalCsvFileName)==0 || StringLen(TradeCsvFileName)==0))
-      || (EnableImprovementShadowPack && WriteCsvLogs && StringLen(ShadowCsvFileName)==0)
+      || (EnableExperimentalImprovementPack && WriteCsvLogs && StringLen(ExperimentalCsvFileName)==0)
       || !IsAllowedModelUrl(ModelUrl))
    { Print("Invalid risk or local server settings"); return INIT_FAILED; }
    long current_login=AccountInfoInteger(ACCOUNT_LOGIN);
