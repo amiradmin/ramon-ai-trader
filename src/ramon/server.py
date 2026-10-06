@@ -26,7 +26,7 @@ from .moment_shadow import MomentAnomalyShadow
 from .finbert_shadow import FinBertNewsShadow
 from .range_shadow import observe as observe_range_shadow
 from .range_strategy import candidate as range_candidate, live_candidate
-from .market_state import assess_market, apply_market_policy
+from .market_state import POLICY_VERSION, assess_market, apply_market_policy
 from .reversal_strategy import apply_reversal
 
 
@@ -255,7 +255,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
             "meta_model_handler": role_handler_name("meta"),
             "risk_model_handler": role_handler_name("risk"),
             "news_source_handler": "ForexFactoryNewsProvider",
-            "market_state_handler": "market-state-v1",
+            "market_state_handler": POLICY_VERSION,
             "target_model_handler": "Ramon/TargetStructure",
         }
     last_persisted_bar: dict[str, int] = {}
