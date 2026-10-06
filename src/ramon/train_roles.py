@@ -62,7 +62,10 @@ def _regime_dataset(bars: tuple[Bar, ...]) -> list[Example]:
 def load_trade_examples(db: str | Path, symbol: str, chronos_model: str) -> list[Example]:
     """Use one clean fully closed REAL position per decision, net of deal costs.
 
-    Manual exits, stop-outs and legacy expert exits without an exact trigger are
+    Dashboard-opportunity entries are learnable when their executed direction
+    matches the immutable snapshot direction. This allows human-confirmed model
+    opportunities to improve Direction Quality / Entry / Meta / Risk without
+    training on opposite-direction overrides. Manual exits, stop-outs and legacy expert exits without an exact trigger are
     censored. Legacy snapshots and 15-minute midpoint proxies are also excluded.
     Sample/trade ordering remains broker-event time; recorded UTC offsets are kept
     separately for audit and reporting rather than guessed for legacy events.
@@ -79,9 +82,12 @@ def read_trade_examples(conn: sqlite3.Connection, symbol: str, chronos_model: st
                    s.news_features,s.meta_base_features,t.net_r,s.base_decision,t.direction,t.exit_reason
             FROM decision_samples s JOIN trade_outcomes t ON t.sample_key=s.sample_key
             WHERE s.symbol=? AND t.symbol=s.symbol AND s.chronos_model=?
-              AND s.schema_version>=3 AND s.news_features IS NOT NULL AND t.direction=s.direction
-              AND s.final_decision=t.direction AND t.training_status='LEARNABLE'
-              AND COALESCE(t.entry_source,'AUTO_RAMON')!='DASHBOARD_OPPORTUNITY'
+              AND s.schema_version>=3 AND s.news_features IS NOT NULL
+              AND t.direction=s.direction AND t.training_status='LEARNABLE'
+              AND (
+                    s.final_decision=t.direction
+                    OR COALESCE(t.entry_source,'AUTO_RAMON')='DASHBOARD_OPPORTUNITY'
+                  )
               AND t.opened>=s.quote_time
               AND t.opened<=s.quote_time+90 AND t.closed>=t.opened
             ORDER BY s.quote_time,s.sample_key
