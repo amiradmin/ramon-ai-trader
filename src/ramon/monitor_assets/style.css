@@ -190,3 +190,11 @@
   #edges text,#sahar-flow-edges text{font-size:11px}
   .flow-footer{padding-top:18px;padding-bottom:18px}
 }
+
+/* Distinguish current trade guidance from historical opportunity ledger. */
+.trade-guidance{display:flex;flex-direction:column;gap:7px;padding:14px 18px;margin:14px 0;border:1px solid #536070;border-radius:12px;background:#19232f;color:#e1e8f2;line-height:1.8}
+.trade-guidance strong{font-size:16px}
+.trade-guidance span{font-size:12px}
+.trade-guidance.buy{border-color:#488a75}
+.trade-guidance.sell{border-color:#b77777}
+.trade-guidance.wait{border-color:#786d54}
