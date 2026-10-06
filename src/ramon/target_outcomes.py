@@ -32,11 +32,11 @@ def backfill_target_outcomes(db: str | Path, *, symbol: str = "XAUUSD_l") -> dic
                    s.atr,s.target_structure
             FROM decision_samples s
             JOIN trade_outcomes t ON t.sample_key=s.sample_key
-            LEFT JOIN target_outcomes o ON o.sample_key=s.sample_key
+            LEFT JOIN target_outcomes o ON o.trade_key=t.trade_key
             WHERE s.symbol=? AND s.schema_version>=4
               AND s.target_structure IS NOT NULL
               AND t.training_status='LEARNABLE'
-              AND o.sample_key IS NULL
+              AND o.trade_key IS NULL
             ORDER BY t.opened
             """,
             (symbol,),
