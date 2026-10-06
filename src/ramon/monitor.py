@@ -15,7 +15,7 @@ import tempfile
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
-from .opportunities import read_opportunities
+from .opportunities import read_opportunities, _live_direction
 
 
 ASSETS = Path(__file__).with_name("monitor_assets")
@@ -1696,6 +1696,11 @@ def queue_manual_entry(db, diagnostic, symbol, payload):
         audit = metadata.get("decision_audit") if isinstance(metadata.get("decision_audit"), dict) else {}
         base = audit.get("base") if isinstance(audit.get("base"), dict) else {}
         final = audit.get("final") if isinstance(audit.get("final"), dict) else {}
+        live_direction, live_probability, _, _ = _live_direction(audit)
+        if live_direction != direction:
+            raise ValueError(
+                "جهت Direction AI در snapshot تازه تغییر کرده است؛ جدول را تازه کنید"
+            )
         captured = number(current.get("captured"))
         if captured is None or time.time() - captured > 45:
             raise ValueError("snapshot مدل برای ورود دستی تازه نیست")
@@ -1704,10 +1709,7 @@ def queue_manual_entry(db, diagnostic, symbol, payload):
         risk_distance = float(number(base.get("stop_distance")) or 0.0)
         target_distance = float(number(base.get("target_distance")) or 0.0)
         edge = float(number(base.get("buy_edge" if direction == "BUY" else "sell_edge")) or 0.0)
-        probability = number(final.get(
-            "shadow_buy_success_probability" if direction == "BUY"
-            else "shadow_sell_success_probability"
-        ))
+        probability = live_probability
         mode = "RECHECK"
     else:
         if not row.get("actionable"):
