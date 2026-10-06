@@ -1,6 +1,6 @@
 #property strict
-#property version "1.587"
-#define RAMON_EA_VERSION "0.58.7"
+#property version "1.588"
+#define RAMON_EA_VERSION "0.58.8"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -4194,10 +4194,93 @@ void ManageOpenPosition()
       HandleManagedExitFailure(ticket,"SMALL TIME EXIT");
 }
 
+string DashboardAutoCloseKey(const ulong ticket)
+{
+   return "RAMON_AC_"+IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN))
+      +"_"+IntegerToString((long)ticket);
+}
+
+double DashboardAutoCloseTarget(const ulong ticket)
+{
+   string key=DashboardAutoCloseKey(ticket);
+   if(!GlobalVariableCheck(key))
+      return 0.0;
+   double value=GlobalVariableGet(key);
+   return (MathIsValidNumber(value) && value>0.0 ? value : 0.0);
+}
+
+void ClearDashboardAutoCloseTarget(const ulong ticket)
+{
+   string key=DashboardAutoCloseKey(ticket);
+   if(GlobalVariableCheck(key))
+      GlobalVariableDel(key);
+}
+
+bool ProcessDashboardPredictedAutoCloseCrossings()
+{
+   if(SmallOnlyMode)
+      return false;
+   MqlTick tick;
+   if(!SymbolInfoTick(_Symbol,tick) || tick.bid<=0.0 || tick.ask<=tick.bid)
+      return false;
+
+   for(int i=PositionsTotal()-1;i>=0;i--)
+   {
+      ulong ticket=PositionGetTicket(i);
+      if(ticket==0 || !PositionSelectByTicket(ticket))
+         continue;
+      if(PositionGetString(POSITION_SYMBOL)!=_Symbol
+         || (ulong)PositionGetInteger(POSITION_MAGIC)!=MagicNumber)
+         continue;
+      string comment=PositionGetString(POSITION_COMMENT);
+      if(StringFind(comment,"Ramon:")!=0 || StringFind(comment,":M")<0)
+         continue;
+
+      double target=DashboardAutoCloseTarget(ticket);
+      if(target<=0.0)
+         continue;
+      long type=PositionGetInteger(POSITION_TYPE);
+      bool reached=(type==POSITION_TYPE_BUY ? tick.bid>=target : tick.ask<=target);
+      if(!reached)
+         continue;
+
+      if(!AccountLockHealthy()
+         || !(bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED)
+         || !(bool)MQLInfoInteger(MQL_TRADE_ALLOWED)
+         || !(bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED))
+      {
+         StatusLine="PREDICTED AUTO CLOSE reached but execution unavailable";
+         return false;
+      }
+
+      double profit_units=PositionGetDouble(POSITION_PROFIT);
+      if(Trade.PositionClose(ticket,MaxDeviationPoints))
+      {
+         ClearDashboardAutoCloseTarget(ticket);
+         RecordDealTelemetry(Trade.ResultDeal(),"chronos_predicted_auto_close");
+         StatusLine="PREDICTED AUTO CLOSE #"+IntegerToString((long)ticket)
+            +" target="+DoubleToString(target,_Digits)
+            +" P/L "+DoubleToString(profit_units,2)+" units";
+         Print("Ramon execution: ",StatusLine);
+         WriteOpenDashboardPositions();
+         return true;
+      }
+
+      StatusLine="PREDICTED AUTO CLOSE FAILED "
+         +IntegerToString((int)Trade.ResultRetcode());
+      Print("Ramon execution: ",StatusLine);
+      return false;
+   }
+   return false;
+}
+
 void OnTick()
 {
-   // Price crossings must not wait for the 5-second timer or 30-second model snapshot.
-   // This handler only advances TP stages and tightens SL; it never creates entries.
+   // Predicted dashboard exits are exact ticket-bound price crossings and must
+   // not wait for the five-second timer.
+   ProcessDashboardPredictedAutoCloseCrossings();
+
+   // Normal Ramon TP-stage crossings also stay tick-driven.
    if(PositionSelect(_Symbol) && IsRangeTradeComment(PositionGetString(POSITION_COMMENT))) return;
    ObserveTPStageCrossingsOnTick();
 }
@@ -4273,10 +4356,12 @@ void WriteOpenDashboardPositions()
       double volume=PositionGetDouble(POSITION_VOLUME);
       double open_price=PositionGetDouble(POSITION_PRICE_OPEN);
       double current_price=PositionGetDouble(POSITION_PRICE_CURRENT);
+      double auto_close_target=DashboardAutoCloseTarget(ticket);
       FileWriteString(handle,origin_sample+"|"+execution_sample+"|"+direction+"|"
          +IntegerToString((long)ticket)+"|"+IntegerToString((long)opened)+"|"
          +DoubleToString(profit_units,8)+"|"+DoubleToString(volume,2)+"|"
-         +DoubleToString(open_price,_Digits)+"|"+DoubleToString(current_price,_Digits)+"\r\n");
+         +DoubleToString(open_price,_Digits)+"|"+DoubleToString(current_price,_Digits)+"|"
+         +DoubleToString(auto_close_target,_Digits)+"\r\n");
    }
    FileFlush(handle);
    FileClose(handle);
@@ -4415,6 +4500,112 @@ int ReadDashboardManualEntry(
 }
 
 
+bool ProcessDashboardPredictedAutoCloseCommand()
+{
+   if(SmallOnlyMode)
+      return false;
+   const string queue_name="Ramon_AutoCloseCommands.txt";
+   int handle=FileOpen(queue_name,FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
+   if(handle==INVALID_HANDLE)
+      return false;
+
+   string lines[];
+   int total=0;
+   while(!FileIsEnding(handle))
+   {
+      string line=FileReadString(handle);
+      StringTrimLeft(line); StringTrimRight(line);
+      if(line=="") continue;
+      ArrayResize(lines,total+1);
+      lines[total++]=line;
+   }
+   FileClose(handle);
+   if(total<=0)
+   {
+      FileDelete(queue_name,FILE_COMMON);
+      return false;
+   }
+
+   if(total==1)
+      FileDelete(queue_name,FILE_COMMON);
+   else
+   {
+      int out=FileOpen(queue_name,FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON);
+      if(out==INVALID_HANDLE)
+      {
+         StatusLine="AUTO CLOSE queue rewrite failed";
+         return false;
+      }
+      for(int i=1;i<total;i++)
+         FileWriteString(out,lines[i]+"\r\n");
+      FileFlush(out);
+      FileClose(out);
+   }
+
+   string parts[];
+   ushort separator=StringGetCharacter("|",0);
+   if(StringSplit(lines[0],separator,parts)!=6)
+   {
+      StatusLine="AUTO CLOSE invalid command";
+      return false;
+   }
+
+   datetime requested=(datetime)StringToInteger(parts[0]);
+   string origin_sample=parts[1];
+   string execution_sample=parts[2];
+   ulong requested_ticket=(ulong)StringToInteger(parts[3]);
+   string direction=parts[4];
+   double target=StringToDouble(parts[5]);
+   datetime utc_now=TimeGMT();
+   if(requested<=0 || utc_now-requested>120 || requested-utc_now>5
+      || !ValidSampleKey(origin_sample) || !ValidSampleKey(execution_sample)
+      || requested_ticket==0 || (direction!="BUY" && direction!="SELL")
+      || !MathIsValidNumber(target) || target<=0.0)
+   {
+      StatusLine="AUTO CLOSE command expired/invalid";
+      return false;
+   }
+
+   if(!PositionSelectByTicket(requested_ticket))
+   {
+      StatusLine="AUTO CLOSE position unavailable";
+      WriteOpenDashboardPositions();
+      return false;
+   }
+   if(PositionGetString(POSITION_SYMBOL)!=_Symbol
+      || (ulong)PositionGetInteger(POSITION_MAGIC)!=MagicNumber)
+   {
+      StatusLine="AUTO CLOSE ownership mismatch";
+      return false;
+   }
+   string comment=PositionGetString(POSITION_COMMENT);
+   if(StringFind(comment,"Ramon:"+execution_sample+":M")!=0)
+   {
+      StatusLine="AUTO CLOSE sample mismatch";
+      return false;
+   }
+   long type=PositionGetInteger(POSITION_TYPE);
+   string actual_direction=(type==POSITION_TYPE_BUY ? "BUY" : "SELL");
+   if(actual_direction!=direction)
+   {
+      StatusLine="AUTO CLOSE direction mismatch";
+      return false;
+   }
+
+   if(!GlobalVariableSet(DashboardAutoCloseKey(requested_ticket),target))
+   {
+      StatusLine="AUTO CLOSE target persistence failed";
+      return false;
+   }
+   StatusLine="PREDICTED AUTO CLOSE ARMED #"+IntegerToString((long)requested_ticket)
+      +" @ "+DoubleToString(target,_Digits);
+   Print("Ramon execution: ",StatusLine);
+   WriteOpenDashboardPositions();
+   ProcessDashboardPredictedAutoCloseCrossings();
+   return true;
+}
+
+
 bool ProcessDashboardManualClose()
 {
    if(SmallOnlyMode)
@@ -4511,6 +4702,7 @@ bool ProcessDashboardManualClose()
    double profit_units=PositionGetDouble(POSITION_PROFIT);
    if(Trade.PositionClose(requested_ticket,MaxDeviationPoints))
    {
+      ClearDashboardAutoCloseTarget(requested_ticket);
       RecordDealTelemetry(Trade.ResultDeal(),"manual_dashboard_table_close");
       StatusLine="MANUAL TABLE CLOSE #"+IntegerToString((long)requested_ticket)
          +" P/L "+DoubleToString(profit_units,2)+" units";
@@ -4530,7 +4722,9 @@ void OnTimer()
    ReadControlRiskCap();
    ReadDecisionCadence();
    WriteOpenDashboardPositions();
+   ProcessDashboardPredictedAutoCloseCommand();
    ProcessDashboardManualClose();
+   ProcessDashboardPredictedAutoCloseCrossings();
    WriteOpenDashboardPositions();
    datetime now=TimeCurrent();
    bool management_due=(LastPositionManagementTime==0 || now-LastPositionManagementTime>=5);
