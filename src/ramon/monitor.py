@@ -938,6 +938,22 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
             live=True,
         ),
         model_row(
+            "Direction AI",
+            (health or {}).get("direction_model") or "DirectionAI-v1-Logistic",
+            "LIVE" if (health or {}).get("direction_quality_live") == 1 else "NOT READY",
+            {
+                "Architecture": (health or {}).get("direction_model"),
+                "Schema": (health or {}).get("direction_schema_version"),
+                "BUY probability": final.get("buy_success_probability", final.get("shadow_buy_success_probability")),
+                "SELL probability": final.get("sell_success_probability", final.get("shadow_sell_success_probability")),
+                "Quality margin": final.get("ai_engine_v2_quality_margin"),
+                "AI score": final.get("ai_engine_v2_score"),
+                "Selected": final.get("ai_engine_v2_candidate_direction"),
+                "Source": final.get("ai_engine_v2_direction_source"),
+            },
+            live=True,
+        ),
+        model_row(
             "Forecast Experimental",
             handler("forecast_shadow_model_handler", "OFF"),
             "READY" if timesfm_snapshot.get("timesfm3_experimental_ready", timesfm_snapshot.get("timesfm3_shadow_ready")) == 1 else "OFF" if (health or {}).get("timesfm3_experimental_enabled") == 0 else "NO SNAPSHOT",
@@ -1122,6 +1138,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
     role_state = "pass" if role_live and final else "observed" if final else "unknown"
     conditions = {
         "Forecast": ("pass" if base.get("decision") in {"BUY", "SELL"} else "blocked" if base.get("decision") == "WAIT" else "unknown", "تصمیم پایهٔ پیش‌بینی"),
+        "Direction AI": ("pass" if (health or {}).get("direction_quality_live") == 1 else "blocked", "مدل جهت زندهٔ مشترک برای Auto Ramon و جدول"),
         "Forecast Shadow": ("shadow" if timesfm_snapshot.get("timesfm3_shadow_ready") == 1 else "idle", "پیش‌بینی ناظر؛ مجوز ورود نیست"),
         "Regime": (role_state, "نقش مدل رژیم"),
         "Anomaly Detection": (moment_state, "گیت زندهٔ ناهنجاری؛ فعال و تازه، بدون وتو"),
