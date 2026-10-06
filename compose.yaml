@@ -56,6 +56,11 @@ services:
       retries: 3
 
   dashboard:
+    build:
+      context: .
+      args:
+        RAMON_UID: ${RAMON_UID:-1000}
+        RAMON_GID: ${RAMON_GID:-1000}
     image: ramon-ai-trader:local
     init: true
     restart: unless-stopped
