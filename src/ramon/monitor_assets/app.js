@@ -332,7 +332,7 @@ function renderOpportunities(data){
   for(const row of sortedOpportunities){
     const tr=document.createElement("tr");
     const p=row.success_probability;
-    tr.className=typeof p==="number"&&Number.isFinite(p)?(p>=0.70?"opportunity-confidence-high":p>=0.55?"opportunity-confidence-medium":p>=0.45?"opportunity-confidence-neutral":"opportunity-confidence-low"):"";
+    tr.className=typeof p==="number"&&Number.isFinite(p)?(p>=0.60?"opportunity-confidence-high":p>=0.55?"opportunity-confidence-medium":p>=0.45?"opportunity-confidence-neutral":"opportunity-confidence-low"):"";
     const livePnl=typeof row.live_profit_units==="number"&&Number.isFinite(row.live_profit_units)
       ?(" · P/L "+(row.live_profit_units>=0?"+":"")+row.live_profit_units.toFixed(2))
       :"";
@@ -344,7 +344,7 @@ function renderOpportunities(data){
       row.position_open&&typeof row.live_profit_units==="number"&&Number.isFinite(row.live_profit_units)
         ?((row.live_profit_units>=0?"+":"")+row.live_profit_units.toFixed(2)+" units")
         :"—",
-      !row.position_open&&typeof row.success_probability==="number"&&row.success_probability>=0.70
+      !row.position_open&&typeof row.success_probability==="number"&&row.success_probability>=0.60
         ?(row.chronos_entry_action==="ENTER_NEAR"
           ?"ورود نزدیک/الان · "+format(row.chronos_entry_price)
           :row.chronos_entry_action==="WAIT_PULLBACK"&&typeof row.chronos_entry_price==="number"
