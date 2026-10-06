@@ -1311,13 +1311,19 @@ def read_open_dashboard_positions(diagnostic):
             return result
         for raw in path.read_text(encoding="ascii", errors="ignore").splitlines():
             parts = raw.strip().split("|")
-            if len(parts) == 7:
+            if len(parts) == 9:
+                sample_key, execution_sample_key, direction, ticket, opened, profit, volume, open_price, current_price = parts
+            elif len(parts) == 7:
                 sample_key, execution_sample_key, direction, ticket, opened, profit, volume = parts
+                open_price = None
+                current_price = None
             elif len(parts) in {4, 6}:
                 sample_key, direction, ticket, opened = parts[:4]
                 execution_sample_key = sample_key
                 profit = parts[4] if len(parts) >= 6 else None
                 volume = parts[5] if len(parts) >= 6 else None
+                open_price = None
+                current_price = None
             else:
                 continue
             if (
@@ -1333,13 +1339,39 @@ def read_open_dashboard_positions(diagnostic):
                 "opened": int(opened) if opened.isdigit() else None,
                 "profit_units": number(profit),
                 "volume": number(volume),
+                "open_price": number(open_price),
+                "current_price": number(current_price),
             }
     except OSError:
         return {}
     return result
 
 
-def opportunities_with_execution_state(db, diagnostic, symbol):
+def chronos_exit_advice(health_url, open_info):
+    if not health_url or not open_info:
+        return None
+    direction = str(open_info.get("direction") or "")
+    entry_price = number(open_info.get("open_price"))
+    current_price = number(open_info.get("current_price"))
+    if direction not in {"BUY", "SELL"} or entry_price is None or current_price is None:
+        return None
+    url = str(health_url).rsplit("/", 1)[0] + "/position-exit-advice"
+    payload = json.dumps({
+        "direction": direction,
+        "entry_price": entry_price,
+        "current_price": current_price,
+        "horizon": 4,
+    }).encode("utf-8")
+    try:
+        request = Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+        with urlopen(request, timeout=1.5) as response:
+            data = object_json(response.read(100_000))
+        return data if data.get("model") and data.get("action") else None
+    except (OSError, ValueError):
+        return None
+
+
+def opportunities_with_execution_state(db, diagnostic, symbol, health_url=None):
     data = read_opportunities(db, symbol)
     opened = read_open_dashboard_positions(diagnostic)
     queue_path = Path(diagnostic).with_name("Ramon_ManualEntries.txt") if diagnostic else None
@@ -1360,6 +1392,13 @@ def opportunities_with_execution_state(db, diagnostic, symbol):
         row["execution_sample_key"] = open_info.get("execution_sample_key") if open_info else None
         row["live_profit_units"] = open_info.get("profit_units") if open_info else None
         row["position_volume"] = open_info.get("volume") if open_info else None
+        row["position_open_price"] = open_info.get("open_price") if open_info else None
+        row["position_current_price"] = open_info.get("current_price") if open_info else None
+        advice = chronos_exit_advice(health_url, open_info) if open_info else None
+        row["chronos_exit_advice"] = advice
+        row["chronos_exit_price"] = number(advice.get("suggested_exit_price")) if advice else None
+        row["chronos_exit_action"] = advice.get("action") if advice else None
+        row["chronos_exit_step"] = advice.get("forecast_peak_step") if advice else None
         row["entry_queued"] = sample_key in queued
         if row["position_open"]:
             row["actionable"] = False
@@ -1524,7 +1563,7 @@ def handler_for(db, diagnostic, symbol, health_url):
                 body = analysis_bundle(data, selected_stage).encode("utf-8")
                 self.reply(body, "text/plain; charset=utf-8")
             elif route == "/api/opportunities":
-                self.reply(json.dumps(opportunities_with_execution_state(db, diagnostic, symbol), ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
+                self.reply(json.dumps(opportunities_with_execution_state(db, diagnostic, symbol, health_url), ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
             elif route == "/api/snapshot":
                 health = None
                 try:
