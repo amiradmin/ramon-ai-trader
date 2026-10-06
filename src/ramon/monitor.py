@@ -1322,12 +1322,16 @@ def read_open_dashboard_positions(diagnostic):
             return result
         for raw in path.read_text(encoding="ascii", errors="ignore").splitlines():
             parts = raw.strip().split("|")
-            if len(parts) == 9:
+            if len(parts) == 10:
+                sample_key, execution_sample_key, direction, ticket, opened, profit, volume, open_price, current_price, auto_close_target = parts
+            elif len(parts) == 9:
                 sample_key, execution_sample_key, direction, ticket, opened, profit, volume, open_price, current_price = parts
+                auto_close_target = None
             elif len(parts) == 7:
                 sample_key, execution_sample_key, direction, ticket, opened, profit, volume = parts
                 open_price = None
                 current_price = None
+                auto_close_target = None
             elif len(parts) in {4, 6}:
                 sample_key, direction, ticket, opened = parts[:4]
                 execution_sample_key = sample_key
@@ -1335,6 +1339,7 @@ def read_open_dashboard_positions(diagnostic):
                 volume = parts[5] if len(parts) >= 6 else None
                 open_price = None
                 current_price = None
+                auto_close_target = None
             else:
                 continue
             if (
@@ -1352,6 +1357,7 @@ def read_open_dashboard_positions(diagnostic):
                 "volume": number(volume),
                 "open_price": number(open_price),
                 "current_price": number(current_price),
+                "auto_close_target": number(auto_close_target),
             }
     except OSError:
         return {}
@@ -1559,9 +1565,29 @@ def dashboard_entry_compatibility(diagnostic):
     return {"supported": True, "reason": "نسخه EA و وضعیت تازه تأیید شد", "version": raw}
 
 
+MIN_AUTO_CLOSE_EA_VERSION = (0, 58, 8)
+
+
+def dashboard_auto_close_compatibility(diagnostic):
+    state = dashboard_entry_compatibility(diagnostic)
+    if not state.get("supported"):
+        return state
+    raw = str(state.get("version") or "")
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", raw)
+    version = tuple(int(part) for part in match.groups()) if match else (0, 0, 0)
+    if version < MIN_AUTO_CLOSE_EA_VERSION:
+        return {
+            "supported": False,
+            "reason": f"خروج خودکار پیش‌بینی‌شده به Ramon 0.58.8 یا جدیدتر نیاز دارد؛ نسخه نصب‌شده {raw or 'نامشخص'} است.",
+            "version": raw,
+        }
+    return {"supported": True, "reason": "خروج خودکار پیش‌بینی‌شده آماده است", "version": raw}
+
+
 def opportunities_with_execution_state(db, diagnostic, symbol, health_url=None):
     data = read_opportunities(db, symbol)
     data["manual_entry_compatibility"] = dashboard_entry_compatibility(diagnostic)
+    data["auto_close_compatibility"] = dashboard_auto_close_compatibility(diagnostic)
     opened = read_open_dashboard_positions(diagnostic)
     queue_path = Path(diagnostic).with_name("Ramon_ManualEntries.txt") if diagnostic else None
     queued = set()
@@ -1587,6 +1613,8 @@ def opportunities_with_execution_state(db, diagnostic, symbol, health_url=None):
         row["position_volume"] = open_info.get("volume") if open_info else None
         row["position_open_price"] = open_info.get("open_price") if open_info else None
         row["position_current_price"] = open_info.get("current_price") if open_info else None
+        row["auto_close_target"] = open_info.get("auto_close_target") if open_info else None
+        row["auto_close_armed"] = bool(open_info and number(open_info.get("auto_close_target")) is not None and number(open_info.get("auto_close_target")) > 0)
         advice = chronos_exit_advice(health_url, open_info) if open_info else None
         row["chronos_exit_advice"] = advice
         row["chronos_exit_price"] = number(advice.get("suggested_exit_price")) if advice else None
@@ -1742,6 +1770,63 @@ def queue_manual_close(diagnostic, payload):
     }
 
 
+def queue_predicted_auto_close(diagnostic, symbol, health_url, payload):
+    if diagnostic is None:
+        raise ValueError("مسیر فایل اکسپرت در دسترس نیست")
+    compatibility = dashboard_auto_close_compatibility(diagnostic)
+    if not compatibility.get("supported"):
+        raise ValueError(compatibility.get("reason") or "نسخه EA از خروج خودکار پشتیبانی نمی‌کند")
+
+    sample_key = str(payload.get("sample_key") or "")
+    ticket = str(payload.get("ticket") or "")
+    if not re.fullmatch(r"[a-f0-9]{16}", sample_key) or not ticket.isdigit():
+        raise ValueError("شناسهٔ پوزیشن نامعتبر است")
+
+    opened = read_open_dashboard_positions(diagnostic)
+    row = opened.get(sample_key)
+    if not row or str(row.get("ticket")) != ticket:
+        raise ValueError("این پوزیشن دیگر در لیست بازهای Ramon نیست")
+
+    advice = chronos_exit_advice(health_url, row)
+    if not advice:
+        raise ValueError("پیش‌بینی خروج تازه Chronos در دسترس نیست")
+    action = str(advice.get("action") or "")
+    target = number(advice.get("suggested_exit_price"))
+    if action not in {"TARGET", "RECOVERY_EXIT"} or target is None or target <= 0:
+        if action in {"EXIT_NOW", "LOSS_EXIT_NOW"}:
+            raise ValueError("Chronos خروج فوری پیشنهاد می‌دهد؛ برای این وضعیت از دکمه بستن پوزیشن استفاده کن")
+        raise ValueError("Chronos فعلاً سطح خروج قابل مانیتور ندارد")
+
+    direction = str(row.get("direction") or "").upper()
+    current = number(row.get("current_price"))
+    if direction not in {"BUY", "SELL"} or current is None or current <= 0:
+        raise ValueError("قیمت جاری پوزیشن برای مسلح‌کردن خروج خودکار معتبر نیست")
+    # The target must be ahead of the current quote in the profitable/recovery
+    # direction; the EA re-validates ownership and the exact crossing condition.
+    if (direction == "BUY" and target <= current) or (direction == "SELL" and target >= current):
+        raise ValueError("سطح پیشنهادی Chronos دیگر جلوتر از قیمت جاری نیست؛ جدول را تازه کن")
+
+    execution_sample_key = str(row.get("execution_sample_key") or sample_key)
+    queue_path = Path(diagnostic).with_name("Ramon_AutoCloseCommands.txt")
+    with open(queue_path, "a", encoding="ascii", newline="") as out:
+        out.write(
+            f"{int(time.time())}|{sample_key}|{execution_sample_key}|{ticket}|"
+            f"{direction}|{float(target):.10f}\n"
+        )
+        out.flush()
+        os.fsync(out.fileno())
+    return {
+        "queued": True,
+        "sample_key": sample_key,
+        "execution_sample_key": execution_sample_key,
+        "ticket": ticket,
+        "direction": direction,
+        "target_price": float(target),
+        "chronos_action": action,
+        "forecast_peak_step": advice.get("forecast_peak_step"),
+    }
+
+
 def handler_for(db, diagnostic, symbol, health_url):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -1805,7 +1890,7 @@ def handler_for(db, diagnostic, symbol, health_url):
                 self.send_error(404)
 
         def do_POST(self):
-            if self.path not in {"/api/control", "/api/override", "/api/override/reset", "/api/manual-entry", "/api/manual-close", "/api/today-profit/reset"}:
+            if self.path not in {"/api/control", "/api/override", "/api/override/reset", "/api/manual-entry", "/api/manual-close", "/api/predicted-auto-close", "/api/today-profit/reset"}:
                 self.send_error(404)
                 return
             origin = self.headers.get("Origin")
@@ -1833,6 +1918,11 @@ def handler_for(db, diagnostic, symbol, health_url):
                     return
                 if self.path == "/api/manual-close":
                     result = queue_manual_close(diagnostic, payload)
+                    self.reply(json.dumps(result, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
+                    return
+
+                if self.path == "/api/predicted-auto-close":
+                    result = queue_predicted_auto_close(diagnostic, symbol, health_url, payload)
                     self.reply(json.dumps(result, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
                     return
 
