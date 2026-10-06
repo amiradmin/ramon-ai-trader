@@ -861,7 +861,11 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                             try:
                                 response["replay_input_saved"] = int(persist_replay_input(
                                     history_db, sample_key=sample_key, market=market, quote_time=quote_time,
-                                    forecast=audit_forecast, settings=settings, response={**response, "replay_input_saved": 1}))
+                                    forecast=audit_forecast, settings=settings, response={**response, "replay_input_saved": 1},
+                                    broker_utc_offset_seconds=(
+                                        int(payload["broker_utc_offset_seconds"])
+                                        if payload.get("broker_utc_offset_seconds") is not None else None
+                                    )))
                             except Exception as exc:
                                 print(f"Ramon replay-input warning: {type(exc).__name__}: {exc}", flush=True)
                     except Exception as exc:
