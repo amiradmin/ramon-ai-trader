@@ -8,7 +8,7 @@ from statistics import median
 
 from .core import Market, atr14
 
-POLICY_VERSION = "market-state-v1"
+POLICY_VERSION = "market-state-v2"
 
 
 def assess_market(market: Market, *, max_spread_points: int = 50) -> dict:
@@ -77,8 +77,13 @@ def assess_market(market: Market, *, max_spread_points: int = 50) -> dict:
     add((fake_up and (fake_down or breakout_up or retest_up))
         or (fake_down and (breakout_down or retest_down)), "CONFLICTING_STRUCTURE")
     state = next((flag for flag in flags if flag in hazards), flags[0] if flags else "UNCERTAIN")
-    if hazards.intersection(flags) or state=="UNCERTAIN" or state=="RANGE_MIDDLE":
+    if hazards.intersection(flags) or state=="UNCERTAIN":
         route, allowed = "WAIT", []
+    elif state=="RANGE_MIDDLE":
+        # A neutral position inside a measured range is no longer an absolute veto.
+        # The final policy still requires the model, intrabar confirmation and the
+        # independent AI-trend confirmation to agree before any order is allowed.
+        route, allowed = "CONFIRMED_MODEL", ["BUY", "SELL"]
     elif state in {"RANGE_LOW", "RANGE_HIGH"}:
         route, allowed = "RANGE_REVERSAL", ["BUY" if state=="RANGE_LOW" else "SELL"]
     else:
