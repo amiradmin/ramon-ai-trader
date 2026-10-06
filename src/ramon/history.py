@@ -552,7 +552,8 @@ def validate_trade_telemetry(payload: dict[str, object], net: float) -> dict[str
 
 
 def persist_replay_input(db: str | Path, *, sample_key: str, market: Market,
-                         quote_time: int | None, forecast, settings, response: dict) -> bool:
+                         quote_time: int | None, forecast, settings, response: dict,
+                         broker_utc_offset_seconds: int | None = None) -> bool:
     """Store exact price inputs for later offline replay, deduplicating M15 bars.
 
     Contains no credentials/account identifiers. This is best-effort telemetry;
@@ -570,7 +571,9 @@ def persist_replay_input(db: str | Path, *, sample_key: str, market: Market,
     provenance = {"schema_version": 1, "settings": asdict(settings), "forecast": asdict(forecast),
                   "request": {"symbol": market.symbol, "timeframe": market.timeframe,
                               "bid": market.bid, "ask": market.ask, "point": market.point,
-                              "quote_time": quote_time, "micro_bars": [asdict(b) for b in market.micro_bars]},
+                              "quote_time": quote_time,
+                              "broker_utc_offset_seconds": broker_utc_offset_seconds,
+                              "micro_bars": [asdict(b) for b in market.micro_bars]},
                   "policy_replay_scope": "price_only; no account or execution reconstruction"}
     with sqlite3.connect(Path(db), timeout=.25) as con:
         con.execute("CREATE TABLE IF NOT EXISTS input_blobs (sha256 TEXT PRIMARY KEY, codec TEXT NOT NULL, body BLOB NOT NULL)")
