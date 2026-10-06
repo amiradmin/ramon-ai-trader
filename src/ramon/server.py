@@ -870,6 +870,25 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         market_state_route="AI_ENGINE_V2",
                         market_state_policy=market_assessment["version"],
                     )
+                    if response.get("ai_engine_v2_selected") and response.get("decision") in {"BUY", "SELL"}:
+                        live_target = build_target_structure(
+                            market,
+                            direction=str(response["decision"]),
+                            atr=result.atr,
+                            target_distance=result.target_distance,
+                        )
+                        target_payload = live_target.to_dict()
+                        response["target_structure_ready"] = live_target.ready
+                        response["target_method"] = live_target.method
+                        response["target_direction"] = live_target.direction
+                        response["target_impulse_start"] = live_target.impulse_start
+                        response["target_impulse_end"] = live_target.impulse_end
+                        response["target_impulse_range"] = live_target.impulse_range
+                        response["target_impulse_atr"] = live_target.impulse_atr
+                        response["target_tp1"] = live_target.tp1
+                        response["target_tp2"] = live_target.tp2
+                        response["target_tp3"] = live_target.tp3
+                        response["legacy_target_price"] = live_target.legacy_target
                 elif settings.market_state_policy_enabled and not reversal_selected:
                     apply_market_policy(response, market_assessment)
                 elif not reversal_selected:
