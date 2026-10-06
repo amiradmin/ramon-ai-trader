@@ -1,6 +1,6 @@
 #property strict
-#property version "1.588"
-#define RAMON_EA_VERSION "0.58.8"
+#property version "1.589"
+#define RAMON_EA_VERSION "0.58.9"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -4795,6 +4795,7 @@ void OnTimer()
    double ai_trend_confirmed=0.0,ai_trend_score=0.0,ai_trend_move_atr=0.0,ai_trend_consistency=0.0;
    double trend_min_path_atr=0.0,trend_min_consistency=0.0,trend_min_edge_fraction=0.0,trend_min_micro_move_atr=0.0;
    double manual_execution_override=0.0;
+   double ai_engine_v2_selected=0.0;
    if(!JsonText(reply,"decision",decision)
       || !JsonText(reply,"reason",reason)
       || !JsonText(reply,"sample_key",sample_key)
@@ -4852,6 +4853,7 @@ void OnTimer()
       || !JsonNumber(reply,"trend_min_edge_fraction",trend_min_edge_fraction)
       || !JsonNumber(reply,"trend_min_micro_move_atr",trend_min_micro_move_atr)
       || !JsonNumber(reply,"manual_execution_override",manual_execution_override)
+      || !JsonNumber(reply,"ai_engine_v2_selected",ai_engine_v2_selected)
       || !JsonNumber(reply,"spread_points",model_spread)
       || !JsonNumber(reply,"stop_distance",stop_distance)
       || !JsonNumber(reply,"target_distance",target_distance)
@@ -5187,10 +5189,14 @@ void OnTimer()
    double range_execution=0.0,range_stop=0.0,range_target=0.0,range_low=0.0,range_high=0.0;
    JsonNumber(reply,"range_execution",range_execution);
    bool range_trade=(range_execution>=0.5 && !dashboard_manual_entry);
-   if(!range_trade && manual_execution_override<0.5
+   bool live_direction_ai=(ai_engine_v2_selected>=0.5 && (decision=="BUY" || decision=="SELL"));
+   if(!range_trade && manual_execution_override<0.5 && !live_direction_ai
       && (intrabar_confirmed<0.5 || ai_trend_confirmed<0.5
       || intrabar_direction!=decision || ai_trend_direction!=decision))
    { StatusLine="DIRECTION GUARD: normal entry needs aligned confirmations"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+   if(!range_trade && live_direction_ai)
+      Print("Ramon execution: LIVE DIRECTION AI accepted ",decision,
+         " sample=",sample_key);
    if(!range_trade && manual_execution_override>=0.5)
       Print("Ramon execution: MANUAL EXECUTION OVERRIDE accepted for ",decision,
          " sample=",sample_key);
