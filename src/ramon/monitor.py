@@ -1347,6 +1347,28 @@ def read_open_dashboard_positions(diagnostic):
     return result
 
 
+def chronos_entry_advice(health_url, row):
+    probability = number(row.get("success_probability"))
+    if probability is None or probability < 0.70 or not health_url:
+        return None
+    direction = str(row.get("direction") or "")
+    if direction not in {"BUY", "SELL"}:
+        return None
+    url = str(health_url).rsplit("/", 1)[0] + "/opportunity-entry-advice"
+    payload = json.dumps({
+        "direction": direction,
+        "success_probability": probability,
+        "horizon": 4,
+    }).encode("utf-8")
+    try:
+        request = Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+        with urlopen(request, timeout=1.5) as response:
+            data = object_json(response.read(100_000))
+        return data if data.get("model") and data.get("action") else None
+    except (OSError, ValueError):
+        return None
+
+
 def chronos_exit_advice(health_url, open_info):
     if not health_url or not open_info:
         return None
@@ -1399,6 +1421,11 @@ def opportunities_with_execution_state(db, diagnostic, symbol, health_url=None):
         row["chronos_exit_price"] = number(advice.get("suggested_exit_price")) if advice else None
         row["chronos_exit_action"] = advice.get("action") if advice else None
         row["chronos_exit_step"] = advice.get("forecast_peak_step") if advice else None
+        entry_advice = chronos_entry_advice(health_url, row) if not open_info else None
+        row["chronos_entry_advice"] = entry_advice
+        row["chronos_entry_action"] = entry_advice.get("action") if entry_advice else None
+        row["chronos_entry_price"] = number(entry_advice.get("suggested_entry_price")) if entry_advice else None
+        row["chronos_entry_minutes"] = entry_advice.get("forecast_entry_minutes") if entry_advice else None
         row["entry_queued"] = sample_key in queued
         if row["position_open"]:
             row["actionable"] = False
