@@ -444,15 +444,83 @@ def income_roadmap(readiness, diag):
     }
 
 
-def recent_market_context(db, symbol="XAUUSD_l", m15_limit=12, m1_limit=15, *, signal_bar_time=None, quote_time=None):
-    """Historical context, not the exact candles supplied to the selected decision.
+def exact_decision_market_context(db, sample_key, *, m15_limit=12):
+    """Load the immutable market snapshot supplied to this exact decision."""
+    if not sample_key or not Path(db).is_file():
+        return None
+    try:
+        import zlib
+        with sqlite3.connect(Path(db).resolve().as_uri() + "?mode=ro", uri=True) as con:
+            row = con.execute(
+                """SELECT b.codec,b.body,a.provenance_json
+                   FROM inference_audit a
+                   JOIN input_blobs b ON b.sha256=a.input_sha256
+                   WHERE a.sample_key=?""",
+                (str(sample_key),),
+            ).fetchone()
+        if not row or row[0] != "zlib-json-v1":
+            return None
+        context = json.loads(zlib.decompress(row[1]).decode("utf-8"))
+        provenance = json.loads(row[2] or "{}")
+        request = provenance.get("request") if isinstance(provenance.get("request"), dict) else {}
+        offset = number(request.get("broker_utc_offset_seconds"))
+        if offset is None:
+            return None
+        offset = int(offset)
+        spread_points = 0
+        bid, ask, point = (number(request.get(k)) for k in ("bid", "ask", "point"))
+        if bid is not None and ask is not None and point is not None and point > 0:
+            spread_points = round((ask - bid) / point)
 
-    Stored bars use the broker clock; no per-bar UTC offset is persisted.
-    """
+        def convert(rows, *, latest_spread=False):
+            output = []
+            rows = list(rows or [])
+            for index, bar in enumerate(rows):
+                try:
+                    output.append({
+                        "time": int(bar["time"]) - offset,
+                        "broker_time": int(bar["time"]),
+                        "time_basis": "UTC canonical from recorded broker offset",
+                        "broker_utc_offset_seconds": offset,
+                        "open": float(bar["open"]),
+                        "high": float(bar["high"]),
+                        "low": float(bar["low"]),
+                        "close": float(bar["close"]),
+                        "spread_points": spread_points if latest_spread and index == len(rows) - 1 else 0,
+                        "body": float(bar["close"]) - float(bar["open"]),
+                        "range": float(bar["high"]) - float(bar["low"]),
+                    })
+                except (KeyError, TypeError, ValueError, OverflowError):
+                    return []
+            return output
+
+        m15 = convert((context.get("bars") or [])[-int(m15_limit):])
+        m1 = convert(request.get("micro_bars") or [], latest_spread=True)
+        quote_time = number(request.get("quote_time"))
+        return {
+            "m15": m15,
+            "m1": m1,
+            "exact_input": True,
+            "sample_key": str(sample_key),
+            "broker_utc_offset_seconds": offset,
+            "quote_time_utc": int(quote_time) - offset if quote_time is not None else None,
+            "warnings": [],
+        }
+    except (sqlite3.Error, OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
+
+
+def recent_market_context(db, symbol="XAUUSD_l", m15_limit=12, m1_limit=15, *,
+                          sample_key=None, signal_bar_time=None, quote_time=None):
+    """Return exact decision input when available; otherwise historical fallback."""
+    exact = exact_decision_market_context(db, sample_key, m15_limit=m15_limit)
+    if exact is not None:
+        return exact
+
     path = Path(db)
     if not path.is_file():
-        return {"m15": [], "m1": []}
-    result = {"m15": [], "m1": []}
+        return {"m15": [], "m1": [], "exact_input": False, "warnings": []}
+    result = {"m15": [], "m1": [], "exact_input": False}
     try:
         with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True) as con:
             for timeframe, limit, key in (("M15", m15_limit, "m15"), ("M1", m1_limit, "m1")):
@@ -479,10 +547,10 @@ def recent_market_context(db, symbol="XAUUSD_l", m15_limit=12, m1_limit=15, *, s
                     for t, o, h, lo, cl, spread in rows
                 ]
     except sqlite3.Error:
-        return {"m15": [], "m1": []}
+        return {"m15": [], "m1": [], "exact_input": False, "warnings": []}
     warnings = []
     if any(result.values()):
-        warnings.append("زمان کندل‌های تاریخچه به وقت بروکر است؛ اختلاف با UTC ثبت نشده و این کندل‌ها ورودی دقیق تصمیم نیستند")
+        warnings.append("این تصمیم قبل از ثبت snapshot دقیق/offset ساخته شده است؛ کندل‌های نمایش‌داده‌شده فقط تاریخچهٔ تقریبی‌اند")
     signal = number(signal_bar_time)
     quote = number(quote_time)
     reference = quote if quote is not None else signal + 900 if signal is not None else None
@@ -1040,7 +1108,8 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
     }
     roadmap = income_roadmap(readiness, diag)
     recent_market = recent_market_context(
-        db, symbol, signal_bar_time=base.get("signal_bar_time"), quote_time=sample.get("quote_time")
+        db, symbol, sample_key=sample.get("sample_key"),
+        signal_bar_time=base.get("signal_bar_time"), quote_time=sample.get("quote_time")
     )
     warnings = [x for x in (diag_error, db_error) if x]
     warnings.extend(recent_market.get("warnings", []))
