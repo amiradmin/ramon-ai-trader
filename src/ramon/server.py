@@ -193,6 +193,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
     finbert_shadow = FinBertNewsShadow.from_env(lazy=True)
     moment_live_enabled = os.getenv("RAMON_MOMENT_LIVE_ENABLED", "1").strip().lower() in {"1","true","yes","on"}
     moment_live_threshold = float(os.getenv("RAMON_MOMENT_LIVE_THRESHOLD", "2.0"))
+    moment_hard_veto_threshold = float(os.getenv("RAMON_MOMENT_HARD_VETO_THRESHOLD", "5.0"))
     finbert_live_enabled = os.getenv("RAMON_FINBERT_LIVE_ENABLED", "1").strip().lower() in {"1","true","yes","on"}
     finbert_live_threshold = float(os.getenv("RAMON_FINBERT_LIVE_THRESHOLD", "0.35"))
     selector_live_enabled = os.getenv("RAMON_SELECTOR_LIVE_ENABLED", "1").strip().lower() in {"1","true","yes","on"}
@@ -315,6 +316,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     **model_handlers(),
                     "moment_live_enabled": int(moment_live_enabled),
                     "moment_live_threshold": moment_live_threshold,
+                    "moment_hard_veto_threshold": moment_hard_veto_threshold,
                     "finbert_live_enabled": int(finbert_live_enabled),
                     "finbert_live_threshold": finbert_live_threshold,
                     "selector_live_enabled": int(selector_live_enabled),
@@ -623,6 +625,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         minimum_quality=selector_minimum_quality,
                         maximum_full_sl_probability=selector_maximum_full_sl,
                         minimum_quality_margin=selector_minimum_margin,
+                        anomaly_ratio=float(response.get("moment_anomaly_ratio", -1.0)),
+                        anomaly_soft_threshold=moment_live_threshold,
                     )
                 else:
                     response.update({
@@ -644,7 +648,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 moment_veto = (
                     moment_live_enabled
                     and moment_fresh
-                    and moment_ratio >= moment_live_threshold
+                    and moment_ratio >= moment_hard_veto_threshold
                 )
                 finbert_ready = int(response.get("finbert_shadow_ready", 0)) == 1
                 finbert_score = abs(float(response.get("finbert_directional_score", 0.0)))
@@ -658,6 +662,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 response["moment_live_fresh"] = int(moment_fresh)
                 response["moment_live_veto"] = int(moment_veto)
                 response["moment_live_threshold"] = moment_live_threshold
+                response["moment_hard_veto_threshold"] = moment_hard_veto_threshold
+                response["moment_risk_mode"] = "SOFT_PENALTY_WITH_EXTREME_HARD_VETO"
                 response["finbert_live_active"] = int(finbert_live_enabled)
                 response["finbert_live_veto"] = int(finbert_veto)
                 response["finbert_live_threshold"] = finbert_live_threshold
