@@ -221,7 +221,15 @@ function renderOpportunities(data){
   const labels={OPEN:"هنوز باز",TP_OBSERVED:"هدف در نمونه‌ها دیده شد",SL_OBSERVED:"حد ضرر در نمونه‌ها دیده شد",TIMEOUT_OBSERVED:"پایان ۴ ساعت",DATA_GAP:"نامشخص؛ شکاف داده"};
   const reasons={trend_conflict:"تعارض جهت",insufficient_model_edge:"مزیت ناکافی",insufficient_model_strength:"قدرت ناکافی",adverse_intrabar_timing:"حرکت کوتاه مخالف",late_entry_extension:"ورود دیرهنگام",direction_confirmation_required:"نبود تأیید جهت",market_direction_conflict:"تعارض جهت مستقل",market_direction_neutral:"جهت خنثی",confirmed_countertrend_reversal:"برگشت تأییدشده"};
   const format=v=>typeof v!=="number"||!Number.isFinite(v)?"—":v.toFixed(3);
-  for(const row of data.opportunities||[]){
+  const sortedOpportunities=[...(data.opportunities||[])].sort((a,b)=>{
+    const aOpen=a.position_open?1:0,bOpen=b.position_open?1:0;
+    if(aOpen!==bOpen)return bOpen-aOpen;
+    const ap=typeof a.success_probability==="number"&&Number.isFinite(a.success_probability)?a.success_probability:-1;
+    const bp=typeof b.success_probability==="number"&&Number.isFinite(b.success_probability)?b.success_probability:-1;
+    if(ap!==bp)return bp-ap;
+    return (b.latest_captured||b.captured||0)-(a.latest_captured||a.captured||0);
+  });
+  for(const row of sortedOpportunities){
     const tr=document.createElement("tr");
     const p=row.success_probability;
     tr.className=typeof p==="number"&&Number.isFinite(p)?(p>=0.70?"opportunity-confidence-high":p>=0.55?"opportunity-confidence-medium":p>=0.45?"opportunity-confidence-neutral":"opportunity-confidence-low"):"";
