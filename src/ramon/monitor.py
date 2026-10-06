@@ -1301,17 +1301,28 @@ def read_open_dashboard_positions(diagnostic):
             return result
         for raw in path.read_text(encoding="ascii", errors="ignore").splitlines():
             parts = raw.strip().split("|")
-            if len(parts) not in {4, 6}:
+            if len(parts) == 7:
+                sample_key, execution_sample_key, direction, ticket, opened, profit, volume = parts
+            elif len(parts) in {4, 6}:
+                sample_key, direction, ticket, opened = parts[:4]
+                execution_sample_key = sample_key
+                profit = parts[4] if len(parts) >= 6 else None
+                volume = parts[5] if len(parts) >= 6 else None
+            else:
                 continue
-            sample_key, direction, ticket, opened = parts[:4]
-            if not re.fullmatch(r"[a-f0-9]{16}", sample_key) or direction not in {"BUY", "SELL"}:
+            if (
+                not re.fullmatch(r"[a-f0-9]{16}", sample_key)
+                or not re.fullmatch(r"[a-f0-9]{16}", execution_sample_key)
+                or direction not in {"BUY", "SELL"}
+            ):
                 continue
             result[sample_key] = {
+                "execution_sample_key": execution_sample_key,
                 "direction": direction,
                 "ticket": ticket,
                 "opened": int(opened) if opened.isdigit() else None,
-                "profit_units": number(parts[4]) if len(parts) >= 6 else None,
-                "volume": number(parts[5]) if len(parts) >= 6 else None,
+                "profit_units": number(profit),
+                "volume": number(volume),
             }
     except OSError:
         return {}
@@ -1336,6 +1347,7 @@ def opportunities_with_execution_state(db, diagnostic, symbol):
         open_info = opened.get(sample_key)
         row["position_open"] = bool(open_info)
         row["position_ticket"] = open_info.get("ticket") if open_info else None
+        row["execution_sample_key"] = open_info.get("execution_sample_key") if open_info else None
         row["live_profit_units"] = open_info.get("profit_units") if open_info else None
         row["position_volume"] = open_info.get("volume") if open_info else None
         row["entry_queued"] = sample_key in queued
@@ -1384,6 +1396,7 @@ def queue_manual_entry(db, diagnostic, symbol, payload):
     common_dir = Path(diagnostic).parent
     queue_path = common_dir / "Ramon_ManualEntries.txt"
 
+    origin_sample_key = str(row.get("sample_key") or "")
     if recheck:
         # Re-anchor a human-selected direction to the newest immutable decision
         # snapshot. This avoids executing stale prices/sample attribution.
@@ -1426,7 +1439,7 @@ def queue_manual_entry(db, diagnostic, symbol, payload):
         f"{int(time.time())}|{signal_bar_time}|{direction}|{sample_key}|"
         f"{risk_distance:.10f}|{target_distance:.10f}|{edge:.10f}|"
         f"{probability_value:.10f}"
-        + (f"|{mode}" if mode != "NORMAL" else "")
+        + (f"|{mode}|{origin_sample_key}" if mode != "NORMAL" else "")
         + "\n"
     )
     with open(queue_path, "a", encoding="ascii", newline="") as out:
@@ -1456,10 +1469,16 @@ def queue_manual_close(diagnostic, payload):
         raise ValueError("این پوزیشن دیگر در لیست بازهای Ramon نیست")
     queue_path = Path(diagnostic).with_name("Ramon_ManualCloses.txt")
     with open(queue_path, "a", encoding="ascii", newline="") as out:
-        out.write(f"{int(time.time())}|{sample_key}|{ticket}\n")
+        execution_sample_key = str(row.get("execution_sample_key") or sample_key)
+        out.write(f"{int(time.time())}|{sample_key}|{execution_sample_key}|{ticket}\n")
         out.flush()
         os.fsync(out.fileno())
-    return {"queued": True, "sample_key": sample_key, "ticket": ticket}
+    return {
+        "queued": True,
+        "sample_key": sample_key,
+        "execution_sample_key": row.get("execution_sample_key") or sample_key,
+        "ticket": ticket,
+    }
 
 
 def handler_for(db, diagnostic, symbol, health_url):
