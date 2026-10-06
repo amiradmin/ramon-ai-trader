@@ -270,6 +270,7 @@ function renderLiveMarketSync(){
 }
 function renderOpportunities(data){
   renderLiveMarketSync();
+  const compatibility=data.manual_entry_compatibility||{supported:false,reason:"وضعیت EA قابل تأیید نیست"};
   const body=$("opportunity-rows");body.replaceChildren();
   const daily=data.today_profit||{};
   const dailyEl=$("today-profit-summary");
@@ -363,8 +364,13 @@ function renderOpportunities(data){
       button.title="برای حفظ attribution آموزشی، همان فرصت دوباره اجرا نمی‌شود";
     }else{
       const recheck=!row.actionable;
-      button.textContent=recheck?"بازبینی و ورود "+row.direction:"باز کردن "+row.direction;
-      button.disabled=false;
+      button.textContent=!compatibility.supported?"EA نیاز به به‌روزرسانی دارد":recheck?"بازبینی و ورود "+row.direction:"باز کردن "+row.direction;
+      button.disabled=!compatibility.supported;
+      if(!compatibility.supported){
+        button.title=compatibility.reason;
+        action.append(button);tr.append(action);body.append(tr);
+        continue;
+      }
       button.title=recheck
         ?"جهت این ردیف روی snapshot تازه بررسی می‌شود؛ فقط Safety Gateهای اجرایی می‌توانند مانع سفارش شوند"
         :"فرمان ورود به EA ارسال می‌شود؛ EA دوباره ریسک و قفل‌های اجرایی را بررسی می‌کند";
@@ -377,10 +383,11 @@ function renderOpportunities(data){
   const lastDecision=Math.max(0,...(data.opportunities||[]).map(r=>Number(r.latest_captured||r.captured||0)));
   const stale=lastDecision>0 && Date.now()/1000-lastDecision>120;
   const refreshedAt=new Intl.DateTimeFormat("fa-IR",{timeZone:"Asia/Tehran",hour:"2-digit",minute:"2-digit",second:"2-digit"}).format(new Date());
+  const compatibilityWarning=compatibility.supported?"":" · ⚠ "+compatibility.reason;
   opportunitySet("opportunity-status",data.error?"دریافت جدول ناموفق: "+data.error:(data.opportunities||[]).length?
     "آخرین ۲۴ ساعت · "+data.opportunities.length+" کاندید · آخرین نمونه: "+(lastDecision?opportunityDate.format(new Date(lastDecision*1000)):"—")+
-    " · دریافت موفق: "+refreshedAt+(stale?" · هشدار: نمونه جدید ثبت نشده":"")+perfText:
-    "هنوز کاندیدی با مزیت مثبت ثبت نشده · دریافت موفق: "+refreshedAt+perfText);
+    " · دریافت موفق: "+refreshedAt+(stale?" · هشدار: نمونه جدید ثبت نشده":"")+compatibilityWarning+perfText:
+    "هنوز کاندیدی با مزیت مثبت ثبت نشده · دریافت موفق: "+refreshedAt+compatibilityWarning+perfText);
 }
 let opportunityInFlight=false;
 async function refreshOpportunities(){
