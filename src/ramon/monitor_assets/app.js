@@ -221,6 +221,14 @@ function renderOpportunities(data){
   const labels={OPEN:"هنوز باز",TP_OBSERVED:"هدف در نمونه‌ها دیده شد",SL_OBSERVED:"حد ضرر در نمونه‌ها دیده شد",TIMEOUT_OBSERVED:"پایان ۴ ساعت",DATA_GAP:"نامشخص؛ شکاف داده"};
   const reasons={trend_conflict:"تعارض جهت",insufficient_model_edge:"مزیت ناکافی",insufficient_model_strength:"قدرت ناکافی",adverse_intrabar_timing:"حرکت کوتاه مخالف",late_entry_extension:"ورود دیرهنگام",direction_confirmation_required:"نبود تأیید جهت",market_direction_conflict:"تعارض جهت مستقل",market_direction_neutral:"جهت خنثی",confirmed_countertrend_reversal:"برگشت تأییدشده"};
   const format=v=>typeof v!=="number"||!Number.isFinite(v)?"—":v.toFixed(3);
+  const estimatedPnlAt=(row,target)=>{
+    const pnl=row.live_profit_units,entry=row.position_open_price,current=row.position_current_price;
+    if(![pnl,entry,current,target].every(v=>typeof v==="number"&&Number.isFinite(v)))return null;
+    const currentMove=current-entry,targetMove=target-entry;
+    if(Math.abs(currentMove)<1e-9)return null;
+    return pnl*(targetMove/currentMove);
+  };
+  const pnlText=v=>typeof v!=="number"||!Number.isFinite(v)?"—":((v>=0?"+":"")+Math.abs(v).toFixed(1)+" سنت "+(v>=0?"سود":"ضرر"));
   const sortedOpportunities=[...(data.opportunities||[])].sort((a,b)=>{
     const aOpen=a.position_open?1:0,bOpen=b.position_open?1:0;
     if(aOpen!==bOpen)return bOpen-aOpen;
@@ -246,12 +254,16 @@ function renderOpportunities(data){
         :"—",
       row.position_open
         ?(row.chronos_exit_action==="EXIT_NOW"
-          ?"خروج نزدیک قیمت فعلی · "+format(row.position_current_price)
-          :row.chronos_exit_action==="TARGET"&&typeof row.chronos_exit_price==="number"
-            ?format(row.chronos_exit_price)+" · حدود "+((row.chronos_exit_step||1)*15)+" دقیقه"
-            :row.chronos_exit_action==="NO_PROFIT_TARGET"
-              ?"فعلاً هدف سودی معتبر ندارد"
-              :"در حال محاسبه…")
+          ?"خروج نزدیک · حدود "+pnlText(row.live_profit_units)
+          :row.chronos_exit_action==="LOSS_EXIT_NOW"
+            ?"خروج نزدیک از ضرر · حدود "+pnlText(row.live_profit_units)
+            :row.chronos_exit_action==="RECOVERY_EXIT"&&typeof row.chronos_exit_price==="number"
+              ?"خروج برای کاهش ضرر · "+format(row.chronos_exit_price)+" · حدود "+((row.chronos_exit_step||1)*15)+" دقیقه · "+pnlText(estimatedPnlAt(row,row.chronos_exit_price))
+              :row.chronos_exit_action==="TARGET"&&typeof row.chronos_exit_price==="number"
+                ?format(row.chronos_exit_price)+" · حدود "+((row.chronos_exit_step||1)*15)+" دقیقه · "+pnlText(estimatedPnlAt(row,row.chronos_exit_price))
+                :row.chronos_exit_action==="NO_PROFIT_TARGET"
+                  ?"فعلاً هدف سودی معتبر ندارد"
+                  :"در حال محاسبه…")
         :"—"];
     cells.forEach((text,index)=>{const td=document.createElement("td");td.textContent=text;if([2,3,4,5,8,9].includes(index))td.dir="ltr";tr.append(td);});
     const action=document.createElement("td"),button=document.createElement("button");
