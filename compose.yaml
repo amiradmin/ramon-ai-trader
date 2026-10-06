@@ -87,6 +87,42 @@ services:
       - ./data:/data:ro
       - ${HOME}/.mt5/drive_c/users:/mt5-users
 
+  training-dashboard:
+    build:
+      context: .
+      args:
+        RAMON_UID: ${RAMON_UID:-1000}
+        RAMON_GID: ${RAMON_GID:-1000}
+    image: ramon-ai-trader:local
+    init: true
+    restart: unless-stopped
+    depends_on:
+      model:
+        condition: service_healthy
+    command:
+      - python
+      - -m
+      - ramon.training_dashboard
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8015"
+      - --db
+      - /data/ramon_history.sqlite3
+      - --out
+      - /checkpoints/ensemble
+      - --model-url
+      - http://model:8012
+      - --minimum-samples
+      - "150"
+    environment:
+      CHRONOS_MODEL: ${CHRONOS_MODEL:-autogluon/chronos-2-small}
+    ports:
+      - "127.0.0.1:8015:8015"
+    volumes:
+      - ./data:/data
+      - ./checkpoints:/checkpoints
+
   market-dashboard:
     image: ramon-ai-trader:local
     init: true
