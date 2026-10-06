@@ -1,6 +1,6 @@
 #property strict
-#property version "1.579"
-#define RAMON_EA_VERSION "0.57.9"
+#property version "1.580"
+#define RAMON_EA_VERSION "0.58.0"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -4239,6 +4239,7 @@ int ReadDashboardManualEntry(
    double &target_distance,
    double &edge,
    double &probability,
+   string &mode,
    string &why
 )
 {
@@ -4248,6 +4249,7 @@ int ReadDashboardManualEntry(
    target_distance=0.0;
    edge=0.0;
    probability=-1.0;
+   mode="NORMAL";
    why="";
    if(SmallOnlyMode)
       return 0;
@@ -4290,7 +4292,7 @@ int ReadDashboardManualEntry(
    string parts[];
    ushort separator=StringGetCharacter("|",0);
    int count=StringSplit(lines[0],separator,parts);
-   if(count!=8)
+   if(count!=8 && count!=9)
    { why="invalid command"; return -1; }
 
    datetime requested=(datetime)StringToInteger(parts[0]);
@@ -4301,17 +4303,23 @@ int ReadDashboardManualEntry(
    double command_target=StringToDouble(parts[5]);
    double command_edge=StringToDouble(parts[6]);
    double command_probability=StringToDouble(parts[7]);
+   string command_mode=(count==9 ? parts[8] : "NORMAL");
    datetime utc_now=TimeGMT();
 
    if(side!="BUY" && side!="SELL")
    { why="invalid direction"; return -1; }
    if(!ValidSampleKey(command_sample))
    { why="invalid sample key"; return -1; }
-   if(command_risk<=0.0 || command_target<=0.0 || command_edge<=0.0)
+   if(command_risk<=0.0 || command_target<=0.0)
    { why="invalid opportunity geometry"; return -1; }
+   if(command_mode!="NORMAL" && command_mode!="RECHECK")
+   { why="invalid command mode"; return -1; }
+   if(command_mode=="NORMAL" && command_edge<=0.0)
+   { why="invalid opportunity edge"; return -1; }
    if(command_probability>1.0 || command_probability< -1.0)
    { why="invalid probability"; return -1; }
-   if(requested<=0 || utc_now-requested>90 || requested-utc_now>5)
+   int command_ttl=(command_mode=="RECHECK" ? 120 : 90);
+   if(requested<=0 || utc_now-requested>command_ttl || requested-utc_now>5)
    { why="command expired"; return -1; }
    if(signal_bar!=current_bar)
    { why="signal bar changed"; return -1; }
@@ -4322,6 +4330,7 @@ int ReadDashboardManualEntry(
    target_distance=command_target;
    edge=command_edge;
    probability=command_probability;
+   mode=command_mode;
    Print("Ramon manual dashboard command consumed side=",side,
       " sample=",command_sample,
       " bar=",IntegerToString((long)signal_bar),
@@ -4358,7 +4367,7 @@ void OnTimer()
    // Do not consume a queued manual command until a valid model snapshot has
    // reached the execution section. This prevents commands from disappearing
    // when a network/parser/telemetry return happens earlier in the timer cycle.
-   string dashboard_direction="",dashboard_sample_key="",dashboard_command_reason="";
+   string dashboard_direction="",dashboard_sample_key="",dashboard_command_mode="NORMAL",dashboard_command_reason="";
    double dashboard_risk_distance=0.0,dashboard_target_distance=0.0;
    double dashboard_edge=0.0,dashboard_probability=-1.0;
    int dashboard_command=0;
@@ -4654,7 +4663,7 @@ void OnTimer()
       dashboard_command=ReadDashboardManualEntry(
          closed,dashboard_direction,dashboard_sample_key,
          dashboard_risk_distance,dashboard_target_distance,
-         dashboard_edge,dashboard_probability,dashboard_command_reason
+         dashboard_edge,dashboard_probability,dashboard_command_mode,dashboard_command_reason
       );
       if(dashboard_command<0)
          Print("Ramon manual dashboard entry ignored: ",dashboard_command_reason);
@@ -4672,14 +4681,14 @@ void OnTimer()
    if(dashboard_command>0)
    {
       decision=dashboard_direction;
-      reason="manual_dashboard_opportunity";
+      reason=(dashboard_command_mode=="RECHECK" ? "manual_dashboard_recheck" : "manual_dashboard_opportunity");
       manual_execution_override=1.0;
       dashboard_manual_entry=true;
       LastSampleKey=dashboard_sample_key;
       sample_key=dashboard_sample_key;
       stop_distance=dashboard_risk_distance;
       target_distance=dashboard_target_distance;
-      StatusLine="MANUAL DASHBOARD "+decision+" requested";
+      StatusLine="MANUAL DASHBOARD "+dashboard_command_mode+" "+decision+" requested";
       Print("Ramon execution: manual dashboard opportunity accepted ",
          decision," sample=",dashboard_sample_key,
          " edge=",DoubleToString(dashboard_edge,_Digits),
