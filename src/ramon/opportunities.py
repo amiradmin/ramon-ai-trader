@@ -14,7 +14,12 @@ DIRECTION_MIN_MARGIN = 0.05
 
 def _direction_probabilities(audit):
     try:
-        quality = audit.get("shadow_forecasts", {}).get("direction_quality", {})
+        live = audit.get("direction_models", {})
+        quality = live.get("direction_quality", {}) if isinstance(live, dict) else {}
+        if not quality:
+            # Historical compatibility for decisions saved before the live schema.
+            legacy = audit.get("shadow_forecasts", {})
+            quality = legacy.get("direction_quality", {}) if isinstance(legacy, dict) else {}
         buy = float(quality.get("buy_success_probability"))
         sell = float(quality.get("sell_success_probability"))
         if not (0.0 <= buy <= 1.0 and 0.0 <= sell <= 1.0):
@@ -84,7 +89,7 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
                     'direction_source':'LIVE_DIRECTION_QUALITY',
                     'ai_score':final.get('ai_engine_v2_score'),
                     'entry_probability':final.get('ai_engine_v2_entry_probability',final.get('entry_probability')),
-                    'full_sl_probability':final.get('ai_engine_v2_full_sl_probability',final.get('shadow_full_sl_probability')),
+                    'full_sl_probability':final.get('ai_engine_v2_full_sl_probability',final.get('full_sl_probability',final.get('shadow_full_sl_probability'))),
                     'market_state':final.get('market_state'),
                     'market_state_route':final.get('market_state_route'),
                     'market_direction':final.get('market_direction'),
