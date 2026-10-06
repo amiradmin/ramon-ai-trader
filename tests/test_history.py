@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sqlite3
 
 from ramon.core import Bar, Market
 from ramon.history import (
     decision_sample_count,
     history_count,
+    ensure_history_db,
     load_bars,
     persist_decision_sample,
     persist_market,
+    persist_trade_outcome,
 )
 
 
@@ -64,3 +67,56 @@ def test_persist_decision_sample_for_role_training(tmp_path: Path) -> None:
     )
 
     assert decision_sample_count(db) == 1
+
+
+
+def test_trade_outcomes_allow_multiple_trades_for_one_sample(tmp_path: Path) -> None:
+    db = tmp_path / "history.sqlite3"
+    ensure_history_db(db)
+    base = {
+        "sample_key": "a" * 16,
+        "symbol": "XAUUSD_l",
+        "direction": "BUY",
+        "opened": 1_900_000_000,
+        "closed": 1_900_000_060,
+        "net_units": 1.0,
+        "initial_risk_units": 2.0,
+        "exit_reason": "DEAL_REASON_TP",
+    }
+    persist_trade_outcome(db, {**base, "trade_key": "trade:1"}, 1_900_000_100)
+    persist_trade_outcome(db, {**base, "trade_key": "trade:2", "closed": 1_900_000_070}, 1_900_000_110)
+    # Re-delivery of the same trade_key remains idempotent.
+    persist_trade_outcome(db, {**base, "trade_key": "trade:1"}, 1_900_000_120)
+
+    with sqlite3.connect(db) as con:
+        rows = con.execute(
+            "SELECT trade_key,sample_key FROM trade_outcomes ORDER BY trade_key"
+        ).fetchall()
+    assert rows == [("trade:1", "a" * 16), ("trade:2", "a" * 16)]
+
+
+def test_legacy_trade_outcome_schema_migrates_shared_sample_key(tmp_path: Path) -> None:
+    db = tmp_path / "history.sqlite3"
+    with sqlite3.connect(db) as con:
+        con.execute("""CREATE TABLE trade_outcomes (
+            trade_key TEXT PRIMARY KEY, sample_key TEXT NOT NULL UNIQUE, symbol TEXT NOT NULL,
+            direction TEXT NOT NULL, opened INTEGER NOT NULL, closed INTEGER NOT NULL,
+            net_units REAL NOT NULL, initial_risk_units REAL NOT NULL,
+            net_r REAL NOT NULL, exit_reason TEXT NOT NULL, received INTEGER NOT NULL
+        )""")
+        con.execute(
+            "INSERT INTO trade_outcomes VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            ("legacy:1", "b" * 16, "XAUUSD_l", "SELL", 10, 20, 1.0, 2.0, 0.5, "DEAL_REASON_TP", 30),
+        )
+
+    ensure_history_db(db)
+    persist_trade_outcome(db, {
+        "trade_key": "legacy:2", "sample_key": "b" * 16, "symbol": "XAUUSD_l",
+        "direction": "SELL", "opened": 11, "closed": 21,
+        "net_units": -1.0, "initial_risk_units": 2.0, "exit_reason": "DEAL_REASON_SL",
+    }, 31)
+
+    with sqlite3.connect(db) as con:
+        assert con.execute(
+            "SELECT COUNT(*) FROM trade_outcomes WHERE sample_key=?", ("b" * 16,)
+        ).fetchone()[0] == 2
