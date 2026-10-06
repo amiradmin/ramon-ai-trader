@@ -178,6 +178,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
     """Serve Chronos plus learned regime/entry/news/meta roles."""
     guard = Lock()
     cached_model = CachedForecaster(model)
+    latest_market: Market | None = None
+    latest_market_received_utc = 0
     history_db = os.getenv("RAMON_HISTORY_DB", "").strip()
     range_live_enabled = os.getenv("RAMON_RANGE_LIVE_ENABLED", "0") == "1"
     reversal_live_enabled = os.getenv("RAMON_REVERSAL_LIVE_ENABLED", "0") == "1"
@@ -295,6 +297,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     "model": model.model_id,
                     "forecast_context": "completed_m15_cached",
                     "live_quote_decisions": True,
+                    "position_exit_advice": True,
                     "history_enabled": bool(history_db),
                     "allow_weak_intrabar_entries": settings.allow_weak_intrabar_entries,
                     "minimum_strength": settings.minimum_strength,
@@ -339,7 +342,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
         def do_POST(self) -> None:
             nonlocal moment_future, finbert_future, latest_moment_payload
             nonlocal latest_finbert_payload, last_shadow_bar, last_finbert_event_key
-            if self.path not in {"/decision", "/trades", "/manual-override", "/manual-overrides/reset", "/human-opinion"}:
+            nonlocal latest_market, latest_market_received_utc
+            if self.path not in {"/decision", "/trades", "/manual-override", "/manual-overrides/reset", "/human-opinion", "/position-exit-advice"}:
                 self.send_error(404)
                 return
             try:
@@ -398,6 +402,71 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         "active": sorted(manual_overrides_by_bar.get(signal_bar_time, {})),
                     })
                     return
+                if self.path == "/position-exit-advice":
+                    if latest_market is None or int(time.time()) - latest_market_received_utc > 120:
+                        raise ValueError("fresh market context unavailable")
+                    direction = str(payload.get("direction", "")).upper()
+                    entry_price = float(payload.get("entry_price", 0.0))
+                    current_price = float(payload.get("current_price", 0.0))
+                    horizon = int(payload.get("horizon", settings.horizon))
+                    if direction not in {"BUY", "SELL"}:
+                        raise ValueError("direction must be BUY or SELL")
+                    if entry_price <= 0.0 or current_price <= 0.0:
+                        raise ValueError("entry_price and current_price must be positive")
+                    if horizon < 1 or horizon > 16:
+                        raise ValueError("horizon must be 1..16")
+                    closes = [float(bar.close) for bar in latest_market.bars[-settings.context:]]
+                    with guard:
+                        forecast = cached_model.forecast(closes, horizon)
+                    path = [float(x) for x in forecast.median_path]
+                    if not path:
+                        raise ValueError("Chronos returned an empty median path")
+                    if direction == "BUY":
+                        peak_index = max(range(len(path)), key=lambda i: path[i])
+                        model_target = path[peak_index]
+                        profitable_forecast = model_target > entry_price
+                        if current_price > entry_price and model_target <= current_price:
+                            action = "EXIT_NOW"
+                            suggested = current_price
+                        elif profitable_forecast:
+                            action = "TARGET"
+                            suggested = model_target
+                        else:
+                            action = "NO_PROFIT_TARGET"
+                            suggested = None
+                    else:
+                        peak_index = min(range(len(path)), key=lambda i: path[i])
+                        model_target = path[peak_index]
+                        profitable_forecast = model_target < entry_price
+                        if current_price < entry_price and model_target >= current_price:
+                            action = "EXIT_NOW"
+                            suggested = current_price
+                        elif profitable_forecast:
+                            action = "TARGET"
+                            suggested = model_target
+                        else:
+                            action = "NO_PROFIT_TARGET"
+                            suggested = None
+                    self.reply(200, {
+                        "model": model.model_id,
+                        "direction": direction,
+                        "entry_price": entry_price,
+                        "current_price": current_price,
+                        "horizon_bars": horizon,
+                        "horizon_minutes": horizon * 15,
+                        "action": action,
+                        "suggested_exit_price": suggested,
+                        "forecast_peak_price": model_target,
+                        "forecast_peak_step": peak_index + 1,
+                        "forecast_final_low": forecast.low,
+                        "forecast_final_median": forecast.median,
+                        "forecast_final_high": forecast.high,
+                        "median_path": path,
+                        "market_bar_time": latest_market.bars[-1].time,
+                        "market_context_age_seconds": max(0, int(time.time()) - latest_market_received_utc),
+                        "advisory_only": True,
+                    })
+                    return
                 if self.path == "/trades":
                     if not history_db:
                         raise ValueError("history persistence is disabled")
@@ -424,6 +493,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     ):
                         raise ValueError("invalid broker UTC offset")
                 market.validate_quote_context(quote_time)
+                latest_market = market
+                latest_market_received_utc = int(time.time())
 
                 if history_db:
                     key = f"{market.symbol}:{market.timeframe}"
