@@ -200,6 +200,22 @@ async function manualOpportunity(row,button,recheck=false){
     setTimeout(()=>void refreshOpportunities(),1500);
   }catch(err){button.textContent="رد شد";opportunitySet("opportunity-status","ورود دستی انجام نشد: "+err.message);setTimeout(()=>{button.disabled=!row.actionable;button.textContent=old;},1800);}
 }
+async function manualCloseOpportunity(row,button){
+  if(button.disabled)return;
+  button.disabled=true;const old=button.textContent;button.textContent="در حال بستن…";
+  try{
+    const response=await fetch("/api/manual-close",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sample_key:row.sample_key,ticket:row.position_ticket})});
+    let data={};try{data=await response.json();}catch{}
+    if(!response.ok||!data.queued)throw new Error(data.error||("HTTP "+response.status));
+    button.textContent="فرمان بستن ارسال شد";
+    opportunitySet("opportunity-status","فرمان بستن پوزیشن #"+row.position_ticket+" ارسال شد؛ EA مالکیت پوزیشن و مجوز معامله را دوباره بررسی می‌کند.");
+    setTimeout(()=>void refreshOpportunities(),1000);
+  }catch(err){
+    button.textContent="خطا";
+    opportunitySet("opportunity-status","بستن معامله انجام نشد: "+err.message);
+    setTimeout(()=>{button.disabled=false;button.textContent=old;},1800);
+  }
+}
 function renderOpportunities(data){
   const body=$("opportunity-rows");body.replaceChildren();
   const labels={OPEN:"هنوز باز",TP_OBSERVED:"هدف در نمونه‌ها دیده شد",SL_OBSERVED:"حد ضرر در نمونه‌ها دیده شد",TIMEOUT_OBSERVED:"پایان ۴ ساعت",DATA_GAP:"نامشخص؛ شکاف داده"};
@@ -209,7 +225,10 @@ function renderOpportunities(data){
     const tr=document.createElement("tr");
     const p=row.success_probability;
     tr.className=typeof p==="number"&&Number.isFinite(p)?(p>=0.70?"opportunity-confidence-high":p>=0.55?"opportunity-confidence-medium":p>=0.45?"opportunity-confidence-neutral":"opportunity-confidence-low"):"";
-    const disposition=row.position_open?"پوزیشن باز است"+(row.position_ticket?" · #"+row.position_ticket:""):row.entry_queued?"در صف اجرا":row.executed?"معاملهٔ بسته‌شده ثبت شده":row.model_approved?"سیگنال صادر شده؛ اجرای سفارش تأیید نشده":"مسدود";
+    const livePnl=typeof row.live_profit_units==="number"&&Number.isFinite(row.live_profit_units)
+      ?(" · P/L "+(row.live_profit_units>=0?"+":"")+row.live_profit_units.toFixed(2))
+      :"";
+    const disposition=row.position_open?"پوزیشن باز است"+(row.position_ticket?" · #"+row.position_ticket:"")+livePnl+(row.position_volume?" · vol "+row.position_volume.toFixed(2):""):row.entry_queued?"در صف اجرا":row.executed?"معاملهٔ بسته‌شده ثبت شده":row.model_approved?"سیگنال صادر شده؛ اجرای سفارش تأیید نشده":"مسدود";
     const cells=[opportunityDate.format(new Date(row.captured*1000)),row.strategy+" / "+row.direction,
       format(row.entry)+" / "+format(row.stop)+" / "+format(row.target),format(row.edge)+" / "+format(row.minimum_edge),
       format(row.strength),percent(row.success_probability),disposition+" · علت نخست: "+(reasons[row.first_reason]||row.first_reason||"—")+(row.last_reason!==row.first_reason?" · آخرین: "+(reasons[row.last_reason]||row.last_reason||"—"):""),
@@ -218,9 +237,11 @@ function renderOpportunities(data){
     const action=document.createElement("td"),button=document.createElement("button");
     button.type="button";button.className="opportunity-entry "+(row.direction==="BUY"?"buy":"sell");
     if(row.position_open){
-      button.textContent="پوزیشن باز است";
-      button.disabled=true;
-      button.title="این فرصت همین حالا پوزیشن باز دارد"+(row.position_ticket?" · Ticket "+row.position_ticket:"");
+      button.textContent="بستن پوزیشن";
+      button.disabled=false;
+      button.className="opportunity-entry close";
+      button.title="بستن فقط همین پوزیشن جدول · Ticket "+row.position_ticket;
+      button.addEventListener("click",()=>manualCloseOpportunity(row,button));
     }else if(row.entry_queued){
       button.textContent="در صف اجرا";
       button.disabled=true;
