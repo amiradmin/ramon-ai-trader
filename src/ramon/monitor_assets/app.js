@@ -252,6 +252,13 @@ function renderOpportunities(data){
       row.position_open&&typeof row.live_profit_units==="number"&&Number.isFinite(row.live_profit_units)
         ?((row.live_profit_units>=0?"+":"")+row.live_profit_units.toFixed(2)+" units")
         :"—",
+      !row.position_open&&typeof row.success_probability==="number"&&row.success_probability>=0.70
+        ?(row.chronos_entry_action==="ENTER_NEAR"
+          ?"ورود نزدیک/الان · "+format(row.chronos_entry_price)
+          :row.chronos_entry_action==="WAIT_PULLBACK"&&typeof row.chronos_entry_price==="number"
+            ?"حدود "+(row.chronos_entry_minutes||15)+" دقیقه دیگر · "+format(row.chronos_entry_price)
+            :"در حال محاسبه…")
+        :"—",
       row.position_open
         ?(row.chronos_exit_action==="EXIT_NOW"
           ?"خروج نزدیک · حدود "+pnlText(row.live_profit_units)
@@ -265,7 +272,7 @@ function renderOpportunities(data){
                   ?"فعلاً هدف سودی معتبر ندارد"
                   :"در حال محاسبه…")
         :"—"];
-    cells.forEach((text,index)=>{const td=document.createElement("td");td.textContent=text;if([2,3,4,5,8,9].includes(index))td.dir="ltr";tr.append(td);});
+    cells.forEach((text,index)=>{const td=document.createElement("td");td.textContent=text;if([2,3,4,5,8,9,10].includes(index))td.dir="ltr";tr.append(td);});
     const action=document.createElement("td"),button=document.createElement("button");
     button.type="button";button.className="opportunity-entry "+(row.direction==="BUY"?"buy":"sell");
     if(row.position_open){
