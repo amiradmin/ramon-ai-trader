@@ -1470,6 +1470,10 @@ def opportunities_with_execution_state(db, diagnostic, symbol, health_url=None):
                     queued.add(parts[3])
     except OSError:
         pass
+    # Historical rows must not trigger model inference on every dashboard poll.
+    # Only live positions and the newest actionable candidates need advice.
+    now = time.time()
+    advice_budget = 2
     for row in data.get("opportunities", []):
         sample_key = str(row.get("sample_key") or "")
         open_info = opened.get(sample_key)
@@ -1485,7 +1489,16 @@ def opportunities_with_execution_state(db, diagnostic, symbol, health_url=None):
         row["chronos_exit_price"] = number(advice.get("suggested_exit_price")) if advice else None
         row["chronos_exit_action"] = advice.get("action") if advice else None
         row["chronos_exit_step"] = advice.get("forecast_peak_step") if advice else None
-        entry_advice = chronos_entry_advice(health_url, row) if not open_info else None
+        captured = number(row.get("latest_captured") or row.get("captured"))
+        recent_candidate = (
+            not open_info and not row.get("executed") and not row.get("entry_queued")
+            and captured is not None and 0 <= now - captured <= 90
+        )
+        # Keep inference bounded even when many snapshots arrive simultaneously.
+        ask_entry = recent_candidate and advice_budget > 0
+        if ask_entry:
+            advice_budget -= 1
+        entry_advice = chronos_entry_advice(health_url, row) if ask_entry else None
         row["chronos_entry_advice"] = entry_advice
         row["chronos_entry_action"] = entry_advice.get("action") if entry_advice else None
         row["chronos_entry_price"] = number(entry_advice.get("suggested_entry_price")) if entry_advice else None
