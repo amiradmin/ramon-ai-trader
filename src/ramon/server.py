@@ -413,6 +413,16 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     return
                 market = Market.from_dict(payload)
                 quote_time = int(payload["quote_time"]) if "quote_time" in payload else None
+                broker_utc_offset_seconds = (
+                    int(payload["broker_utc_offset_seconds"])
+                    if payload.get("broker_utc_offset_seconds") is not None else None
+                )
+                if broker_utc_offset_seconds is not None:
+                    if (
+                        abs(broker_utc_offset_seconds) > 14 * 3600
+                        or broker_utc_offset_seconds % 900 != 0
+                    ):
+                        raise ValueError("invalid broker UTC offset")
                 market.validate_quote_context(quote_time)
 
                 if history_db:
@@ -862,10 +872,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                                 response["replay_input_saved"] = int(persist_replay_input(
                                     history_db, sample_key=sample_key, market=market, quote_time=quote_time,
                                     forecast=audit_forecast, settings=settings, response={**response, "replay_input_saved": 1},
-                                    broker_utc_offset_seconds=(
-                                        int(payload["broker_utc_offset_seconds"])
-                                        if payload.get("broker_utc_offset_seconds") is not None else None
-                                    )))
+                                    broker_utc_offset_seconds=broker_utc_offset_seconds))
                             except Exception as exc:
                                 print(f"Ramon replay-input warning: {type(exc).__name__}: {exc}", flush=True)
                     except Exception as exc:
