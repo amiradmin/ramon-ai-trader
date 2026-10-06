@@ -13,8 +13,8 @@ def source() -> str:
 
 def test_current_ea_keeps_sizing_telemetry_observational():
     text = source()
-    assert '#property version "1.588"' in text
-    assert '#define RAMON_EA_VERSION "0.58.8"' in text
+    assert '#property version "1.589"' in text
+    assert '#define RAMON_EA_VERSION "0.58.9"' in text
     assert '+"EA version: "+RAMON_EA_VERSION+' in text
     assert '"RAMON AI TRADER  v"+RAMON_EA_VERSION+' in text
     assert 'version=RAMON_EA_VERSION;' in text
@@ -116,3 +116,11 @@ def test_predicted_auto_close_is_ticket_bound_and_tick_driven():
     assert 'RecordDealTelemetry(Trade.ResultDeal(),"chronos_predicted_auto_close")' in text
     on_tick = text.split('void OnTick()', 1)[1].split('string DashboardAliasFileName', 1)[0]
     assert 'ProcessDashboardPredictedAutoCloseCrossings();' in on_tick
+
+
+def test_live_direction_ai_can_own_direction_without_legacy_confirmation():
+    text = source()
+    assert 'double ai_engine_v2_selected=0.0;' in text
+    assert 'JsonNumber(reply,"ai_engine_v2_selected",ai_engine_v2_selected)' in text
+    assert 'bool live_direction_ai=(ai_engine_v2_selected>=0.5' in text
+    assert 'LIVE DIRECTION AI accepted' in text
