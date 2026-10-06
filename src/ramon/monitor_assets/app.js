@@ -456,20 +456,7 @@ function renderOpportunities(data){
       if(cell.extra)td.append(cell.extra);
       tr.append(td);
     });
-    const action=document.createElement("td"),button=document.createElement("button");
-    button.type="button";button.className="opportunity-entry "+(row.direction==="BUY"?"buy":"sell");
-    const scenarioWrap=document.createElement("div");scenarioWrap.className="manual-scenario-list";
-    for(const scenario of (row.trade_scenarios||[])){
-      const scenarioBtn=document.createElement("button");
-      scenarioBtn.type="button";
-      scenarioBtn.className="scenario-entry "+(scenario.direction==="BUY"?"buy":"sell")+(scenario.risk==="high"||scenario.risk==="very_high"?" high-risk":"");
-      const p=typeof scenario.probability==="number"?" · "+Math.round(scenario.probability*100)+"٪":"";
-      scenarioBtn.textContent=scenario.label+" · "+scenario.direction+p;
-      scenarioBtn.title=scenario.setup+(scenario.risk==="very_high"?" · ریسک بسیار بالا":scenario.risk==="high"?" · ریسک بالا":"");
-      scenarioBtn.disabled=!compatibility.supported||row.position_open||row.entry_queued;
-      if(!scenarioBtn.disabled)scenarioBtn.addEventListener("click",()=>manualOpportunity(row,scenarioBtn,true,true,scenario.direction));
-      scenarioWrap.append(scenarioBtn);
-    }
+    const action=document.createElement("td");
     if(row.position_open){
       const actions=document.createElement("div");actions.className="opportunity-actions";
       const closeNow=document.createElement("button");
@@ -498,36 +485,43 @@ function renderOpportunities(data){
         if(!autoClose.disabled)autoClose.addEventListener("click",()=>predictedAutoCloseOpportunity(row,autoClose));
       }
       actions.append(autoClose);
-      action.append(actions);tr.append(action);body.append(tr);
+      action.append(actions);
+      tr.append(action);body.append(tr);
       continue;
-    }else if(row.entry_queued){
-      button.textContent="در صف اجرا";
-      button.disabled=true;
-      button.title="فرمان این فرصت قبلاً برای EA ارسال شده است";
-    }else if(row.executed){
-      button.textContent="قبلاً اجرا شده";
-      button.disabled=true;
-      button.title="برای حفظ attribution آموزشی، همان فرصت دوباره اجرا نمی‌شود";
-    }else{
-      const recheck=!row.actionable;
-      button.textContent=!compatibility.supported?"EA نیاز به به‌روزرسانی دارد":recheck?"بازبینی و ورود "+row.direction:"باز کردن "+row.direction;
-      button.disabled=!compatibility.supported;
-      if(!compatibility.supported){
-        button.title=compatibility.reason;
-        if((row.trade_scenarios||[]).length){
-      action.append(scenarioWrap);
-    }else{
-      action.append(button);
     }
-    tr.append(action);body.append(tr);
-        continue;
+
+    const scenarioWrap=document.createElement("div");scenarioWrap.className="manual-scenario-list";
+    for(const scenario of (row.trade_scenarios||[])){
+      const scenarioBtn=document.createElement("button");
+      scenarioBtn.type="button";
+      scenarioBtn.className="scenario-entry "+(scenario.direction==="BUY"?"buy":"sell")+(scenario.risk==="high"||scenario.risk==="very_high"?" high-risk":"");
+      const p=typeof scenario.probability==="number"?" · "+Math.round(scenario.probability*100)+"٪":"";
+      scenarioBtn.textContent=scenario.label+" · "+scenario.direction+p;
+      scenarioBtn.title=scenario.setup+(scenario.risk==="very_high"?" · ریسک بسیار بالا":scenario.risk==="high"?" · ریسک بالا":"");
+      scenarioBtn.disabled=!compatibility.supported||row.entry_queued;
+      if(!scenarioBtn.disabled){
+        scenarioBtn.addEventListener("click",()=>manualOpportunity(row,scenarioBtn,true,true,scenario.direction));
       }
-      button.title=recheck
-        ?"جهت این ردیف روی snapshot تازه بررسی می‌شود؛ فقط Safety Gateهای اجرایی می‌توانند مانع سفارش شوند"
-        :"فرمان ورود به EA ارسال می‌شود؛ EA دوباره ریسک و قفل‌های اجرایی را بررسی می‌کند";
-      button.addEventListener("click",()=>manualOpportunity(row,button,recheck));
+      scenarioWrap.append(scenarioBtn);
     }
-    action.append(button);tr.append(action);body.append(tr);
+
+    if(!(row.trade_scenarios||[]).length){
+      const fallback=document.createElement("button");
+      fallback.type="button";
+      fallback.className="opportunity-entry "+(row.direction==="BUY"?"buy":"sell");
+      fallback.textContent=!compatibility.supported?"EA نیاز به به‌روزرسانی دارد":"ورود دستی "+row.direction;
+      fallback.disabled=!compatibility.supported||row.entry_queued;
+      fallback.title=compatibility.supported
+        ?"انتخاب جهت با شماست؛ قفل‌های تحلیلی Ramon دخالت نمی‌کنند"
+        :compatibility.reason;
+      if(!fallback.disabled){
+        fallback.addEventListener("click",()=>manualOpportunity(row,fallback,true,true,row.direction));
+      }
+      scenarioWrap.append(fallback);
+    }
+
+    action.append(scenarioWrap);
+    tr.append(action);body.append(tr);
   }
   const perf=snapshot&&snapshot.dashboard_opportunity_performance;
   const perfText=perf&&perf.closed?(" · دستی جدول: "+perf.closed+" بسته · برد "+(perf.win_rate*100).toFixed(1)+"% · خالص "+perf.net_units.toFixed(2)):"";
