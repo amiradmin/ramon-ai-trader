@@ -1554,7 +1554,7 @@ def daily_profit_summary(db, symbol, opened, diagnostic=None, now=None):
     }
 
 
-MIN_DASHBOARD_ENTRY_EA_VERSION = (0, 58, 7)
+MIN_DASHBOARD_ENTRY_EA_VERSION = (0, 59, 0)
 
 
 def dashboard_entry_compatibility(diagnostic):
@@ -1575,7 +1575,7 @@ def dashboard_entry_compatibility(diagnostic):
     return {"supported": True, "reason": "نسخه EA و وضعیت تازه تأیید شد", "version": raw}
 
 
-MIN_AUTO_CLOSE_EA_VERSION = (0, 58, 8)
+MIN_AUTO_CLOSE_EA_VERSION = (0, 59, 0)
 
 
 def dashboard_auto_close_compatibility(diagnostic):
@@ -1603,10 +1603,27 @@ def opportunities_with_execution_state(db, diagnostic, symbol, health_url=None):
     queued = set()
     try:
         if queue_path and queue_path.exists():
+            now_queue = time.time()
+            fresh_lines = []
             for raw in queue_path.read_text(encoding="ascii", errors="ignore").splitlines():
-                parts = raw.strip().split("|")
-                if len(parts) >= 4 and re.fullmatch(r"[a-f0-9]{16}", parts[3]):
+                line = raw.strip()
+                parts = line.split("|")
+                if len(parts) < 4 or not re.fullmatch(r"[a-f0-9]{16}", parts[3]):
+                    continue
+                try:
+                    requested = int(parts[0])
+                except (TypeError, ValueError):
+                    continue
+                # EA accepts NORMAL for 90s and RECHECK for 120s. Give the
+                # dashboard a small grace window, then stop showing a command
+                # as perpetually queued if an old/mismatched EA never consumed it.
+                if 0 <= now_queue - requested <= 135:
                     queued.add(parts[3])
+                    fresh_lines.append(line)
+            if fresh_lines:
+                queue_path.write_text("\n".join(fresh_lines) + "\n", encoding="ascii")
+            else:
+                queue_path.unlink(missing_ok=True)
     except OSError:
         pass
     # Historical rows must not trigger model inference on every dashboard poll.
