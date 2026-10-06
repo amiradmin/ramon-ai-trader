@@ -955,11 +955,11 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
         ),
         model_row(
             "Forecast Experimental",
-            handler("forecast_shadow_model_handler", "OFF"),
+            handler("forecast_experimental_model_handler", "OFF"),
             "READY" if timesfm_snapshot.get("timesfm3_experimental_ready", timesfm_snapshot.get("timesfm3_shadow_ready")) == 1 else "OFF" if (health or {}).get("timesfm3_experimental_enabled") == 0 else "NO SNAPSHOT",
             {
                 "Direction": timesfm_snapshot.get("timesfm3_experimental_direction", timesfm_snapshot.get("timesfm3_shadow_direction")),
-                "Low / Median / High": " / ".join(metric(timesfm_snapshot.get(k)) for k in ("timesfm3_shadow_low", "timesfm3_shadow_median", "timesfm3_shadow_high")),
+                "Low / Median / High": " / ".join(metric(timesfm_snapshot.get(k)) for k in ("timesfm3_experimental_low", "timesfm3_experimental_median", "timesfm3_experimental_high")),
                 "Move ATR": timesfm_snapshot.get("timesfm3_experimental_move_atr", timesfm_snapshot.get("timesfm3_shadow_move_atr")),
                 "Agrees Chronos": timesfm_snapshot.get("timesfm3_experimental_agrees_chronos", timesfm_snapshot.get("timesfm3_shadow_agrees_chronos")),
                 "Effect": "EXPERIMENTAL / no execution effect",
@@ -1139,7 +1139,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
     conditions = {
         "Forecast": ("pass" if base.get("decision") in {"BUY", "SELL"} else "blocked" if base.get("decision") == "WAIT" else "unknown", "تصمیم پایهٔ پیش‌بینی"),
         "Direction AI": ("pass" if (health or {}).get("direction_quality_live") == 1 else "blocked", "مدل جهت زندهٔ مشترک برای Auto Ramon و جدول"),
-        "Forecast Shadow": ("shadow" if timesfm_snapshot.get("timesfm3_shadow_ready") == 1 else "idle", "پیش‌بینی ناظر؛ مجوز ورود نیست"),
+        "Forecast Experimental": ("observed" if timesfm_snapshot.get("timesfm3_experimental_ready", timesfm_snapshot.get("timesfm3_shadow_ready")) == 1 else "idle", "آزمایشی و بدون اثر اجرایی"),
         "Regime": (role_state, "نقش مدل رژیم"),
         "Anomaly Detection": (moment_state, "گیت زندهٔ ناهنجاری؛ فعال و تازه، بدون وتو"),
         "Entry": (role_state, "مدل ورود LIVE"),
