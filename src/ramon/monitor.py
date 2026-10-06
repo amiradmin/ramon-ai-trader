@@ -1366,7 +1366,7 @@ def read_open_dashboard_positions(diagnostic):
 
 def chronos_entry_advice(health_url, row):
     probability = number(row.get("success_probability"))
-    if probability is None or probability < 0.70 or not health_url:
+    if probability is None or probability < 0.60 or not health_url:
         return None
     direction = str(row.get("direction") or "")
     if direction not in {"BUY", "SELL"}:
@@ -1623,7 +1623,7 @@ def opportunities_with_execution_state(db, diagnostic, symbol, health_url=None):
         captured = number(row.get("latest_captured") or row.get("captured"))
         recent_candidate = (
             not open_info and not row.get("executed") and sample_key not in queued
-            and (number(row.get("success_probability")) or 0) >= 0.70
+            and (number(row.get("success_probability")) or 0) >= 0.60
             and captured is not None and 0 <= now - captured <= 90
         )
         # Keep inference bounded even when many snapshots arrive simultaneously.
