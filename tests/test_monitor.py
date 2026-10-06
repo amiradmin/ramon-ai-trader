@@ -2,6 +2,7 @@
 from datetime import datetime, timezone
 from http.server import ThreadingHTTPServer
 import json
+import os
 from pathlib import Path
 import sqlite3
 from threading import Thread
@@ -10,7 +11,7 @@ from urllib.request import Request, urlopen
 
 import pytest
 
-from ramon.monitor import build_snapshot, dollar_readiness, freshness, handler_for, income_roadmap, read_diagnostic, read_history
+from ramon.monitor import build_snapshot, dollar_readiness, freshness, handler_for, income_roadmap, read_diagnostic, read_history, read_open_dashboard_positions
 
 
 NOW = 1_800_000_000
@@ -488,3 +489,27 @@ def test_trend_conflict_detail_marks_confirmed_override_as_pass(sources):
     assert timing["values"]["قدرت کافی برای عبور"] == "بله"
     assert timing["values"]["نتیجهٔ override"] == "عبور مجاز"
     assert "مجاز شد" in timing["detail"]
+
+
+def test_open_position_snapshot_requires_fresh_mt5_confirmation(tmp_path, monkeypatch):
+    from ramon import monitor
+    stamp = 1_800_000_000
+    monkeypatch.setattr(monitor.time, "time", lambda: stamp)
+    diag = tmp_path / "Ramon_Diagnostic.txt"
+    opened = tmp_path / "Ramon_OpenDashboardPositions.txt"
+    sample = "abcdef1234567890"
+    opened.write_text(f"{sample}|BUY|50379117083|{stamp - 30}|1.73|0.01\n")
+    os.utime(opened, (stamp, stamp))
+
+    diagnostic(diag, now=stamp, position="NONE")
+    assert read_open_dashboard_positions(diag) == {}
+
+    diagnostic(diag, now=stamp, position="BUY #50379117083")
+    assert read_open_dashboard_positions(diag)[sample]["ticket"] == "50379117083"
+
+    os.utime(opened, (stamp - 180, stamp - 180))
+    assert read_open_dashboard_positions(diag) == {}
+
+    os.utime(opened, (stamp, stamp))
+    diagnostic(diag, now=stamp - 180, position="BUY #50379117083")
+    assert read_open_dashboard_positions(diag) == {}
