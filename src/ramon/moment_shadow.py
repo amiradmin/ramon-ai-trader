@@ -59,7 +59,7 @@ class MomentAnomalyShadow:
 
     @classmethod
     def from_env(cls, *, lazy: bool = False) -> "MomentAnomalyShadow":
-        enabled = os.getenv("RAMON_MOMENT_SHADOW_ENABLED", "0").strip().lower() in {"1","true","yes","on"}
+        enabled = os.getenv("RAMON_MOMENT_ENABLED", os.getenv("RAMON_MOMENT_SHADOW_ENABLED", "0")).strip().lower() in {"1","true","yes","on"}
         return cls(
             enabled=enabled,
             checkpoint=os.getenv("RAMON_MOMENT_CHECKPOINT", DEFAULT_MOMENT_CHECKPOINT).strip() or DEFAULT_MOMENT_CHECKPOINT,
@@ -72,11 +72,11 @@ class MomentAnomalyShadow:
 
     def status(self) -> dict[str, object]:
         return {
-            "moment_shadow_enabled": int(self.enabled),
-            "moment_shadow_ready": int(self.ready),
-            "moment_shadow_checkpoint": self.checkpoint,
-            "moment_shadow_error": self.error,
-            "moment_shadow_effect": "NONE",
+            "moment_enabled": int(self.enabled),
+            "moment_ready": int(self.ready),
+            "moment_checkpoint": self.checkpoint,
+            "moment_error": self.error,
+            "moment_effect": "NONE",
         }
 
     def assess(self, market: Market) -> dict[str, object]:
@@ -120,13 +120,13 @@ class MomentAnomalyShadow:
             ratio = current / max(median, 1e-12)
             label = "ELEVATED" if ratio >= 2.0 else "NORMAL"
             payload.update(
-                moment_shadow_ready=1,
-                moment_shadow_error="",
+                moment_ready=1,
+                moment_error="",
                 moment_anomaly_score=current,
                 moment_anomaly_ratio=ratio,
                 moment_anomaly_label=label,
             )
         except Exception as exc:
-            payload["moment_shadow_ready"] = 0
-            payload["moment_shadow_error"] = f"{type(exc).__name__}: {exc}"
+            payload["moment_ready"] = 0
+            payload["moment_error"] = f"{type(exc).__name__}: {exc}"
         return payload
