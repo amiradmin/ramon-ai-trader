@@ -42,7 +42,7 @@ def sources(tmp_path):
             "buy_edge": 1, "sell_edge": -2, "minimum_edge": .5,
             "signal_strength": .1, "minimum_strength": .2,
             "intrabar_confirmed": 0, "ai_trend_confirmed": 0}
-    metadata = {"decision_audit": {"base": base, "final": {"decision": "WAIT", "reason": base["reason"], "role_shadow": 1}, "settings": {}}}
+    metadata = {"ensemble_mode": "direction_live", "decision_audit": {"base": base, "final": {"decision": "WAIT", "reason": base["reason"], "role_shadow": 0}, "settings": {}}}
     with sqlite3.connect(db) as c:
         c.execute("CREATE TABLE decision_samples(id INTEGER PRIMARY KEY, captured INT,symbol TEXT,sample_key TEXT,final_decision TEXT,chronos_model TEXT,model_metadata TEXT)")
         c.execute("INSERT INTO decision_samples VALUES(1,?,?,?,?,?,?)", (NOW, "XAUUSD_l", "sample-1", "WAIT", "chronos", json.dumps(metadata)))
@@ -64,7 +64,7 @@ def test_observed_preview_does_not_claim_an_order_or_gate_pass(sources):
     assert n["order"]["state"] == "idle"
     assert n["position"]["state"] == "idle"
     assert n["range"]["state"] == "unknown"  # no persisted rejection detail
-    assert n["shadow"]["state"] == "shadow"
+    assert n["models"]["state"] == "pass"
 
 
 @pytest.mark.parametrize("detected,ready,state,signal_ready", [
@@ -389,8 +389,8 @@ def test_model_map_green_requires_ready_gate_without_veto(sources, veto, expecte
     assert rows["Anomaly Detection"]["condition_state"] == expected
     assert rows["News Sentiment"]["condition_state"] == expected
     assert rows["News Calendar"]["condition_state"] == "pass"
-    assert rows["Entry"]["condition_state"] == "shadow"
-    assert rows["Risk / SL"]["condition_state"] == "shadow"
+    assert rows["Entry"]["condition_state"] == "pass"
+    assert rows["Risk / SL"]["condition_state"] == "pass"
     assert all(r["condition_state"] == "stale" for r in build_snapshot(db, diag, now=NOW+100)["model_handler_map"])
     diagnostic(diag, sample="different-decision")
     with diag.open("a") as f:
@@ -522,7 +522,7 @@ def test_dashboard_manual_entry_requires_ea_version_that_consumes_queue(tmp_path
     diag = tmp_path / "Ramon_Diagnostic.txt"
     diagnostic(diag, now=stamp)
     assert dashboard_entry_compatibility(diag)["supported"] is False
-    text = diag.read_text().replace("EA version: 0.54.8", "EA version: 0.58.7")
+    text = diag.read_text().replace("EA version: 0.54.8", "EA version: 0.59.0")
     diag.write_text(text)
     assert dashboard_entry_compatibility(diag)["supported"] is True
     diagnostic(diag, now=stamp - 200)
