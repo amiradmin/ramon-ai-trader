@@ -54,8 +54,8 @@ class MomentAnomalyModel:
             return False
 
     @classmethod
-    def from_env(cls, *, lazy: bool = False) -> "MomentAnomalyShadow":
-        enabled = os.getenv("RAMON_MOMENT_ENABLED", os.getenv("RAMON_MOMENT_SHADOW_ENABLED", "0")).strip().lower() in {"1","true","yes","on"}
+    def from_env(cls, *, lazy: bool = False) -> "MomentAnomalyModel":
+        enabled = os.getenv("RAMON_MOMENT_ENABLED", "0").strip().lower() in {"1","true","yes","on"}
         return cls(
             enabled=enabled,
             checkpoint=os.getenv("RAMON_MOMENT_CHECKPOINT", DEFAULT_MOMENT_CHECKPOINT).strip() or DEFAULT_MOMENT_CHECKPOINT,
