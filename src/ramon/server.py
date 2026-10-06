@@ -407,9 +407,13 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     market = Market.from_dict(payload)
                     quote_time = int(payload["quote_time"]) if "quote_time" in payload else None
                     market.validate_quote_context(quote_time)
+                    # Display-only horizon override; Ramon trading horizon is unchanged.
+                    horizon = int(payload.get("forecast_horizon_bars", settings.horizon))
+                    if horizon < 1 or horizon > 16:
+                        raise ValueError("forecast_horizon_bars must be 1..16")
                     closes = [float(bar.close) for bar in market.bars[-settings.context:]]
                     with guard:
-                        forecast = cached_model.forecast(closes, settings.horizon)
+                        forecast = cached_model.forecast(closes, horizon)
                     midpoint = (float(market.bid) + float(market.ask)) / 2.0
                     move = float(forecast.median) - midpoint
                     deadband = max(float(market.point) * 5.0, abs(midpoint) * 1e-7)
@@ -421,8 +425,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         "forecast_low": forecast.low,
                         "forecast_median": forecast.median,
                         "forecast_high": forecast.high,
-                        "forecast_horizon_bars": settings.horizon,
-                        "forecast_horizon_minutes": settings.horizon * 15,
+                        "forecast_horizon_bars": horizon,
+                        "forecast_horizon_minutes": horizon * 15,
                         "signal_bar_time": market.bars[-1].time,
                         "advisory_only": True,
                         "ramon_decision_independent": True,
