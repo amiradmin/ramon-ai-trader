@@ -249,10 +249,12 @@ function renderOpportunities(data){
   const sortedOpportunities=[...(data.opportunities||[])].sort((a,b)=>{
     const aOpen=a.position_open?1:0,bOpen=b.position_open?1:0;
     if(aOpen!==bOpen)return bOpen-aOpen;
+    // Fresh decisions first; old high-scoring rows should not hide live updates.
+    const freshness=(b.latest_captured||b.captured||0)-(a.latest_captured||a.captured||0);
+    if(freshness!==0)return freshness;
     const ap=typeof a.success_probability==="number"&&Number.isFinite(a.success_probability)?a.success_probability:-1;
     const bp=typeof b.success_probability==="number"&&Number.isFinite(b.success_probability)?b.success_probability:-1;
-    if(ap!==bp)return bp-ap;
-    return (b.latest_captured||b.captured||0)-(a.latest_captured||a.captured||0);
+    return bp-ap;
   });
   for(const row of sortedOpportunities){
     const tr=document.createElement("tr");
@@ -319,9 +321,31 @@ function renderOpportunities(data){
   }
   const perf=snapshot&&snapshot.dashboard_opportunity_performance;
   const perfText=perf&&perf.closed?(" · دستی جدول: "+perf.closed+" بسته · برد "+(perf.win_rate*100).toFixed(1)+"% · خالص "+perf.net_units.toFixed(2)):"";
-  opportunitySet("opportunity-status",data.error?"دریافت جدول ناموفق: "+data.error:(data.opportunities||[]).length?"آخرین ۲۴ ساعت · "+data.opportunities.length+" کاندید · دکمهٔ ورود تا "+(data.actionable_seconds||90)+" ثانیه فعال است · داده تا "+(data.as_of?opportunityDate.format(new Date(data.as_of*1000)):"—")+perfText:"هنوز کاندیدی با مزیت مثبت ثبت نشده"+perfText);
+  const lastDecision=Math.max(0,...(data.opportunities||[]).map(r=>Number(r.latest_captured||r.captured||0)));
+  const stale=lastDecision>0 && Date.now()/1000-lastDecision>120;
+  const refreshedAt=new Intl.DateTimeFormat("fa-IR",{timeZone:"Asia/Tehran",hour:"2-digit",minute:"2-digit",second:"2-digit"}).format(new Date());
+  opportunitySet("opportunity-status",data.error?"دریافت جدول ناموفق: "+data.error:(data.opportunities||[]).length?
+    "آخرین ۲۴ ساعت · "+data.opportunities.length+" کاندید · آخرین نمونه: "+(lastDecision?opportunityDate.format(new Date(lastDecision*1000)):"—")+
+    " · دریافت موفق: "+refreshedAt+(stale?" · هشدار: نمونه جدید ثبت نشده":"")+perfText:
+    "هنوز کاندیدی با مزیت مثبت ثبت نشده · دریافت موفق: "+refreshedAt+perfText);
 }
-async function refreshOpportunities(){try{const r=await fetch("/api/opportunities",{cache:"no-store"});if(!r.ok)throw Error();renderOpportunities(await r.json());}catch{opportunitySet("opportunity-status","دریافت جدول ناموفق؛ اطلاعات قبلی ممکن است قدیمی باشد");}}
+let opportunityInFlight=false;
+async function refreshOpportunities(){
+  if(opportunityInFlight)return;
+  opportunityInFlight=true;
+  const controller=new AbortController();
+  const timeout=setTimeout(()=>controller.abort(),4500);
+  try{
+    const r=await fetch("/api/opportunities",{cache:"no-store",signal:controller.signal});
+    if(!r.ok)throw Error("HTTP "+r.status);
+    renderOpportunities(await r.json());
+  }catch(err){
+    opportunitySet("opportunity-status","دریافت جدول ناموفق ("+(err?.message||"خطای شبکه")+")؛ ردیف‌های قبلی ممکن است قدیمی باشند");
+  }finally{
+    clearTimeout(timeout);
+    opportunityInFlight=false;
+  }
+}
 async function refresh(){if(busy)return;busy=true;clearTimeout(timer);const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),5000);try{const response=await fetch("/api/snapshot",{cache:"no-store",signal:controller.signal});if(!response.ok)throw Error("monitor unavailable");snapshot=await response.json();render();void refreshOpportunities();$("connection").textContent="داشبورد متصل";$("connection").className="connection connected";}catch{ $("connection").textContent="اتصال قطع است؛ تلاش مجدد";$("connection").className="connection error";$("warning").hidden=false;$("warning").textContent="ارتباط با داشبورد قطع شده است؛ داده‌های روی صفحه مربوط به آخرین دریافت هستند.";document.querySelectorAll(".node").forEach(e=>{e.className="node stale";const b=e.querySelector(".state-badge");b.className="state-badge stale";b.textContent="دادهٔ قدیمی";});if(snapshot){snapshot.nodes.forEach(n=>n.state="stale");detail();renderEdges(false);}}finally{clearTimeout(timeout);busy=false;timer=setTimeout(refresh,3000);}}
 async function resetOverrides(){if(overrideBusy)return;overrideBusy=true;const btn=$("reset-overrides");const old=btn.textContent;btn.disabled=true;btn.textContent="RESETTING...";try{const response=await fetch("/api/override/reset",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});if(!response.ok){let msg="reset failed";try{const data=await response.json();msg=data.error||msg;}catch{}throw new Error(msg);}btn.textContent="RESET DONE";await refresh();}catch(err){btn.textContent="RESET ERROR: "+err.message;}finally{overrideBusy=false;setTimeout(()=>{btn.disabled=false;btn.textContent=old;},1200);}}
 function analysisLine(value){return value===null||value===undefined?"—":typeof value==="object"?JSON.stringify(value):String(value);}
@@ -346,4 +370,4 @@ selectedNode?JSON.stringify(selectedNode,null,2):"NONE",
 "=== ALL DECISION / EXECUTION STEPS ==="
 ];for(const n of snapshot.nodes||[]){out.push(`[${nodeNumbers[n.id]||n.id}] ${n.title} | state=${n.state} observed=${n.observed_state} manual=${!!n.manual_override} engine=${n.engine||"Logic"}`);out.push(`detail: ${n.detail||"—"}`);out.push(`values: ${JSON.stringify(n.values||{})}`);}out.push("","=== RECENT DECISIONS ===");for(const x of snapshot.timeline||[])out.push(`${x.at||"—"} | ${x.decision} | ${x.reason} | ${x.strategy} | ${x.sample_key}`);out.push("",...candleLines(snapshot.recent_market?.m15,"M15"),"",...candleLines(snapshot.recent_market?.m1,"M1"),"","=== MODEL / HANDLER MAP ===");for(const row of snapshot.model_handler_map||[])out.push(`${row.name} | ${row.handler} | status=${row.status} | condition=${row.condition_state||"—"} | values=${JSON.stringify(row.values||{})}`);out.push("","=== WARNINGS ===",...(snapshot.warnings?.length?snapshot.warnings:["NONE"]));return out.join("\n");}
 async function copyAnalysis(){const btn=$("copy-analysis");const old=btn.textContent;btn.disabled=true;btn.textContent="COPYING...";let text="";try{const response=await fetch(`/api/analysis?stage=${encodeURIComponent(selected||"")}`,{cache:"no-store"});if(!response.ok)throw new Error(`HTTP ${response.status}`);text=await response.text();}catch{text=buildAnalysisBundle();}let copied=false;try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text);copied=true;}}catch{}if(!copied){const ta=document.createElement("textarea");ta.value=text;ta.setAttribute("readonly","");ta.style.position="absolute";ta.style.left="-9999px";document.body.append(ta);ta.select();try{copied=document.execCommand("copy");}catch{}ta.remove();}btn.textContent=copied?"COPIED ✓":"COPY FAILED";setTimeout(()=>{btn.disabled=false;btn.textContent=old;},1400);}
-$("copy-analysis").addEventListener("click",copyAnalysis);$("reset-overrides").addEventListener("click",resetOverrides);$("zoom").addEventListener("click",()=>{zoomed=!zoomed;$("zoom").textContent=zoomed?"−":"＋";$("zoom").setAttribute("aria-label",zoomed?"نمای کلی فلوچارت":"بزرگ‌نمایی فلوچارت");resize();});$("refresh").addEventListener("click",refresh);new ResizeObserver(resize).observe($("viewport"));document.addEventListener("visibilitychange",()=>{if(!document.hidden)void refresh();});void refresh();
+$("copy-analysis").addEventListener("click",copyAnalysis);$("reset-overrides").addEventListener("click",resetOverrides);$("zoom").addEventListener("click",()=>{zoomed=!zoomed;$("zoom").textContent=zoomed?"−":"＋";$("zoom").setAttribute("aria-label",zoomed?"نمای کلی فلوچارت":"بزرگ‌نمایی فلوچارت");resize();});$("refresh").addEventListener("click",refresh);new ResizeObserver(resize).observe($("viewport"));document.addEventListener("visibilitychange",()=>{if(!document.hidden){void refresh();void refreshOpportunities();}});setInterval(()=>{if(!document.hidden)void refreshOpportunities();},5000);void refresh();void refreshOpportunities();
