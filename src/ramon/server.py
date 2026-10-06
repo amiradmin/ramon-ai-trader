@@ -15,7 +15,7 @@ from uuid import uuid4
 
 from .core import Forecast, Market, Settings, evaluate, independent_market_direction, independent_entry_timing
 from .ensemble import EnsembleCoordinator, dominant_direction
-from .shadow_roles import ShadowCoordinator
+from .shadow_roles import ShadowCoordinator, DirectionCoordinator
 from .history import persist_decision_sample, persist_market, persist_trade_outcome, persist_replay_input
 from .model import ChronosForecaster, model_name
 from .news import DEFAULT_FOREX_FACTORY_JSON, ForexFactoryNewsProvider
@@ -185,11 +185,16 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
     range_live_enabled = os.getenv("RAMON_RANGE_LIVE_ENABLED", "0") == "1"
     reversal_live_enabled = os.getenv("RAMON_REVERSAL_LIVE_ENABLED", "0") == "1"
     ensemble_dir = os.getenv("RAMON_ENSEMBLE_DIR", "/checkpoints/ensemble").strip()
-    # Preview is the default; enabling the live ensemble requires an explicit mode.
-    role_mode = os.getenv("RAMON_ROLE_MODE", "shadow").strip().lower()
-    if role_mode not in {"shadow", "live"}:
-        raise ValueError("RAMON_ROLE_MODE must be shadow or live")
-    coordinator = ShadowCoordinator if role_mode == "shadow" else EnsembleCoordinator
+    # Direction-live uses the independently trained BUY/SELL quality roles as
+    # an operational source while retaining the validated bundle path for full live mode.
+    role_mode = os.getenv("RAMON_ROLE_MODE", "direction_live").strip().lower()
+    if role_mode not in {"shadow", "direction_live", "live"}:
+        raise ValueError("RAMON_ROLE_MODE must be shadow, direction_live or live")
+    coordinator = (
+        ShadowCoordinator if role_mode == "shadow"
+        else DirectionCoordinator if role_mode == "direction_live"
+        else EnsembleCoordinator
+    )
     ensemble = coordinator(ensemble_dir, model.model_id)
     news_enabled = os.getenv("RAMON_NEWS_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
     timesfm3_shadow = TimesFM3Shadow.from_env()
