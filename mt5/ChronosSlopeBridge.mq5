@@ -1,5 +1,5 @@
 #property copyright "Ramon AI Trader"
-#property version "1.020"
+#property version "1.021"
 #property strict
 
 // Read-only bridge. Attach to a SEPARATE chart from the Ramon trading EA.
@@ -88,13 +88,17 @@ void Refresh()
       return;
    }
    string reply=CharArrayToString(response,0,ArraySize(response),CP_UTF8);
-   string direction="",model="";
-   double mid=0,median=0,horizon=0,step1=0,step2=0;
+   string direction="",model="",bias_direction="",bias_source="";
+   double mid=0,median=0,horizon=0,step1=0,step2=0,bias_confidence=0,bias_score=0;
    if(!JsonText(reply,"direction",direction) || !JsonText(reply,"model",model)
       || !JsonNumber(reply,"current_mid",mid) || !JsonNumber(reply,"forecast_median",median)
        || !JsonNumber(reply,"forecast_horizon_bars",horizon)
       || !JsonNumber(reply,"forecast_step_1",step1)
       || !JsonNumber(reply,"forecast_step_2",step2)
+      || !JsonText(reply,"bias_direction",bias_direction)
+      || !JsonText(reply,"bias_source",bias_source)
+      || !JsonNumber(reply,"bias_confidence",bias_confidence)
+      || !JsonNumber(reply,"bias_score",bias_score)
       || mid<=0 || median<=0 || step1<=0 || step2<=0 || horizon!=2)
    { Print("ChronosSlopeBridge: invalid forecast response: ",StringSubstr(reply,0,300)); return; }
    int dir=direction=="UP" ? 1 : direction=="DOWN" ? -1 : 0;
@@ -103,9 +107,17 @@ void Refresh()
    GlobalVariableSet(Key("HORIZON"),horizon);
    GlobalVariableSet(Key("STEP1"),step1);
    GlobalVariableSet(Key("STEP2"),step2);
+   int bias_dir=bias_direction=="BUY" ? 1 : bias_direction=="SELL" ? -1 : 0;
    GlobalVariableSet(Key("DIR"),dir);
+   GlobalVariableSet(Key("BIAS_DIR"),bias_dir);
+   GlobalVariableSet(Key("BIAS_CONF"),bias_confidence);
+   GlobalVariableSet(Key("BIAS_SCORE"),bias_score);
    GlobalVariableSet(Key("UPDATED"),(double)TimeCurrent()); // publish last
-   Print("ChronosSlopeBridge: ",direction," mid=",mid," forecast=",median," step15=",step1," step30=",step2," horizon=",horizon);
+   Print("ChronosSlopeBridge: ",direction,
+      " bias=",bias_direction,
+      " conf=",DoubleToString(bias_confidence,3),
+      " score=",DoubleToString(bias_score,3),
+      " mid=",mid," forecast=",median," step15=",step1," step30=",step2," horizon=",horizon);
 }
 int OnInit()
 {
