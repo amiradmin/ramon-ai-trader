@@ -4890,8 +4890,9 @@ void OnTimer()
    if(SmallOnlyMode && decision!="WAIT")
    { StatusLine="Primary signal; small EA stands aside"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
    string small_direction="",small_filter_reason="";
-   bool small_profit=SmallProfitCandidate(decision,reason,buy_edge,sell_edge,
-      signal_strength,small_direction,small_filter_reason);
+   // Manual dashboard direction is explicit; never reroute it into SMALL.
+   bool small_profit=(!dashboard_manual_entry && SmallProfitCandidate(decision,reason,buy_edge,sell_edge,
+      signal_strength,small_direction,small_filter_reason));
    if(decision=="WAIT" && !small_profit)
    {
       if(SmallOnlyMode && StringFind(small_filter_reason,"SMALL_FILTER_")==0)
