@@ -100,8 +100,8 @@ def train_direction_roles(db: str | Path, root: Path, symbol: str, chronos_model
     return manifest
 
 
-class ShadowCoordinator(EnsembleCoordinator):
-    """A separate inference route that cannot substitute a live decision."""
+class DirectionCoordinator(EnsembleCoordinator):
+    """Operational coordinator for Direction AI specialists."""
 
     def __init__(self, root: str | Path, chronos_model: str | None = None):
         self.root = Path(root)
@@ -147,8 +147,7 @@ class ShadowCoordinator(EnsembleCoordinator):
 
     def status(self):
         return {**super().status(), "ensemble_mode": "direction_live", "ensemble_active": 1,
-                "risk_model_ready": int(self.risk_ready), "role_shadow": 0,
-                "direction_quality_live": int(self.buy_quality is not None and self.sell_quality is not None),
+                "risk_model_ready": int(self.risk_ready),
                 "direction_quality_live": int(self.buy_quality is not None and self.sell_quality is not None),
                 "buy_quality_ready": int(self.buy_quality is not None),
                 "sell_quality_ready": int(self.sell_quality is not None),
@@ -189,7 +188,7 @@ class ShadowCoordinator(EnsembleCoordinator):
         payload = {"base_decision": decision.decision, "base_reason": decision.reason,
                    "decision": decision.decision, "reason": decision.reason, "edge": decision.edge,
                    "ensemble_ready": int(self.ready), "ensemble_active": 1,
-                   "ensemble_bundle": self.bundle_id, "role_shadow": 0,
+                   "ensemble_bundle": self.bundle_id,
                    "ensemble_mode": "direction_live",
                    "risk_model_ready": int(self.risk_ready),
                    "risk_probability": risk_probability,
