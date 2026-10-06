@@ -1,6 +1,6 @@
 #property strict
-#property version "1.580"
-#define RAMON_EA_VERSION "0.58.0"
+#property version "1.581"
+#define RAMON_EA_VERSION "0.58.1"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -4207,8 +4207,11 @@ void WriteOpenDashboardPositions()
       long type=PositionGetInteger(POSITION_TYPE);
       string direction=(type==POSITION_TYPE_BUY ? "BUY" : "SELL");
       datetime opened=(datetime)PositionGetInteger(POSITION_TIME);
+      double profit_units=PositionGetDouble(POSITION_PROFIT);
+      double volume=PositionGetDouble(POSITION_VOLUME);
       FileWriteString(handle,sample+"|"+direction+"|"+IntegerToString((long)ticket)+"|"
-         +IntegerToString((long)opened)+"\r\n");
+         +IntegerToString((long)opened)+"|"+DoubleToString(profit_units,8)+"|"
+         +DoubleToString(volume,2)+"\r\n");
    }
    FileFlush(handle);
    FileClose(handle);
@@ -4340,10 +4343,122 @@ int ReadDashboardManualEntry(
    return 1;
 }
 
+
+bool ProcessDashboardManualClose()
+{
+   if(SmallOnlyMode)
+      return false;
+   const string queue_name="Ramon_ManualCloses.txt";
+   int handle=FileOpen(queue_name,FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
+   if(handle==INVALID_HANDLE)
+      return false;
+
+   string lines[];
+   int total=0;
+   while(!FileIsEnding(handle))
+   {
+      string line=FileReadString(handle);
+      StringTrimLeft(line); StringTrimRight(line);
+      if(line=="") continue;
+      ArrayResize(lines,total+1);
+      lines[total++]=line;
+   }
+   FileClose(handle);
+   if(total<=0)
+   {
+      FileDelete(queue_name,FILE_COMMON);
+      return false;
+   }
+
+   if(total==1)
+      FileDelete(queue_name,FILE_COMMON);
+   else
+   {
+      int out=FileOpen(queue_name,FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON);
+      if(out==INVALID_HANDLE)
+      {
+         StatusLine="MANUAL CLOSE queue rewrite failed";
+         return false;
+      }
+      for(int i=1;i<total;i++)
+         FileWriteString(out,lines[i]+"\r\n");
+      FileFlush(out);
+      FileClose(out);
+   }
+
+   string parts[];
+   ushort separator=StringGetCharacter("|",0);
+   if(StringSplit(lines[0],separator,parts)!=3)
+   {
+      StatusLine="MANUAL CLOSE invalid command";
+      return false;
+   }
+
+   datetime requested=(datetime)StringToInteger(parts[0]);
+   string sample=parts[1];
+   ulong requested_ticket=(ulong)StringToInteger(parts[2]);
+   datetime utc_now=TimeGMT();
+   if(requested<=0 || utc_now-requested>120 || requested-utc_now>5
+      || !ValidSampleKey(sample) || requested_ticket==0)
+   {
+      StatusLine="MANUAL CLOSE command expired/invalid";
+      return false;
+   }
+
+   if(!PositionSelectByTicket(requested_ticket))
+   {
+      StatusLine="MANUAL CLOSE position unavailable";
+      WriteOpenDashboardPositions();
+      return false;
+   }
+   if(PositionGetString(POSITION_SYMBOL)!=_Symbol
+      || (ulong)PositionGetInteger(POSITION_MAGIC)!=MagicNumber)
+   {
+      StatusLine="MANUAL CLOSE ownership mismatch";
+      return false;
+   }
+   string comment=PositionGetString(POSITION_COMMENT);
+   if(StringFind(comment,"Ramon:"+sample+":M")!=0)
+   {
+      StatusLine="MANUAL CLOSE sample mismatch";
+      return false;
+   }
+   if(!AccountLockHealthy())
+   {
+      StatusLine="MANUAL CLOSE account lock mismatch";
+      return false;
+   }
+   if(!(bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED)
+      || !(bool)MQLInfoInteger(MQL_TRADE_ALLOWED)
+      || !(bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED))
+   {
+      StatusLine="MANUAL CLOSE trading permissions";
+      return false;
+   }
+
+   double profit_units=PositionGetDouble(POSITION_PROFIT);
+   if(Trade.PositionClose(requested_ticket,MaxDeviationPoints))
+   {
+      RecordDealTelemetry(Trade.ResultDeal(),"manual_dashboard_table_close");
+      StatusLine="MANUAL TABLE CLOSE #"+IntegerToString((long)requested_ticket)
+         +" P/L "+DoubleToString(profit_units,2)+" units";
+      Print("Ramon execution: ",StatusLine);
+      WriteOpenDashboardPositions();
+      return true;
+   }
+
+   uint retcode=Trade.ResultRetcode();
+   StatusLine="MANUAL TABLE CLOSE FAILED "+IntegerToString((int)retcode);
+   Print("Ramon execution: ",StatusLine);
+   return false;
+}
+
 void OnTimer()
 {
    ReadControlRiskCap();
    ReadDecisionCadence();
+   WriteOpenDashboardPositions();
+   ProcessDashboardManualClose();
    WriteOpenDashboardPositions();
    datetime now=TimeCurrent();
    bool management_due=(LastPositionManagementTime==0 || now-LastPositionManagementTime>=5);
