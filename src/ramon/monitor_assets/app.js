@@ -216,7 +216,25 @@ async function manualCloseOpportunity(row,button){
     setTimeout(()=>{button.disabled=false;button.textContent=old;},1800);
   }
 }
+function renderLiveMarketSync(){
+  const target=$("live-market-sync");
+  if(!target)return;
+  if(!snapshot){
+    target.textContent="وضعیت زنده Ramon هنوز دریافت نشده است.";
+    return;
+  }
+  const fresh=snapshot.model_freshness?.state==="fresh";
+  const state=snapshot.decision||"نامشخص";
+  const reason=snapshot.reason_fa||snapshot.reason||"بدون دلیل";
+  const sample=snapshot.model_freshness?.at;
+  const timestamp=sample?formattedTime(sample,true):"نامشخص";
+  target.textContent=(fresh?"آخرین تصمیم Ramon":"آخرین تصمیم ثبت‌شده (قدیمی)")+
+    ": "+state+" · "+reason+" · زمان: "+timestamp+
+    " · توجه: افق پیش‌بینی معاملاتی Ramon با مسیر ۳۰ دقیقه‌ای ChronosSlope متفاوت است.";
+  target.classList.toggle("stale",!fresh);
+}
 function renderOpportunities(data){
+  renderLiveMarketSync();
   const body=$("opportunity-rows");body.replaceChildren();
   const daily=data.today_profit||{};
   const dailyEl=$("today-profit-summary");
@@ -264,7 +282,7 @@ function renderOpportunities(data){
       ?(" · P/L "+(row.live_profit_units>=0?"+":"")+row.live_profit_units.toFixed(2))
       :"";
     const disposition=row.position_open?"پوزیشن باز است"+(row.position_ticket?" · #"+row.position_ticket:"")+livePnl+(row.position_volume?" · vol "+row.position_volume.toFixed(2):""):row.entry_queued?"در صف اجرا":row.executed?"معاملهٔ بسته‌شده ثبت شده":row.model_approved?"سیگنال صادر شده؛ اجرای سفارش تأیید نشده":"مسدود";
-    const cells=[opportunityDate.format(new Date(row.captured*1000)),row.strategy+" / "+row.direction,
+    const cells=[opportunityDate.format(new Date(row.captured*1000))+" · ثبت اولیه",row.strategy+" / "+row.direction,
       format(row.entry)+" / "+format(row.stop)+" / "+format(row.target),format(row.edge)+" / "+format(row.minimum_edge),
       format(row.strength),percent(row.success_probability),disposition+" · علت نخست: "+(reasons[row.first_reason]||row.first_reason||"—")+(row.last_reason!==row.first_reason?" · آخرین: "+(reasons[row.last_reason]||row.last_reason||"—"):""),
       (labels[row.outcome]||row.outcome)+(row.net_r!==null&&row.outcome!=="DATA_GAP"?" · "+format(row.net_r)+"R":""),
@@ -346,7 +364,7 @@ async function refreshOpportunities(){
     opportunityInFlight=false;
   }
 }
-async function refresh(){if(busy)return;busy=true;clearTimeout(timer);const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),5000);try{const response=await fetch("/api/snapshot",{cache:"no-store",signal:controller.signal});if(!response.ok)throw Error("monitor unavailable");snapshot=await response.json();render();void refreshOpportunities();$("connection").textContent="داشبورد متصل";$("connection").className="connection connected";}catch{ $("connection").textContent="اتصال قطع است؛ تلاش مجدد";$("connection").className="connection error";$("warning").hidden=false;$("warning").textContent="ارتباط با داشبورد قطع شده است؛ داده‌های روی صفحه مربوط به آخرین دریافت هستند.";document.querySelectorAll(".node").forEach(e=>{e.className="node stale";const b=e.querySelector(".state-badge");b.className="state-badge stale";b.textContent="دادهٔ قدیمی";});if(snapshot){snapshot.nodes.forEach(n=>n.state="stale");detail();renderEdges(false);}}finally{clearTimeout(timeout);busy=false;timer=setTimeout(refresh,3000);}}
+async function refresh(){if(busy)return;busy=true;clearTimeout(timer);const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),5000);try{const response=await fetch("/api/snapshot",{cache:"no-store",signal:controller.signal});if(!response.ok)throw Error("monitor unavailable");snapshot=await response.json();render();renderLiveMarketSync();void refreshOpportunities();$("connection").textContent="داشبورد متصل";$("connection").className="connection connected";}catch{ $("connection").textContent="اتصال قطع است؛ تلاش مجدد";$("connection").className="connection error";$("warning").hidden=false;$("warning").textContent="ارتباط با داشبورد قطع شده است؛ داده‌های روی صفحه مربوط به آخرین دریافت هستند.";document.querySelectorAll(".node").forEach(e=>{e.className="node stale";const b=e.querySelector(".state-badge");b.className="state-badge stale";b.textContent="دادهٔ قدیمی";});if(snapshot){snapshot.nodes.forEach(n=>n.state="stale");detail();renderEdges(false);}}finally{clearTimeout(timeout);busy=false;timer=setTimeout(refresh,3000);}}
 async function resetOverrides(){if(overrideBusy)return;overrideBusy=true;const btn=$("reset-overrides");const old=btn.textContent;btn.disabled=true;btn.textContent="RESETTING...";try{const response=await fetch("/api/override/reset",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});if(!response.ok){let msg="reset failed";try{const data=await response.json();msg=data.error||msg;}catch{}throw new Error(msg);}btn.textContent="RESET DONE";await refresh();}catch(err){btn.textContent="RESET ERROR: "+err.message;}finally{overrideBusy=false;setTimeout(()=>{btn.disabled=false;btn.textContent=old;},1200);}}
 function analysisLine(value){return value===null||value===undefined?"—":typeof value==="object"?JSON.stringify(value):String(value);}
 function candleLines(rows,label){const exact=!!snapshot?.recent_market?.exact_input;const out=[`=== ${label} CANDLES (oldest → newest; ${exact?"EXACT DECISION INPUT · UTC":"historical fallback"}) ===`];for(const b of rows||[]){let t="—";if(b.time){const iso=new Date(b.time*1000).toISOString().replace(/Z$/,"");t=exact?iso+" UTC":iso+" (broker time; UTC offset unknown)";}out.push(`${t} | O ${b.open} H ${b.high} L ${b.low} C ${b.close} | body ${b.body} range ${b.range} spreadPts ${b.spread_points}`);}if(!(rows||[]).length)out.push("NO DATA");return out;}
