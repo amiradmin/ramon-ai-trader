@@ -156,3 +156,30 @@ def test_legacy_trade_migration_recovers_from_stale_staging_table(tmp_path: Path
         assert con.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='trade_outcomes_v2'"
         ).fetchone() is None
+
+
+
+def test_legacy_trade_migration_preserves_unknown_future_columns(tmp_path: Path) -> None:
+    db = tmp_path / "history.sqlite3"
+    with sqlite3.connect(db) as con:
+        con.execute("""CREATE TABLE trade_outcomes (
+            trade_key TEXT PRIMARY KEY, sample_key TEXT NOT NULL UNIQUE, symbol TEXT NOT NULL,
+            direction TEXT NOT NULL, opened INTEGER NOT NULL, closed INTEGER NOT NULL,
+            net_units REAL NOT NULL, initial_risk_units REAL NOT NULL,
+            net_r REAL NOT NULL, exit_reason TEXT NOT NULL, received INTEGER NOT NULL,
+            entry_strategy TEXT
+        )""")
+        con.execute(
+            "INSERT INTO trade_outcomes VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("future:1", "d" * 16, "XAUUSD_l", "BUY", 10, 20, 1.0, 2.0, 0.5,
+             "DEAL_REASON_TP", 30, "AUTO"),
+        )
+
+    ensure_history_db(db)
+
+    with sqlite3.connect(db) as con:
+        columns = {row[1] for row in con.execute("PRAGMA table_info(trade_outcomes)")}
+        assert "entry_strategy" in columns
+        assert con.execute(
+            "SELECT entry_strategy FROM trade_outcomes WHERE trade_key='future:1'"
+        ).fetchone()[0] == "AUTO"
