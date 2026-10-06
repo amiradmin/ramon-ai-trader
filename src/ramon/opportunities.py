@@ -8,14 +8,32 @@ from pathlib import Path
 ACTIONABLE_SECONDS = 90
 
 
-def _direction_probability(audit, side):
+DIRECTION_MIN_QUALITY = 0.55
+DIRECTION_MIN_MARGIN = 0.05
+
+
+def _direction_probabilities(audit):
     try:
         quality = audit.get("shadow_forecasts", {}).get("direction_quality", {})
-        value = quality.get("buy_success_probability" if side == "BUY" else "sell_success_probability")
-        value = float(value)
-        return value if 0.0 <= value <= 1.0 else None
+        buy = float(quality.get("buy_success_probability"))
+        sell = float(quality.get("sell_success_probability"))
+        if not (0.0 <= buy <= 1.0 and 0.0 <= sell <= 1.0):
+            return None, None
+        return buy, sell
     except (TypeError, ValueError):
-        return None
+        return None, None
+
+
+def _live_direction(audit):
+    """Operational BUY/SELL/WAIT selector from trained direction-quality models."""
+    buy, sell = _direction_probabilities(audit)
+    if buy is None or sell is None:
+        return "WAIT", None, None, None
+    best = max(buy, sell)
+    margin = abs(buy - sell)
+    if best < DIRECTION_MIN_QUALITY or margin < DIRECTION_MIN_MARGIN:
+        return "WAIT", best, buy, sell
+    return ("BUY" if buy > sell else "SELL"), best, buy, sell
 
 
 def read_opportunities(db, symbol='XAUUSD_l', limit=200):
@@ -36,18 +54,29 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
             try:
                 metadata=json.loads(row['model_metadata'] or '{}');audit=metadata.get('decision_audit',{});base=audit.get('base',{});final=audit.get('final',{})
                 if not base.get('forecast_median',0)>0:continue
-                side='BUY' if base['buy_edge']>base['sell_edge'] else 'SELL'
-                edge=max(base['buy_edge'],base['sell_edge'])
-                if edge<=0 or not row['quote_time']:continue
-                probability=_direction_probability(audit,side)
-                key=(row['signal_bar_time'],side)
+                side,probability,buy_probability,sell_probability=_live_direction(audit)
+                if side not in {'BUY','SELL'} or not row['quote_time']:
+                    continue
+                edge=base['buy_edge'] if side=='BUY' else base['sell_edge']
+                # Direction quality is authoritative for table direction. A
+                # negative Chronos edge no longer flips the side, but it still
+                # disqualifies immediate execution geometry for safety.
+                if edge<=0:
+                    continue
+                key=row['signal_bar_time']
                 if key in grouped:
-                    grouped[key]['last_reason']=final.get('reason')
-                    grouped[key]['model_approved'] |= row['final_decision']==side
-                    grouped[key]['executed'] |= row['sample_key'] in traded
-                    grouped[key]['latest_captured']=row['captured']
-                    if probability is not None:
-                        grouped[key]['success_probability']=probability
+                    item=grouped[key]
+                    # Latest classifier output wins within the same M15 bar.
+                    item['direction']=side
+                    item['last_reason']=final.get('reason')
+                    item['model_approved'] |= row['final_decision']==side
+                    item['executed'] |= row['sample_key'] in traded
+                    item['latest_captured']=row['captured']
+                    item['sample_key']=row['sample_key']
+                    item['success_probability']=probability
+                    item['buy_success_probability']=buy_probability
+                    item['sell_success_probability']=sell_probability
+                    item['direction_source']='LIVE_DIRECTION_QUALITY'
                     continue
                 sign=1 if side=='BUY' else -1
                 entry=row['mid']+sign*row['spread']/2
@@ -59,6 +88,9 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
                     'direction':side,'strategy':'برگشت تأییدشده' if base.get('trend_conflict_active')==1 and base.get('intrabar_confirmed')==1 and base.get('ai_trend_confirmed')==1 else 'پیش‌بینی مدل',
                     'edge':edge,'minimum_edge':base.get('minimum_edge'),'strength':base.get('signal_strength'),
                     'success_probability':probability,
+                    'buy_success_probability':buy_probability,
+                    'sell_success_probability':sell_probability,
+                    'direction_source':'LIVE_DIRECTION_QUALITY',
                     'entry':entry,'stop':entry-sign*stop,'target':entry+sign*target,
                     'risk_distance':stop,'first_reason':final.get('reason'),'last_reason':final.get('reason'),
                     'model_approved':row['final_decision']==side,'executed':row['sample_key'] in traded,
@@ -85,7 +117,7 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
             )
         return {'opportunities':sorted(grouped.values(),key=lambda x:x['captured'],reverse=True)[:max(1,min(limit,200))],
                 'as_of':latest,'actionable_seconds':ACTIONABLE_SECONDS,
-                'scope':'HISTORICAL positive model edge; first snapshot per M15/direction; not latest market or live ChronosSlope; quote sampled; spread included; no commission/slippage; manual execution requires fresh EA-side revalidation'}
+                'scope':'LIVE_DIRECTION_QUALITY selects BUY/SELL with quality>=0.55 and margin>=0.05; historical opportunity ledger supplies geometry; quote sampled; spread included; no commission/slippage; manual execution requires fresh EA-side revalidation'}
     except sqlite3.Error as exc:
         return {'opportunities':[], 'error':str(exc),'scope':'positive_model_edge'}
     finally:con.close()
