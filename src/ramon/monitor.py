@@ -1491,7 +1491,8 @@ def opportunities_with_execution_state(db, diagnostic, symbol, health_url=None):
         row["chronos_exit_step"] = advice.get("forecast_peak_step") if advice else None
         captured = number(row.get("latest_captured") or row.get("captured"))
         recent_candidate = (
-            not open_info and not row.get("executed") and not row.get("entry_queued")
+            not open_info and not row.get("executed") and sample_key not in queued
+            and (number(row.get("success_probability")) or 0) >= 0.70
             and captured is not None and 0 <= now - captured <= 90
         )
         # Keep inference bounded even when many snapshots arrive simultaneously.
