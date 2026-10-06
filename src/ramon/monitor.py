@@ -1760,7 +1760,7 @@ def queue_manual_entry(db, diagnostic, symbol, payload):
             else sell_probability if direction == "SELL"
             else live_probability
         )
-        mode = "UNLOCKED" if unlocked else "RECHECK"
+        mode = "DISCRETIONARY" if unlocked else "RECHECK"
     else:
         if not row.get("actionable"):
             raise ValueError("فرصت منقضی شده؛ از دکمهٔ بازبینی دستی استفاده کنید")
