@@ -844,8 +844,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 )
                 ai_engine_authoritative = False
                 if (
-                    account_is_cent
-                    and not bool(response.get("range_execution"))
+                    not bool(response.get("range_execution"))
                     and not reversal_selected
                 ):
                     ai_engine_authoritative = apply_ai_decision_engine(
