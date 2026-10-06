@@ -1720,11 +1720,11 @@ def queue_manual_entry(db, diagnostic, symbol, payload):
     )
     if not row:
         raise ValueError("فرصت در داده‌های فعلی پیدا نشد")
-    if row.get("position_open"):
+    if row.get("position_open") and not unlocked:
         raise ValueError("برای این فرصت همین حالا پوزیشن باز است")
     if row.get("entry_queued"):
         raise ValueError("فرمان این فرصت قبلاً در صف اجراست")
-    if row.get("executed"):
+    if row.get("executed") and not unlocked:
         raise ValueError("این فرصت قبلاً معاملهٔ ثبت‌شده دارد")
 
     common_dir = Path(diagnostic).parent
