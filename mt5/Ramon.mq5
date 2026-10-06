@@ -4214,11 +4214,12 @@ void SaveDashboardAlias(const string execution_sample,const string origin_sample
 {
    if(!ValidSampleKey(execution_sample) || !ValidSampleKey(origin_sample))
       return;
-   int handle=FileOpen(DashboardAliasFileName(),FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
+   int handle=FileOpen(DashboardAliasFileName(),FILE_READ|FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
+   if(handle==INVALID_HANDLE)
+      handle=FileOpen(DashboardAliasFileName(),FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
    if(handle==INVALID_HANDLE)
       return;
-   // Keep a compact one-line mapping for the active manual position. This is
-   // sufficient because dashboard manual positions are keyed by execution sample.
+   FileSeek(handle,0,SEEK_END);
    FileWriteString(handle,execution_sample+"|"+origin_sample+"\r\n");
    FileFlush(handle);
    FileClose(handle);
