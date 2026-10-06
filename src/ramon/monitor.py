@@ -1467,8 +1467,30 @@ def daily_profit_summary(db, symbol, opened, diagnostic=None, now=None):
     }
 
 
+MIN_DASHBOARD_ENTRY_EA_VERSION = (0, 58, 6)
+
+
+def dashboard_entry_compatibility(diagnostic):
+    """Do not queue commands for an old EA that never consumes them."""
+    diag, error = read_diagnostic(diagnostic)
+    if error or not diag:
+        return {"supported": False, "reason": "فایل وضعیت معتبر EA در دسترس نیست"}
+    raw = str(diag.get("EA version") or "").strip()
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", raw)
+    if not match:
+        return {"supported": False, "reason": f"نسخه EA قابل تشخیص نیست: {raw or 'نامشخص'}"}
+    version = tuple(int(part) for part in match.groups())
+    if version < MIN_DASHBOARD_ENTRY_EA_VERSION:
+        return {"supported": False, "reason": f"نسخه نصب‌شده Ramon {raw} از فرمان ورود دستی داشبورد پشتیبانی تأییدشده ندارد؛ نسخه 0.58.6 یا جدیدتر را کامپایل و روی چارت بارگذاری کن."}
+    stamp = float(diag.get("captured_epoch") or 0)
+    if not -5 <= time.time() - stamp <= 90:
+        return {"supported": False, "reason": "وضعیت EA تازه نیست؛ دریافت فرمان قابل تأیید نیست"}
+    return {"supported": True, "reason": "نسخه EA و وضعیت تازه تأیید شد", "version": raw}
+
+
 def opportunities_with_execution_state(db, diagnostic, symbol, health_url=None):
     data = read_opportunities(db, symbol)
+    data["manual_entry_compatibility"] = dashboard_entry_compatibility(diagnostic)
     opened = read_open_dashboard_positions(diagnostic)
     queue_path = Path(diagnostic).with_name("Ramon_ManualEntries.txt") if diagnostic else None
     queued = set()
@@ -1534,6 +1556,9 @@ def opportunities_with_execution_state(db, diagnostic, symbol, health_url=None):
 def queue_manual_entry(db, diagnostic, symbol, payload):
     if diagnostic is None:
         raise ValueError("مسیر فایل اکسپرت در دسترس نیست")
+    compatibility = dashboard_entry_compatibility(diagnostic)
+    if not compatibility["supported"]:
+        raise ValueError(compatibility["reason"])
     direction = str(payload.get("direction", "")).upper()
     signal_bar_time = int(payload.get("signal_bar_time", 0))
     recheck = bool(payload.get("recheck"))
