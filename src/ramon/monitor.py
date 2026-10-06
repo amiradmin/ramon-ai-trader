@@ -1404,11 +1404,74 @@ def chronos_exit_advice(health_url, open_info):
         return None
 
 
-def daily_profit_summary(db, symbol, opened, diagnostic=None, now=None):
-    """Today's realized Ramon P/L plus current floating P/L, using Tehran calendar day."""
+def _today_profit_reset_path(diagnostic):
+    if not diagnostic:
+        return None
+    return Path(diagnostic).expanduser().resolve().with_name("Ramon_TodayProfitReset.json")
+
+
+def _load_today_profit_reset(diagnostic, today):
+    path = _today_profit_reset_path(diagnostic)
+    if path is None or not path.is_file():
+        return {"reset_utc": 0.0, "open_baselines": {}}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if raw.get("date_tehran") != today.isoformat():
+            return {"reset_utc": 0.0, "open_baselines": {}}
+        reset_utc = float(raw.get("reset_utc") or 0.0)
+        baselines = raw.get("open_baselines") or {}
+        if not isinstance(baselines, dict):
+            baselines = {}
+        return {
+            "reset_utc": reset_utc,
+            "open_baselines": {
+                str(key): float(value)
+                for key, value in baselines.items()
+                if number(value) is not None
+            },
+        }
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return {"reset_utc": 0.0, "open_baselines": {}}
+
+
+def reset_today_profit(diagnostic, opened, now=None):
+    """Reset dashboard-only daily P/L without deleting trading/history data."""
     now = time.time() if now is None else float(now)
     tehran = ZoneInfo("Asia/Tehran")
     today = datetime.fromtimestamp(now, timezone.utc).astimezone(tehran).date()
+    path = _today_profit_reset_path(diagnostic)
+    if path is None:
+        raise ValueError("مسیر Diagnostic برای ریست آمار امروز در دسترس نیست")
+    baselines = {}
+    for sample_key, info in (opened or {}).items():
+        profit = number(info.get("profit_units"))
+        if profit is not None:
+            baselines[str(sample_key)] = float(profit)
+    payload = {
+        "date_tehran": today.isoformat(),
+        "reset_utc": now,
+        "open_baselines": baselines,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    tmp.replace(path)
+    return {
+        "reset": True,
+        "date_tehran": today.isoformat(),
+        "reset_utc": now,
+        "open_positions_baselined": len(baselines),
+    }
+
+
+def daily_profit_summary(db, symbol, opened, diagnostic=None, now=None):
+    """Today's Ramon P/L since the optional dashboard reset baseline, Tehran day."""
+    now = time.time() if now is None else float(now)
+    tehran = ZoneInfo("Asia/Tehran")
+    today = datetime.fromtimestamp(now, timezone.utc).astimezone(tehran).date()
+    reset = _load_today_profit_reset(diagnostic, today)
+    reset_utc = float(reset.get("reset_utc") or 0.0)
+    open_baselines = reset.get("open_baselines") or {}
     realized = 0.0
     closed_count = 0
     path = Path(db).expanduser().resolve()
@@ -1425,7 +1488,7 @@ def daily_profit_summary(db, symbol, opened, diagnostic=None, now=None):
                         if "trade_role" in cols else ""
                     )
                     query = (
-                        "SELECT closed,received,net_units"
+                        "SELECT sample_key,closed,received,net_units"
                         + (",closed_utc_offset_seconds" if "closed_utc_offset_seconds" in cols else ",NULL AS closed_utc_offset_seconds")
                         + " FROM trade_outcomes WHERE symbol=?" + role_clause
                     )
@@ -1436,22 +1499,28 @@ def daily_profit_summary(db, symbol, opened, diagnostic=None, now=None):
                         if closed is not None and offset is not None:
                             utc_stamp = closed - offset
                         elif received is not None:
-                            # received is recorded by the local service at ingestion and is
-                            # a safer UTC-day fallback than an unqualified broker timestamp.
                             utc_stamp = received
                         else:
                             continue
                         trade_day = datetime.fromtimestamp(utc_stamp, timezone.utc).astimezone(tehran).date()
-                        if trade_day == today:
-                            realized += number(row["net_units"]) or 0.0
-                            closed_count += 1
+                        if trade_day != today or (reset_utc > 0.0 and utc_stamp < reset_utc):
+                            continue
+                        pnl = number(row["net_units"]) or 0.0
+                        sample_key = str(row["sample_key"] or "")
+                        # If the position was already open at reset, count only
+                        # P/L earned/lost after the reset baseline.
+                        if sample_key in open_baselines:
+                            pnl -= float(open_baselines[sample_key])
+                        realized += pnl
+                        closed_count += 1
         except (sqlite3.Error, OSError, ValueError, OverflowError):
             pass
-    floating_values = [
-        number(info.get("profit_units"))
-        for info in (opened or {}).values()
-    ]
-    floating = sum(v for v in floating_values if v is not None)
+    floating = 0.0
+    for sample_key, info in (opened or {}).items():
+        profit = number(info.get("profit_units"))
+        if profit is None:
+            continue
+        floating += profit - float(open_baselines.get(str(sample_key), 0.0))
     diag, _ = read_diagnostic(diagnostic)
     account_text = str(diag.get("Account") or diag.get("AccountType") or "").upper()
     account_is_cent = "CENT" in account_text
@@ -1464,6 +1533,8 @@ def daily_profit_summary(db, symbol, opened, diagnostic=None, now=None):
         "open_positions": len(opened or {}),
         "unit_label": "سنت" if account_is_cent else "واحد حساب",
         "timezone": "Asia/Tehran",
+        "reset_active": reset_utc > 0.0,
+        "reset_utc": reset_utc or None,
     }
 
 
@@ -1734,7 +1805,7 @@ def handler_for(db, diagnostic, symbol, health_url):
                 self.send_error(404)
 
         def do_POST(self):
-            if self.path not in {"/api/control", "/api/override", "/api/override/reset", "/api/manual-entry", "/api/manual-close"}:
+            if self.path not in {"/api/control", "/api/override", "/api/override/reset", "/api/manual-entry", "/api/manual-close", "/api/today-profit/reset"}:
                 self.send_error(404)
                 return
             origin = self.headers.get("Origin")
@@ -1762,6 +1833,12 @@ def handler_for(db, diagnostic, symbol, health_url):
                     return
                 if self.path == "/api/manual-close":
                     result = queue_manual_close(diagnostic, payload)
+                    self.reply(json.dumps(result, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
+                    return
+
+                if self.path == "/api/today-profit/reset":
+                    opened = read_open_dashboard_positions(diagnostic)
+                    result = reset_today_profit(diagnostic, opened)
                     self.reply(json.dumps(result, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
                     return
 
