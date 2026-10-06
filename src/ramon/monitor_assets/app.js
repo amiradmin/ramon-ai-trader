@@ -216,6 +216,24 @@ async function manualCloseOpportunity(row,button){
     setTimeout(()=>{button.disabled=false;button.textContent=old;},1800);
   }
 }
+async function predictedAutoCloseOpportunity(row,button){
+  if(button.disabled)return;
+  button.disabled=true;const old=button.textContent;button.textContent="در حال تنظیم…";
+  try{
+    const response=await fetch("/api/predicted-auto-close",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sample_key:row.sample_key,ticket:row.position_ticket})});
+    let data={};try{data=await response.json();}catch{}
+    if(!response.ok||!data.queued)throw new Error(data.error||("HTTP "+response.status));
+    const target=typeof data.target_price==="number"?data.target_price.toFixed(2):"—";
+    button.textContent="خروج خودکار @ "+target;
+    button.classList.add("armed");
+    opportunitySet("opportunity-status","خروج خودکار پوزیشن #"+row.position_ticket+" روی قیمت "+target+" مسلح شد؛ EA فقط همان Ticket را هنگام رسیدن قیمت می‌بندد.");
+    setTimeout(()=>void refreshOpportunities(),700);
+  }catch(err){
+    button.textContent="خطا";
+    opportunitySet("opportunity-status","خروج خودکار تنظیم نشد: "+err.message);
+    setTimeout(()=>{button.disabled=false;button.textContent=old;},1800);
+  }
+}
 let chronosSlope = null;
 function renderTradingGuidance(){
   const title=$("trade-guidance-title"),reason=$("trade-guidance-reason"),container=title?.parentElement;
@@ -271,6 +289,7 @@ function renderLiveMarketSync(){
 function renderOpportunities(data){
   renderLiveMarketSync();
   const compatibility=data.manual_entry_compatibility||{supported:false,reason:"وضعیت EA قابل تأیید نیست"};
+  const autoCloseCompatibility=data.auto_close_compatibility||{supported:false,reason:"خروج خودکار در این نسخه EA در دسترس نیست"};
   const body=$("opportunity-rows");body.replaceChildren();
   const daily=data.today_profit||{};
   const dailyEl=$("today-profit-summary");
@@ -349,11 +368,35 @@ function renderOpportunities(data){
     const action=document.createElement("td"),button=document.createElement("button");
     button.type="button";button.className="opportunity-entry "+(row.direction==="BUY"?"buy":"sell");
     if(row.position_open){
-      button.textContent="بستن پوزیشن";
-      button.disabled=false;
-      button.className="opportunity-entry close";
-      button.title="بستن فقط همین پوزیشن جدول · Ticket "+row.position_ticket;
-      button.addEventListener("click",()=>manualCloseOpportunity(row,button));
+      const actions=document.createElement("div");actions.className="opportunity-actions";
+      const closeNow=document.createElement("button");
+      closeNow.type="button";closeNow.textContent="بستن فوری";
+      closeNow.className="opportunity-entry close";
+      closeNow.title="بستن فوری فقط همین پوزیشن · Ticket "+row.position_ticket;
+      closeNow.addEventListener("click",()=>manualCloseOpportunity(row,closeNow));
+      actions.append(closeNow);
+
+      const autoClose=document.createElement("button");
+      autoClose.type="button";
+      autoClose.className="opportunity-entry auto-close"+(row.auto_close_armed?" armed":"");
+      if(row.auto_close_armed&&typeof row.auto_close_target==="number"){
+        autoClose.textContent="خروج خودکار @ "+format(row.auto_close_target);
+        autoClose.disabled=true;
+        autoClose.title="خروج خودکار برای همین Ticket فعال است";
+      }else{
+        const hasTarget=["TARGET","RECOVERY_EXIT"].includes(row.chronos_exit_action)&&typeof row.chronos_exit_price==="number";
+        autoClose.textContent=hasTarget?"خروج خودکار @ "+format(row.chronos_exit_price):"خروج خودکار";
+        autoClose.disabled=!autoCloseCompatibility.supported||!hasTarget;
+        autoClose.title=!autoCloseCompatibility.supported
+          ?autoCloseCompatibility.reason
+          :hasTarget
+            ?"قیمت خروج تازه Chronos هنگام کلیک دوباره محاسبه و سپس برای همین Ticket قفل می‌شود"
+            :"Chronos فعلاً سطح خروج قابل مانیتور پیشنهاد نکرده است";
+        if(!autoClose.disabled)autoClose.addEventListener("click",()=>predictedAutoCloseOpportunity(row,autoClose));
+      }
+      actions.append(autoClose);
+      action.append(actions);tr.append(action);body.append(tr);
+      continue;
     }else if(row.entry_queued){
       button.textContent="در صف اجرا";
       button.disabled=true;
