@@ -16,7 +16,7 @@ from .core import Decision, Market
 DEFAULT_TIMESFM3_CHECKPOINT = "google/timesfm-3.0-pytorch"
 
 
-class TimesFM3Shadow:
+class TimesFM3Experimental:
     """Best-effort secondary forecast for observation and later evaluation only."""
 
     def __init__(
@@ -50,8 +50,8 @@ class TimesFM3Shadow:
             self.error = f"{type(exc).__name__}: {exc}"
 
     @classmethod
-    def from_env(cls) -> "TimesFM3Shadow":
-        enabled = os.getenv("RAMON_TIMESFM3_SHADOW_ENABLED", "0").strip().lower() in {
+    def from_env(cls) -> "TimesFM3Experimental":
+        enabled = os.getenv("RAMON_TIMESFM3_EXPERIMENTAL_ENABLED", "0").strip().lower() in {
             "1", "true", "yes", "on"
         }
         return cls(
@@ -68,11 +68,11 @@ class TimesFM3Shadow:
 
     def status(self) -> dict[str, object]:
         return {
-            "timesfm3_shadow_enabled": int(self.enabled),
-            "timesfm3_shadow_ready": int(self.ready),
-            "timesfm3_shadow_checkpoint": self.checkpoint,
-            "timesfm3_shadow_error": self.error,
-            "timesfm3_shadow_effect": "NONE",
+            "timesfm3_experimental_enabled": int(self.enabled),
+            "timesfm3_experimental_ready": int(self.ready),
+            "timesfm3_experimental_checkpoint": self.checkpoint,
+            "timesfm3_experimental_error": self.error,
+            "timesfm3_experimental_effect": "NONE",
         }
 
     @staticmethod
@@ -90,12 +90,12 @@ class TimesFM3Shadow:
     def assess(self, market: Market, decision: Decision, horizon: int = 4) -> dict[str, object]:
         payload: dict[str, object] = {
             **self.status(),
-            "timesfm3_shadow_direction": "UNAVAILABLE",
-            "timesfm3_shadow_low": -1.0,
-            "timesfm3_shadow_median": -1.0,
-            "timesfm3_shadow_high": -1.0,
-            "timesfm3_shadow_move_atr": -1.0,
-            "timesfm3_shadow_agrees_chronos": 0,
+            "timesfm3_experimental_direction": "UNAVAILABLE",
+            "timesfm3_experimental_low": -1.0,
+            "timesfm3_experimental_median": -1.0,
+            "timesfm3_experimental_high": -1.0,
+            "timesfm3_experimental_move_atr": -1.0,
+            "timesfm3_experimental_agrees_chronos": 0,
         }
         if not self.ready:
             return payload
@@ -153,19 +153,19 @@ class TimesFM3Shadow:
             )
             payload.update(
                 {
-                    "timesfm3_shadow_ready": 1,
-                    "timesfm3_shadow_error": "",
-                    "timesfm3_shadow_direction": direction,
-                    "timesfm3_shadow_low": low,
-                    "timesfm3_shadow_median": median,
-                    "timesfm3_shadow_high": high,
-                    "timesfm3_shadow_move_atr": move_atr,
-                    "timesfm3_shadow_agrees_chronos": int(
+                    "timesfm3_experimental_ready": 1,
+                    "timesfm3_experimental_error": "",
+                    "timesfm3_experimental_direction": direction,
+                    "timesfm3_experimental_low": low,
+                    "timesfm3_experimental_median": median,
+                    "timesfm3_experimental_high": high,
+                    "timesfm3_experimental_move_atr": move_atr,
+                    "timesfm3_experimental_agrees_chronos": int(
                         direction in {"BUY", "SELL"} and direction == chronos_direction
                     ),
                 }
             )
         except Exception as exc:
-            payload["timesfm3_shadow_ready"] = 0
-            payload["timesfm3_shadow_error"] = f"{type(exc).__name__}: {exc}"
+            payload["timesfm3_experimental_ready"] = 0
+            payload["timesfm3_experimental_error"] = f"{type(exc).__name__}: {exc}"
         return payload
