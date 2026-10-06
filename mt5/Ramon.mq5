@@ -228,6 +228,11 @@ double LastTrendConflictOverrideStrength = 0.70;
 bool LastTrendConflictOverridePassed = false;
 bool LastIntrabarTurnConfirmed = false;
 double LastTrendEdgeFloor = 0.0;
+double LastAIBuyQuality = -1.0;
+double LastAISellQuality = -1.0;
+double LastAIQualityMargin = -1.0;
+double LastAIScore = -1.0;
+string LastAIDirectionSource = "NONE";
 string LastSizingSide = "NONE";
 double LastPlannedVolume = 0.0;
 double LastEstimatedStopLossUnits = 0.0;
@@ -670,6 +675,11 @@ string BuildDiagnosticText()
       +"TradeLearning*: "+TradeLearningStatus+"\n"
       +"LossCooldown: MT5_HISTORY | 2 consecutive same-direction net-loss SL closes | 30min\n"
       +"BaseDecision: "+LastBaseDecision+"  BaseReason: "+LastBaseReason+"\n"
+      +"DirectionAI: "+LastAIDirectionSource
+      +"  BUY="+DoubleToString(LastAIBuyQuality,3)
+      +"  SELL="+DoubleToString(LastAISellQuality,3)
+      +"  Margin="+DoubleToString(LastAIQualityMargin,3)
+      +"  Score="+DoubleToString(LastAIScore,3)+"\n"
       +"RoleModels: "+(LastRoleShadow ? "*SHADOW* (display only)" : (LastEnsembleReady ? "READY" : "*LEARNING*"))
       +"  Active: "+BoolText(LastEnsembleActive)
       +"  RegimeP: "+DoubleToString(LastRegimeProbability,3)
@@ -4796,6 +4806,9 @@ void OnTimer()
    double trend_min_path_atr=0.0,trend_min_consistency=0.0,trend_min_edge_fraction=0.0,trend_min_micro_move_atr=0.0;
    double manual_execution_override=0.0;
    double ai_engine_v2_selected=0.0;
+   double ai_engine_v2_buy_quality=-1.0,ai_engine_v2_sell_quality=-1.0;
+   double ai_engine_v2_quality_margin=-1.0,ai_engine_v2_score=-1.0;
+   string ai_engine_v2_direction_source="NONE";
    if(!JsonText(reply,"decision",decision)
       || !JsonText(reply,"reason",reason)
       || !JsonText(reply,"sample_key",sample_key)
@@ -4854,6 +4867,11 @@ void OnTimer()
       || !JsonNumber(reply,"trend_min_micro_move_atr",trend_min_micro_move_atr)
       || !JsonNumber(reply,"manual_execution_override",manual_execution_override)
       || !JsonNumber(reply,"ai_engine_v2_selected",ai_engine_v2_selected)
+      || !JsonNumber(reply,"ai_engine_v2_buy_quality",ai_engine_v2_buy_quality)
+      || !JsonNumber(reply,"ai_engine_v2_sell_quality",ai_engine_v2_sell_quality)
+      || !JsonNumber(reply,"ai_engine_v2_quality_margin",ai_engine_v2_quality_margin)
+      || !JsonNumber(reply,"ai_engine_v2_score",ai_engine_v2_score)
+      || !JsonText(reply,"ai_engine_v2_direction_source",ai_engine_v2_direction_source)
       || !JsonNumber(reply,"spread_points",model_spread)
       || !JsonNumber(reply,"stop_distance",stop_distance)
       || !JsonNumber(reply,"target_distance",target_distance)
@@ -5041,6 +5059,11 @@ void OnTimer()
    LastTrendConflictOverridePassed=(trend_conflict_override_passed>=0.5);
    LastIntrabarTurnConfirmed=(intrabar_turn_confirmed>=0.5);
    LastTrendEdgeFloor=trend_edge_floor;
+   LastAIBuyQuality=ai_engine_v2_buy_quality;
+   LastAISellQuality=ai_engine_v2_sell_quality;
+   LastAIQualityMargin=ai_engine_v2_quality_margin;
+   LastAIScore=ai_engine_v2_score;
+   LastAIDirectionSource=ai_engine_v2_direction_source;
    LastModelSpreadPoints=(int)model_spread;
    LastStopDistance=stop_distance;
    LastTargetDistance=target_distance;
