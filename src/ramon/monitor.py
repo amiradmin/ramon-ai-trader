@@ -246,7 +246,7 @@ def trade_trace(path, symbol, trade_key):
     finbert = external.get("finbert") if isinstance(external.get("finbert"), dict) else {}
     stage("guards", "خبر، ناهنجاری و مدل‌های کمکی", "observed" if external or section("news_snapshot") else "unknown",
           "مقادیر تاریخی مدل‌ها؛ عبور مستقل از قفل‌های اجرایی اکسپرت ثبت نشده است",
-          {"ناهـنجاری": moment.get("moment_anomaly_label"), "نسبت ناهنجاری": moment.get("moment_anomaly_ratio"), "احساس خبر": finbert.get("finbert_sentiment_label"), "خبر": section("news_snapshot").get("news_event_title"), "رژیم ناظر": final.get("shadow_regime_label"), "نقش‌ها": "فقط ناظر" if final.get("role_shadow") == 1 else None})
+          {"ناهـنجاری": moment.get("moment_anomaly_label"), "نسبت ناهنجاری": moment.get("moment_anomaly_ratio"), "احساس خبر": finbert.get("finbert_sentiment_label"), "خبر": section("news_snapshot").get("news_event_title"), "برچسب رژیم": final.get("regime_label", final.get("shadow_regime_label")), "نقش‌ها": "LIVE" if final.get("role_shadow") == 0 else "legacy" if final.get("role_shadow") == 1 else None})
     stage("risk", "حجم و ریسک ورود", "observed" if trade.get("initial_risk_units") is not None else "unknown",
           "مقادیر ثبت‌شدهٔ معامله؛ تأیید جداگانهٔ تمام مجوزها و قفل‌ها موجود نیست",
           {"حجم برنامه‌ریزی‌شده": trade.get("planned_volume"), "بودجهٔ ریسک، واحد حساب": trade.get("risk_budget_units"), "ریسک اولیه، واحد حساب": trade.get("initial_risk_units"), "سقف ریسک، دلار": trade.get("max_executable_risk_usd"), "استفاده از لات حداقل": trade.get("min_lot_override_used"), "فاصلهٔ حد ضرر": base.get("stop_distance"), "فاصلهٔ هدف": base.get("target_distance")})
@@ -602,7 +602,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
         "market_direction": "AI→Logic",
         "entry_timing": "AI→Logic",
         "base": "AI+Logic",
-        "shadow": "AI · Shadow",
+        "models": "AI · Live Models",
         "decision": "AI+Logic",
     }
 
@@ -648,8 +648,8 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
          metrics=f"Chronos {pct(base.get('signal_strength'))}",
          values={"کف / میانه / سقف": " / ".join(metric(base.get(k)) for k in ("forecast_low", "forecast_median", "forecast_high")),
                  "ATR": base.get("atr"), "مدل ثبت‌شده": sample.get("chronos_model")})
-    edge_buy_quality = number(final.get("shadow_buy_success_probability"))
-    edge_sell_quality = number(final.get("shadow_sell_success_probability"))
+    edge_buy_quality = number(final.get("buy_success_probability", final.get("shadow_buy_success_probability")))
+    edge_sell_quality = number(final.get("sell_success_probability", final.get("shadow_sell_success_probability")))
     edge, minimum = number(max(number(base.get("buy_edge")) or 0, number(base.get("sell_edge")) or 0)), number(base.get("minimum_edge"))
     node("edge", "مزیت پس از اسپرد", "pass" if minimum is not None and edge >= minimum else "blocked" if minimum is not None else "unknown",
          "Edge خام با هزینهٔ اسپرد مقایسه می‌شود؛ درصدها کیفیت جهت از مدل AI هستند",
@@ -670,9 +670,9 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
     regime_p = number(final.get("regime_probability"))
     news_p = number(final.get("news_probability"))
     meta_p = number(final.get("meta_probability"))
-    full_sl_p = number(final.get("shadow_full_sl_probability"))
-    buy_quality_p = number(final.get("shadow_buy_success_probability"))
-    sell_quality_p = number(final.get("shadow_sell_success_probability"))
+    full_sl_p = number(final.get("full_sl_probability", final.get("shadow_full_sl_probability")))
+    buy_quality_p = number(final.get("buy_success_probability", final.get("shadow_buy_success_probability")))
+    sell_quality_p = number(final.get("sell_success_probability", final.get("shadow_sell_success_probability")))
     ai_score_p = number(final.get("ai_engine_v2_score"))
 
     proposed_direction = (
@@ -689,8 +689,8 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
         else "blocked" if cent_gate_active and detected_direction in {"BUY", "SELL", "NEUTRAL"}
         else "observed" if detected_direction else "unknown"
     )
-    buy_quality = number(final.get("shadow_buy_success_probability"))
-    sell_quality = number(final.get("shadow_sell_success_probability"))
+    buy_quality = number(final.get("buy_success_probability", final.get("shadow_buy_success_probability")))
+    sell_quality = number(final.get("sell_success_probability", final.get("shadow_sell_success_probability")))
     direction_quality_badge = None
     if buy_quality is not None and buy_quality >= 0 and sell_quality is not None and sell_quality >= 0:
         direction_quality_badge = f"BUY {buy_quality * 100:.0f}% · SELL {sell_quality * 100:.0f}%"
@@ -798,15 +798,15 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
          "علت رد هر شرط رنج در تاریخچهٔ این نسخه ذخیره نشده؛ نتیجه را حدس نمی‌زنیم",
          values={"فعال در سرویس": (health or {}).get("range_main_enabled"), "فعال در اکسپرت": diag.get("Range MAIN"),
                  "مجاز برای WAIT": "قدرت / مزیت ناکافی، حرکت مخالف، نبود تأیید جهت", "Setup ثبت‌شده": range_setup or None})
-    shadow = final.get("role_shadow") == 1 or metadata.get("ensemble_mode") == "shadow"
+    role_live = metadata.get("ensemble_mode") == "direction_live" or final.get("role_shadow") == 0
     regime_badge = probability_badge(final.get("regime_probability"), "Regime")
-    full_sl_badge = probability_badge(final.get("shadow_full_sl_probability"), "Full-SL")
-    shadow_badge = " · ".join(x for x in (regime_badge, full_sl_badge) if x) or None
-    node("shadow", "تشخیص رژیم و مدل‌های ناظر", "shadow" if shadow else "observed" if final else "unknown",
+    full_sl_badge = probability_badge(final.get("full_sl_probability", final.get("shadow_full_sl_probability")), "Full-SL")
+    models_badge = " · ".join(x for x in (regime_badge, full_sl_badge) if x) or None
+    node("models", "مدل‌های کمکی LIVE", "pass" if role_live and final else "observed" if final else "unknown",
          f"Regime {pct(regime_p)} · Full-SL Risk {pct(full_sl_p)}",
-         score=shadow_badge,
+         score=models_badge,
          metrics=f"Regime {pct(regime_p)} · Full-SL {pct(full_sl_p)}",
-         values={"رژیم ناظر": final.get("shadow_regime_label"), "احتمال رژیم": final.get("regime_probability"),
+         values={"رژیم": final.get("regime_label", final.get("shadow_regime_label")), "احتمال رژیم": final.get("regime_probability"),
                  "نقش‌های فعال": final.get("ensemble_active"), "توجه": "RANGE/UNCLEAR رنج قطعی نیست"})
     final_ai_badge = (
         probability_badge(final.get("ai_engine_v2_score"), "AI Score")
@@ -847,7 +847,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
     risk = diag.get("RiskGate", "")
     node("risk", "حجم، ریسک و مارجین", "blocked" if "BLOCK" in risk or any(x in ea_status for x in ("risk >", "hard risk cap", "Insufficient margin", "SL risk >", "TP not inside", "reward/risk <")) else "pass" if risk else "unknown",
          f"Full-SL Risk AI {pct(full_sl_p)} · ریسک اجرایی MT5 جداگانه کنترل می‌شود", source="ea",
-         score=probability_badge(final.get("shadow_full_sl_probability"), "Full-SL"),
+         score=probability_badge(final.get("full_sl_probability", final.get("shadow_full_sl_probability")), "Full-SL"),
          metrics=f"Full-SL Risk {pct(full_sl_p)}",
          values={"پیش‌نمایش ریسک": risk or None,
                  "بودجهٔ ترجیحی، دلار": number(match(diag.get("RiskPerTradeUSD"), r"^([\d.]+)")),
@@ -871,7 +871,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
         ("forecast", "timing", "قفل"), ("timing", "extension", "امتداد"), ("extension", "edge", "مزیت"), ("edge", "strength", "قدرت"),
         ("strength", "market_direction", "جهت"), ("market_direction", "entry_timing", "زمان"),
         ("entry_timing", "base", "تصمیم"),
-        ("base", "decision", "عادی"), ("forecast", "shadow", "ناظر"),
+        ("base", "decision", "عادی"), ("forecast", "models", "مدل‌های LIVE"),
         ("base", "range", "WAIT"), ("range", "decision", "برگشت رنج"),
         ("decision", "news", "سیگنال"), ("news", "account", "مجوز"),
         ("account", "limits", "سقف"), ("limits", "risk", "حجم"),
@@ -899,8 +899,11 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
     external_models = audit.get("external_models") if isinstance(audit.get("external_models"), dict) else {}
     moment_snapshot = external_models.get("moment") if isinstance(external_models.get("moment"), dict) else {}
     finbert_snapshot = external_models.get("finbert") if isinstance(external_models.get("finbert"), dict) else {}
-    shadow_forecasts = audit.get("shadow_forecasts") if isinstance(audit.get("shadow_forecasts"), dict) else {}
-    timesfm_snapshot = shadow_forecasts.get("timesfm3") if isinstance(shadow_forecasts.get("timesfm3"), dict) else {}
+    experimental_models = audit.get("experimental_models") if isinstance(audit.get("experimental_models"), dict) else {}
+    timesfm_snapshot = experimental_models.get("timesfm3") if isinstance(experimental_models.get("timesfm3"), dict) else {}
+    if not timesfm_snapshot:
+        legacy = audit.get("shadow_forecasts") if isinstance(audit.get("shadow_forecasts"), dict) else {}
+        timesfm_snapshot = legacy.get("timesfm3") if isinstance(legacy.get("timesfm3"), dict) else {}
     news_snapshot = audit.get("news_snapshot") if isinstance(audit.get("news_snapshot"), dict) else {}
     target_snapshot = metadata.get("target_structure") if isinstance(metadata.get("target_structure"), dict) else {}
 
@@ -935,24 +938,24 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
             live=True,
         ),
         model_row(
-            "Forecast Shadow",
+            "Forecast Experimental",
             handler("forecast_shadow_model_handler", "OFF"),
-            "READY" if timesfm_snapshot.get("timesfm3_shadow_ready") == 1 else "OFF" if (health or {}).get("timesfm3_shadow_enabled") == 0 else "NO SNAPSHOT",
+            "READY" if timesfm_snapshot.get("timesfm3_experimental_ready", timesfm_snapshot.get("timesfm3_shadow_ready")) == 1 else "OFF" if (health or {}).get("timesfm3_experimental_enabled") == 0 else "NO SNAPSHOT",
             {
-                "Direction": timesfm_snapshot.get("timesfm3_shadow_direction"),
+                "Direction": timesfm_snapshot.get("timesfm3_experimental_direction", timesfm_snapshot.get("timesfm3_shadow_direction")),
                 "Low / Median / High": " / ".join(metric(timesfm_snapshot.get(k)) for k in ("timesfm3_shadow_low", "timesfm3_shadow_median", "timesfm3_shadow_high")),
-                "Move ATR": timesfm_snapshot.get("timesfm3_shadow_move_atr"),
-                "Agrees Chronos": timesfm_snapshot.get("timesfm3_shadow_agrees_chronos"),
-                "Effect": "SHADOW / display only",
+                "Move ATR": timesfm_snapshot.get("timesfm3_experimental_move_atr", timesfm_snapshot.get("timesfm3_shadow_move_atr")),
+                "Agrees Chronos": timesfm_snapshot.get("timesfm3_experimental_agrees_chronos", timesfm_snapshot.get("timesfm3_shadow_agrees_chronos")),
+                "Effect": "EXPERIMENTAL / no execution effect",
             },
         ),
         model_row(
             "Regime",
             handler("regime_model_handler", "Ramon/BinaryLogisticModel"),
-            "SHADOW" if final.get("role_shadow") == 1 or metadata.get("ensemble_mode") == "shadow" else "ACTIVE" if final else "NO SAMPLE",
+            "ACTIVE" if final else "NO SAMPLE",
             {
                 "Probability": final.get("regime_probability"),
-                "Label": final.get("shadow_regime_label"),
+                "Label": final.get("regime_label", final.get("shadow_regime_label")),
                 "Ensemble active": final.get("ensemble_active"),
                 "Market state": assessment.get("state"),
                 "Route": assessment.get("route"),
@@ -961,7 +964,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
         model_row(
             "Anomaly Detection",
             handler("anomaly_model_handler", "OFF") + " [AI RISK]",
-            "VETO" if moment_snapshot.get("moment_live_veto") == 1 else "READY" if moment_snapshot.get("moment_shadow_ready") == 1 else "NO SNAPSHOT",
+            "VETO" if moment_snapshot.get("moment_live_veto") == 1 else "READY" if moment_snapshot.get("moment_ready", moment_snapshot.get("moment_shadow_ready")) == 1 else "NO SNAPSHOT",
             {
                 "Label": moment_snapshot.get("moment_anomaly_label"),
                 "Score": moment_snapshot.get("moment_anomaly_score"),
@@ -977,7 +980,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
         model_row(
             "Entry",
             handler("entry_model_handler", "Ramon/BinaryLogisticModel"),
-            "SHADOW" if metadata.get("ensemble_mode") == "shadow" else "ACTIVE" if final else "NO SAMPLE",
+            "ACTIVE" if final else "NO SAMPLE",
             {
                 "Entry probability": final.get("entry_probability"),
                 "Signal strength": base.get("signal_strength"),
@@ -1006,7 +1009,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
         model_row(
             "News Model",
             handler("news_model_handler", "Ramon/BinaryLogisticModel"),
-            "SHADOW" if metadata.get("ensemble_mode") == "shadow" else "ACTIVE" if final else "NO SAMPLE",
+            "ACTIVE" if final else "NO SAMPLE",
             {
                 "News probability": final.get("news_probability"),
                 "Model ready": final.get("news_model_ready"),
@@ -1017,7 +1020,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
         model_row(
             "News Sentiment",
             handler("news_sentiment_model_handler", "OFF") + " [AI FEATURE]",
-            "VETO" if finbert_snapshot.get("finbert_live_veto") == 1 else "READY" if finbert_snapshot.get("finbert_shadow_ready") == 1 else "NO SNAPSHOT",
+            "VETO" if finbert_snapshot.get("finbert_live_veto") == 1 else "READY" if finbert_snapshot.get("finbert_ready", finbert_snapshot.get("finbert_shadow_ready")) == 1 else "NO SNAPSHOT",
             {
                 "Sentiment": finbert_snapshot.get("finbert_sentiment_label"),
                 "Directional score": finbert_snapshot.get("finbert_directional_score"),
@@ -1033,7 +1036,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
         model_row(
             "Meta",
             handler("meta_model_handler", "Ramon/BinaryLogisticModel"),
-            "SHADOW" if metadata.get("ensemble_mode") == "shadow" else "ACTIVE" if final else "NO SAMPLE",
+            "ACTIVE" if final else "NO SAMPLE",
             {
                 "Meta probability": final.get("meta_probability"),
                 "Base decision": base.get("decision"),
@@ -1051,7 +1054,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
         model_row(
             "Risk / SL",
             handler("risk_model_handler", "Ramon/BinaryLogisticModel"),
-            "SHADOW" if metadata.get("ensemble_mode") == "shadow" else "ACTIVE" if final else "NO SAMPLE",
+            "ACTIVE" if final else "NO SAMPLE",
             {
                 "Risk probability": final.get("risk_probability"),
                 "Risk multiplier": final.get("risk_multiplier"),
@@ -1113,21 +1116,21 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
         return "blocked" if stored[prefix + "_live_veto"] == 1 else "pass"
 
     moment_state = gate_state(diag.get("MOMENT LIVE"), moment_snapshot,
-                              moment_snapshot.get("moment_shadow_ready"), requires_fresh=True)
+                              moment_snapshot.get("moment_ready", moment_snapshot.get("moment_shadow_ready")), requires_fresh=True)
     sentiment_state = gate_state(diag.get("FinBERT LIVE"), finbert_snapshot,
-                                 finbert_snapshot.get("finbert_shadow_ready"))
-    role_state = "shadow" if shadow else "observed" if final else "unknown"
+                                 finbert_snapshot.get("finbert_ready", finbert_snapshot.get("finbert_shadow_ready")))
+    role_state = "pass" if role_live and final else "observed" if final else "unknown"
     conditions = {
         "Forecast": ("pass" if base.get("decision") in {"BUY", "SELL"} else "blocked" if base.get("decision") == "WAIT" else "unknown", "تصمیم پایهٔ پیش‌بینی"),
         "Forecast Shadow": ("shadow" if timesfm_snapshot.get("timesfm3_shadow_ready") == 1 else "idle", "پیش‌بینی ناظر؛ مجوز ورود نیست"),
         "Regime": (role_state, "نقش مدل رژیم"),
         "Anomaly Detection": (moment_state, "گیت زندهٔ ناهنجاری؛ فعال و تازه، بدون وتو"),
-        "Entry": (role_state, "نقش مدل ورود؛ SHADOW به معنی تأیید شرط نیست"),
+        "Entry": (role_state, "مدل ورود LIVE"),
         "News Calendar": ("pass" if news_snapshot.get("news_source_ready") == 1 else "blocked" if news_snapshot.get("news_source_ready") == 0 else "unknown", "آمادگی منبع تقویم خبر؛ مجوز ورود نیست"),
         "News Model": (role_state, "نقش مدل خبر"),
         "News Sentiment": (sentiment_state, "گیت زندهٔ احساس خبر؛ فعال و آماده، بدون وتو"),
         "Meta": (role_state, "نقش مدل ترکیبی"),
-        "Risk / SL": (role_state, "نقش مدل ریسک؛ ناظر با تأیید ریسک اجرایی فرق دارد"),
+        "Risk / SL": (role_state, "مدل ریسک LIVE؛ کنترل اجرایی MT5 همچنان جداست"),
         "Market State": ("pass" if assessment.get("route") in {"CONFIRMED_MODEL", "RANGE_REVERSAL"} else "blocked" if assessment.get("route") == "WAIT" else "observed" if assessment else "unknown", "سیاست بازار مسیر ورود دارد؛ تأیید نهایی سفارش نیست"),
         "TP Structure": ("pass" if target_snapshot.get("ready") else "unknown", "ساختار هدف آماده است"),
     }
@@ -1195,7 +1198,7 @@ def analysis_bundle(snapshot: dict, selected_stage: str = "") -> str:
         "extension": "05", "edge": "06", "strength": "07", "market_direction": "08",
         "entry_timing": "09", "base": "10", "decision": "11", "news": "12",
         "account": "13", "limits": "14", "risk": "15", "order": "16",
-        "position": "17", "range": "R1", "shadow": "S1",
+        "position": "17", "range": "R1", "models": "M1",
     }
     nodes = snapshot.get("nodes") if isinstance(snapshot.get("nodes"), list) else []
     selected = next((row for row in nodes if row.get("id") == selected_stage), None)
