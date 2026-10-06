@@ -522,7 +522,7 @@ def test_dashboard_manual_entry_requires_ea_version_that_consumes_queue(tmp_path
     diag = tmp_path / "Ramon_Diagnostic.txt"
     diagnostic(diag, now=stamp)
     assert dashboard_entry_compatibility(diag)["supported"] is False
-    text = diag.read_text().replace("EA version: 0.54.8", "EA version: 0.58.6")
+    text = diag.read_text().replace("EA version: 0.54.8", "EA version: 0.58.7")
     diag.write_text(text)
     assert dashboard_entry_compatibility(diag)["supported"] is True
     diagnostic(diag, now=stamp - 200)
