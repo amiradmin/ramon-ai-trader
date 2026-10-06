@@ -100,7 +100,7 @@ def ensure_history_db(db: str | Path) -> Path:
                 conn.execute(f"ALTER TABLE decision_samples ADD COLUMN {name} {definition}")
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_sample_key ON decision_samples(sample_key)")
         conn.execute("""CREATE TABLE IF NOT EXISTS trade_outcomes (
-            trade_key TEXT PRIMARY KEY, sample_key TEXT NOT NULL UNIQUE, symbol TEXT NOT NULL,
+            trade_key TEXT PRIMARY KEY, sample_key TEXT NOT NULL, symbol TEXT NOT NULL,
             direction TEXT NOT NULL, opened INTEGER NOT NULL, closed INTEGER NOT NULL,
             net_units REAL NOT NULL, initial_risk_units REAL NOT NULL,
             net_r REAL NOT NULL, exit_reason TEXT NOT NULL, received INTEGER NOT NULL
@@ -109,6 +109,41 @@ def ensure_history_db(db: str | Path) -> Path:
         for name, definition in {**TRADE_TELEMETRY_COLUMNS, "training_status": "TEXT"}.items():
             if name not in columns:
                 conn.execute(f"ALTER TABLE trade_outcomes ADD COLUMN {name} {definition}")
+
+        # Legacy schema allowed only one realized trade per decision sample. Ramon can
+        # now execute multiple distinct tickets from the same immutable sample, so
+        # sample_key is a many-to-one foreign reference while trade_key remains the
+        # idempotency key.
+        trade_table_sql_row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='trade_outcomes'"
+        ).fetchone()
+        trade_table_sql = str(trade_table_sql_row[0] or "") if trade_table_sql_row else ""
+        if re.search(r"sample_key\s+TEXT\s+NOT\s+NULL\s+UNIQUE", trade_table_sql, re.IGNORECASE):
+            conn.execute("""CREATE TABLE trade_outcomes_v2 (
+                trade_key TEXT PRIMARY KEY, sample_key TEXT NOT NULL, symbol TEXT NOT NULL,
+                direction TEXT NOT NULL, opened INTEGER NOT NULL, closed INTEGER NOT NULL,
+                net_units REAL NOT NULL, initial_risk_units REAL NOT NULL,
+                net_r REAL NOT NULL, exit_reason TEXT NOT NULL, received INTEGER NOT NULL,
+                profit_units REAL, commission_units REAL, swap_units REAL, fee_units REAL,
+                opened_utc_offset_seconds INTEGER, closed_utc_offset_seconds INTEGER,
+                actual_fill_price REAL, exit_detail TEXT, entry_ea_version TEXT,
+                trade_role TEXT, entry_magic INTEGER, entry_source TEXT,
+                risk_budget_units REAL, planned_volume REAL, min_lot_sl_units REAL,
+                min_lot_override_used INTEGER, max_executable_risk_usd REAL,
+                money_units_per_usd REAL, training_status TEXT
+            )""")
+            trade_columns = [row[1] for row in conn.execute("PRAGMA table_info(trade_outcomes)")]
+            copy_columns = ",".join(trade_columns)
+            conn.execute(
+                f"INSERT INTO trade_outcomes_v2 ({copy_columns}) "
+                f"SELECT {copy_columns} FROM trade_outcomes"
+            )
+            conn.execute("DROP TABLE trade_outcomes")
+            conn.execute("ALTER TABLE trade_outcomes_v2 RENAME TO trade_outcomes")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_trade_outcomes_sample_key "
+            "ON trade_outcomes(sample_key)"
+        )
         # Backfill deterministically from immutable broker exit provenance. Do not
         # pretend legacy DEAL_REASON_EXPERT rows have an exact trigger.
         conn.execute("""
@@ -157,8 +192,8 @@ def ensure_history_db(db: str | Path) -> Path:
             "ON shadow_votes(advisor,captured)"
         )
         conn.execute("""CREATE TABLE IF NOT EXISTS target_outcomes (
-            sample_key TEXT PRIMARY KEY,
-            trade_key TEXT NOT NULL,
+            trade_key TEXT PRIMARY KEY,
+            sample_key TEXT NOT NULL,
             symbol TEXT NOT NULL,
             direction TEXT NOT NULL,
             opened INTEGER NOT NULL,
@@ -185,6 +220,52 @@ def ensure_history_db(db: str | Path) -> Path:
             computed_at INTEGER NOT NULL,
             FOREIGN KEY(sample_key) REFERENCES decision_samples(sample_key)
         )""")
+        target_table_sql_row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='target_outcomes'"
+        ).fetchone()
+        target_table_sql = str(target_table_sql_row[0] or "") if target_table_sql_row else ""
+        if re.search(r"sample_key\s+TEXT\s+PRIMARY\s+KEY", target_table_sql, re.IGNORECASE):
+            conn.execute("""CREATE TABLE target_outcomes_v2 (
+                trade_key TEXT PRIMARY KEY,
+                sample_key TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                opened INTEGER NOT NULL,
+                closed INTEGER NOT NULL,
+                tp1 REAL NOT NULL,
+                tp2 REAL NOT NULL,
+                tp3 REAL NOT NULL,
+                tp1_hit INTEGER NOT NULL,
+                tp2_hit INTEGER NOT NULL,
+                tp3_hit INTEGER NOT NULL,
+                tp1_time INTEGER,
+                tp2_time INTEGER,
+                tp3_time INTEGER,
+                bars_to_tp1 INTEGER,
+                bars_to_tp2 INTEGER,
+                bars_to_tp3 INTEGER,
+                mfe_price REAL NOT NULL,
+                mae_price REAL NOT NULL,
+                mfe_atr REAL,
+                mae_atr REAL,
+                continuation_tp2 INTEGER NOT NULL,
+                continuation_tp3 INTEGER NOT NULL,
+                source TEXT NOT NULL,
+                computed_at INTEGER NOT NULL,
+                FOREIGN KEY(sample_key) REFERENCES decision_samples(sample_key)
+            )""")
+            target_columns = [row[1] for row in conn.execute("PRAGMA table_info(target_outcomes)")]
+            copy_columns = ",".join(target_columns)
+            conn.execute(
+                f"INSERT INTO target_outcomes_v2 ({copy_columns}) "
+                f"SELECT {copy_columns} FROM target_outcomes"
+            )
+            conn.execute("DROP TABLE target_outcomes")
+            conn.execute("ALTER TABLE target_outcomes_v2 RENAME TO target_outcomes")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_target_outcomes_sample_key "
+            "ON target_outcomes(sample_key)"
+        )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_target_outcomes_symbol_opened "
             "ON target_outcomes(symbol,opened)"
