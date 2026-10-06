@@ -33,7 +33,6 @@ button{border:1px solid #39735f;background:#173b31;color:#b9f5dc;border-radius:1
 button:disabled{opacity:.5;cursor:not-allowed}.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:20px 0}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:15px}.label{color:var(--muted);font-size:12px}.value{font:700 24px monospace;margin-top:7px}.ok{color:var(--green)}.bad{color:var(--red)}.warn{color:var(--amber)}
 .status{padding:14px;border:1px solid var(--line);border-radius:12px;background:#0c1724;line-height:1.9;margin-bottom:16px}
-.progress{height:8px;background:#15273a;border-radius:999px;overflow:hidden;margin-top:10px}.bar{height:100%;width:0;background:var(--green);transition:width .35s}
 table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);font-size:12px}
 th,td{padding:10px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}th{color:#bad0e4;background:#0d1927}
 .scroll{overflow:auto;border-radius:12px}.foot{color:var(--muted);font-size:12px;margin-top:12px;line-height:1.8}
@@ -58,7 +57,7 @@ code{font-family:monospace;color:#c8d9e8}
     <div class="card"><div class="label">خالص معاملات جدول</div><div id="net" class="value">—</div></div>
   </section>
 
-  <div id="status" class="status">در حال دریافت وضعیت آموزش…<div class="progress"><div id="bar" class="bar"></div></div></div>
+  <div id="status" class="status">در حال دریافت وضعیت واقعی آموزش…</div>
 
   <div class="scroll">
     <table>
@@ -66,7 +65,7 @@ code{font-family:monospace;color:#c8d9e8}
       <tbody id="rows"><tr><td colspan="5">در حال دریافت…</td></tr></tbody>
     </table>
   </div>
-  <div class="foot">حداقل نمونهٔ این دکمه: <code id="minimum">—</code>. حتی با رسیدن به حداقل، وجود هر دو کلاس برد/باخت، پنجره‌های زمانی پاک، holdout کافی و بهتر بودن نسبت به مدل فعلی الزامی است.</div>
+  <div class="foot">حداقل واقعی trainer: <code id="minimum">—</code>. این عدد از تنظیم واقعی آموزش می‌آید؛ هیچ threshold نمایشی یا force-train وجود ندارد. وجود هر دو کلاس برد/باخت، پنجره‌های زمانی پاک، holdout کافی و بهتر بودن نسبت به مدل فعلی الزامی است.</div>
 </main>
 <script>
 const $=id=>document.getElementById(id);
@@ -101,7 +100,6 @@ function render(data){
   $("net").className="value "+((st.dashboard_net_units||0)>0?"ok":(st.dashboard_net_units||0)<0?"bad":"");
   $("minimum").textContent=data.minimum_samples??"—";
   $("status").firstChild.textContent=statusText(s);
-  $("bar").style.width=s.running?"70%":((s.report&&s.report.status==="promoted")?"100%":"0%");
   $("train").disabled=!!s.running;
   $("train").textContent=s.running?"در حال آموزش…":"آموزش Ramon از داده‌های فعلی";
   const body=$("rows");body.replaceChildren();
@@ -242,6 +240,13 @@ def _stats(db: Path, symbol: str, chronos_model: str) -> tuple[dict[str, object]
 def serve(host: str, port: int, db: Path, out: Path, symbol: str, chronos_model: str,
           model_url: str, minimum_samples: int) -> None:
     state = TrainingState()
+    persisted_report = out / "training_report.json"
+    if persisted_report.is_file():
+        try:
+            state.report = json.loads(persisted_report.read_text(encoding="utf-8"))
+            state.last_finished = str(state.report.get("generated_at_utc") or "") or None
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            pass
 
     def run_training() -> None:
         with state.lock:
@@ -356,7 +361,7 @@ def main() -> None:
     parser.add_argument("--symbol", default="XAUUSD_l")
     parser.add_argument("--chronos-model", default=os.getenv("CHRONOS_MODEL", "autogluon/chronos-2-small"))
     parser.add_argument("--model-url", default="http://model:8012")
-    parser.add_argument("--minimum-samples", type=int, default=150)
+    parser.add_argument("--minimum-samples", type=int, default=500)
     args = parser.parse_args()
     serve(args.host, args.port, Path(args.db), Path(args.out), args.symbol,
           args.chronos_model, args.model_url, args.minimum_samples)
