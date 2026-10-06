@@ -37,6 +37,12 @@ table{width:100%;border-collapse:collapse;background:var(--card);border:1px soli
 th,td{padding:10px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}th{color:#bad0e4;background:#0d1927}
 .scroll{overflow:auto;border-radius:12px}.foot{color:var(--muted);font-size:12px;margin-top:12px;line-height:1.8}
 code{font-family:monospace;color:#c8d9e8}
+.live-process{margin-bottom:16px;border:1px solid var(--line);border-radius:12px;background:#091522;overflow:hidden}
+.live-head{display:flex;justify-content:space-between;gap:12px;padding:12px 14px;border-bottom:1px solid var(--line)}
+.live-head span{color:var(--amber);font:700 12px monospace}
+.events{max-height:320px;overflow:auto;padding:8px 14px;direction:ltr;text-align:left;font:12px/1.75 monospace}
+.event{padding:4px 0;border-bottom:1px dashed #1d3044;white-space:pre-wrap;word-break:break-word}
+.event:last-child{border-bottom:0}.event .ts{color:#758aa0}.event .stage{color:var(--blue)}.event .details{color:#98b3ca}.muted{color:var(--muted)}
 @media(max-width:800px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>
 </head>
@@ -58,6 +64,10 @@ code{font-family:monospace;color:#c8d9e8}
   </section>
 
   <div id="status" class="status">در حال دریافت وضعیت واقعی آموزش…</div>
+  <section class="live-process">
+    <div class="live-head"><strong>پروسس زندهٔ آموزش</strong><span id="stage">—</span></div>
+    <div id="events" class="events"><div class="event muted">هنوز آموزشی اجرا نشده است.</div></div>
+  </section>
 
   <div class="scroll">
     <table>
@@ -102,6 +112,22 @@ function render(data){
   $("status").firstChild.textContent=statusText(s);
   $("train").disabled=!!s.running;
   $("train").textContent=s.running?"در حال آموزش…":"آموزش Ramon از داده‌های فعلی";
+  $("stage").textContent=s.current_stage||"—";
+  const events=$("events");events.replaceChildren();
+  for(const e of s.events||[]){
+    const div=document.createElement("div");div.className="event";
+    const ts=document.createElement("span");ts.className="ts";ts.textContent="["+String(e.at||"").replace("T"," ").replace("+00:00","Z")+"] ";
+    const stage=document.createElement("span");stage.className="stage";stage.textContent=(e.stage||"")+" ";
+    const msg=document.createElement("span");msg.textContent=e.message||"";
+    div.append(ts,stage,msg);
+    if(e.details&&Object.keys(e.details).length){
+      const details=document.createElement("span");details.className="details";details.textContent=" · "+JSON.stringify(e.details);
+      div.append(details);
+    }
+    events.append(div);
+  }
+  if(!(s.events||[]).length){const div=document.createElement("div");div.className="event muted";div.textContent="هنوز آموزشی اجرا نشده است.";events.append(div);}
+  events.scrollTop=events.scrollHeight;
   const body=$("rows");body.replaceChildren();
   for(const r of data.recent||[]){
     const tr=document.createElement("tr");
@@ -191,6 +217,8 @@ class TrainingState:
         self.report: dict[str, object] | None = None
         self.error = ""
         self.reload: dict[str, object] | None = None
+        self.current_stage = ""
+        self.events: list[dict[str, object]] = []
 
 
 def _stats(db: Path, symbol: str, chronos_model: str) -> tuple[dict[str, object], list[dict[str, object]]]:
@@ -249,9 +277,27 @@ def serve(host: str, port: int, db: Path, out: Path, symbol: str, chronos_model:
             pass
 
     def run_training() -> None:
+        def progress(stage: str, message: str, details: dict[str, object]) -> None:
+            event = {
+                "at": datetime.now(timezone.utc).isoformat(),
+                "stage": stage,
+                "message": message,
+                "details": details,
+            }
+            with state.lock:
+                state.current_stage = stage
+                state.events.append(event)
+                state.events = state.events[-200:]
         with state.lock:
             state.error = ""
             state.reload = None
+            state.current_stage = "starting"
+            state.events = [{
+                "at": datetime.now(timezone.utc).isoformat(),
+                "stage": "starting",
+                "message": "درخواست آموزش دریافت شد",
+                "details": {},
+            }]
         try:
             report = train_bundle(
                 db=db,
@@ -261,10 +307,12 @@ def serve(host: str, port: int, db: Path, out: Path, symbol: str, chronos_model:
                 minimum_samples=minimum_samples,
                 regime_minimum=300,
                 minimum_trades=20,
+                progress=progress,
             )
             atomic_json(out / "training_report.json", report)
             reload_result = None
             if report.get("status") == "promoted":
+                progress("publish_shadow", "در حال انتقال مدل تأییدشده به مسیر فعلی Ramon", {})
                 shadow_manifest = _publish_promoted_shadow(db, out, symbol, chronos_model)
                 request = Request(
                     model_url.rstrip("/") + "/reload-roles",
@@ -272,16 +320,26 @@ def serve(host: str, port: int, db: Path, out: Path, symbol: str, chronos_model:
                     headers={"Content-Type": "application/json"},
                     method="POST",
                 )
+                progress("reload_roles", "در حال Reload کردن Roleهای تأییدشده در سرویس مدل", {})
                 with urlopen(request, timeout=15) as response:
                     reload_result = json.loads(response.read().decode("utf-8"))
+                progress("reload_roles", "Roleهای جدید با موفقیت Reload شدند", {"bundle": reload_result.get("bundle")})
                 reload_result["shadow_bundle"] = shadow_manifest.get("bundle_id")
                 reload_result["source_promoted_bundle"] = shadow_manifest.get("source_bundle_id")
             with state.lock:
                 state.report = report
                 state.reload = reload_result
+                state.current_stage = str(report.get("status") or "finished")
         except Exception as exc:
             with state.lock:
                 state.error = f"{type(exc).__name__}: {exc}"
+                state.current_stage = "error"
+                state.events.append({
+                    "at": datetime.now(timezone.utc).isoformat(),
+                    "stage": "error",
+                    "message": state.error,
+                    "details": {},
+                })
         finally:
             with state.lock:
                 state.running = False
@@ -324,6 +382,8 @@ def serve(host: str, port: int, db: Path, out: Path, symbol: str, chronos_model:
                         "report": state.report,
                         "error": state.error,
                         "reload": state.reload,
+                        "current_stage": state.current_stage,
+                        "events": list(state.events),
                     }
                 self._json(200, {
                     "stats": stats,
