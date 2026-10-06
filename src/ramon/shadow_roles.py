@@ -1,6 +1,7 @@
-"""Independent experimental role training and display-only inference.
+"""Operational Direction AI role training and inference.
 
-Writes only ensemble/shadow/current.json. No live promotion pointer is touched.
+BUY/SELL quality and full-SL probability are consumed by the live Ramon
+decision engine. Legacy bundle storage remains readable for one migration cycle.
 """
 from __future__ import annotations
 
@@ -45,11 +46,7 @@ DIRECTION_EXTRA_FEATURES = {
 
 
 def train_direction_roles(db: str | Path, root: Path, symbol: str, chronos_model: str) -> dict:
-    """Fit each eligible role; missing data stays explicitly unavailable.
-
-    These are experimental predictions, without claims of out-of-sample accuracy.
-    Meta uses a later purged window, never the base-role training outcomes.
-    """
+    """Fit the specialist roles used by the live Direction AI path."""
     examples = [row for row in load_trade_examples(db, symbol, chronos_model)
                 if set(FEATURES["news"]).issubset(row.features.get("news", {}))]
     bars, _ = load_bars(db, symbol)
@@ -73,9 +70,8 @@ def train_direction_roles(db: str | Path, root: Path, symbol: str, chronos_model
     for role in ("entry", "news"):
         fit(role, training, lambda rows, role=role: fit_role(rows, role, FEATURES[role]))
     fit("risk", training, fit_risk_role)
-    # Direction-quality roles are display-only exploratory models. Use every
-    # clean historical trade so BUY and SELL can become observable sooner; they
-    # are never used for promotion, sizing, entry, or exit.
+    # Direction-quality roles are operational. Use every clean historical
+    # trade so BUY and SELL remain observable with the largest valid sample.
     fit(
         "buy_quality",
         examples,
@@ -124,18 +120,18 @@ class ShadowCoordinator(EnsembleCoordinator):
             # One-release migration bridge for an already-trained pre-live bundle.
             pointer = self.root / "shadow" / "current.json"
         if not pointer.exists():
-            self.error = "shadow_not_trained"
+            self.error = "direction_roles_not_trained"
             return
         try:
             bundle_id = json.loads(pointer.read_text())["bundle_id"]
             if not isinstance(bundle_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", bundle_id):
-                raise ValueError("invalid shadow bundle ID")
+                raise ValueError("invalid direction bundle ID")
             directory = pointer.parent / "versions" / bundle_id
             manifest = json.loads((directory / "manifest.json").read_text())
             if (manifest["mode"] not in {"direction_live", "shadow"} or manifest["schema_version"] != 1
                     or manifest["bundle_id"] != bundle_id
                     or manifest["chronos_model"] != chronos_model):
-                raise ValueError("shadow identity/checkpoint mismatch")
+                raise ValueError("direction identity/checkpoint mismatch")
             self.manifest, self.bundle_id, self.symbol = manifest, bundle_id, manifest["symbol"]
             for role, expected in {**FEATURES, **DIRECTION_EXTRA_FEATURES}.items():
                 if role not in manifest["sha256"]:
@@ -151,11 +147,12 @@ class ShadowCoordinator(EnsembleCoordinator):
                 except (OSError, ValueError, KeyError, TypeError) as exc:
                     self.role_errors[role] = str(exc)
         except (OSError, ValueError, KeyError, TypeError) as exc:
-            self.error = f"invalid_shadow_bundle: {exc}"
+            self.error = f"invalid_direction_bundle: {exc}"
 
     def status(self):
         return {**super().status(), "ensemble_mode": "direction_live", "ensemble_active": 1,
                 "risk_model_ready": int(self.risk_ready), "role_shadow": 0,
+                "direction_quality_live": int(self.buy_quality is not None and self.sell_quality is not None),
                 "direction_quality_live": int(self.buy_quality is not None and self.sell_quality is not None),
                 "buy_quality_ready": int(self.buy_quality is not None),
                 "sell_quality_ready": int(self.sell_quality is not None),
@@ -197,50 +194,21 @@ class ShadowCoordinator(EnsembleCoordinator):
                    "decision": decision.decision, "reason": decision.reason, "edge": decision.edge,
                    "ensemble_ready": int(self.ready), "ensemble_active": 1,
                    "ensemble_bundle": self.bundle_id, "role_shadow": 0,
-                   "ensemble_mode": "direction_live", "risk_model_ready": 0,
-                   "risk_probability": -1.0, "risk_target": "none", "risk_multiplier": 1.0,
-                   "shadow_risk_probability": risk_probability,
-                   "shadow_full_sl_probability": risk_probability,
-                   "shadow_buy_success_probability": buy_success_probability,
-                   "shadow_sell_success_probability": sell_success_probability,
-                   "shadow_direction_quality_ready": int(
+                   "ensemble_mode": "direction_live",
+                   "risk_model_ready": int(self.risk_ready),
+                   "risk_probability": risk_probability,
+                   "risk_target": "full_stop_loss", "risk_multiplier": 1.0,
+                   "full_sl_probability": risk_probability,
+                   "buy_success_probability": buy_success_probability,
+                   "sell_success_probability": sell_success_probability,
+                   "direction_quality_ready": int(
                        buy_success_probability >= 0 and sell_success_probability >= 0
                    ),
-                   "shadow_regime_label": "UNAVAILABLE" if p < 0 else "TREND" if p >= 0.5 else "RANGE/UNCLEAR",
-                   "shadow_candidate_direction": dominant_direction(decision),
-                   "shadow_role_errors": errors, "shadow_roles": self.manifest.get("roles", {}),
-                   "shadow_error": self.error,
+                   "regime_label": "UNAVAILABLE" if p < 0 else "TREND" if p >= 0.5 else "RANGE/UNCLEAR",
+                   "candidate_direction": dominant_direction(decision),
+                   "role_errors": errors, "roles": self.manifest.get("roles", {}),
+                   "role_error": self.error,
                    **{name + "_probability": p for name, p in probabilities.items()}}
-        return payload, features
-
-
-
-class DirectionCoordinator(ShadowCoordinator):
-    """Operational direction-quality coordinator."""
-
-    def status(self):
-        base = super().status()
-        base.update({
-            "ensemble_mode": "direction_live",
-            "ensemble_active": 1,
-            "role_shadow": 0,
-            "direction_quality_live": int(
-                self.buy_quality is not None and self.sell_quality is not None
-            ),
-        })
-        return base
-
-    def assess(self, market, decision, news_features=None):
-        payload, features = super().assess(market, decision, news_features)
-        payload.update({
-            "ensemble_mode": "direction_live",
-            "ensemble_active": 1,
-            "role_shadow": 0,
-            "direction_quality_live": int(
-                payload.get("shadow_buy_success_probability", -1.0) >= 0
-                and payload.get("shadow_sell_success_probability", -1.0) >= 0
-            ),
-        })
         return payload, features
 
 
