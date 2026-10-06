@@ -728,6 +728,16 @@ string BuildDiagnosticText()
       +"  Consistency: "+DoubleToString(LastAiTrendConsistency,2)+"/"+DoubleToString(LastTrendMinConsistency,2)
       +"  EdgeFloor: "+DoubleToString(LastTrendMinEdgeFraction,2)+"x"
       +"  MicroFloor: "+DoubleToString(LastTrendMinMicroMoveAtr,3)+"\n"
+      +"DirectionConflictLock: "+(LastTrendConflictActive ? "ACTIVE" : "CLEAR")
+      +"  Override: "+(LastTrendConflictOverridePassed ? "PASS" : "NO")
+      +"  OverrideStrength: "+DoubleToString(LastTrendConflictOverrideStrength,2)
+      +"  RecentMoveATR: "+DoubleToString(LastRecentMoveAtr,3)
+      +"  AlignedMoveATR: "+DoubleToString(LastAlignedRecentMoveAtr,3)+"\n"
+      +"StrongIntrabarGuard: "+(LastStrongEntryGuardActive ? "ACTIVE" : "CLEAR")
+      +"  MoveATR: "+DoubleToString(LastIntrabarMoveAtr,3)
+      +"  MinAllowed: "+DoubleToString(LastStrongEntryMinIntrabarMoveAtr,3)
+      +"  TurnConfirmed: "+BoolText(LastIntrabarTurnConfirmed)
+      +"  TrendEdgeFloor: "+DoubleToString(LastTrendEdgeFloor,_Digits)+"\n"
       +"StopDistance: "+DoubleToString(LastStopDistance,_Digits)
       +"  TargetDistance: "+DoubleToString(LastTargetDistance,_Digits)+"\n"
       +"TargetLearning*: "+(LastTargetLearningActive ? "*COLLECTING*" : "OFF")
@@ -4812,6 +4822,29 @@ void OnTimer()
    LastTrendMinConsistency=trend_min_consistency;
    LastTrendMinEdgeFraction=trend_min_edge_fraction;
    LastTrendMinMicroMoveAtr=trend_min_micro_move_atr;
+   // Optional direction-conflict telemetry. It never changes execution behavior.
+   double strong_entry_min_intrabar_move_atr=LastStrongEntryMinIntrabarMoveAtr;
+   double strong_entry_guard_active=0.0,recent_move_atr=0.0,aligned_recent_move_atr=0.0;
+   double trend_conflict_active=0.0,trend_conflict_override_strength=LastTrendConflictOverrideStrength;
+   double trend_conflict_override_passed=0.0,intrabar_turn_confirmed=0.0,trend_edge_floor=0.0;
+   JsonNumber(reply,"strong_entry_min_intrabar_move_atr",strong_entry_min_intrabar_move_atr);
+   JsonNumber(reply,"strong_entry_guard_active",strong_entry_guard_active);
+   JsonNumber(reply,"recent_move_atr",recent_move_atr);
+   JsonNumber(reply,"aligned_recent_move_atr",aligned_recent_move_atr);
+   JsonNumber(reply,"trend_conflict_active",trend_conflict_active);
+   JsonNumber(reply,"trend_conflict_override_strength",trend_conflict_override_strength);
+   JsonNumber(reply,"trend_conflict_override_passed",trend_conflict_override_passed);
+   JsonNumber(reply,"intrabar_turn_confirmed",intrabar_turn_confirmed);
+   JsonNumber(reply,"trend_edge_floor",trend_edge_floor);
+   LastStrongEntryMinIntrabarMoveAtr=strong_entry_min_intrabar_move_atr;
+   LastStrongEntryGuardActive=(strong_entry_guard_active>=0.5);
+   LastRecentMoveAtr=recent_move_atr;
+   LastAlignedRecentMoveAtr=aligned_recent_move_atr;
+   LastTrendConflictActive=(trend_conflict_active>=0.5);
+   LastTrendConflictOverrideStrength=trend_conflict_override_strength;
+   LastTrendConflictOverridePassed=(trend_conflict_override_passed>=0.5);
+   LastIntrabarTurnConfirmed=(intrabar_turn_confirmed>=0.5);
+   LastTrendEdgeFloor=trend_edge_floor;
    LastModelSpreadPoints=(int)model_spread;
    LastStopDistance=stop_distance;
    LastTargetDistance=target_distance;
