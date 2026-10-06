@@ -417,7 +417,6 @@ function renderOpportunities(data){
     const directionFa=row.direction==="BUY"?"خرید (BUY)":row.direction==="SELL"?"فروش (SELL)":"صبر";
     const confidence=(typeof row.success_probability==="number"?Math.round(row.success_probability*100):null);
     const confidenceText=confidence===null?"—":confidence+"٪";
-    const levels="SL "+format(row.stop)+" · TP "+format(row.target);
     const positionText=row.position_open
       ?"باز"+(row.position_ticket?" #"+row.position_ticket:"")+(typeof row.live_profit_units==="number"?" · "+pnlText(row.live_profit_units):"")
       :row.entry_queued?"در صف اجرا":row.executed?"بسته شده":"بدون پوزیشن";
@@ -443,17 +442,36 @@ function renderOpportunities(data){
       {text:directionFa,cls:"trade-direction "+(row.direction==="BUY"?"buy":"sell"),dir:"ltr"},
       {text:confidenceText,cls:"trade-confidence",dir:"ltr"},
       {text:entryAdvice,cls:"trade-entry-price",dir:"ltr"},
-      {text:levels,cls:"trade-levels",dir:"ltr"},
+      {levels:true,cls:"trade-levels"},
       {text:exitAdvice,cls:"trade-exit-advice",dir:"ltr"},
       {text:simpleReason,cls:"trade-simple-reason",extra:technical},
       {text:positionText,cls:"trade-position-state"}
     ];
     simpleCells.forEach(cell=>{
       const td=document.createElement("td");
-      td.textContent=cell.text;
       if(cell.cls)td.className=cell.cls;
       if(cell.dir)td.dir=cell.dir;
-      if(cell.extra)td.append(cell.extra);
+      if(cell.levels){
+        td.dir="ltr";
+        const stack=document.createElement("div");
+        stack.className="trade-level-stack";
+        [["SL",format(row.stop)],["TP",format(row.target)]].forEach(([label,value])=>{
+          const line=document.createElement("div");
+          line.className="trade-level-row";
+          const key=document.createElement("span");
+          key.className="label";
+          key.textContent=label;
+          const val=document.createElement("span");
+          val.className="value";
+          val.textContent=value;
+          line.append(key,val);
+          stack.append(line);
+        });
+        td.append(stack);
+      }else{
+        td.textContent=cell.text;
+        if(cell.extra)td.append(cell.extra);
+      }
       tr.append(td);
     });
     const action=document.createElement("td");
