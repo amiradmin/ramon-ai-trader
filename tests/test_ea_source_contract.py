@@ -13,8 +13,8 @@ def source() -> str:
 
 def test_current_ea_keeps_sizing_telemetry_observational():
     text = source()
-    assert '#property version "1.589"' in text
-    assert '#define RAMON_EA_VERSION "0.58.9"' in text
+    assert '#property version "1.590"' in text
+    assert '#define RAMON_EA_VERSION "0.59.0"' in text
     assert '+"EA version: "+RAMON_EA_VERSION+' in text
     assert '"RAMON AI TRADER  v"+RAMON_EA_VERSION+' in text
     assert 'version=RAMON_EA_VERSION;' in text
