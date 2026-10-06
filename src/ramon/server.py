@@ -343,8 +343,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
         def do_POST(self) -> None:
             nonlocal moment_future, finbert_future, latest_moment_payload
             nonlocal latest_finbert_payload, last_shadow_bar, last_finbert_event_key
-            nonlocal latest_market, latest_market_received_utc
-            if self.path not in {"/decision", "/trades", "/manual-override", "/manual-overrides/reset", "/human-opinion", "/position-exit-advice", "/opportunity-entry-advice"}:
+            nonlocal latest_market, latest_market_received_utc, ensemble
+            if self.path not in {"/decision", "/trades", "/manual-override", "/manual-overrides/reset", "/human-opinion", "/position-exit-advice", "/opportunity-entry-advice", "/reload-roles"}:
                 self.send_error(404)
                 return
             try:
@@ -401,6 +401,17 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         "saved": True,
                         "action": action,
                         "active": sorted(manual_overrides_by_bar.get(signal_bar_time, {})),
+                    })
+                    return
+                if self.path == "/reload-roles":
+                    refreshed = coordinator(ensemble_dir, model.model_id)
+                    if refreshed.error:
+                        raise ValueError(refreshed.error)
+                    ensemble = refreshed
+                    self.reply(200, {
+                        "reloaded": True,
+                        "bundle": ensemble.bundle_id,
+                        **ensemble.status(),
                     })
                     return
                 if self.path == "/opportunity-entry-advice":
