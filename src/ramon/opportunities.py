@@ -53,6 +53,10 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
         for row in rows:
             try:
                 metadata=json.loads(row['model_metadata'] or '{}');audit=metadata.get('decision_audit',{});base=audit.get('base',{});final=audit.get('final',{})
+                external=audit.get('external_models',{}) if isinstance(audit.get('external_models'),dict) else {}
+                moment=external.get('moment',{}) if isinstance(external.get('moment'),dict) else {}
+                finbert=external.get('finbert',{}) if isinstance(external.get('finbert'),dict) else {}
+                news=audit.get('news_snapshot',{}) if isinstance(audit.get('news_snapshot'),dict) else {}
                 if not base.get('forecast_median',0)>0:continue
                 side,probability,buy_probability,sell_probability=_live_direction(audit)
                 if side not in {'BUY','SELL'} or not row['quote_time']:
@@ -78,6 +82,27 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
                     'buy_success_probability':buy_probability,
                     'sell_success_probability':sell_probability,
                     'direction_source':'LIVE_DIRECTION_QUALITY',
+                    'ai_score':final.get('ai_engine_v2_score'),
+                    'entry_probability':final.get('ai_engine_v2_entry_probability',final.get('entry_probability')),
+                    'full_sl_probability':final.get('ai_engine_v2_full_sl_probability',final.get('shadow_full_sl_probability')),
+                    'market_state':final.get('market_state'),
+                    'market_state_route':final.get('market_state_route'),
+                    'market_direction':final.get('market_direction'),
+                    'market_direction_score':final.get('market_direction_score'),
+                    'entry_timing_ready':final.get('entry_timing_ready'),
+                    'entry_timing_direction':final.get('entry_timing_direction'),
+                    'intrabar_confirmed':base.get('intrabar_confirmed'),
+                    'intrabar_direction':base.get('intrabar_direction'),
+                    'intrabar_move_atr':base.get('intrabar_move_atr'),
+                    'ai_trend_confirmed':base.get('ai_trend_confirmed'),
+                    'ai_trend_direction':base.get('ai_trend_direction'),
+                    'ai_trend_score':base.get('ai_trend_score'),
+                    'moment_ratio':moment.get('moment_anomaly_ratio'),
+                    'moment_label':moment.get('moment_anomaly_label'),
+                    'finbert_label':finbert.get('finbert_sentiment_label'),
+                    'finbert_score':finbert.get('finbert_directional_score'),
+                    'news_title':news.get('news_event_title'),
+                    'news_impact':news.get('news_event_impact'),
                     'entry':entry,'stop':entry-sign*stop,'target':entry+sign*target,
                     'risk_distance':stop,'first_reason':first_reason,'last_reason':final.get('reason'),
                     'model_approved':prior_approved or row['final_decision']==side,
