@@ -1,5 +1,5 @@
 #property copyright "Ramon AI Trader"
-#property version "1.000"
+#property version "1.010"
 #property strict
 
 // Read-only bridge. Attach to a SEPARATE chart from the Ramon trading EA.
@@ -8,6 +8,7 @@ input string ForecastUrl="http://127.0.0.1:8012/forecast-only";
 input string ForecastSymbol="XAUUSD_l";
 input int RequestTimeoutMs=4000;
 input int RefreshSeconds=15;
+input int ForecastHorizonBars=2; // 30-minute M15 forecast
 const string Prefix="CHRONOS_SLOPE_";
 
 string Key(const string suffix) { return Prefix+ForecastSymbol+"_"+suffix; }
@@ -65,7 +66,8 @@ bool BuildRequest(string &payload)
          +",\"low\":"+DoubleToString(bars[i].low,digits)
          +",\"close\":"+DoubleToString(bars[i].close,digits)+"}";
    }
-   payload+="],\"micro_bars\":[],\"quote_time\":"+IntegerToString((long)tick.time)+"}";
+   payload+="],\"micro_bars\":[],\"quote_time\":"+IntegerToString((long)tick.time)
+      +",\"forecast_horizon_bars\":"+IntegerToString(ForecastHorizonBars)+"}";
    return true;
 }
 void Refresh()
@@ -103,7 +105,7 @@ void Refresh()
 }
 int OnInit()
 {
-   if(RefreshSeconds<5 || RequestTimeoutMs<500 || ForecastSymbol=="") return INIT_PARAMETERS_INCORRECT;
+   if(RefreshSeconds<5 || RequestTimeoutMs<500 || ForecastSymbol=="" || ForecastHorizonBars<1 || ForecastHorizonBars>16) return INIT_PARAMETERS_INCORRECT;
    if(!SymbolSelect(ForecastSymbol,true)) return INIT_FAILED;
    EventSetTimer(RefreshSeconds);
    return INIT_SUCCEEDED;
