@@ -237,3 +237,11 @@
   .simple-trade-table{min-width:980px}
   .simple-trade-table th,.simple-trade-table td{padding:11px 9px}
 }
+
+.manual-scenario-list{display:flex;flex-direction:column;gap:6px;min-width:210px}
+.manual-scenario-list.compact{margin-top:8px;padding-top:8px;border-top:1px dashed #33445b}
+.scenario-entry{border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:#172131;color:var(--text);cursor:pointer;font:700 10px/1.5 monospace;text-align:right}
+.scenario-entry.buy{border-color:#3f7565;color:var(--green);background:#173a32}
+.scenario-entry.sell{border-color:#75434a;color:var(--red);background:#3e272e}
+.scenario-entry.high-risk{border-style:dashed;opacity:.86}
+.scenario-entry:disabled{opacity:.38;cursor:not-allowed;filter:grayscale(.4)}
