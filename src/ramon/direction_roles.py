@@ -201,11 +201,18 @@ class DirectionCoordinator(EnsembleCoordinator):
                     or manifest["chronos_model"] != chronos_model):
                 raise ValueError("direction identity/checkpoint mismatch")
             self.manifest, self.bundle_id, self.symbol = manifest, bundle_id, manifest["symbol"]
-            for role, expected in {**FEATURES, **DIRECTION_EXTRA_FEATURES}.items():
+            schema_version = int(manifest.get("schema_version", 1))
+            expected_features = dict(FEATURES)
+            direction_expected = DIRECTION_V2_FEATURES if schema_version == 2 else RISK_FEATURES
+            expected_features.update({
+                "buy_quality": direction_expected,
+                "sell_quality": direction_expected,
+            })
+            for role, expected in expected_features.items():
                 if role not in manifest["sha256"]:
                     continue
                 try:
-                    if role in {"buy_quality", "sell_quality"} and manifest.get("schema_version") == 2:
+                    if role in {"buy_quality", "sell_quality"} and schema_version == 2:
                         path = directory / f"{role}.pkl"
                         if hashlib.sha256(path.read_bytes()).hexdigest() != manifest["sha256"][role]:
                             raise ValueError("checksum mismatch")
@@ -258,12 +265,16 @@ class DirectionCoordinator(EnsembleCoordinator):
         meta_input = {**features["meta_base"], **{name + "_probability": p for name, p in probabilities.items()}}
         probabilities["meta"] = predict("meta", meta_input) if all(p >= 0 for p in probabilities.values()) else -1.0
         risk_probability = predict("risk", risk_features(market, decision))
-        buy_success_probability = predict(
-            "buy_quality", direction_v2_features(direction_risk_features(market, decision, "BUY"))
-        )
-        sell_success_probability = predict(
-            "sell_quality", direction_v2_features(direction_risk_features(market, decision, "SELL"))
-        )
+        buy_base = direction_risk_features(market, decision, "BUY")
+        sell_base = direction_risk_features(market, decision, "SELL")
+        if int(self.manifest.get("schema_version", 1)) == 2:
+            buy_input = direction_v2_features(buy_base)
+            sell_input = direction_v2_features(sell_base)
+        else:
+            buy_input = buy_base
+            sell_input = sell_base
+        buy_success_probability = predict("buy_quality", buy_input)
+        sell_success_probability = predict("sell_quality", sell_input)
         p = probabilities["regime"]
         payload = {"base_decision": decision.decision, "base_reason": decision.reason,
                    "decision": decision.decision, "reason": decision.reason, "edge": decision.edge,
