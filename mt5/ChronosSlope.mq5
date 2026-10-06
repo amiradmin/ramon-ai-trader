@@ -1,5 +1,5 @@
 #property copyright "Ramon AI Trader"
-#property version "1.021"
+#property version "1.030"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -9,6 +9,7 @@ input int RefreshSeconds = 5;
 input int VisualLengthMultiplier = 1; // actual horizon
 input int ArrowWidth = 3;
 input bool ShowLabel = true;
+input bool ShowGhostCandles = true; // synthetic bodies; NOT predicted OHLC
 input int MaxDataAgeSeconds = 120;
 
 const string Prefix="CHRONOS_SLOPE_";
@@ -67,6 +68,65 @@ bool LoadForecast()
    LastDirection=direction>0 ? "UP" : direction<0 ? "DOWN" : "FLAT";
    LastStatus="OK";
    return true;
+}
+
+// Synthetic candle bodies only: Chronos predicts two future close levels,
+// not the future intrabar highs/lows or actual candle OHLC.
+void DrawGhostCandle(const string name,const datetime bar_open,
+                     const double open_price,const double close_price,
+                     const color body_color)
+{
+   int seconds=PeriodSeconds(PERIOD_M15);
+   datetime left=bar_open+(datetime)(seconds*0.20);
+   datetime right=bar_open+(datetime)(seconds*0.80);
+   double top=MathMax(open_price,close_price);
+   double bottom=MathMin(open_price,close_price);
+   // Give equal open/close bodies a visible minimum height.
+   if(top-bottom<_Point*2.0)
+   {
+      top+=_Point;
+      bottom-=_Point;
+   }
+   string obj=Prefix+name+"_BODY";
+   if(ObjectFind(0,obj)<0)
+      ObjectCreate(0,obj,OBJ_RECTANGLE,0,left,top,right,bottom);
+   else
+   {
+      ObjectMove(0,obj,0,left,top);
+      ObjectMove(0,obj,1,right,bottom);
+   }
+   ObjectSetInteger(0,obj,OBJPROP_COLOR,body_color);
+   ObjectSetInteger(0,obj,OBJPROP_FILL,true);
+   ObjectSetInteger(0,obj,OBJPROP_WIDTH,1);
+   ObjectSetInteger(0,obj,OBJPROP_STYLE,STYLE_DOT);
+   ObjectSetInteger(0,obj,OBJPROP_BACK,false);
+   ObjectSetInteger(0,obj,OBJPROP_SELECTABLE,false);
+   ObjectSetString(0,obj,OBJPROP_TOOLTIP,"Synthetic forecast body only; no predicted wick or OHLC");
+}
+void ClearGhostCandles()
+{
+   ObjectDelete(0,Prefix+"GHOST1_BODY");
+   ObjectDelete(0,Prefix+"GHOST2_BODY");
+}
+void DrawGhostForecastCandles()
+{
+   if(!ShowGhostCandles)
+   {
+      ClearGhostCandles();
+      return;
+   }
+   int seconds=PeriodSeconds(PERIOD_M15);
+   datetime open0=iTime(_Symbol,PERIOD_M15,0);
+   if(open0<=0 || seconds<=0)
+   {
+      ClearGhostCandles();
+      return;
+   }
+   datetime next_open=open0+(datetime)seconds;
+   DrawGhostCandle("GHOST1",next_open,LastCurrentMid,LastStep15,
+      LastStep15>=LastCurrentMid ? clrAqua : clrTomato);
+   DrawGhostCandle("GHOST2",next_open+(datetime)seconds,LastStep15,LastStep30,
+      LastStep30>=LastStep15 ? clrLimeGreen : clrTomato);
 }
 
 // Forecast path: current mid -> +15m -> +30m.
@@ -129,10 +189,12 @@ void DrawForecast()
    ObjectDelete(0,Prefix+"LINE");
    ObjectDelete(0,Prefix+"ARROW");
    ObjectDelete(0,Prefix+"LABEL");
+   DrawGhostForecastCandles();
    ChartRedraw(0);
 }
 void ClearForecast()
 {
+   ClearGhostCandles();
    ObjectDelete(0,Prefix+"LINE");
    ObjectDelete(0,Prefix+"ARROW");
    ObjectDelete(0,Prefix+"LABEL");
