@@ -819,7 +819,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
         ),
         model_row(
             "Anomaly Detection",
-            handler("anomaly_model_handler", "OFF") + " [LIVE GATE]",
+            handler("anomaly_model_handler", "OFF") + " [AI RISK]",
             "VETO" if moment_snapshot.get("moment_live_veto") == 1 else "READY" if moment_snapshot.get("moment_shadow_ready") == 1 else "NO SNAPSHOT",
             {
                 "Label": moment_snapshot.get("moment_anomaly_label"),
@@ -828,6 +828,8 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
                 "Threshold": moment_snapshot.get("moment_live_threshold") or (health or {}).get("moment_live_threshold"),
                 "Fresh": moment_snapshot.get("moment_live_fresh"),
                 "LIVE veto": moment_snapshot.get("moment_live_veto"),
+                "AI anomaly penalty": final.get("ai_engine_v2_anomaly_penalty"),
+                "AI hard threshold": moment_snapshot.get("moment_hard_veto_threshold") or (health or {}).get("moment_hard_veto_threshold"),
             },
             live=True,
         ),
@@ -873,7 +875,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
         ),
         model_row(
             "News Sentiment",
-            handler("news_sentiment_model_handler", "OFF") + " [LIVE GATE]",
+            handler("news_sentiment_model_handler", "OFF") + " [AI FEATURE]",
             "VETO" if finbert_snapshot.get("finbert_live_veto") == 1 else "READY" if finbert_snapshot.get("finbert_shadow_ready") == 1 else "NO SNAPSHOT",
             {
                 "Sentiment": finbert_snapshot.get("finbert_sentiment_label"),
@@ -883,6 +885,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
                 "Neutral": finbert_snapshot.get("finbert_neutral"),
                 "Threshold": finbert_snapshot.get("finbert_live_threshold") or (health or {}).get("finbert_live_threshold"),
                 "LIVE veto": finbert_snapshot.get("finbert_live_veto"),
+                "Mode": finbert_snapshot.get("finbert_risk_mode") or "AI feature",
             },
             live=True,
         ),
@@ -897,6 +900,11 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
                 "Final decision": decision,
                 "Final reason": reason,
                 "Ensemble active": final.get("ensemble_active"),
+                "AI Engine active": final.get("ai_engine_v2_active"),
+                "AI Engine selected": final.get("ai_engine_v2_selected"),
+                "AI Engine score": final.get("ai_engine_v2_score"),
+                "AI Engine threshold": final.get("ai_engine_v2_minimum_score"),
+                "AI score source": final.get("ai_engine_v2_score_source"),
             },
         ),
         model_row(
