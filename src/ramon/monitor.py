@@ -1571,7 +1571,7 @@ def daily_profit_summary(db, symbol, opened, diagnostic=None, now=None):
     }
 
 
-MIN_DASHBOARD_ENTRY_EA_VERSION = (0, 59, 0)
+MIN_DASHBOARD_ENTRY_EA_VERSION = (0, 59, 1)
 
 
 def dashboard_entry_compatibility(diagnostic):
@@ -1592,7 +1592,7 @@ def dashboard_entry_compatibility(diagnostic):
     return {"supported": True, "reason": "نسخه EA و وضعیت تازه تأیید شد", "version": raw}
 
 
-MIN_AUTO_CLOSE_EA_VERSION = (0, 59, 0)
+MIN_AUTO_CLOSE_EA_VERSION = (0, 59, 1)
 
 
 def dashboard_auto_close_compatibility(diagnostic):
@@ -1705,6 +1705,7 @@ def queue_manual_entry(db, diagnostic, symbol, payload):
     direction = str(payload.get("direction", "")).upper()
     signal_bar_time = int(payload.get("signal_bar_time", 0))
     recheck = bool(payload.get("recheck"))
+    unlocked = bool(payload.get("manual_unlocked"))
     if direction not in {"BUY", "SELL"} or signal_bar_time <= 0:
         raise ValueError("فرصت انتخاب‌شده نامعتبر است")
 
@@ -1713,7 +1714,7 @@ def queue_manual_entry(db, diagnostic, symbol, payload):
         (
             item for item in data.get("opportunities", [])
             if int(item.get("signal_bar_time") or 0) == signal_bar_time
-            and str(item.get("direction") or "").upper() == direction
+            and (unlocked or str(item.get("direction") or "").upper() == direction)
         ),
         None,
     )
@@ -1730,9 +1731,10 @@ def queue_manual_entry(db, diagnostic, symbol, payload):
     queue_path = common_dir / "Ramon_ManualEntries.txt"
 
     origin_sample_key = str(row.get("sample_key") or "")
-    if recheck:
+    if recheck or unlocked:
         # Re-anchor a human-selected direction to the newest immutable decision
-        # snapshot. This avoids executing stale prices/sample attribution.
+        # snapshot. In unlocked manual mode the human owns direction choice;
+        # analytical Direction AI / Chronos / timing gates are advisory only.
         current, _, _, error = read_history(db, symbol, "")
         if error or not current:
             raise ValueError("snapshot تازه برای بازبینی دستی در دسترس نیست")
@@ -1740,8 +1742,8 @@ def queue_manual_entry(db, diagnostic, symbol, payload):
         audit = metadata.get("decision_audit") if isinstance(metadata.get("decision_audit"), dict) else {}
         base = audit.get("base") if isinstance(audit.get("base"), dict) else {}
         final = audit.get("final") if isinstance(audit.get("final"), dict) else {}
-        live_direction, live_probability, _, _ = _live_direction(audit)
-        if live_direction != direction:
+        live_direction, live_probability, buy_probability, sell_probability = _live_direction(audit)
+        if not unlocked and live_direction != direction:
             raise ValueError(
                 "جهت Direction AI در snapshot تازه تغییر کرده است؛ جدول را تازه کنید"
             )
@@ -1753,8 +1755,12 @@ def queue_manual_entry(db, diagnostic, symbol, payload):
         risk_distance = float(number(base.get("stop_distance")) or 0.0)
         target_distance = float(number(base.get("target_distance")) or 0.0)
         edge = float(number(base.get("buy_edge" if direction == "BUY" else "sell_edge")) or 0.0)
-        probability = live_probability
-        mode = "RECHECK"
+        probability = (
+            buy_probability if direction == "BUY"
+            else sell_probability if direction == "SELL"
+            else live_probability
+        )
+        mode = "UNLOCKED" if unlocked else "RECHECK"
     else:
         if not row.get("actionable"):
             raise ValueError("فرصت منقضی شده؛ از دکمهٔ بازبینی دستی استفاده کنید")
@@ -1787,7 +1793,8 @@ def queue_manual_entry(db, diagnostic, symbol, payload):
         "signal_bar_time": signal_bar_time,
         "success_probability": probability,
         "mode": mode,
-        "safety": "EA hard execution gates remain active",
+        "manual_unlocked": unlocked,
+        "safety": "Analytical Ramon gates bypassed; hard broker/account/risk/quote safety remains active",
     }
 
 
