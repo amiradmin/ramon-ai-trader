@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import math
+import pickle
 from pathlib import Path
 import re
 from uuid import uuid4
@@ -22,6 +23,7 @@ from .ensemble import (
     regime_features,
     risk_features,
 )
+from .direction_model import DIRECTION_V2_FEATURES, DirectionHGBEnsemble, direction_v2_features
 from .history import load_bars
 from .news import neutral_news_features
 from .train_roles import (
@@ -36,8 +38,8 @@ from .train_roles import (
 )
 
 DIRECTION_EXTRA_FEATURES = {
-    "buy_quality": RISK_FEATURES,
-    "sell_quality": RISK_FEATURES,
+    "buy_quality": DIRECTION_V2_FEATURES,
+    "sell_quality": DIRECTION_V2_FEATURES,
 }
 
 
@@ -71,12 +73,12 @@ def train_direction_roles(db: str | Path, root: Path, symbol: str, chronos_model
     fit(
         "buy_quality",
         examples,
-        lambda rows: fit_direction_quality_role(rows, "BUY"),
+        lambda rows: fit_direction_quality_v2(rows, "BUY"),
     )
     fit(
         "sell_quality",
         examples,
-        lambda rows: fit_direction_quality_role(rows, "SELL"),
+        lambda rows: fit_direction_quality_v2(rows, "SELL"),
     )
     if use_meta and all(name in models for name in ("regime", "entry", "news")):
         meta_rows = [Example(row.time, row.label_end, {"meta": meta_features(row, models)}, row.label) for row in meta]
@@ -88,16 +90,45 @@ def train_direction_roles(db: str | Path, root: Path, symbol: str, chronos_model
     directory.mkdir(parents=True, exist_ok=False)
     hashes = {}
     for role, model in models.items():
-        path = directory / f"{role}.json"
+        suffix = ".pkl" if role in {"buy_quality", "sell_quality"} else ".json"
+        path = directory / f"{role}{suffix}"
         model.save(path)
         hashes[role] = hashlib.sha256(path.read_bytes()).hexdigest()
-    manifest = {"mode": "direction_live", "schema_version": 1, "bundle_id": bundle_id,
+    manifest = {"mode": "direction_live", "schema_version": 2, "bundle_id": bundle_id,
+                "direction_model": "DirectionAI-v2-HistGradientBoosting",
                 "chronos_model": chronos_model, "symbol": symbol, "roles": roles,
                 "sha256": hashes, "closed_trade_samples": len(examples),
                 "validation": "experimental_unvalidated", "promotion_gate_passed": False}
     atomic_json(directory / "manifest.json", manifest)
     atomic_json(root / "direction_live" / "current.json", {"bundle_id": bundle_id})
     return manifest
+
+
+
+def fit_direction_quality_v2(examples: list[Example], direction: str) -> DirectionHGBEnsemble:
+    """Train the operational v2 direction-quality ensemble for one side."""
+    if direction not in {"BUY", "SELL"}:
+        raise ValueError("Direction AI v2 direction must be BUY or SELL")
+    rows = [row for row in examples if row.direction == direction]
+    labels = [row.label for row in rows]
+    role = f"{direction.lower()}_quality"
+    if len(rows) < 40 or min(labels.count(0), labels.count(1)) < 10:
+        raise ValueError(
+            f"{role}: need >=40 samples and >=10 wins/losses for Direction AI v2"
+        )
+    feature_rows = [direction_v2_features(risk_features(row)) for row in rows]
+    return DirectionHGBEnsemble.train(
+        feature_rows,
+        labels,
+        metadata={
+            "role": role,
+            "target": "win",
+            "direction": direction,
+            "samples": len(rows),
+            "last_feature_time": max(row.time for row in rows),
+            "last_label_end": max(row.label_end for row in rows),
+        },
+    )
 
 
 class DirectionCoordinator(EnsembleCoordinator):
@@ -124,7 +155,7 @@ class DirectionCoordinator(EnsembleCoordinator):
                 raise ValueError("invalid direction bundle ID")
             directory = pointer.parent / "versions" / bundle_id
             manifest = json.loads((directory / "manifest.json").read_text())
-            if (manifest["mode"] not in {"direction_live", "shadow"} or manifest["schema_version"] != 1
+            if (manifest["mode"] not in {"direction_live", "shadow"} or manifest["schema_version"] not in {1, 2}
                     or manifest["bundle_id"] != bundle_id
                     or manifest["chronos_model"] != chronos_model):
                 raise ValueError("direction identity/checkpoint mismatch")
@@ -133,14 +164,20 @@ class DirectionCoordinator(EnsembleCoordinator):
                 if role not in manifest["sha256"]:
                     continue
                 try:
-                    path = directory / f"{role}.json"
-                    if hashlib.sha256(path.read_bytes()).hexdigest() != manifest["sha256"][role]:
-                        raise ValueError("checksum mismatch")
-                    model = BinaryLogisticModel.load(path)
+                    if role in {"buy_quality", "sell_quality"} and manifest.get("schema_version") == 2:
+                        path = directory / f"{role}.pkl"
+                        if hashlib.sha256(path.read_bytes()).hexdigest() != manifest["sha256"][role]:
+                            raise ValueError("checksum mismatch")
+                        model = DirectionHGBEnsemble.load(path)
+                    else:
+                        path = directory / f"{role}.json"
+                        if hashlib.sha256(path.read_bytes()).hexdigest() != manifest["sha256"][role]:
+                            raise ValueError("checksum mismatch")
+                        model = BinaryLogisticModel.load(path)
                     if model.feature_names != expected:
                         raise ValueError("feature schema mismatch")
                     setattr(self, role, model)
-                except (OSError, ValueError, KeyError, TypeError) as exc:
+                except (OSError, ValueError, KeyError, TypeError, pickle.UnpicklingError) as exc:
                     self.role_errors[role] = str(exc)
         except (OSError, ValueError, KeyError, TypeError) as exc:
             self.error = f"invalid_direction_bundle: {exc}"
@@ -151,6 +188,8 @@ class DirectionCoordinator(EnsembleCoordinator):
                 "direction_quality_live": int(self.buy_quality is not None and self.sell_quality is not None),
                 "buy_quality_ready": int(self.buy_quality is not None),
                 "sell_quality_ready": int(self.sell_quality is not None),
+                "direction_model": self.manifest.get("direction_model", "legacy-logistic"),
+                "direction_schema_version": self.manifest.get("schema_version", 1),
                 "roles": self.manifest.get("roles", {}),
                 "role_errors": self.role_errors}
 
@@ -179,10 +218,10 @@ class DirectionCoordinator(EnsembleCoordinator):
         probabilities["meta"] = predict("meta", meta_input) if all(p >= 0 for p in probabilities.values()) else -1.0
         risk_probability = predict("risk", risk_features(market, decision))
         buy_success_probability = predict(
-            "buy_quality", direction_risk_features(market, decision, "BUY")
+            "buy_quality", direction_v2_features(direction_risk_features(market, decision, "BUY"))
         )
         sell_success_probability = predict(
-            "sell_quality", direction_risk_features(market, decision, "SELL")
+            "sell_quality", direction_v2_features(direction_risk_features(market, decision, "SELL"))
         )
         p = probabilities["regime"]
         payload = {"base_decision": decision.decision, "base_reason": decision.reason,
