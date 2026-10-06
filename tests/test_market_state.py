@@ -58,7 +58,7 @@ def test_breakout_false_breakout_and_retest(sign,label):
     assert assess_market(changed)['state']=='BREAKOUT_RETEST_'+label
 
 
-@pytest.mark.parametrize('state', ['UNCERTAIN','PRICE_GAP','VOLATILITY_SHOCK','LOW_LIQUIDITY','RANGE_MIDDLE','REGIME_TRANSITION','DISORDERLY_MARKET','VOLATILITY_COMPRESSION'])
+@pytest.mark.parametrize('state', ['UNCERTAIN','PRICE_GAP','VOLATILITY_SHOCK','LOW_LIQUIDITY','REGIME_TRANSITION','DISORDERLY_MARKET','VOLATILITY_COMPRESSION'])
 def test_wait_policy_cannot_be_bypassed_by_any_model_or_range(state):
     a={'state':state,'version':'test','route':'WAIT','allowed_directions':[]}
     r={'decision':'BUY','reason':'forecast_up','range_execution':1,
@@ -68,6 +68,17 @@ def test_wait_policy_cannot_be_bypassed_by_any_model_or_range(state):
 
 
 @pytest.mark.parametrize('side',['BUY','SELL'])
+def test_range_middle_requires_full_confirmation_instead_of_hard_wait():
+    a={'state':'RANGE_MIDDLE','version':'test','route':'CONFIRMED_MODEL','allowed_directions':['BUY','SELL']}
+    r={'decision':'BUY','reason':'forecast_up','range_execution':0,
+       'intrabar_confirmed':1,'ai_trend_confirmed':1,'intrabar_direction':'BUY','ai_trend_direction':'BUY'}
+    apply_market_policy(r,a)
+    assert r['decision']=='BUY'
+    r.update(decision='BUY', intrabar_confirmed=0)
+    apply_market_policy(r,a)
+    assert r['decision']=='WAIT'
+
+
 def test_direction_confirmation_and_range_routes(side):
     a={'state':'TREND_UP','version':'test','route':'CONFIRMED_MODEL','allowed_directions':[side]}
     r={'decision':side,'reason':'forecast','range_execution':0,'intrabar_confirmed':1,
