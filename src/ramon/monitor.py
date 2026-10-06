@@ -591,6 +591,8 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
         "forecast": "AI · Chronos",
         "edge": "AI→Logic",
         "strength": "AI→Logic",
+        "market_direction": "AI→Logic",
+        "entry_timing": "AI→Logic",
         "base": "AI+Logic",
         "shadow": "AI · Shadow",
         "decision": "AI+Logic",
