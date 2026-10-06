@@ -267,6 +267,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
             "news_source_handler": "ForexFactoryNewsProvider",
             "market_state_handler": POLICY_VERSION,
             "target_model_handler": "Ramon/TargetStructure",
+            "decision_engine_handler": "Ramon/AIEngineV2",
         }
     last_persisted_bar: dict[str, int] = {}
     history_status: dict[str, object] = {
@@ -300,6 +301,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     "weak_entry_policy": "forecast_intrabar_ai_trend_agreement",
                     "require_direction_confirmation": settings.require_direction_confirmation,
                     "cent_independent_direction_gate": True,
+                    "cent_independent_direction_gate_role": "fallback_only" if ai_engine_v2_enabled else "primary",
+                    "analytical_decision_mode": "AI_ENGINE_V2_PRIMARY" if ai_engine_v2_enabled else "LEGACY_RULE_GATES",
                     "cent_direction_vote_threshold": 2,
                     "cent_entry_timing_min_move_atr": settings.trend_min_micro_move_atr,
                     "cent_entry_timing_min_rebound_atr": settings.intrabar_min_rebound_atr,
