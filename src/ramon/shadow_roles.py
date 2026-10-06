@@ -38,13 +38,13 @@ from .train_roles import (
     temporal_windows,
 )
 
-SHADOW_EXTRA_FEATURES = {
+DIRECTION_EXTRA_FEATURES = {
     "buy_quality": RISK_FEATURES,
     "sell_quality": RISK_FEATURES,
 }
 
 
-def train_shadow(db: str | Path, root: Path, symbol: str, chronos_model: str) -> dict:
+def train_direction_roles(db: str | Path, root: Path, symbol: str, chronos_model: str) -> dict:
     """Fit each eligible role; missing data stays explicitly unavailable.
 
     These are experimental predictions, without claims of out-of-sample accuracy.
@@ -92,19 +92,19 @@ def train_shadow(db: str | Path, root: Path, symbol: str, chronos_model: str) ->
     else:
         roles["meta"] = {"status": "waiting_for_data", "samples": len(meta), "reason": "needs ready base roles and >=40 purged later meta samples"}
     bundle_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid4().hex[:8]
-    directory = root / "shadow" / "versions" / bundle_id
+    directory = root / "direction_live" / "versions" / bundle_id
     directory.mkdir(parents=True, exist_ok=False)
     hashes = {}
     for role, model in models.items():
         path = directory / f"{role}.json"
         model.save(path)
         hashes[role] = hashlib.sha256(path.read_bytes()).hexdigest()
-    manifest = {"mode": "shadow", "schema_version": 1, "bundle_id": bundle_id,
+    manifest = {"mode": "direction_live", "schema_version": 1, "bundle_id": bundle_id,
                 "chronos_model": chronos_model, "symbol": symbol, "roles": roles,
                 "sha256": hashes, "closed_trade_samples": len(examples),
                 "validation": "experimental_unvalidated", "promotion_gate_passed": False}
     atomic_json(directory / "manifest.json", manifest)
-    atomic_json(root / "shadow" / "current.json", {"bundle_id": bundle_id})
+    atomic_json(root / "direction_live" / "current.json", {"bundle_id": bundle_id})
     return manifest
 
 
@@ -119,7 +119,10 @@ class ShadowCoordinator(EnsembleCoordinator):
         self.bundle_id = self.symbol = self.error = ""
         self.threshold = 0.65
         self.role_errors = {}
-        pointer = self.root / "shadow" / "current.json"
+        pointer = self.root / "direction_live" / "current.json"
+        if not pointer.exists():
+            # One-release migration bridge for an already-trained pre-live bundle.
+            pointer = self.root / "shadow" / "current.json"
         if not pointer.exists():
             self.error = "shadow_not_trained"
             return
@@ -129,12 +132,12 @@ class ShadowCoordinator(EnsembleCoordinator):
                 raise ValueError("invalid shadow bundle ID")
             directory = pointer.parent / "versions" / bundle_id
             manifest = json.loads((directory / "manifest.json").read_text())
-            if (manifest["mode"] != "shadow" or manifest["schema_version"] != 1
+            if (manifest["mode"] not in {"direction_live", "shadow"} or manifest["schema_version"] != 1
                     or manifest["bundle_id"] != bundle_id
                     or manifest["chronos_model"] != chronos_model):
                 raise ValueError("shadow identity/checkpoint mismatch")
             self.manifest, self.bundle_id, self.symbol = manifest, bundle_id, manifest["symbol"]
-            for role, expected in {**FEATURES, **SHADOW_EXTRA_FEATURES}.items():
+            for role, expected in {**FEATURES, **DIRECTION_EXTRA_FEATURES}.items():
                 if role not in manifest["sha256"]:
                     continue
                 try:
@@ -151,13 +154,13 @@ class ShadowCoordinator(EnsembleCoordinator):
             self.error = f"invalid_shadow_bundle: {exc}"
 
     def status(self):
-        return {**super().status(), "ensemble_mode": "shadow", "ensemble_active": 0,
-                "risk_model_ready": False, "role_shadow": 1,
-                "shadow_risk_model_ready": self.risk_ready,
-                "shadow_buy_quality_ready": self.buy_quality is not None,
-                "shadow_sell_quality_ready": self.sell_quality is not None,
-                "shadow_roles": self.manifest.get("roles", {}),
-                "shadow_role_errors": self.role_errors}
+        return {**super().status(), "ensemble_mode": "direction_live", "ensemble_active": 1,
+                "risk_model_ready": int(self.risk_ready), "role_shadow": 0,
+                "direction_quality_live": int(self.buy_quality is not None and self.sell_quality is not None),
+                "buy_quality_ready": int(self.buy_quality is not None),
+                "sell_quality_ready": int(self.sell_quality is not None),
+                "roles": self.manifest.get("roles", {}),
+                "role_errors": self.role_errors}
 
     def assess(self, market, decision, news_features=None):
         features = {"regime": regime_features(market.bars),
@@ -192,9 +195,9 @@ class ShadowCoordinator(EnsembleCoordinator):
         p = probabilities["regime"]
         payload = {"base_decision": decision.decision, "base_reason": decision.reason,
                    "decision": decision.decision, "reason": decision.reason, "edge": decision.edge,
-                   "ensemble_ready": int(self.ready), "ensemble_active": 0,
-                   "ensemble_bundle": self.bundle_id, "role_shadow": 1,
-                   "ensemble_mode": "shadow", "risk_model_ready": 0,
+                   "ensemble_ready": int(self.ready), "ensemble_active": 1,
+                   "ensemble_bundle": self.bundle_id, "role_shadow": 0,
+                   "ensemble_mode": "direction_live", "risk_model_ready": 0,
                    "risk_probability": -1.0, "risk_target": "none", "risk_multiplier": 1.0,
                    "shadow_risk_probability": risk_probability,
                    "shadow_full_sl_probability": risk_probability,
@@ -251,7 +254,7 @@ def main():
     args = parser.parse_args()
     model_file = Path(args.active_model_file)
     model = model_file.read_text().strip() if model_file.exists() else args.chronos_model
-    print(json.dumps(train_shadow(args.db, Path(args.out), args.symbol, model), indent=2))
+    print(json.dumps(train_direction_roles(args.db, Path(args.out), args.symbol, model), indent=2))
 
 
 if __name__ == "__main__":
