@@ -23,7 +23,7 @@ from .ensemble import (
     regime_features,
     risk_features,
 )
-from .direction_model import DIRECTION_V2_FEATURES, DirectionHGBEnsemble, direction_v2_features
+from .direction_model import DIRECTION_V2_FEATURES, DirectionHGBEnsemble, direction_v2_features, walk_forward_validate
 from .history import load_bars
 from .news import neutral_news_features
 from .train_roles import (
@@ -56,11 +56,12 @@ def train_direction_roles(db: str | Path, root: Path, symbol: str, chronos_model
         regime_rows = [row for row in regime_rows if row.label_end < meta[0].time]
     models = {}
     roles = {}
+    validation = {}
 
     def fit(name, rows, fitter):
         try:
             models[name] = fitter(rows)
-            roles[name] = {"status": "experimental_ready", "samples": len(rows)}
+            roles[name] = {"status": "live_ready", "samples": len(rows)}
         except (ValueError, KeyError, TypeError) as exc:
             roles[name] = {"status": "waiting_for_data", "samples": len(rows), "reason": str(exc)}
 
@@ -70,16 +71,25 @@ def train_direction_roles(db: str | Path, root: Path, symbol: str, chronos_model
     fit("risk", training, fit_risk_role)
     # Direction-quality roles are operational. Use every clean historical
     # trade so BUY and SELL remain observable with the largest valid sample.
-    fit(
-        "buy_quality",
-        examples,
-        lambda rows: fit_direction_quality_v2(rows, "BUY"),
-    )
-    fit(
-        "sell_quality",
-        examples,
-        lambda rows: fit_direction_quality_v2(rows, "SELL"),
-    )
+    for direction, role_name in (("BUY", "buy_quality"), ("SELL", "sell_quality")):
+        direction_rows = [row for row in examples if row.direction == direction]
+        try:
+            ordered = sorted(direction_rows, key=lambda row: row.time)
+            feature_rows = [direction_v2_features(risk_features(row)) for row in ordered]
+            labels = [row.label for row in ordered]
+            validation[role_name] = walk_forward_validate(feature_rows, labels)
+            models[role_name] = fit_direction_quality_v2(ordered, direction)
+            roles[role_name] = {
+                "status": "live_ready",
+                "samples": len(ordered),
+                "walk_forward": validation[role_name],
+            }
+        except (ValueError, KeyError, TypeError) as exc:
+            roles[role_name] = {
+                "status": "waiting_for_data",
+                "samples": len(direction_rows),
+                "reason": str(exc),
+            }
     if use_meta and all(name in models for name in ("regime", "entry", "news")):
         meta_rows = [Example(row.time, row.label_end, {"meta": meta_features(row, models)}, row.label) for row in meta]
         fit("meta", meta_rows, lambda rows: fit_role(rows, "meta", FEATURES["meta"]))
@@ -94,13 +104,44 @@ def train_direction_roles(db: str | Path, root: Path, symbol: str, chronos_model
         path = directory / f"{role}{suffix}"
         model.save(path)
         hashes[role] = hashlib.sha256(path.read_bytes()).hexdigest()
-    manifest = {"mode": "direction_live", "schema_version": 2, "bundle_id": bundle_id,
-                "direction_model": "DirectionAI-v2-HistGradientBoosting",
-                "chronos_model": chronos_model, "symbol": symbol, "roles": roles,
-                "sha256": hashes, "closed_trade_samples": len(examples),
-                "validation": "experimental_unvalidated", "promotion_gate_passed": False}
+    quality_roles_ready = all(name in models for name in ("buy_quality", "sell_quality"))
+    pooled_scores = [
+        float(validation[name]["pooled"]["balanced_accuracy"])
+        for name in ("buy_quality", "sell_quality")
+        if name in validation
+    ]
+    pooled_briers = [
+        float(validation[name]["pooled"]["brier"])
+        for name in ("buy_quality", "sell_quality")
+        if name in validation
+    ]
+    validation_passed = bool(
+        quality_roles_ready
+        and len(pooled_scores) == 2
+        and min(pooled_scores) >= 0.50
+        and max(pooled_briers) <= 0.30
+    )
+    manifest = {
+        "mode": "direction_live",
+        "schema_version": 2,
+        "bundle_id": bundle_id,
+        "direction_model": "DirectionAI-v2-HistGradientBoosting",
+        "chronos_model": chronos_model,
+        "symbol": symbol,
+        "roles": roles,
+        "sha256": hashes,
+        "closed_trade_samples": len(examples),
+        "validation": validation,
+        "validation_policy": {
+            "method": "expanding_walk_forward",
+            "minimum_balanced_accuracy_each_side": 0.50,
+            "maximum_brier_each_side": 0.30,
+        },
+        "promotion_gate_passed": validation_passed,
+    }
     atomic_json(directory / "manifest.json", manifest)
-    atomic_json(root / "direction_live" / "current.json", {"bundle_id": bundle_id})
+    if validation_passed:
+        atomic_json(root / "direction_live" / "current.json", {"bundle_id": bundle_id})
     return manifest
 
 
@@ -256,7 +297,10 @@ def main():
     args = parser.parse_args()
     model_file = Path(args.active_model_file)
     model = model_file.read_text().strip() if model_file.exists() else args.chronos_model
-    print(json.dumps(train_direction_roles(args.db, Path(args.out), args.symbol, model), indent=2))
+    report = train_direction_roles(args.db, Path(args.out), args.symbol, model)
+    print(json.dumps(report, indent=2))
+    if not report.get("promotion_gate_passed"):
+        print("Direction AI v2 candidate was trained but NOT promoted; previous live bundle remains active.")
 
 
 if __name__ == "__main__":
