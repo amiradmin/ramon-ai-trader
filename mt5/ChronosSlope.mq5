@@ -1,12 +1,12 @@
 #property copyright "Ramon AI Trader"
-#property version "1.010"
+#property version "1.011"
 #property indicator_chart_window
 #property indicator_plots 0
 
 // WebRequest is prohibited inside MT5 indicators (error 4014).
 // Run ChronosSlopeBridge EA on a DIFFERENT chart in the same terminal.
 input int RefreshSeconds = 5;
-input int VisualLengthMultiplier = 3;
+input int VisualLengthMultiplier = 1; // actual horizon
 input int ArrowWidth = 3;
 input bool ShowLabel = true;
 input int MaxDataAgeSeconds = 120;
