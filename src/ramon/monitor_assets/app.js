@@ -232,8 +232,11 @@ function renderOpportunities(data){
     const cells=[opportunityDate.format(new Date(row.captured*1000)),row.strategy+" / "+row.direction,
       format(row.entry)+" / "+format(row.stop)+" / "+format(row.target),format(row.edge)+" / "+format(row.minimum_edge),
       format(row.strength),percent(row.success_probability),disposition+" · علت نخست: "+(reasons[row.first_reason]||row.first_reason||"—")+(row.last_reason!==row.first_reason?" · آخرین: "+(reasons[row.last_reason]||row.last_reason||"—"):""),
-      (labels[row.outcome]||row.outcome)+(row.net_r!==null&&row.outcome!=="DATA_GAP"?" · "+format(row.net_r)+"R":"")];
-    cells.forEach((text,index)=>{const td=document.createElement("td");td.textContent=text;if([2,3,4,5].includes(index))td.dir="ltr";tr.append(td);});
+      (labels[row.outcome]||row.outcome)+(row.net_r!==null&&row.outcome!=="DATA_GAP"?" · "+format(row.net_r)+"R":""),
+      row.position_open&&typeof row.live_profit_units==="number"&&Number.isFinite(row.live_profit_units)
+        ?((row.live_profit_units>=0?"+":"")+row.live_profit_units.toFixed(2)+" units")
+        :"—"];
+    cells.forEach((text,index)=>{const td=document.createElement("td");td.textContent=text;if([2,3,4,5,8].includes(index))td.dir="ltr";tr.append(td);});
     const action=document.createElement("td"),button=document.createElement("button");
     button.type="button";button.className="opportunity-entry "+(row.direction==="BUY"?"buy":"sell");
     if(row.position_open){
