@@ -119,6 +119,9 @@ def ensure_history_db(db: str | Path) -> Path:
         ).fetchone()
         trade_table_sql = str(trade_table_sql_row[0] or "") if trade_table_sql_row else ""
         if re.search(r"sample_key\s+TEXT\s+NOT\s+NULL\s+UNIQUE", trade_table_sql, re.IGNORECASE):
+            # Recover safely if an interrupted migration left a staging table behind.
+            # trade_outcomes remains authoritative until the final DROP/RENAME succeeds.
+            conn.execute("DROP TABLE IF EXISTS trade_outcomes_v2")
             conn.execute("""CREATE TABLE trade_outcomes_v2 (
                 trade_key TEXT PRIMARY KEY, sample_key TEXT NOT NULL, symbol TEXT NOT NULL,
                 direction TEXT NOT NULL, opened INTEGER NOT NULL, closed INTEGER NOT NULL,
@@ -225,6 +228,7 @@ def ensure_history_db(db: str | Path) -> Path:
         ).fetchone()
         target_table_sql = str(target_table_sql_row[0] or "") if target_table_sql_row else ""
         if re.search(r"sample_key\s+TEXT\s+PRIMARY\s+KEY", target_table_sql, re.IGNORECASE):
+            conn.execute("DROP TABLE IF EXISTS target_outcomes_v2")
             conn.execute("""CREATE TABLE target_outcomes_v2 (
                 trade_key TEXT PRIMARY KEY,
                 sample_key TEXT NOT NULL,
