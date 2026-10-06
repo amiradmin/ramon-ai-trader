@@ -676,6 +676,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     last_finbert_event_key = event_key
 
                 response = result.to_dict()
+                response["forecast_horizon_bars"] = settings.horizon
                 response.update(ensemble_payload)
                 response.update(timesfm3_payload)
                 response.update(latest_moment_payload)
