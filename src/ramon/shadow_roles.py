@@ -211,6 +211,23 @@ class ShadowCoordinator(EnsembleCoordinator):
         return payload, features
 
 
+
+class DirectionCoordinator(ShadowCoordinator):
+    """Operational direction-quality coordinator."""
+
+    def status(self):
+        base = super().status()
+        base.update({
+            "ensemble_mode": "direction_live",
+            "ensemble_active": 1,
+            "role_shadow": 0,
+            "direction_quality_live": int(
+                self.buy_quality is not None and self.sell_quality is not None
+            ),
+        })
+        return base
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", default="/data/ramon_history.sqlite3")
