@@ -114,7 +114,7 @@ services:
       - --model-url
       - http://model:8012
       - --minimum-samples
-      - "150"
+      - "500"
     environment:
       CHRONOS_MODEL: ${CHRONOS_MODEL:-autogluon/chronos-2-small}
     ports:
