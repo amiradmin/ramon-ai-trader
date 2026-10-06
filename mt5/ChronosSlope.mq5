@@ -1,5 +1,5 @@
 #property copyright "Ramon AI Trader"
-#property version "1.011"
+#property version "1.020"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -12,7 +12,7 @@ input bool ShowLabel = true;
 input int MaxDataAgeSeconds = 120;
 
 const string Prefix="CHRONOS_SLOPE_";
-double LastCurrentMid=0.0,LastForecastMedian=0.0;
+double LastCurrentMid=0.0,LastForecastMedian=0.0,LastStep15=0.0,LastStep30=0.0;
 int LastHorizonBars=4;
 string LastDirection="NONE";
 string LastStatus="Waiting for ChronosSlopeBridge";
@@ -36,7 +36,8 @@ bool LoadForecast()
 {
    if(!GlobalVariableCheck(Key("UPDATED")) || !GlobalVariableCheck(Key("MID"))
       || !GlobalVariableCheck(Key("MEDIAN")) || !GlobalVariableCheck(Key("DIR"))
-      || !GlobalVariableCheck(Key("HORIZON")))
+      || !GlobalVariableCheck(Key("HORIZON"))
+      || !GlobalVariableCheck(Key("STEP1")) || !GlobalVariableCheck(Key("STEP2")))
    {
       LastStatus="Bridge not running";
       return false;
@@ -50,57 +51,95 @@ bool LoadForecast()
    double mid=GlobalVariableGet(Key("MID"));
    double median=GlobalVariableGet(Key("MEDIAN"));
    int horizon=(int)GlobalVariableGet(Key("HORIZON"));
+   double step15=GlobalVariableGet(Key("STEP1"));
+   double step30=GlobalVariableGet(Key("STEP2"));
    int direction=(int)GlobalVariableGet(Key("DIR"));
-   if(mid<=0 || median<=0 || horizon<1 || horizon>32 || direction < -1 || direction > 1)
+   if(mid<=0 || median<=0 || step15<=0 || step30<=0 || horizon!=2 || direction < -1 || direction > 1)
    {
       LastStatus="Invalid bridge data";
       return false;
    }
    LastCurrentMid=mid;
    LastForecastMedian=median;
+   LastStep15=step15;
+   LastStep30=step30;
    LastHorizonBars=horizon;
    LastDirection=direction>0 ? "UP" : direction<0 ? "DOWN" : "FLAT";
    LastStatus="OK";
    return true;
 }
 
+// Forecast path: current mid -> +15m -> +30m.
+// Drawn from the latest quote time, not a stretched endpoint.
 void DrawForecast()
 {
-   string line=Prefix+"LINE",label=Prefix+"LABEL",arrow=Prefix+"ARROW";
-   datetime t1=iTime(_Symbol,_Period,0);
-   if(t1<=0) t1=TimeCurrent();
-   datetime t2=t1+(datetime)(LastHorizonBars*PeriodSeconds(PERIOD_M15)*MathMax(1,VisualLengthMultiplier));
-   color clr=LastDirection=="UP" ? clrLimeGreen : LastDirection=="DOWN" ? clrTomato : clrSilver;
-   if(ObjectFind(0,line)<0) ObjectCreate(0,line,OBJ_ARROWED_LINE,0,t1,LastCurrentMid,t2,LastForecastMedian);
-   else { ObjectMove(0,line,0,t1,LastCurrentMid); ObjectMove(0,line,1,t2,LastForecastMedian); }
-   ObjectSetInteger(0,line,OBJPROP_COLOR,clr);
-   ObjectSetInteger(0,line,OBJPROP_WIDTH,MathMax(1,ArrowWidth));
-   ObjectSetInteger(0,line,OBJPROP_RAY_RIGHT,false);
-   ObjectSetInteger(0,line,OBJPROP_SELECTABLE,false);
-   // Also place a visible arrow on the current bar, even if the projected line extends off-screen.
-   if(ObjectFind(0,arrow)<0) ObjectCreate(0,arrow,OBJ_ARROW,0,t1,LastCurrentMid);
-   else ObjectMove(0,arrow,0,t1,LastCurrentMid);
-   ObjectSetInteger(0,arrow,OBJPROP_ARROWCODE,LastDirection=="UP" ? 233 : LastDirection=="DOWN" ? 234 : 159);
-   ObjectSetInteger(0,arrow,OBJPROP_COLOR,clr);
-   ObjectSetInteger(0,arrow,OBJPROP_WIDTH,MathMax(1,ArrowWidth));
-   ObjectSetInteger(0,arrow,OBJPROP_SELECTABLE,false);
-   if(ShowLabel)
+   datetime t0=TimeCurrent();
+   datetime t15=t0+PeriodSeconds(PERIOD_M15);
+   datetime t30=t15+PeriodSeconds(PERIOD_M15);
+   color overall=LastDirection=="UP" ? clrLimeGreen : LastDirection=="DOWN" ? clrTomato : clrSilver;
+   double prices[3];
+   datetime times[3];
+   prices[0]=LastCurrentMid; prices[1]=LastStep15; prices[2]=LastStep30;
+   times[0]=t0; times[1]=t15; times[2]=t30;
+   for(int i=0;i<2;i++)
    {
-      if(ObjectFind(0,label)<0) ObjectCreate(0,label,OBJ_TEXT,0,t2,LastForecastMedian);
-      else ObjectMove(0,label,0,t2,LastForecastMedian);
-      ObjectSetString(0,label,OBJPROP_TEXT,"Chronos "+LastDirection+" "+DoubleToString(LastForecastMedian,_Digits)+" ("+IntegerToString(LastHorizonBars*15)+"m)");
-      ObjectSetInteger(0,label,OBJPROP_COLOR,clr);
-      ObjectSetInteger(0,label,OBJPROP_FONTSIZE,9);
+      string name=Prefix+"SEG"+IntegerToString(i+1);
+      color segment=prices[i+1]>prices[i] ? clrLimeGreen : prices[i+1]<prices[i] ? clrTomato : clrSilver;
+      if(ObjectFind(0,name)<0)
+         ObjectCreate(0,name,OBJ_TREND,0,times[i],prices[i],times[i+1],prices[i+1]);
+      else
+      {
+         ObjectMove(0,name,0,times[i],prices[i]);
+         ObjectMove(0,name,1,times[i+1],prices[i+1]);
+      }
+      ObjectSetInteger(0,name,OBJPROP_RAY_RIGHT,false);
+      ObjectSetInteger(0,name,OBJPROP_RAY_LEFT,false);
+      ObjectSetInteger(0,name,OBJPROP_COLOR,segment);
+      ObjectSetInteger(0,name,OBJPROP_WIDTH,MathMax(1,ArrowWidth));
+      ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+      ObjectSetInteger(0,name,OBJPROP_BACK,false);
    }
-   else ObjectDelete(0,label);
+   // Projected endpoints are two independently forecast model outputs.
+   for(int j=1;j<=2;j++)
+   {
+      string point=Prefix+"POINT"+IntegerToString(j);
+      if(ObjectFind(0,point)<0) ObjectCreate(0,point,OBJ_ARROW,0,times[j],prices[j]);
+      else ObjectMove(0,point,0,times[j],prices[j]);
+      ObjectSetInteger(0,point,OBJPROP_ARROWCODE,159);
+      ObjectSetInteger(0,point,OBJPROP_WIDTH,MathMax(2,ArrowWidth));
+      ObjectSetInteger(0,point,OBJPROP_COLOR,j==2 ? overall : clrAqua);
+      ObjectSetInteger(0,point,OBJPROP_SELECTABLE,false);
+      string label=Prefix+"STEP_LABEL"+IntegerToString(j);
+      if(ShowLabel)
+      {
+         if(ObjectFind(0,label)<0) ObjectCreate(0,label,OBJ_TEXT,0,times[j],prices[j]);
+         else ObjectMove(0,label,0,times[j],prices[j]);
+         ObjectSetString(0,label,OBJPROP_TEXT,
+            "Chronos +"+IntegerToString(j*15)+"m "+DoubleToString(prices[j],_Digits));
+         ObjectSetInteger(0,label,OBJPROP_COLOR,j==2 ? overall : clrAqua);
+         ObjectSetInteger(0,label,OBJPROP_FONTSIZE,9);
+         ObjectSetInteger(0,label,OBJPROP_ANCHOR,ANCHOR_LEFT_LOWER);
+         ObjectSetInteger(0,label,OBJPROP_SELECTABLE,false);
+      }
+      else ObjectDelete(0,label);
+   }
+   // Remove legacy single-arrow objects during upgrade.
+   ObjectDelete(0,Prefix+"LINE");
+   ObjectDelete(0,Prefix+"ARROW");
+   ObjectDelete(0,Prefix+"LABEL");
    ChartRedraw(0);
 }
-
 void ClearForecast()
 {
    ObjectDelete(0,Prefix+"LINE");
    ObjectDelete(0,Prefix+"ARROW");
    ObjectDelete(0,Prefix+"LABEL");
+   for(int i=1;i<=2;i++)
+   {
+      ObjectDelete(0,Prefix+"SEG"+IntegerToString(i));
+      ObjectDelete(0,Prefix+"POINT"+IntegerToString(i));
+      ObjectDelete(0,Prefix+"STEP_LABEL"+IntegerToString(i));
+   }
 }
 
 int OnInit()
