@@ -1,5 +1,5 @@
 #property copyright "Ramon AI Trader"
-#property version "1.020"
+#property version "1.021"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -118,7 +118,9 @@ void DrawForecast()
             "Chronos +"+IntegerToString(j*15)+"m "+DoubleToString(prices[j],_Digits));
          ObjectSetInteger(0,label,OBJPROP_COLOR,j==2 ? overall : clrAqua);
          ObjectSetInteger(0,label,OBJPROP_FONTSIZE,9);
-         ObjectSetInteger(0,label,OBJPROP_ANCHOR,ANCHOR_LEFT_LOWER);
+         // Put 15m text to the left/above and 30m text right/below.
+         // This prevents text overlap even when forecast prices nearly match.
+         ObjectSetInteger(0,label,OBJPROP_ANCHOR,j==1 ? ANCHOR_RIGHT_LOWER : ANCHOR_LEFT_UPPER);
          ObjectSetInteger(0,label,OBJPROP_SELECTABLE,false);
       }
       else ObjectDelete(0,label);
