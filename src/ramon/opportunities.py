@@ -62,25 +62,14 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
                 # Chronos edge remains telemetry/geometry; a non-positive edge
                 # forces a fresh RECHECK instead of hiding or flipping the row.
                 key=row['signal_bar_time']
-                if key in grouped:
-                    item=grouped[key]
-                    # Latest classifier output wins within the same M15 bar.
-                    item['direction']=side
-                    item['last_reason']=final.get('reason')
-                    item['model_approved'] |= row['final_decision']==side
-                    item['executed'] |= row['sample_key'] in traded
-                    item['latest_captured']=row['captured']
-                    item['sample_key']=row['sample_key']
-                    item['success_probability']=probability
-                    item['buy_success_probability']=buy_probability
-                    item['sell_success_probability']=sell_probability
-                    item['direction_source']='LIVE_DIRECTION_QUALITY'
-                    continue
                 sign=1 if side=='BUY' else -1
                 entry=row['mid']+sign*row['spread']/2
                 # Use MAIN geometry, never substitute a range decision's levels.
                 stop=base.get('stop_distance');target=base.get('target_distance')
                 if not stop or not target:continue
+                first_reason = grouped[key]['first_reason'] if key in grouped else final.get('reason')
+                prior_executed = grouped[key]['executed'] if key in grouped else False
+                prior_approved = grouped[key]['model_approved'] if key in grouped else False
                 grouped[key]={'captured':row['captured'],'latest_captured':row['captured'],'sample_key':row['sample_key'],
                     'signal_bar_time':row['signal_bar_time'],'quote_time':row['quote_time'],
                     'direction':side,'strategy':'برگشت تأییدشده' if base.get('trend_conflict_active')==1 and base.get('intrabar_confirmed')==1 and base.get('ai_trend_confirmed')==1 else 'پیش‌بینی مدل',
@@ -90,8 +79,9 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
                     'sell_success_probability':sell_probability,
                     'direction_source':'LIVE_DIRECTION_QUALITY',
                     'entry':entry,'stop':entry-sign*stop,'target':entry+sign*target,
-                    'risk_distance':stop,'first_reason':final.get('reason'),'last_reason':final.get('reason'),
-                    'model_approved':row['final_decision']==side,'executed':row['sample_key'] in traded,
+                    'risk_distance':stop,'first_reason':first_reason,'last_reason':final.get('reason'),
+                    'model_approved':prior_approved or row['final_decision']==side,
+                    'executed':prior_executed or row['sample_key'] in traded,
                     'outcome':'OPEN','net_r':None}
             except (ValueError,TypeError,KeyError):continue
         now=int(time.time())
