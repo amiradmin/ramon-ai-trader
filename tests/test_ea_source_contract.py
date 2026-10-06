@@ -13,8 +13,8 @@ def source() -> str:
 
 def test_current_ea_keeps_sizing_telemetry_observational():
     text = source()
-    assert '#property version "1.590"' in text
-    assert '#define RAMON_EA_VERSION "0.59.0"' in text
+    assert '#property version "1.591"' in text
+    assert '#define RAMON_EA_VERSION "0.59.1"' in text
     assert '+"EA version: "+RAMON_EA_VERSION+' in text
     assert '"RAMON AI TRADER  v"+RAMON_EA_VERSION+' in text
     assert 'version=RAMON_EA_VERSION;' in text
@@ -124,3 +124,12 @@ def test_live_direction_ai_can_own_direction_without_legacy_confirmation():
     assert 'JsonNumber(reply,"ai_engine_v2_selected",ai_engine_v2_selected)' in text
     assert 'bool live_direction_ai=(ai_engine_v2_selected>=0.5' in text
     assert 'LIVE DIRECTION AI accepted' in text
+
+
+def test_discretionary_dashboard_entry_bypasses_analytical_direction_gate_only():
+    text = source()
+    assert 'command_mode!="DISCRETIONARY"' in text
+    assert 'manual_dashboard_discretionary' in text
+    assert 'manual_execution_override=1.0;' in text
+    assert 'Entry risk exceeds Control cap' in text
+    assert 'Insufficient margin' in text
