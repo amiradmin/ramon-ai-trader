@@ -337,34 +337,78 @@ function renderOpportunities(data){
       ?(" · P/L "+(row.live_profit_units>=0?"+":"")+row.live_profit_units.toFixed(2))
       :"";
     const disposition=row.position_open?"پوزیشن باز است"+(row.position_ticket?" · #"+row.position_ticket:"")+livePnl+(row.position_volume?" · vol "+row.position_volume.toFixed(2):""):row.entry_queued?"در صف اجرا":row.executed?"معاملهٔ بسته‌شده ثبت شده":row.model_approved?"سیگنال صادر شده؛ اجرای سفارش تأیید نشده":"مسدود";
-    const cells=[opportunityDate.format(new Date(row.captured*1000))+" · ثبت اولیه",row.strategy+" / "+row.direction,
-      format(row.entry)+" / "+format(row.stop)+" / "+format(row.target),format(row.edge)+" / "+format(row.minimum_edge),
-      format(row.strength),percent(row.success_probability),disposition+" · علت نخست: "+(reasons[row.first_reason]||row.first_reason||"—")+(row.last_reason!==row.first_reason?" · آخرین: "+(reasons[row.last_reason]||row.last_reason||"—"):""),
+    const buyP=typeof row.buy_success_probability==="number"?row.buy_success_probability:null;
+    const sellP=typeof row.sell_success_probability==="number"?row.sell_success_probability:null;
+    const margin=buyP!==null&&sellP!==null?Math.abs(buyP-sellP):null;
+    const directionText=row.direction+" · BUY "+percent(buyP)+" · SELL "+percent(sellP)+" · Δ "+percent(margin);
+
+    const marketBits=[
+      marketStates[row.market_state]||row.market_state||"بازار نامشخص",
+      "MktDir "+(row.market_direction||"—"),
+      "Timing "+(row.entry_timing_ready===1?"READY":"WAIT"),
+      "Intrabar "+(row.intrabar_confirmed===1?"✓":"×")+" "+(row.intrabar_direction||"—")+" "+format(row.intrabar_move_atr)+" ATR",
+      "Trend "+(row.ai_trend_confirmed===1?"✓":"×")+" "+(row.ai_trend_direction||"—")
+    ].join(" · ");
+
+    const qualityBits=[
+      "Dir "+percent(row.success_probability),
+      "AI "+percent(row.ai_score),
+      "Entry "+percent(row.entry_probability),
+      "Full-SL "+percent(row.full_sl_probability),
+      "Edge "+format(row.edge)+"/"+format(row.minimum_edge),
+      "Strength "+format(row.strength),
+      "MOMENT "+(row.moment_label||"—")+" "+format(row.moment_ratio),
+      "FinBERT "+(row.finbert_label||"—")+" "+format(row.finbert_score)
+    ].join(" · ");
+
+    const entryAdvice=!row.position_open&&typeof row.success_probability==="number"&&row.success_probability>=0.60
+      ?(row.chronos_entry_action==="ENTER_NEAR"
+        ?"الان/نزدیک · "+format(row.chronos_entry_price)
+        :row.chronos_entry_action==="WAIT_PULLBACK"&&typeof row.chronos_entry_price==="number"
+          ?"پولبک ~"+(row.chronos_entry_minutes||15)+"m · "+format(row.chronos_entry_price)
+          :"در حال محاسبه…")
+      :"—";
+
+    const exitAdvice=row.position_open
+      ?(row.chronos_exit_action==="EXIT_NOW"
+        ?"خروج نزدیک · "+pnlText(row.live_profit_units)
+        :row.chronos_exit_action==="LOSS_EXIT_NOW"
+          ?"خروج از ضرر · "+pnlText(row.live_profit_units)
+          :row.chronos_exit_action==="RECOVERY_EXIT"&&typeof row.chronos_exit_price==="number"
+            ?"ریکاوری @ "+format(row.chronos_exit_price)+" · ~"+((row.chronos_exit_step||1)*15)+"m · "+pnlText(estimatedPnlAt(row,row.chronos_exit_price))
+            :row.chronos_exit_action==="TARGET"&&typeof row.chronos_exit_price==="number"
+              ?"هدف @ "+format(row.chronos_exit_price)+" · ~"+((row.chronos_exit_step||1)*15)+"m · "+pnlText(estimatedPnlAt(row,row.chronos_exit_price))
+              :row.chronos_exit_action==="NO_PROFIT_TARGET"
+                ?"هدف معتبر ندارد"
+                :"در حال محاسبه…")
+      :"—";
+
+    const blockers=[];
+    const positives=[];
+    if((row.success_probability??0)>=0.60)positives.push("جهت قوی");else blockers.push("کیفیت جهت پایین");
+    if(margin!==null&&margin>=0.05)positives.push("فاصله BUY/SELL خوب");else blockers.push("جهت مبهم");
+    if((row.full_sl_probability??1)<=0.50)positives.push("ریسک SL قابل‌قبول");else blockers.push("ریسک Full-SL بالا");
+    if(row.market_direction&&row.market_direction!=="NEUTRAL"&&row.market_direction!==row.direction)blockers.push("جهت بازار مخالف");
+    if(row.entry_timing_ready===1&&row.entry_timing_direction===row.direction)positives.push("تایمینگ آماده");
+    if(row.moment_ratio>=5)blockers.push("ناهنجاری شدید");
+    const verdict=blockers.length?"نگیر: "+blockers.join("، "):"قابل بررسی: "+positives.join("، ");
+
+    const cells=[
+      opportunityDate.format(new Date(row.captured*1000))+" · ثبت اولیه",
+      directionText,
+      marketBits,
+      qualityBits,
+      format(row.entry)+" / "+format(row.stop)+" / "+format(row.target),
+      entryAdvice,
+      exitAdvice,
+      verdict,
+      disposition+" · "+(reasons[row.last_reason]||row.last_reason||"—"),
       (labels[row.outcome]||row.outcome)+(row.net_r!==null&&row.outcome!=="DATA_GAP"?" · "+format(row.net_r)+"R":""),
       row.position_open&&typeof row.live_profit_units==="number"&&Number.isFinite(row.live_profit_units)
         ?((row.live_profit_units>=0?"+":"")+row.live_profit_units.toFixed(2)+" units")
-        :"—",
-      !row.position_open&&typeof row.success_probability==="number"&&row.success_probability>=0.60
-        ?(row.chronos_entry_action==="ENTER_NEAR"
-          ?"ورود نزدیک/الان · "+format(row.chronos_entry_price)
-          :row.chronos_entry_action==="WAIT_PULLBACK"&&typeof row.chronos_entry_price==="number"
-            ?"حدود "+(row.chronos_entry_minutes||15)+" دقیقه دیگر · "+format(row.chronos_entry_price)
-            :"در حال محاسبه…")
-        :"—",
-      row.position_open
-        ?(row.chronos_exit_action==="EXIT_NOW"
-          ?"خروج نزدیک · حدود "+pnlText(row.live_profit_units)
-          :row.chronos_exit_action==="LOSS_EXIT_NOW"
-            ?"خروج نزدیک از ضرر · حدود "+pnlText(row.live_profit_units)
-            :row.chronos_exit_action==="RECOVERY_EXIT"&&typeof row.chronos_exit_price==="number"
-              ?"خروج برای کاهش ضرر · "+format(row.chronos_exit_price)+" · حدود "+((row.chronos_exit_step||1)*15)+" دقیقه · "+pnlText(estimatedPnlAt(row,row.chronos_exit_price))
-              :row.chronos_exit_action==="TARGET"&&typeof row.chronos_exit_price==="number"
-                ?format(row.chronos_exit_price)+" · حدود "+((row.chronos_exit_step||1)*15)+" دقیقه · "+pnlText(estimatedPnlAt(row,row.chronos_exit_price))
-                :row.chronos_exit_action==="NO_PROFIT_TARGET"
-                  ?"فعلاً هدف سودی معتبر ندارد"
-                  :"در حال محاسبه…")
-        :"—"];
-    cells.forEach((text,index)=>{const td=document.createElement("td");td.textContent=text;if([2,3,4,5,8,9,10].includes(index))td.dir="ltr";tr.append(td);});
+        :"—"
+    ];
+    cells.forEach((text,index)=>{const td=document.createElement("td");td.textContent=text;if([1,3,4,5,6,10].includes(index))td.dir="ltr";if(index===7)td.className=blockers.length?"decision-verdict blocked":"decision-verdict pass";tr.append(td);});
     const action=document.createElement("td"),button=document.createElement("button");
     button.type="button";button.className="opportunity-entry "+(row.direction==="BUY"?"buy":"sell");
     if(row.position_open){
