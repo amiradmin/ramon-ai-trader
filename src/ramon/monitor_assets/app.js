@@ -485,6 +485,22 @@ function renderOpportunities(data){
         if(!autoClose.disabled)autoClose.addEventListener("click",()=>predictedAutoCloseOpportunity(row,autoClose));
       }
       actions.append(autoClose);
+
+      const extra=document.createElement("div");extra.className="manual-scenario-list compact";
+      for(const scenario of (row.trade_scenarios||[])){
+        const scenarioBtn=document.createElement("button");
+        scenarioBtn.type="button";
+        scenarioBtn.className="scenario-entry "+(scenario.direction==="BUY"?"buy":"sell")+(scenario.risk==="high"||scenario.risk==="very_high"?" high-risk":"");
+        const p=typeof scenario.probability==="number"?" · "+Math.round(scenario.probability*100)+"٪":"";
+        scenarioBtn.textContent="ورود جدید: "+scenario.label+" · "+scenario.direction+p;
+        scenarioBtn.title=scenario.setup+" · ورود دستی مستقل از پوزیشن فعلی";
+        scenarioBtn.disabled=!compatibility.supported||row.entry_queued;
+        if(!scenarioBtn.disabled){
+          scenarioBtn.addEventListener("click",()=>manualOpportunity(row,scenarioBtn,true,true,scenario.direction));
+        }
+        extra.append(scenarioBtn);
+      }
+      actions.append(extra);
       action.append(actions);
       tr.append(action);body.append(tr);
       continue;
