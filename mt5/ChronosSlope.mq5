@@ -1,5 +1,5 @@
 #property copyright "Ramon AI Trader"
-#property version "1.031"
+#property version "1.032"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -8,11 +8,11 @@
 input int RefreshSeconds = 5;
 input int VisualLengthMultiplier = 1; // actual horizon
 input int ArrowWidth = 3;
-input bool ShowLabel = true;
+input bool ShowLabel = false; // keep chart clean; endpoint labels are optional
 input bool ShowGhostCandles = true; // synthetic bodies; NOT predicted OHLC
 input int GhostBodyWidthPercent = 82; // wider body so future synthetic candles stay visible
 input int GhostBodyBorderWidth = 2;
-input bool ShowGhostLabels = true;
+input bool ShowGhostLabels = false; // ghost bodies are enough by default
 input int MaxDataAgeSeconds = 120;
 
 const string Prefix="CHRONOS_SLOPE_";
@@ -200,7 +200,7 @@ void DrawForecast()
       if(ObjectFind(0,point)<0) ObjectCreate(0,point,OBJ_ARROW,0,times[j],prices[j]);
       else ObjectMove(0,point,0,times[j],prices[j]);
       ObjectSetInteger(0,point,OBJPROP_ARROWCODE,159);
-      ObjectSetInteger(0,point,OBJPROP_WIDTH,MathMax(2,ArrowWidth));
+      ObjectSetInteger(0,point,OBJPROP_WIDTH,2);
       ObjectSetInteger(0,point,OBJPROP_COLOR,j==2 ? overall : clrAqua);
       ObjectSetInteger(0,point,OBJPROP_SELECTABLE,false);
       string label=Prefix+"STEP_LABEL"+IntegerToString(j);
