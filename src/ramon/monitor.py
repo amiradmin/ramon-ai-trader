@@ -1301,15 +1301,17 @@ def read_open_dashboard_positions(diagnostic):
             return result
         for raw in path.read_text(encoding="ascii", errors="ignore").splitlines():
             parts = raw.strip().split("|")
-            if len(parts) != 4:
+            if len(parts) not in {4, 6}:
                 continue
-            sample_key, direction, ticket, opened = parts
+            sample_key, direction, ticket, opened = parts[:4]
             if not re.fullmatch(r"[a-f0-9]{16}", sample_key) or direction not in {"BUY", "SELL"}:
                 continue
             result[sample_key] = {
                 "direction": direction,
                 "ticket": ticket,
                 "opened": int(opened) if opened.isdigit() else None,
+                "profit_units": number(parts[4]) if len(parts) >= 6 else None,
+                "volume": number(parts[5]) if len(parts) >= 6 else None,
             }
     except OSError:
         return {}
@@ -1334,6 +1336,8 @@ def opportunities_with_execution_state(db, diagnostic, symbol):
         open_info = opened.get(sample_key)
         row["position_open"] = bool(open_info)
         row["position_ticket"] = open_info.get("ticket") if open_info else None
+        row["live_profit_units"] = open_info.get("profit_units") if open_info else None
+        row["position_volume"] = open_info.get("volume") if open_info else None
         row["entry_queued"] = sample_key in queued
         if row["position_open"]:
             row["actionable"] = False
@@ -1421,7 +1425,9 @@ def queue_manual_entry(db, diagnostic, symbol, payload):
     command = (
         f"{int(time.time())}|{signal_bar_time}|{direction}|{sample_key}|"
         f"{risk_distance:.10f}|{target_distance:.10f}|{edge:.10f}|"
-        f"{probability_value:.10f}|{mode}\n"
+        f"{probability_value:.10f}"
+        + (f"|{mode}" if mode != "NORMAL" else "")
+        + "\n"
     )
     with open(queue_path, "a", encoding="ascii", newline="") as out:
         out.write(command)
@@ -1435,6 +1441,25 @@ def queue_manual_entry(db, diagnostic, symbol, payload):
         "mode": mode,
         "safety": "EA hard execution gates remain active",
     }
+
+
+def queue_manual_close(diagnostic, payload):
+    if diagnostic is None:
+        raise ValueError("مسیر فایل اکسپرت در دسترس نیست")
+    sample_key = str(payload.get("sample_key") or "")
+    ticket = str(payload.get("ticket") or "")
+    if not re.fullmatch(r"[a-f0-9]{16}", sample_key) or not ticket.isdigit():
+        raise ValueError("شناسهٔ پوزیشن نامعتبر است")
+    opened = read_open_dashboard_positions(diagnostic)
+    row = opened.get(sample_key)
+    if not row or str(row.get("ticket")) != ticket:
+        raise ValueError("این پوزیشن دیگر در لیست بازهای Ramon نیست")
+    queue_path = Path(diagnostic).with_name("Ramon_ManualCloses.txt")
+    with open(queue_path, "a", encoding="ascii", newline="") as out:
+        out.write(f"{int(time.time())}|{sample_key}|{ticket}\n")
+        out.flush()
+        os.fsync(out.fileno())
+    return {"queued": True, "sample_key": sample_key, "ticket": ticket}
 
 
 def handler_for(db, diagnostic, symbol, health_url):
@@ -1488,7 +1513,7 @@ def handler_for(db, diagnostic, symbol, health_url):
                 self.send_error(404)
 
         def do_POST(self):
-            if self.path not in {"/api/control", "/api/override", "/api/override/reset", "/api/manual-entry"}:
+            if self.path not in {"/api/control", "/api/override", "/api/override/reset", "/api/manual-entry", "/api/manual-close"}:
                 self.send_error(404)
                 return
             origin = self.headers.get("Origin")
@@ -1512,6 +1537,10 @@ def handler_for(db, diagnostic, symbol, health_url):
 
                 if self.path == "/api/manual-entry":
                     result = queue_manual_entry(db, diagnostic, symbol, payload)
+                    self.reply(json.dumps(result, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
+                    return
+                if self.path == "/api/manual-close":
+                    result = queue_manual_close(diagnostic, payload)
                     self.reply(json.dumps(result, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
                     return
 
