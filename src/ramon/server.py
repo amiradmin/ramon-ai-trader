@@ -15,15 +15,15 @@ from uuid import uuid4
 
 from .core import Forecast, Market, Settings, evaluate, independent_market_direction, independent_entry_timing
 from .ensemble import EnsembleCoordinator, dominant_direction
-from .shadow_roles import DirectionCoordinator
+from .direction_roles import DirectionCoordinator
 from .history import persist_decision_sample, persist_market, persist_trade_outcome, persist_replay_input
 from .model import ChronosForecaster, model_name
 from .news import DEFAULT_FOREX_FACTORY_JSON, ForexFactoryNewsProvider
 from .target_learning import build_target_structure
 from .target_outcomes import backfill_target_outcomes
-from .timesfm_shadow import TimesFM3Experimental
-from .moment_shadow import MomentAnomalyShadow
-from .finbert_shadow import FinBertNewsShadow
+from .timesfm_experimental import TimesFM3Experimental
+from .moment_model import MomentAnomalyModel
+from .finbert_model import FinBertNewsModel
 from .range_shadow import observe as observe_range_shadow
 from .range_strategy import candidate as range_candidate, live_candidate
 from .market_state import POLICY_VERSION, assess_market, apply_market_policy
@@ -194,8 +194,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
     ensemble = coordinator(ensemble_dir, model.model_id)
     news_enabled = os.getenv("RAMON_NEWS_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
     timesfm3_experimental = TimesFM3Experimental.from_env()
-    moment_shadow = MomentAnomalyShadow.from_env(lazy=True)
-    finbert_shadow = FinBertNewsShadow.from_env(lazy=True)
+    moment_model = MomentAnomalyModel.from_env(lazy=True)
+    finbert_model = FinBertNewsModel.from_env(lazy=True)
     moment_live_enabled = os.getenv("RAMON_MOMENT_LIVE_ENABLED", "1").strip().lower() in {"1","true","yes","on"}
     moment_live_threshold = float(os.getenv("RAMON_MOMENT_LIVE_THRESHOLD", "2.0"))
     moment_hard_veto_threshold = float(os.getenv("RAMON_MOMENT_HARD_VETO_THRESHOLD", "5.0"))
@@ -211,22 +211,22 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
     shadow_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ramon-shadow")
     # Warm heavyweight external models in the background so /health becomes
     # available immediately after Chronos is ready.
-    if moment_shadow.enabled:
-        shadow_executor.submit(moment_shadow.load)
-    if finbert_shadow.enabled:
-        shadow_executor.submit(finbert_shadow.load)
+    if moment_model.enabled:
+        shadow_executor.submit(moment_model.load)
+    if finbert_model.enabled:
+        shadow_executor.submit(finbert_model.load)
     moment_future = None
     finbert_future = None
     latest_moment_payload = {
-        **moment_shadow.status(),
+        **moment_model.status(),
         "moment_anomaly_score": -1.0,
         "moment_anomaly_ratio": -1.0,
-        "moment_anomaly_label": "WARMING" if moment_shadow.enabled else "UNAVAILABLE",
+        "moment_anomaly_label": "WARMING" if moment_model.enabled else "UNAVAILABLE",
         "moment_anomaly_bar_time": 0,
     }
     latest_finbert_payload = {
-        **finbert_shadow.status(),
-        "finbert_sentiment_label": "WARMING" if finbert_shadow.enabled else "UNAVAILABLE",
+        **finbert_model.status(),
+        "finbert_sentiment_label": "WARMING" if finbert_model.enabled else "UNAVAILABLE",
         "finbert_positive": -1.0,
         "finbert_negative": -1.0,
         "finbert_neutral": -1.0,
@@ -256,12 +256,12 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 if timesfm3_experimental.enabled else "OFF"
             ),
             "anomaly_model_handler": (
-                moment_shadow.checkpoint.split("/")[-1]
-                if moment_shadow.enabled else "OFF"
+                moment_model.checkpoint.split("/")[-1]
+                if moment_model.enabled else "OFF"
             ),
             "news_sentiment_model_handler": (
-                finbert_shadow.checkpoint.split("/")[-1]
-                if finbert_shadow.enabled else "OFF"
+                finbert_model.checkpoint.split("/")[-1]
+                if finbert_model.enabled else "OFF"
             ),
             "regime_model_handler": role_handler_name("regime"),
             "entry_model_handler": role_handler_name("entry"),
@@ -332,8 +332,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     "history_last_persisted_bar": int(history_status["last_persisted_bar"]),
                     **ensemble.status(),
                     **timesfm3_experimental.status(),
-                    **moment_shadow.status(),
-                    **finbert_shadow.status(),
+                    **moment_model.status(),
+                    **finbert_model.status(),
                     **news_provider.status(),
                     **model_handlers(),
                     "moment_live_enabled": int(moment_live_enabled),
@@ -688,7 +688,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         latest_moment_payload = moment_future.result()
                     except Exception as exc:
                         latest_moment_payload = {
-                            **moment_shadow.status(),
+                            **moment_model.status(),
                             "moment_ready": 0,
                             "moment_error": f"{type(exc).__name__}: {exc}",
                             "moment_anomaly_score": -1.0,
@@ -697,8 +697,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         }
                     moment_future = None
                 current_bar = market.bars[-1].time
-                if moment_shadow.ready and moment_future is None and current_bar != last_shadow_bar:
-                    moment_future = shadow_executor.submit(moment_shadow.assess, market)
+                if moment_model.ready and moment_future is None and current_bar != last_shadow_bar:
+                    moment_future = shadow_executor.submit(moment_model.assess, market)
                     last_shadow_bar = current_bar
 
                 if finbert_future is not None and finbert_future.done():
@@ -706,7 +706,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         latest_finbert_payload = finbert_future.result()
                     except Exception as exc:
                         latest_finbert_payload = {
-                            **finbert_shadow.status(),
+                            **finbert_model.status(),
                             "finbert_ready": 0,
                             "finbert_error": f"{type(exc).__name__}: {exc}",
                             "finbert_sentiment_label": "ERROR",
@@ -718,13 +718,13 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     finbert_future = None
                 event_key = f"{news_snapshot.event_time}:{news_snapshot.event_title}"
                 if (
-                    finbert_shadow.ready
+                    finbert_model.ready
                     and finbert_future is None
                     and news_snapshot.event_title != "NONE"
                     and event_key != last_finbert_event_key
                 ):
                     finbert_future = shadow_executor.submit(
-                        finbert_shadow.assess,
+                        finbert_model.assess,
                         title=news_snapshot.event_title,
                         country=news_snapshot.event_country,
                         impact=news_snapshot.event_impact,
