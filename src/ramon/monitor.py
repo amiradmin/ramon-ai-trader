@@ -528,13 +528,22 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
         "decision": "AI+Logic",
     }
 
-    def node(id, title, status, detail, *, source="model", values=None):
+    def probability_badge(value, label):
+        parsed = number(value)
+        if parsed is None or parsed < 0.0:
+            return None
+        if parsed <= 1.0:
+            return f"{label} {parsed * 100:.0f}%"
+        return f"{label} {parsed:.2f}"
+
+    def node(id, title, status, detail, *, source="model", values=None, score=None):
         stamp = ea_time if source == "ea" else model_time
         if source == "health":
             stamp = {"state": "fresh" if health and health.get("ready") else "unknown", "at": utc_time(now), "age_seconds": 0}
         effective = status if stamp["state"] == "fresh" else "stale" if stamp["state"] in {"stale", "clock_error"} else "unknown"
         nodes.append({"id": id, "title": title, "state": effective, "observed_state": status,
                       "detail": detail, "source": source, "engine": engine_labels.get(id),
+                      "score": score,
                       "manual_override_supported": id in {"timing", "extension", "edge", "strength", "market_direction", "entry_timing", "base", "decision", "range"},
                       "manual_review_supported": id in {"news", "account", "limits", "risk", "order", "position"},
                       "observed_at": stamp["at"], "age_seconds": stamp["age_seconds"],
@@ -553,6 +562,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
          source="health", values={"مدل": (health or {}).get("model"), "حالت نقش‌ها": (health or {}).get("ensemble_mode")})
     node("forecast", "پیش‌بینی Chronos", "observed" if base.get("forecast_median", 0) else "unknown",
          "پیش‌بینی از کندل‌های بستهٔ M15؛ بازهٔ عدم‌قطعیت همراه آن",
+         score=probability_badge(base.get("signal_strength"), "قدرت"),
          values={"کف / میانه / سقف": " / ".join(metric(base.get(k)) for k in ("forecast_low", "forecast_median", "forecast_high")),
                  "ATR": base.get("atr"), "مدل ثبت‌شده": sample.get("chronos_model")})
     edge, minimum = number(max(number(base.get("buy_edge")) or 0, number(base.get("sell_edge")) or 0)), number(base.get("minimum_edge"))
@@ -562,6 +572,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
     strength, floor = number(base.get("signal_strength")), number(base.get("minimum_strength"))
     node("strength", "قدرت پیش‌بینی", "pass" if strength is not None and floor is not None and strength >= floor else "blocked" if strength is not None and floor is not None else "unknown",
          "قدرت پایین فقط با تأیید هم‌زمان برگشت و مسیر مدل می‌تواند پذیرفته شود",
+         score=probability_badge(strength, "Chronos"),
          values={"قدرت": strength, "حداقل قدرت عادی": floor, "ورود ضعیف مجاز": settings.get("allow_weak_intrabar_entries")})
     proposed_direction = (
         base.get("decision")
@@ -577,11 +588,17 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
         else "blocked" if cent_gate_active and detected_direction in {"BUY", "SELL", "NEUTRAL"}
         else "observed" if detected_direction else "unknown"
     )
+    buy_quality = number(final.get("shadow_buy_success_probability"))
+    sell_quality = number(final.get("shadow_sell_success_probability"))
+    direction_quality_badge = None
+    if buy_quality is not None and buy_quality >= 0 and sell_quality is not None and sell_quality >= 0:
+        direction_quality_badge = f"BUY {buy_quality * 100:.0f}% · SELL {sell_quality * 100:.0f}%"
     node("market_direction", "تشخیص جهت بازار", direction_state,
          "جهت مستقل بازار با سیگنال هم‌جهت است" if direction_matches else
          "جهت مستقل بازار خنثی است؛ ورود متوقف می‌شود" if detected_direction == "NEUTRAL" else
          "جهت مستقل بازار خلاف سیگنال است؛ ورود متوقف می‌شود" if direction_known else
          "تشخیص جهت مستقل هنوز ثبت نشده",
+         score=direction_quality_badge,
          values={"فعال روی حساب سنتی": "بله" if cent_gate_active else "خیر",
                  "جهت سیگنال": proposed_direction,
                  "جهت مستقل بازار": detected_direction,
@@ -605,6 +622,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
          "چرخش و حرکت کوتاه‌مدت زمان ورود سیگنال را تأیید کرده‌اند؛ مجوز نهایی ورود جدا بررسی می‌شود" if signal_timing_ready else
          "جهت درست است ولی چرخش/حرکت کوتاه‌مدت هنوز ورود را تأیید نکرده" if direction_matches else
          "تا تأیید جهت بازار، زمان ورود سیگنال قابل تأیید نیست",
+         score=probability_badge(final.get("entry_probability"), "Entry AI"),
          values={"جهت بررسی": timing_direction,
                  "جهت سیگنال": proposed_direction,
                  "زمان جهت بررسی تأیید شده": "بله" if timing_ready else "خیر",
@@ -676,12 +694,21 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
          values={"فعال در سرویس": (health or {}).get("range_main_enabled"), "فعال در اکسپرت": diag.get("Range MAIN"),
                  "مجاز برای WAIT": "قدرت / مزیت ناکافی، حرکت مخالف، نبود تأیید جهت", "Setup ثبت‌شده": range_setup or None})
     shadow = final.get("role_shadow") == 1 or metadata.get("ensemble_mode") == "shadow"
+    regime_badge = probability_badge(final.get("regime_probability"), "Regime")
+    full_sl_badge = probability_badge(final.get("shadow_full_sl_probability"), "Full-SL")
+    shadow_badge = " · ".join(x for x in (regime_badge, full_sl_badge) if x) or None
     node("shadow", "تشخیص رژیم و مدل‌های ناظر", "shadow" if shadow else "observed" if final else "unknown",
          "در حالت ناظر روی ورود، خروج و حجم اثر ندارد" if shadow else "حالت فعال نقش‌ها فقط از دادهٔ ثبت‌شده تعیین می‌شود",
+         score=shadow_badge,
          values={"رژیم ناظر": final.get("shadow_regime_label"), "احتمال رژیم": final.get("regime_probability"),
                  "نقش‌های فعال": final.get("ensemble_active"), "توجه": "RANGE/UNCLEAR رنج قطعی نیست"})
+    final_ai_badge = (
+        probability_badge(final.get("ai_engine_v2_score"), "AI Score")
+        or probability_badge(final.get("meta_probability"), "Meta")
+    )
     node("decision", "تصمیم نهایی مدل", "blocked" if decision == "WAIT" else "pass" if decision in {"BUY", "SELL"} else "unknown",
-         REASONS.get(reason, reason), values={"تصمیم": decision, "دلیل": reason, "شناسه": sample.get("sample_key"),
+         REASONS.get(reason, reason), score=final_ai_badge,
+         values={"تصمیم": decision, "دلیل": reason, "شناسه": sample.get("sample_key"),
                                              "مسیر": "RANGE" if range_execution else "CHRONOS",
                                              "حالت بازار": assessment.get("state", "ثبت نشده"),
                                              "واکنش مجاز": assessment.get("route", "ثبت نشده"),
@@ -690,6 +717,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
     # These are terminal observations, not a replay of gates that short-circuit.
     node("news", "قفل خبر", "blocked" if "NEWS GUARD" in ea_status else "pass" if diag.get("News") else "unknown",
          "ورود از ۳۰ دقیقه قبل تا ۳۰ دقیقه بعدِ خبر پراثر متوقف است؛ تقویم نامعتبر هم مانع ورود است",
+         score=probability_badge(final.get("news_probability"), "News AI"),
          source="ea", values={"آخرین خبر": diag.get("News"), "وضعیت اکسپرت": ea_status if "NEWS GUARD" in ea_status else "عبور از این گیت در هر تصمیم ثبت نشده"})
     live = match(diag.get("Live"), r"^(\w+)")
     permissions = diag.get("Trade permissions", "")
@@ -708,6 +736,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
     risk = diag.get("RiskGate", "")
     node("risk", "حجم، ریسک و مارجین", "blocked" if "BLOCK" in risk or any(x in ea_status for x in ("risk >", "hard risk cap", "Insufficient margin", "SL risk >", "TP not inside", "reward/risk <")) else "pass" if risk else "unknown",
          "پیش‌نمایش ریسک با تأیید نهایی هنگام سفارش فرق دارد", source="ea",
+         score=probability_badge(final.get("shadow_full_sl_probability"), "Full-SL"),
          values={"پیش‌نمایش ریسک": risk or None,
                  "بودجهٔ ترجیحی، دلار": number(match(diag.get("RiskPerTradeUSD"), r"^([\d.]+)")),
                  "سقف اجرای لات حداقل، دلار": number(match(diag.get("MinLotOverride"), r"MaxExecutableRiskUSD: ([\d.]+)")),
