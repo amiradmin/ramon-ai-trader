@@ -640,10 +640,18 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
          metrics=f"Chronos {pct(base.get('signal_strength'))}",
          values={"کف / میانه / سقف": " / ".join(metric(base.get(k)) for k in ("forecast_low", "forecast_median", "forecast_high")),
                  "ATR": base.get("atr"), "مدل ثبت‌شده": sample.get("chronos_model")})
+    edge_buy_quality = number(final.get("shadow_buy_success_probability"))
+    edge_sell_quality = number(final.get("shadow_sell_success_probability"))
     edge, minimum = number(max(number(base.get("buy_edge")) or 0, number(base.get("sell_edge")) or 0)), number(base.get("minimum_edge"))
     node("edge", "مزیت پس از اسپرد", "pass" if minimum is not None and edge >= minimum else "blocked" if minimum is not None else "unknown",
-         "مزیت جهت برتر باید به حداقل برسد",
-         values={"مزیت خرید": base.get("buy_edge"), "مزیت فروش": base.get("sell_edge"), "حداقل مزیت": minimum})
+         "Edge خام با هزینهٔ اسپرد مقایسه می‌شود؛ درصدها کیفیت جهت از مدل AI هستند",
+         metrics=f"AI BUY {pct(edge_buy_quality)} · SELL {pct(edge_sell_quality)}",
+         score=(
+             f"BUY {pct(edge_buy_quality)} · SELL {pct(edge_sell_quality)}"
+             if edge_buy_quality is not None or edge_sell_quality is not None else None
+         ),
+         values={"مزیت خرید": base.get("buy_edge"), "مزیت فروش": base.get("sell_edge"), "حداقل مزیت": minimum,
+                 "AI BUY Quality": edge_buy_quality, "AI SELL Quality": edge_sell_quality})
     strength, floor = number(base.get("signal_strength")), number(base.get("minimum_strength"))
     node("strength", "قدرت پیش‌بینی", "pass" if strength is not None and floor is not None and strength >= floor else "blocked" if strength is not None and floor is not None else "unknown",
          f"قدرت Chronos {pct(strength)} · حد عادی {pct(floor)}",
