@@ -218,6 +218,23 @@ async function manualCloseOpportunity(row,button){
 }
 function renderOpportunities(data){
   const body=$("opportunity-rows");body.replaceChildren();
+  const daily=data.today_profit||{};
+  const dailyEl=$("today-profit-summary");
+  if(dailyEl){
+    const unit=daily.unit_label||"واحد حساب";
+    const signed=v=>typeof v==="number"&&Number.isFinite(v)?((v>=0?"+":"")+v.toFixed(2)):"—";
+    dailyEl.replaceChildren();
+    [
+      "بسته‌شده امروز: "+signed(daily.realized_units)+" "+unit+" · "+(daily.closed_trades||0)+" معامله",
+      "P/L باز: "+signed(daily.floating_units)+" "+unit+" · "+(daily.open_positions||0)+" پوزیشن",
+      "جمع امروز: "+signed(daily.total_units)+" "+unit
+    ].forEach((label,index)=>{
+      const span=document.createElement("span");span.textContent=label;
+      const value=index===0?daily.realized_units:index===1?daily.floating_units:daily.total_units;
+      span.className=typeof value==="number"?(value>0?"profit-positive":value<0?"profit-negative":"profit-flat"):"profit-flat";
+      dailyEl.append(span);
+    });
+  }
   const labels={OPEN:"هنوز باز",TP_OBSERVED:"هدف در نمونه‌ها دیده شد",SL_OBSERVED:"حد ضرر در نمونه‌ها دیده شد",TIMEOUT_OBSERVED:"پایان ۴ ساعت",DATA_GAP:"نامشخص؛ شکاف داده"};
   const reasons={trend_conflict:"تعارض جهت",insufficient_model_edge:"مزیت ناکافی",insufficient_model_strength:"قدرت ناکافی",adverse_intrabar_timing:"حرکت کوتاه مخالف",late_entry_extension:"ورود دیرهنگام",direction_confirmation_required:"نبود تأیید جهت",market_direction_conflict:"تعارض جهت مستقل",market_direction_neutral:"جهت خنثی",confirmed_countertrend_reversal:"برگشت تأییدشده"};
   const format=v=>typeof v!=="number"||!Number.isFinite(v)?"—":v.toFixed(3);
