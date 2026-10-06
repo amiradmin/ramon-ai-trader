@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sqlite3
+from collections.abc import Callable
 
 from .bundles import activate_bundle, atomic_json, load_active_bundle, stage_bundle
 from .core import Bar, atr14
@@ -263,12 +264,18 @@ def promotion_gate(candidate: dict, incumbent: dict, baseline: dict,
 def train_bundle(*, db: str | Path, symbol: str, chronos_model: str, out: Path,
                  minimum_samples: int = DEFAULT_MINIMUM_SAMPLES, regime_minimum: int = DEFAULT_REGIME_MINIMUM,
                  minimum_trades: int = DEFAULT_MINIMUM_TRADES, threshold: float = 0.65,
-                 improvement: float = 0.5, maximum_drawdown: float = 8.0) -> dict:
+                 improvement: float = 0.5, maximum_drawdown: float = 8.0,
+                 progress: Callable[[str, str, dict[str, object]], None] | None = None) -> dict:
+    def emit(stage: str, message: str, **details: object) -> None:
+        if progress is not None:
+            progress(stage, message, details)
     if minimum_samples < 100 or regime_minimum < 40 or minimum_trades < 1:
         raise ValueError("invalid sample limits")
     if not 0.5 <= threshold < 1 or improvement <= 0 or maximum_drawdown <= 0:
         raise ValueError("invalid promotion limits")
+    emit("load_data", "در حال بارگذاری نمونه‌های واقعی بسته‌شده از دیتابیس")
     examples = load_trade_examples(db, symbol, chronos_model)
+    emit("load_data", "نمونه‌های قابل آموزش بارگذاری شدند", samples=len(examples))
     report = {"updated": False, "closed_trade_samples": len(examples), "chronos_model": chronos_model,
               "symbol": symbol, "generated_at_utc": datetime.now(timezone.utc).isoformat(),
               "minimum_samples": minimum_samples, "regime_minimum": regime_minimum,
@@ -277,9 +284,13 @@ def train_bundle(*, db: str | Path, symbol: str, chronos_model: str, out: Path,
               "dataset_source": "clean_real_closed_positions_net_of_deal_costs",
               "label_policy": "exclude_manual_stopout_unknown_expert"}
     if len(examples) < minimum_samples:
+        emit("sample_gate", "حداقل نمونهٔ واقعی هنوز تأمین نشده", samples=len(examples), minimum_samples=minimum_samples)
         return {**report, "status": "waiting_for_closed_trades", "minimum_samples": minimum_samples}
+    emit("windows", "در حال ساخت پنجره‌های زمانی Train / Meta / Holdout")
     base, meta, holdout = temporal_windows(examples)
+    emit("windows", "پنجره‌های زمانی ساخته شدند", base=len(base), meta=len(meta), holdout=len(holdout))
     if not base or not meta or len(holdout) < 20:
+        emit("windows", "پنجره‌های زمانی کافی نیستند", base=len(base), meta=len(meta), holdout=len(holdout))
         return {**report, "status": "insufficient_purged_windows"}
     # Freeze this holdout for one attempt. Later runs must use entirely new outcomes,
     # avoiding repeated tuning and promotion on an already inspected holdout.
@@ -288,6 +299,7 @@ def train_bundle(*, db: str | Path, symbol: str, chronos_model: str, out: Path,
         state = json.loads(state_path.read_text())
         holdout = [row for row in holdout if row.time > int(state["last_evaluated_end"])]
     if len(holdout) < 20:
+        emit("holdout", "Holdout تازه برای ارزیابی کافی نیست", holdout=len(holdout))
         return {**report, "status": "waiting_for_fresh_holdout"}
     incumbent_manifest = None
     incumbent_models = None
@@ -295,21 +307,38 @@ def train_bundle(*, db: str | Path, symbol: str, chronos_model: str, out: Path,
         incumbent_manifest, incumbent_models = load_active_bundle(out, chronos_model)
         if any(row.time <= int(incumbent_manifest["training_label_end"]) for row in holdout):
             return {**report, "status": "incumbent_holdout_overlap"}
+    emit("regime_data", "در حال آماده‌سازی دیتاست Regime از تاریخچهٔ M15")
     bars, _ = load_bars(db, symbol)
     regime = [row for row in _regime_dataset(bars) if row.label_end < meta[0].time]
+    emit("regime_data", "دیتاست Regime آماده شد", samples=len(regime), bars=len(bars))
     if len(regime) < regime_minimum:
+        emit("regime_data", "دادهٔ Regime هنوز کافی نیست", samples=len(regime), minimum=regime_minimum)
         return {**report, "status": "waiting_for_regime_history", "regime_samples": len(regime)}
     try:
-        models = {"regime": fit_role(regime, "regime", REGIME_FEATURES),
-                  "entry": fit_role(base, "entry", ENTRY_FEATURES),
-                  "news": fit_role(base, "news", NEWS_FEATURES),
-                  "risk": fit_risk_role(base)}
+        emit("train_regime", "آموزش مدل Regime آغاز شد", samples=len(regime))
+        regime_model = fit_role(regime, "regime", REGIME_FEATURES)
+        emit("train_regime", "آموزش مدل Regime تمام شد")
+        emit("train_entry", "آموزش مدل Entry آغاز شد", samples=len(base))
+        entry_model = fit_role(base, "entry", ENTRY_FEATURES)
+        emit("train_entry", "آموزش مدل Entry تمام شد")
+        emit("train_news", "آموزش مدل News آغاز شد", samples=len(base))
+        news_model = fit_role(base, "news", NEWS_FEATURES)
+        emit("train_news", "آموزش مدل News تمام شد")
+        emit("train_risk", "آموزش مدل Risk / SL آغاز شد", samples=len(base))
+        risk_model = fit_risk_role(base)
+        emit("train_risk", "آموزش مدل Risk / SL تمام شد")
+        models = {"regime": regime_model, "entry": entry_model, "news": news_model, "risk": risk_model}
         meta_examples = [Example(row.time, row.label_end, {"meta": meta_features(row, models)}, row.label)
                          for row in meta]
+        emit("train_meta", "آموزش مدل Meta آغاز شد", samples=len(meta_examples))
         models["meta"] = fit_role(meta_examples, "meta", META_FEATURES)
+        emit("train_meta", "آموزش مدل Meta تمام شد")
     except ValueError as exc:
+        emit("training_error", "آموزش یکی از Roleها به‌دلیل کمبود کلاس متوقف شد", reason=str(exc))
         return {**report, "status": "waiting_for_training_classes", "reason": str(exc)}
+    emit("holdout", "ارزیابی مدل کاندید روی Holdout واقعی آغاز شد", samples=len(holdout))
     candidate = evaluate_roles(models, holdout, threshold)
+    emit("holdout", "ارزیابی Holdout تمام شد", trades=candidate.get("trades"), net_r=candidate.get("net_r"), balanced_accuracy=candidate.get("balanced_accuracy"))
     # Compare the ensemble against a single learned gate using Chronos features only.
     # This is a reported ablation, never a tuned threshold or a replacement live model.
     simple = fit_role([Example(row.time, row.label_end, {"meta": row.features["meta_base"]}, row.label)
@@ -319,8 +348,10 @@ def train_bundle(*, db: str | Path, symbol: str, chronos_model: str, out: Path,
     baseline = trade_metrics(holdout, [row.base_trade for row in holdout])
     incumbent = (evaluate_roles(incumbent_models, holdout, float(incumbent_manifest["trade_threshold"]))
                  if incumbent_models else baseline)
+    emit("promotion_gate", "در حال بررسی Promotion Gate")
     reasons = promotion_gate(candidate, incumbent, baseline, minimum_trades=minimum_trades,
                              improvement=improvement, maximum_drawdown=maximum_drawdown)
+    emit("promotion_gate", "Promotion Gate بررسی شد", passed=not reasons, reasons=reasons)
     # Prevent another daily run from selecting against the same outcomes, even on rejection.
     atomic_json(state_path, {"last_evaluated_end": max(row.label_end for row in holdout)})
     metadata = {"chronos_model": chronos_model, "symbol": symbol, "trade_threshold": threshold,
@@ -335,9 +366,15 @@ def train_bundle(*, db: str | Path, symbol: str, chronos_model: str, out: Path,
                 "chronos_features_only_ablation": ablation,
                 "gate_reasons": reasons,
                 "evaluation_scope": "filtering_recorded_executed_opportunities_not_full_strategy_backtest"}
+    emit("stage_bundle", "در حال ذخیرهٔ Bundle کاندید")
     bundle_id = stage_bundle(out, models, metadata)
+    emit("stage_bundle", "Bundle کاندید ذخیره شد", bundle_id=bundle_id)
     if not reasons:
+        emit("activate", "مدل کاندید تأیید شد؛ در حال فعال‌سازی Bundle")
         activate_bundle(out, bundle_id, chronos_model)
+        emit("activate", "Bundle تأییدشده فعال شد", bundle_id=bundle_id)
+    else:
+        emit("rejected", "کاندید رد شد؛ مدل فعلی بدون تغییر ماند", reasons=reasons)
     return {**report, **metadata, "bundle_id": bundle_id, "updated": not reasons,
             "status": "promoted" if not reasons else "validation_rejected"}
 
