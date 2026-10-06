@@ -190,8 +190,6 @@ def serve(host: str, port: int, db: Path, out: Path, symbol: str, chronos_model:
 
     def run_training() -> None:
         with state.lock:
-            state.running = True
-            state.last_started = datetime.now(timezone.utc).isoformat()
             state.error = ""
             state.reload = None
         try:
@@ -285,12 +283,7 @@ def serve(host: str, port: int, db: Path, out: Path, symbol: str, chronos_model:
                     return
                 state.running = True
                 state.last_started = datetime.now(timezone.utc).isoformat()
-            # Reset immediately inside worker; this pre-set closes the click race.
-            def worker() -> None:
-                with state.lock:
-                    state.running = False
-                run_training()
-            threading.Thread(target=worker, name="ramon-manual-training", daemon=True).start()
+            threading.Thread(target=run_training, name="ramon-manual-training", daemon=True).start()
             self._json(202, {"started": True})
 
     ThreadingHTTPServer((host, port), Handler).serve_forever()
