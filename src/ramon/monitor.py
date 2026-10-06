@@ -1678,6 +1678,18 @@ def handler_for(db, diagnostic, symbol, health_url):
                 data = build_snapshot(db, diagnostic, symbol=symbol, health=health)
                 body = analysis_bundle(data, selected_stage).encode("utf-8")
                 self.reply(body, "text/plain; charset=utf-8")
+            elif route == "/api/chronos-slope":
+                # Read-only 30-minute forecast, entirely independent of Ramon EA decision.
+                url = health_url.rsplit("/health", 1)[0] + "/forecast-display"
+                try:
+                    with urlopen(url, timeout=1.2) as response:
+                        forecast = object_json(response.read(8192))
+                    if forecast.get("symbol") != symbol:
+                        forecast = {"ready": False, "reason": "symbol_mismatch"}
+                except (OSError, ValueError):
+                    forecast = {"ready": False, "reason": "forecast_unavailable"}
+                forecast["advisory_only"] = True
+                self.reply(json.dumps(forecast, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
             elif route == "/api/opportunities":
                 self.reply(json.dumps(opportunities_with_execution_state(db, diagnostic, symbol, health_url), ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
             elif route == "/api/snapshot":
