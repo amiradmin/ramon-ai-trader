@@ -1,6 +1,6 @@
 #property strict
-#property version "1.583"
-#define RAMON_EA_VERSION "0.58.3"
+#property version "1.584"
+#define RAMON_EA_VERSION "0.58.4"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -102,6 +102,7 @@ input bool WriteDiagnosticFile = true;
 input string DiagnosticFileName = "Ramon_Diagnostic.txt";
 input bool ShowDashboard = true;
 input bool ShowTPLevelsOnChart = true; // Draw active MAIN TP1/TP2/TP3 levels and stage state on the chart.
+input bool ShowChronosSlopeArrow = true; // Visual-only arrow from current quote toward Chronos median forecast.
 input bool EnableClipboardButton = true;
 input bool WriteCsvLogs = true;
 input string SignalCsvFileName = "Ramon_Signals.csv";
@@ -195,6 +196,7 @@ double LastSignalAsk = 0.0;
 double LastForecastLow = 0.0;
 double LastForecast = 0.0;
 double LastForecastHigh = 0.0;
+int LastForecastHorizonBars = 4;
 double LastAtr = 0.0;
 double LastEdge = 0.0;
 double LastBuyEdge = 0.0;
@@ -253,6 +255,7 @@ string LastCopyStatus = "Ready";
 string LastCloseStatus = "Ready";
 const string UiPrefix = "RAMON_UI_";
 const string TpUiPrefix = "RAMON_TP_";
+const string ChronosUiPrefix = "RAMON_CHRONOS_";
 const string RamonEyeResourceName = "RamonEyeHQ96";
 const int RamonEyeDisplaySize = 96;
 
@@ -1642,6 +1645,55 @@ bool ManageNewsGuard(const ulong ticket)
    return true;
 }
 
+void UpdateChronosSlopeArrow()
+{
+   const string name=ChronosUiPrefix+"Slope";
+   if(!ShowChronosSlopeArrow || LastForecast<=0.0 || LastSignalBid<=0.0 || LastSignalAsk<=0.0)
+   {
+      ObjectDelete(0,name);
+      return;
+   }
+
+   datetime start_time=TimeCurrent();
+   int horizon=MathMax(1,LastForecastHorizonBars);
+   datetime end_time=start_time+(datetime)(horizon*PeriodSeconds(PERIOD_M15));
+   double start_price=(LastSignalBid+LastSignalAsk)/2.0;
+   double end_price=LastForecast;
+   double deadband=MathMax(SymbolInfoDouble(_Symbol,SYMBOL_POINT)*5.0,LastAtr*0.01);
+
+   color arrow_color=clrSilver;
+   if(end_price>start_price+deadband)
+      arrow_color=clrLimeGreen;
+   else if(end_price<start_price-deadband)
+      arrow_color=clrTomato;
+
+   if(ObjectFind(0,name)<0)
+   {
+      if(!ObjectCreate(0,name,OBJ_ARROWED_LINE,0,start_time,start_price,end_time,end_price))
+      {
+         Print("Ramon Chronos arrow create failed err=",GetLastError());
+         return;
+      }
+   }
+   else
+   {
+      ObjectMove(0,name,0,start_time,start_price);
+      ObjectMove(0,name,1,end_time,end_price);
+   }
+
+   ObjectSetInteger(0,name,OBJPROP_COLOR,arrow_color);
+   ObjectSetInteger(0,name,OBJPROP_WIDTH,3);
+   ObjectSetInteger(0,name,OBJPROP_STYLE,STYLE_SOLID);
+   ObjectSetInteger(0,name,OBJPROP_BACK,false);
+   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,name,OBJPROP_SELECTED,false);
+   ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
+   ObjectSetString(0,name,OBJPROP_TOOLTIP,
+      "Chronos median forecast | "+IntegerToString(horizon)+"×M15 | "
+      +DoubleToString(start_price,_Digits)+" → "+DoubleToString(end_price,_Digits));
+   ChartRedraw(0);
+}
+
 void ShowStatus()
 {
    // Clear the closed position's runtime before any diagnostic or chart render.
@@ -1657,6 +1709,7 @@ void ShowStatus()
    }
    WriteDiagnostic();
    UpdateTPStageObjects();
+   UpdateChronosSlopeArrow();
    DrawDashboard();
 }
 bool JsonText(const string json,const string key,string &value)
@@ -4574,7 +4627,7 @@ void OnTimer()
    string target_method="",target_direction="";
    double target_impulse_start=0.0,target_impulse_end=0.0,target_impulse_range=0.0,target_impulse_atr=0.0;
    double target_tp1=0.0,target_tp2=0.0,target_tp3=0.0,legacy_target_price=0.0;
-   double forecast_low=0.0,forecast_high=0.0,edge=0.0,model_spread=0.0;
+   double forecast_low=0.0,forecast_high=0.0,forecast_horizon_bars=4.0,edge=0.0,model_spread=0.0;
    double buy_edge=0.0,sell_edge=0.0,minimum_edge=0.0,uncertainty=0.0,signal_strength=0.0,minimum_strength=0.0;
    double intrabar_confirmed=0.0,intrabar_move_atr=0.0,intrabar_rebound_atr=0.0;
    double intrabar_min_strength=0.0,intrabar_min_move_atr=0.0,intrabar_min_rebound_atr=0.0;
@@ -4776,9 +4829,11 @@ void OnTimer()
    LastSignalBarTime=bar_time;
    LastSignalBid=signal_bid;
    LastSignalAsk=signal_ask;
+   JsonNumber(reply,"forecast_horizon_bars",forecast_horizon_bars);
    LastForecastLow=forecast_low;
    LastForecast=median;
    LastForecastHigh=forecast_high;
+   LastForecastHorizonBars=(int)MathMax(1.0,forecast_horizon_bars);
    LastAtr=atr;
    LastEdge=edge;
    LastBuyEdge=buy_edge;
@@ -5266,6 +5321,7 @@ int OnInit()
       LastDecisionRequestTime=TimeCurrent()-DecisionCadenceSeconds()+MathMin(15,MathMax(1,DecisionCadenceSeconds()/2));
    ObjectsDeleteAll(0,UiPrefix);
    ObjectsDeleteAll(0,TpUiPrefix);
+   ObjectsDeleteAll(0,ChronosUiPrefix);
    ShowStatus();
    return INIT_SUCCEEDED;
 }
@@ -5275,6 +5331,7 @@ void OnDeinit(const int reason)
    EventKillTimer();
    ObjectsDeleteAll(0,UiPrefix);
    ObjectsDeleteAll(0,TpUiPrefix);
+   ObjectsDeleteAll(0,ChronosUiPrefix);
    if(RamonEyeResourceReady)
    {
       ResourceFree("::"+RamonEyeResourceName);
