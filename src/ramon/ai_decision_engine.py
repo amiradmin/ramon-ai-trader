@@ -60,13 +60,13 @@ def apply_ai_decision_engine(
         )
         return True
 
-    buy_quality = _p(response.get("shadow_buy_success_probability"), -1.0)
-    sell_quality = _p(response.get("shadow_sell_success_probability"), -1.0)
+    buy_quality = _p(response.get("buy_success_probability"), -1.0)
+    sell_quality = _p(response.get("sell_success_probability"), -1.0)
     entry_probability = _p(response.get("entry_probability"), -1.0)
     regime_probability = _p(response.get("regime_probability"), -1.0)
     news_probability = _p(response.get("news_probability"), -1.0)
     meta_probability = _p(response.get("meta_probability"), -1.0)
-    full_sl = _p(response.get("shadow_full_sl_probability"), -1.0)
+    full_sl = _p(response.get("full_sl_probability"), -1.0)
 
     required = (buy_quality, sell_quality, entry_probability, full_sl)
     if any(value < 0.0 for value in required):
