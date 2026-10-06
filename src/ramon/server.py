@@ -24,7 +24,6 @@ from .target_outcomes import backfill_target_outcomes
 from .timesfm_experimental import TimesFM3Experimental
 from .moment_model import MomentAnomalyModel
 from .finbert_model import FinBertNewsModel
-from .range_shadow import observe as observe_range_shadow
 from .range_strategy import candidate as range_candidate, live_candidate
 from .market_state import POLICY_VERSION, assess_market, apply_market_policy
 from .reversal_strategy import apply_reversal
@@ -208,13 +207,13 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
     ai_engine_v2_enabled = os.getenv("RAMON_AI_ENGINE_V2_ENABLED", "1").strip().lower() in {"1","true","yes","on"}
     ai_engine_v2_minimum_score = float(os.getenv("RAMON_AI_ENGINE_V2_MIN_SCORE", "0.56"))
     ai_engine_v2_minimum_margin = float(os.getenv("RAMON_AI_ENGINE_V2_MIN_MARGIN", "0.03"))
-    shadow_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ramon-shadow")
+    model_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ramon-model")
     # Warm heavyweight external models in the background so /health becomes
     # available immediately after Chronos is ready.
     if moment_model.enabled:
-        shadow_executor.submit(moment_model.load)
+        model_executor.submit(moment_model.load)
     if finbert_model.enabled:
-        shadow_executor.submit(finbert_model.load)
+        model_executor.submit(finbert_model.load)
     moment_future = None
     finbert_future = None
     latest_moment_payload = {
@@ -232,7 +231,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
         "finbert_neutral": -1.0,
         "finbert_directional_score": 0.0,
     }
-    last_shadow_bar = 0
+    last_moment_bar = 0
     last_finbert_event_key = ""
     manual_overrides_by_bar: dict[int, dict[str, dict[str, object]]] = {}
     news_provider = ForexFactoryNewsProvider(
@@ -251,7 +250,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
     def model_handlers() -> dict[str, str]:
         return {
             "forecast_model_handler": model.model_id.split("/")[-1],
-            "forecast_shadow_model_handler": (
+            "forecast_experimental_model_handler": (
                 timesfm3_experimental.checkpoint.split("/")[-1]
                 if timesfm3_experimental.enabled else "OFF"
             ),
@@ -325,8 +324,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     "trend_min_path_atr": settings.trend_min_path_atr,
                     "trend_min_micro_move_atr": settings.trend_min_micro_move_atr,
                     "maximum_entry_extension_atr": settings.maximum_entry_extension_atr,
-                    "range_shadow_mode": "OBSERVE_ONLY" if history_db else "DISABLED",
-                    "range_main_enabled": range_live_enabled,
+                            "range_main_enabled": range_live_enabled,
                     "reversal_live_enabled": reversal_live_enabled,
                     "history_last_error": str(history_status["last_error"]),
                     "history_last_persisted_bar": int(history_status["last_persisted_bar"]),
@@ -353,7 +351,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
 
         def do_POST(self) -> None:
             nonlocal moment_future, finbert_future, latest_moment_payload
-            nonlocal latest_finbert_payload, last_shadow_bar, last_finbert_event_key
+            nonlocal latest_finbert_payload, last_moment_bar, last_finbert_event_key
             nonlocal latest_market, latest_market_received_utc, ensemble
             nonlocal latest_display_forecast
             if self.path not in {"/decision", "/trades", "/manual-override", "/manual-overrides/reset", "/human-opinion", "/position-exit-advice", "/opportunity-entry-advice", "/reload-roles", "/forecast-only"}:
@@ -697,9 +695,9 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         }
                     moment_future = None
                 current_bar = market.bars[-1].time
-                if moment_model.ready and moment_future is None and current_bar != last_shadow_bar:
-                    moment_future = shadow_executor.submit(moment_model.assess, market)
-                    last_shadow_bar = current_bar
+                if moment_model.ready and moment_future is None and current_bar != last_moment_bar:
+                    moment_future = model_executor.submit(moment_model.assess, market)
+                    last_moment_bar = current_bar
 
                 if finbert_future is not None and finbert_future.done():
                     try:
@@ -723,7 +721,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     and news_snapshot.event_title != "NONE"
                     and event_key != last_finbert_event_key
                 ):
-                    finbert_future = shadow_executor.submit(
+                    finbert_future = model_executor.submit(
                         finbert_model.assess,
                         title=news_snapshot.event_title,
                         country=news_snapshot.event_country,
@@ -747,12 +745,6 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 response.update(timesfm3_payload)
                 response.update(latest_moment_payload)
                 response.update(latest_finbert_payload)
-                if history_db:
-                    try:
-                        response.update(observe_range_shadow(history_db, market, quote_time))
-                    except Exception as exc:
-                        response["range_shadow_status"] = "ERROR"
-                        response["range_shadow_error"] = str(exc)
 
                 # The terminal owns the loss-streak gate. Uploaded history can lag
                 # fresh closes or omit intervening outcomes; it is not authoritative.
