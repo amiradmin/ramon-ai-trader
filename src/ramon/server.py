@@ -854,7 +854,9 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         market_assessment,
                         enabled=ai_engine_v2_enabled,
                         minimum_score=ai_engine_v2_minimum_score,
-                        minimum_quality_margin=ai_engine_v2_minimum_margin,
+                        minimum_direction_quality=selector_minimum_quality,
+                        minimum_quality_margin=selector_minimum_margin,
+                        maximum_full_sl_probability=selector_maximum_full_sl,
                         anomaly_soft_threshold=moment_live_threshold,
                         anomaly_hard_threshold=moment_hard_veto_threshold,
                     )
