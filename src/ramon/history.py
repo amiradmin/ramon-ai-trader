@@ -119,24 +119,26 @@ def ensure_history_db(db: str | Path) -> Path:
         ).fetchone()
         trade_table_sql = str(trade_table_sql_row[0] or "") if trade_table_sql_row else ""
         if re.search(r"sample_key\s+TEXT\s+NOT\s+NULL\s+UNIQUE", trade_table_sql, re.IGNORECASE):
-            # Recover safely if an interrupted migration left a staging table behind.
-            # trade_outcomes remains authoritative until the final DROP/RENAME succeeds.
+            # Preserve every current/future telemetry column by deriving the migration
+            # table from SQLite's authoritative schema instead of a hard-coded column list.
             conn.execute("DROP TABLE IF EXISTS trade_outcomes_v2")
-            conn.execute("""CREATE TABLE trade_outcomes_v2 (
-                trade_key TEXT PRIMARY KEY, sample_key TEXT NOT NULL, symbol TEXT NOT NULL,
-                direction TEXT NOT NULL, opened INTEGER NOT NULL, closed INTEGER NOT NULL,
-                net_units REAL NOT NULL, initial_risk_units REAL NOT NULL,
-                net_r REAL NOT NULL, exit_reason TEXT NOT NULL, received INTEGER NOT NULL,
-                profit_units REAL, commission_units REAL, swap_units REAL, fee_units REAL,
-                opened_utc_offset_seconds INTEGER, closed_utc_offset_seconds INTEGER,
-                actual_fill_price REAL, exit_detail TEXT, entry_ea_version TEXT,
-                trade_role TEXT, entry_magic INTEGER, entry_source TEXT,
-                risk_budget_units REAL, planned_volume REAL, min_lot_sl_units REAL,
-                min_lot_override_used INTEGER, max_executable_risk_usd REAL,
-                money_units_per_usd REAL, training_status TEXT
-            )""")
+            migrated_trade_sql = re.sub(
+                r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?trade_outcomes",
+                "CREATE TABLE trade_outcomes_v2",
+                trade_table_sql,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+            migrated_trade_sql = re.sub(
+                r"(sample_key\s+TEXT\s+NOT\s+NULL)\s+UNIQUE",
+                r"\1",
+                migrated_trade_sql,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+            conn.execute(migrated_trade_sql)
             trade_columns = [row[1] for row in conn.execute("PRAGMA table_info(trade_outcomes)")]
-            copy_columns = ",".join(trade_columns)
+            copy_columns = ",".join(f'"{name}"' for name in trade_columns)
             conn.execute(
                 f"INSERT INTO trade_outcomes_v2 ({copy_columns}) "
                 f"SELECT {copy_columns} FROM trade_outcomes"
@@ -229,43 +231,33 @@ def ensure_history_db(db: str | Path) -> Path:
         target_table_sql = str(target_table_sql_row[0] or "") if target_table_sql_row else ""
         if re.search(r"sample_key\s+TEXT\s+PRIMARY\s+KEY", target_table_sql, re.IGNORECASE):
             conn.execute("DROP TABLE IF EXISTS target_outcomes_v2")
-            conn.execute("""CREATE TABLE target_outcomes_v2 (
-                trade_key TEXT PRIMARY KEY,
-                sample_key TEXT NOT NULL,
-                symbol TEXT NOT NULL,
-                direction TEXT NOT NULL,
-                opened INTEGER NOT NULL,
-                closed INTEGER NOT NULL,
-                tp1 REAL NOT NULL,
-                tp2 REAL NOT NULL,
-                tp3 REAL NOT NULL,
-                tp1_hit INTEGER NOT NULL,
-                tp2_hit INTEGER NOT NULL,
-                tp3_hit INTEGER NOT NULL,
-                tp1_time INTEGER,
-                tp2_time INTEGER,
-                tp3_time INTEGER,
-                bars_to_tp1 INTEGER,
-                bars_to_tp2 INTEGER,
-                bars_to_tp3 INTEGER,
-                mfe_price REAL NOT NULL,
-                mae_price REAL NOT NULL,
-                mfe_atr REAL,
-                mae_atr REAL,
-                continuation_tp2 INTEGER NOT NULL,
-                continuation_tp3 INTEGER NOT NULL,
-                source TEXT NOT NULL,
-                computed_at INTEGER NOT NULL,
-                FOREIGN KEY(sample_key) REFERENCES decision_samples(sample_key)
-            )""")
+            migrated_target_sql = re.sub(
+                r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?target_outcomes",
+                "CREATE TABLE target_outcomes_v2",
+                target_table_sql,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+            migrated_target_sql = re.sub(
+                r"(sample_key\s+TEXT)\s+PRIMARY\s+KEY",
+                r"\1",
+                migrated_target_sql,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+            conn.execute(migrated_target_sql)
             target_columns = [row[1] for row in conn.execute("PRAGMA table_info(target_outcomes)")]
-            copy_columns = ",".join(target_columns)
+            copy_columns = ",".join(f'"{name}"' for name in target_columns)
             conn.execute(
                 f"INSERT INTO target_outcomes_v2 ({copy_columns}) "
                 f"SELECT {copy_columns} FROM target_outcomes"
             )
             conn.execute("DROP TABLE target_outcomes")
             conn.execute("ALTER TABLE target_outcomes_v2 RENAME TO target_outcomes")
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_target_outcomes_trade_key "
+                "ON target_outcomes(trade_key)"
+            )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_target_outcomes_sample_key "
             "ON target_outcomes(sample_key)"
