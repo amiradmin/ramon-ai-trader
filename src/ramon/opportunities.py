@@ -58,11 +58,9 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
                 if side not in {'BUY','SELL'} or not row['quote_time']:
                     continue
                 edge=base['buy_edge'] if side=='BUY' else base['sell_edge']
-                # Direction quality is authoritative for table direction. A
-                # negative Chronos edge no longer flips the side, but it still
-                # disqualifies immediate execution geometry for safety.
-                if edge<=0:
-                    continue
+                # Direction quality is authoritative for table direction.
+                # Chronos edge remains telemetry/geometry; a non-positive edge
+                # forces a fresh RECHECK instead of hiding or flipping the row.
                 key=row['signal_bar_time']
                 if key in grouped:
                     item=grouped[key]
@@ -114,6 +112,7 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
             item['actionable']=bool(
                 item['outcome']=='OPEN' and not item['executed']
                 and item['age_seconds']<=ACTIONABLE_SECONDS
+                and item['edge']>0
             )
         return {'opportunities':sorted(grouped.values(),key=lambda x:x['captured'],reverse=True)[:max(1,min(limit,200))],
                 'as_of':latest,'actionable_seconds':ACTIONABLE_SECONDS,
