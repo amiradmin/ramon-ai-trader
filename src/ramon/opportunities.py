@@ -85,7 +85,7 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
             )
         return {'opportunities':sorted(grouped.values(),key=lambda x:x['captured'],reverse=True)[:max(1,min(limit,200))],
                 'as_of':latest,'actionable_seconds':ACTIONABLE_SECONDS,
-                'scope':'positive_model_edge; first snapshot per M15/direction; quote sampled; spread included; no commission/slippage; manual execution requires fresh EA-side revalidation'}
+                'scope':'HISTORICAL positive model edge; first snapshot per M15/direction; not latest market or live ChronosSlope; quote sampled; spread included; no commission/slippage; manual execution requires fresh EA-side revalidation'}
     except sqlite3.Error as exc:
         return {'opportunities':[], 'error':str(exc),'scope':'positive_model_edge'}
     finally:con.close()
