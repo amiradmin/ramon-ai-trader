@@ -11,10 +11,10 @@ def source() -> str:
     return EA.read_text()
 
 
-def test_ea_038_keeps_sizing_telemetry_observational():
+def test_current_ea_keeps_sizing_telemetry_observational():
     text = source()
-    assert '#property version "1.564"' in text
-    assert '#define RAMON_EA_VERSION "0.56.4"' in text
+    assert '#property version "1.588"' in text
+    assert '#define RAMON_EA_VERSION "0.58.8"' in text
     assert '+"EA version: "+RAMON_EA_VERSION+' in text
     assert '"RAMON AI TRADER  v"+RAMON_EA_VERSION+' in text
     assert 'version=RAMON_EA_VERSION;' in text
@@ -104,3 +104,15 @@ def test_ea_defends_normal_entry_against_older_server_response():
     assert 'intrabar_confirmed<0.5 || ai_trend_confirmed<0.5' in guard
     assert 'intrabar_direction!=decision || ai_trend_direction!=decision' in guard
     assert 'return;' in guard
+
+
+def test_predicted_auto_close_is_ticket_bound_and_tick_driven():
+    text = source()
+    assert 'Ramon_AutoCloseCommands.txt' in text
+    assert 'DashboardAutoCloseKey(requested_ticket)' in text
+    assert 'PositionSelectByTicket(requested_ticket)' in text
+    assert 'StringFind(comment,"Ramon:"+execution_sample+":M")!=0' in text
+    assert 'bool reached=(type==POSITION_TYPE_BUY ? tick.bid>=target : tick.ask<=target);' in text
+    assert 'RecordDealTelemetry(Trade.ResultDeal(),"chronos_predicted_auto_close")' in text
+    on_tick = text.split('void OnTick()', 1)[1].split('string DashboardAliasFileName', 1)[0]
+    assert 'ProcessDashboardPredictedAutoCloseCrossings();' in on_tick
