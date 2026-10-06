@@ -1,6 +1,6 @@
 #property strict
-#property version "1.578"
-#define RAMON_EA_VERSION "0.57.8"
+#property version "1.579"
+#define RAMON_EA_VERSION "0.57.9"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -1737,6 +1737,7 @@ bool BuildRequest(string &payload,datetime &bar_time)
       }
    }
    payload+="],\"quote_time\":"+IntegerToString((long)tick.time)
+      +",\"broker_utc_offset_seconds\":"+IntegerToString((int)BrokerUtcOffsetSeconds())
       +",\"account_is_cent\":"+(AccountIsCent ? "true" : "false")
       +",\"range_execution_ready\":"+((EnableRangeMain && !SmallOnlyMode) ? "true" : "false")+"}";
    return true;
