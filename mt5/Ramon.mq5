@@ -1,6 +1,6 @@
 #property strict
-#property version "1.581"
-#define RAMON_EA_VERSION "0.58.1"
+#property version "1.582"
+#define RAMON_EA_VERSION "0.58.2"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -4183,6 +4183,47 @@ void OnTick()
    ObserveTPStageCrossingsOnTick();
 }
 
+string DashboardAliasFileName()
+{
+   return "Ramon_DashboardAliases.txt";
+}
+
+string DashboardOriginSample(const string execution_sample)
+{
+   int handle=FileOpen(DashboardAliasFileName(),FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
+   if(handle==INVALID_HANDLE)
+      return execution_sample;
+   string origin=execution_sample;
+   while(!FileIsEnding(handle))
+   {
+      string line=FileReadString(handle);
+      StringTrimLeft(line); StringTrimRight(line);
+      if(line=="") continue;
+      string parts[];
+      ushort separator=StringGetCharacter("|",0);
+      if(StringSplit(line,separator,parts)!=2)
+         continue;
+      if(parts[0]==execution_sample && ValidSampleKey(parts[1]))
+         origin=parts[1];
+   }
+   FileClose(handle);
+   return origin;
+}
+
+void SaveDashboardAlias(const string execution_sample,const string origin_sample)
+{
+   if(!ValidSampleKey(execution_sample) || !ValidSampleKey(origin_sample))
+      return;
+   int handle=FileOpen(DashboardAliasFileName(),FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
+   if(handle==INVALID_HANDLE)
+      return;
+   // Keep a compact one-line mapping for the active manual position. This is
+   // sufficient because dashboard manual positions are keyed by execution sample.
+   FileWriteString(handle,execution_sample+"|"+origin_sample+"\r\n");
+   FileFlush(handle);
+   FileClose(handle);
+}
+
 void WriteOpenDashboardPositions()
 {
    const string file_name="Ramon_OpenDashboardPositions.txt";
@@ -4201,17 +4242,18 @@ void WriteOpenDashboardPositions()
       int marker=StringFind(comment,"Ramon:");
       if(marker!=0 || StringFind(comment,":M")<0 || StringLen(comment)<22)
          continue;
-      string sample=StringSubstr(comment,6,16);
-      if(!ValidSampleKey(sample))
+      string execution_sample=StringSubstr(comment,6,16);
+      if(!ValidSampleKey(execution_sample))
          continue;
+      string origin_sample=DashboardOriginSample(execution_sample);
       long type=PositionGetInteger(POSITION_TYPE);
       string direction=(type==POSITION_TYPE_BUY ? "BUY" : "SELL");
       datetime opened=(datetime)PositionGetInteger(POSITION_TIME);
       double profit_units=PositionGetDouble(POSITION_PROFIT);
       double volume=PositionGetDouble(POSITION_VOLUME);
-      FileWriteString(handle,sample+"|"+direction+"|"+IntegerToString((long)ticket)+"|"
-         +IntegerToString((long)opened)+"|"+DoubleToString(profit_units,8)+"|"
-         +DoubleToString(volume,2)+"\r\n");
+      FileWriteString(handle,origin_sample+"|"+execution_sample+"|"+direction+"|"
+         +IntegerToString((long)ticket)+"|"+IntegerToString((long)opened)+"|"
+         +DoubleToString(profit_units,8)+"|"+DoubleToString(volume,2)+"\r\n");
    }
    FileFlush(handle);
    FileClose(handle);
@@ -4243,6 +4285,7 @@ int ReadDashboardManualEntry(
    double &edge,
    double &probability,
    string &mode,
+   string &origin_sample_key,
    string &why
 )
 {
@@ -4253,6 +4296,7 @@ int ReadDashboardManualEntry(
    edge=0.0;
    probability=-1.0;
    mode="NORMAL";
+   origin_sample_key="";
    why="";
    if(SmallOnlyMode)
       return 0;
@@ -4295,7 +4339,7 @@ int ReadDashboardManualEntry(
    string parts[];
    ushort separator=StringGetCharacter("|",0);
    int count=StringSplit(lines[0],separator,parts);
-   if(count!=8 && count!=9)
+   if(count!=8 && count!=9 && count!=10)
    { why="invalid command"; return -1; }
 
    datetime requested=(datetime)StringToInteger(parts[0]);
@@ -4306,7 +4350,8 @@ int ReadDashboardManualEntry(
    double command_target=StringToDouble(parts[5]);
    double command_edge=StringToDouble(parts[6]);
    double command_probability=StringToDouble(parts[7]);
-   string command_mode=(count==9 ? parts[8] : "NORMAL");
+   string command_mode=(count>=9 ? parts[8] : "NORMAL");
+   string command_origin=(count==10 ? parts[9] : command_sample);
    datetime utc_now=TimeGMT();
 
    if(side!="BUY" && side!="SELL")
@@ -4317,6 +4362,8 @@ int ReadDashboardManualEntry(
    { why="invalid opportunity geometry"; return -1; }
    if(command_mode!="NORMAL" && command_mode!="RECHECK")
    { why="invalid command mode"; return -1; }
+   if(!ValidSampleKey(command_origin))
+   { why="invalid origin sample"; return -1; }
    if(command_mode=="NORMAL" && command_edge<=0.0)
    { why="invalid opportunity edge"; return -1; }
    if(command_probability>1.0 || command_probability< -1.0)
@@ -4334,6 +4381,7 @@ int ReadDashboardManualEntry(
    edge=command_edge;
    probability=command_probability;
    mode=command_mode;
+   origin_sample_key=command_origin;
    Print("Ramon manual dashboard command consumed side=",side,
       " sample=",command_sample,
       " bar=",IntegerToString((long)signal_bar),
@@ -4388,18 +4436,19 @@ bool ProcessDashboardManualClose()
 
    string parts[];
    ushort separator=StringGetCharacter("|",0);
-   if(StringSplit(lines[0],separator,parts)!=3)
+   if(StringSplit(lines[0],separator,parts)!=4)
    {
       StatusLine="MANUAL CLOSE invalid command";
       return false;
    }
 
    datetime requested=(datetime)StringToInteger(parts[0]);
-   string sample=parts[1];
-   ulong requested_ticket=(ulong)StringToInteger(parts[2]);
+   string origin_sample=parts[1];
+   string sample=parts[2];
+   ulong requested_ticket=(ulong)StringToInteger(parts[3]);
    datetime utc_now=TimeGMT();
    if(requested<=0 || utc_now-requested>120 || requested-utc_now>5
-      || !ValidSampleKey(sample) || requested_ticket==0)
+      || !ValidSampleKey(origin_sample) || !ValidSampleKey(sample) || requested_ticket==0)
    {
       StatusLine="MANUAL CLOSE command expired/invalid";
       return false;
@@ -4482,7 +4531,7 @@ void OnTimer()
    // Do not consume a queued manual command until a valid model snapshot has
    // reached the execution section. This prevents commands from disappearing
    // when a network/parser/telemetry return happens earlier in the timer cycle.
-   string dashboard_direction="",dashboard_sample_key="",dashboard_command_mode="NORMAL",dashboard_command_reason="";
+   string dashboard_direction="",dashboard_sample_key="",dashboard_command_mode="NORMAL",dashboard_origin_sample_key="",dashboard_command_reason="";
    double dashboard_risk_distance=0.0,dashboard_target_distance=0.0;
    double dashboard_edge=0.0,dashboard_probability=-1.0;
    int dashboard_command=0;
@@ -4778,7 +4827,7 @@ void OnTimer()
       dashboard_command=ReadDashboardManualEntry(
          closed,dashboard_direction,dashboard_sample_key,
          dashboard_risk_distance,dashboard_target_distance,
-         dashboard_edge,dashboard_probability,dashboard_command_mode,dashboard_command_reason
+         dashboard_edge,dashboard_probability,dashboard_command_mode,dashboard_origin_sample_key,dashboard_command_reason
       );
       if(dashboard_command<0)
          Print("Ramon manual dashboard entry ignored: ",dashboard_command_reason);
@@ -5012,6 +5061,9 @@ void OnTimer()
          LastTargetTP1,LastTargetTP2,LastTargetTP3);
    // The broker owns SL/TP immediately. No position is opened when the model is unavailable.
    string trade_comment="Ramon:"+LastSampleKey+(small_profit ? ":S" : (range_trade ? ":R" : (dashboard_manual_entry ? ":M" : "")));
+   if(dashboard_manual_entry)
+      SaveDashboardAlias(LastSampleKey,
+         ValidSampleKey(dashboard_origin_sample_key) ? dashboard_origin_sample_key : LastSampleKey);
    bool submitted=(
       decision=="BUY"
       ? Trade.Buy(volume,_Symbol,0.0,stop,target,trade_comment)
