@@ -209,3 +209,31 @@
 .trade-guidance.buy{border-color:#488a75}
 .trade-guidance.sell{border-color:#b77777}
 .trade-guidance.wait{border-color:#786d54}
+
+
+/* Beginner-friendly trade decision table */
+.simple-trade-table{min-width:1180px;font-size:13px}
+.simple-trade-table th,.simple-trade-table td{padding:14px 12px;vertical-align:middle}
+.simple-trade-table td{max-width:220px}
+.trade-recommendation{font-weight:900;font-size:15px;white-space:nowrap;border-right:4px solid transparent}
+.trade-recommendation.enter{color:var(--green);border-right-color:var(--green);background:#173a3238}
+.trade-recommendation.exit{color:#ff9a9a;border-right-color:var(--red);background:#3e272e40}
+.trade-recommendation.hold{color:#9bd9ff;border-right-color:#3f6685;background:#14273540}
+.trade-recommendation.wait{color:#f0c66b;border-right-color:#8a6f36;background:#3a321e38}
+.trade-recommendation.watch{color:#c3cedd;border-right-color:#64748b;background:#1d283638}
+.trade-recommendation.avoid{color:var(--red);border-right-color:var(--red);background:#3e272e30}
+.trade-recommendation.queued{color:#b8a3ff;border-right-color:#6655a6;background:#2d254438}
+.trade-direction{font-weight:800;white-space:nowrap}
+.trade-direction.buy{color:var(--green)}
+.trade-direction.sell{color:var(--red)}
+.trade-confidence{font:900 15px monospace;white-space:nowrap}
+.trade-entry-price,.trade-levels,.trade-exit-advice{font:700 12px monospace;white-space:normal}
+.trade-simple-reason{font-weight:700;line-height:1.8}
+.trade-position-state{font-size:12px;white-space:normal}
+.trade-tech-details{margin-top:8px;border-top:1px dashed #33445b;padding-top:7px;font-weight:400;color:var(--muted)}
+.trade-tech-details summary{cursor:pointer;color:#8eb7e6;font-weight:700;font-size:11px}
+.trade-tech-body{white-space:pre-line;margin-top:7px;font:400 10px/1.8 monospace;color:#aebbd0;direction:rtl}
+@media(max-width:900px){
+  .simple-trade-table{min-width:980px}
+  .simple-trade-table th,.simple-trade-table td{padding:11px 9px}
+}
