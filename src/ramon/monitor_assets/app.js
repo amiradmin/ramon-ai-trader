@@ -216,23 +216,39 @@ async function manualCloseOpportunity(row,button){
     setTimeout(()=>{button.disabled=false;button.textContent=old;},1800);
   }
 }
+let chronosSlope = null;
 function renderTradingGuidance(){
   const title=$("trade-guidance-title"),reason=$("trade-guidance-reason"),container=title?.parentElement;
   if(!title||!reason||!container)return;
-  const state=String(snapshot?.decision||"UNKNOWN").toUpperCase();
-  const modelFresh=snapshot?.model_freshness?.state==="fresh";
-  const eaFresh=snapshot?.ea_freshness?.state==="fresh";
-  const joined=snapshot?.joined===true;
-  const eligible=modelFresh&&eaFresh&&joined;
-  let mode="wait",heading="صبر — سیگنال ورود تأیید نشده";
-  if(eligible&&state==="BUY"){mode="buy";heading="سیگنال BUY (خرید) — منتظر تأیید اجرای EA";}
-  else if(eligible&&state==="SELL"){mode="sell";heading="سیگنال SELL (فروش) — منتظر تأیید اجرای EA";}
-  else if(!eligible){heading="صبر — داده مدل و EA هم‌زمان و تازه نیست";}
+  const value=chronosSlope;
+  const valid=value?.ready===true && value?.horizon_minutes===30 &&
+    ["UP","DOWN","FLAT"].includes(value?.direction) &&
+    typeof value.current_mid==="number" &&
+    typeof value.forecast_step_1==="number" &&
+    typeof value.forecast_step_2==="number";
+  let mode="wait",heading="صبر — پیش‌بینی ۳۰ دقیقه‌ای Chronos در دسترس نیست";
+  if(valid){
+    if(value.direction==="UP"){mode="buy";heading="تمایل به BUY — پیش‌بینی صعودی Chronos (+۳۰ دقیقه)";}
+    else if(value.direction==="DOWN"){mode="sell";heading="تمایل به SELL — پیش‌بینی نزولی Chronos (+۳۰ دقیقه)";}
+    else heading="صبر — پیش‌بینی Chronos خنثی است";
+  }
   title.textContent=heading;
-  reason.textContent=(snapshot?.reason_fa||snapshot?.reason||"تصمیم معتبری دریافت نشده")+
-    " · "+(eligible?"تصمیم تازه و شناسه مشترک تأیید شده؛ ریسک، اسپرد، خبر و مجوز سفارش همچنان باید توسط EA بررسی شود.":"تصمیم‌های تاریخی یا پیش‌بینی ChronosSlope مجوز ورود دستی نیستند.")+
-    " · تصمیم: "+state;
+  reason.textContent=valid
+    ?"قیمت فعلی: "+value.current_mid.toFixed(2)+" · +۱۵ دقیقه: "+value.forecast_step_1.toFixed(2)+
+     " · +۳۰ دقیقه: "+value.forecast_step_2.toFixed(2)+" · تازگی: "+(value.age_seconds??"—")+
+     " ثانیه · فقط جهت احتمالی؛ برای ورود واقعی تأیید زمان‌بندی، اسپرد و ریسک لازم است."
+    :"Bridge باید پیش‌بینی معتبر و تازه ارسال کند. هیچ سیگنال معامله‌ای از داده قدیمی صادر نمی‌شود.";
   container.className="trade-guidance "+mode;
+}
+async function refreshChronosSlope(){
+  const controller=new AbortController();
+  const timeout=setTimeout(()=>controller.abort(),2500);
+  try{
+    const response=await fetch("/api/chronos-slope",{cache:"no-store",signal:controller.signal});
+    if(!response.ok)throw Error("HTTP "+response.status);
+    chronosSlope=await response.json();
+  }catch{chronosSlope=null;}
+  finally{clearTimeout(timeout);renderTradingGuidance();}
 }
 function renderLiveMarketSync(){
   renderTradingGuidance();
@@ -407,4 +423,4 @@ selectedNode?JSON.stringify(selectedNode,null,2):"NONE",
 "=== ALL DECISION / EXECUTION STEPS ==="
 ];for(const n of snapshot.nodes||[]){out.push(`[${nodeNumbers[n.id]||n.id}] ${n.title} | state=${n.state} observed=${n.observed_state} manual=${!!n.manual_override} engine=${n.engine||"Logic"}`);out.push(`detail: ${n.detail||"—"}`);out.push(`values: ${JSON.stringify(n.values||{})}`);}out.push("","=== RECENT DECISIONS ===");for(const x of snapshot.timeline||[])out.push(`${x.at||"—"} | ${x.decision} | ${x.reason} | ${x.strategy} | ${x.sample_key}`);out.push("",...candleLines(snapshot.recent_market?.m15,"M15"),"",...candleLines(snapshot.recent_market?.m1,"M1"),"","=== MODEL / HANDLER MAP ===");for(const row of snapshot.model_handler_map||[])out.push(`${row.name} | ${row.handler} | status=${row.status} | condition=${row.condition_state||"—"} | values=${JSON.stringify(row.values||{})}`);out.push("","=== WARNINGS ===",...(snapshot.warnings?.length?snapshot.warnings:["NONE"]));return out.join("\n");}
 async function copyAnalysis(){const btn=$("copy-analysis");const old=btn.textContent;btn.disabled=true;btn.textContent="COPYING...";let text="";try{const response=await fetch(`/api/analysis?stage=${encodeURIComponent(selected||"")}`,{cache:"no-store"});if(!response.ok)throw new Error(`HTTP ${response.status}`);text=await response.text();}catch{text=buildAnalysisBundle();}let copied=false;try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text);copied=true;}}catch{}if(!copied){const ta=document.createElement("textarea");ta.value=text;ta.setAttribute("readonly","");ta.style.position="absolute";ta.style.left="-9999px";document.body.append(ta);ta.select();try{copied=document.execCommand("copy");}catch{}ta.remove();}btn.textContent=copied?"COPIED ✓":"COPY FAILED";setTimeout(()=>{btn.disabled=false;btn.textContent=old;},1400);}
-$("copy-analysis").addEventListener("click",copyAnalysis);$("reset-overrides").addEventListener("click",resetOverrides);$("zoom").addEventListener("click",()=>{zoomed=!zoomed;$("zoom").textContent=zoomed?"−":"＋";$("zoom").setAttribute("aria-label",zoomed?"نمای کلی فلوچارت":"بزرگ‌نمایی فلوچارت");resize();});$("refresh").addEventListener("click",refresh);new ResizeObserver(resize).observe($("viewport"));document.addEventListener("visibilitychange",()=>{if(!document.hidden){void refresh();void refreshOpportunities();}});setInterval(()=>{if(!document.hidden)void refreshOpportunities();},5000);void refresh();void refreshOpportunities();
+$("copy-analysis").addEventListener("click",copyAnalysis);$("reset-overrides").addEventListener("click",resetOverrides);$("zoom").addEventListener("click",()=>{zoomed=!zoomed;$("zoom").textContent=zoomed?"−":"＋";$("zoom").setAttribute("aria-label",zoomed?"نمای کلی فلوچارت":"بزرگ‌نمایی فلوچارت");resize();});$("refresh").addEventListener("click",refresh);new ResizeObserver(resize).observe($("viewport"));document.addEventListener("visibilitychange",()=>{if(!document.hidden){void refresh();void refreshOpportunities();void refreshChronosSlope();setInterval(()=>{if(!document.hidden)void refreshChronosSlope();},5000);}});setInterval(()=>{if(!document.hidden)void refreshOpportunities();},5000);void refresh();void refreshOpportunities();
