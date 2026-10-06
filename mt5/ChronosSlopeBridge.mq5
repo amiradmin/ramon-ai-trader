@@ -1,5 +1,5 @@
 #property copyright "Ramon AI Trader"
-#property version "1.010"
+#property version "1.020"
 #property strict
 
 // Read-only bridge. Attach to a SEPARATE chart from the Ramon trading EA.
@@ -89,19 +89,23 @@ void Refresh()
    }
    string reply=CharArrayToString(response,0,ArraySize(response),CP_UTF8);
    string direction="",model="";
-   double mid=0,median=0,horizon=0;
+   double mid=0,median=0,horizon=0,step1=0,step2=0;
    if(!JsonText(reply,"direction",direction) || !JsonText(reply,"model",model)
       || !JsonNumber(reply,"current_mid",mid) || !JsonNumber(reply,"forecast_median",median)
-      || !JsonNumber(reply,"forecast_horizon_bars",horizon)
-      || mid<=0 || median<=0 || horizon<1 || horizon>32)
+       || !JsonNumber(reply,"forecast_horizon_bars",horizon)
+      || !JsonNumber(reply,"forecast_step_1",step1)
+      || !JsonNumber(reply,"forecast_step_2",step2)
+      || mid<=0 || median<=0 || step1<=0 || step2<=0 || horizon!=2)
    { Print("ChronosSlopeBridge: invalid forecast response: ",StringSubstr(reply,0,300)); return; }
    int dir=direction=="UP" ? 1 : direction=="DOWN" ? -1 : 0;
    GlobalVariableSet(Key("MID"),mid);
    GlobalVariableSet(Key("MEDIAN"),median);
    GlobalVariableSet(Key("HORIZON"),horizon);
+   GlobalVariableSet(Key("STEP1"),step1);
+   GlobalVariableSet(Key("STEP2"),step2);
    GlobalVariableSet(Key("DIR"),dir);
    GlobalVariableSet(Key("UPDATED"),(double)TimeCurrent()); // publish last
-   Print("ChronosSlopeBridge: ",direction," mid=",mid," forecast=",median," horizon=",horizon);
+   Print("ChronosSlopeBridge: ",direction," mid=",mid," forecast=",median," step15=",step1," step30=",step2," horizon=",horizon);
 }
 int OnInit()
 {
