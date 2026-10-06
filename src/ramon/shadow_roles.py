@@ -227,6 +227,19 @@ class DirectionCoordinator(ShadowCoordinator):
         })
         return base
 
+    def assess(self, market, decision, news_features=None):
+        payload, features = super().assess(market, decision, news_features)
+        payload.update({
+            "ensemble_mode": "direction_live",
+            "ensemble_active": 1,
+            "role_shadow": 0,
+            "direction_quality_live": int(
+                payload.get("shadow_buy_success_probability", -1.0) >= 0
+                and payload.get("shadow_sell_success_probability", -1.0) >= 0
+            ),
+        })
+        return payload, features
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
