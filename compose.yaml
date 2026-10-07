@@ -55,6 +55,38 @@ services:
       start_period: 180s
       retries: 3
 
+  chronos-shadow:
+    build:
+      context: .
+      args:
+        RAMON_UID: ${RAMON_UID:-1000}
+        RAMON_GID: ${RAMON_GID:-1000}
+    image: ramon-ai-trader:local
+    init: true
+    restart: unless-stopped
+    command:
+      - python
+      - -m
+      - ramon.chronos_shadow_server
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8016"
+    environment:
+      CHRONOS_SHADOW_MODEL: ${CHRONOS_SHADOW_MODEL:-amazon/chronos-2}
+      CHRONOS_SHADOW_DEVICE: cpu
+      HF_HOME: /home/ramon/.cache/huggingface
+    ports:
+      - "127.0.0.1:8016:8016"
+    volumes:
+      - chronos_cache:/home/ramon/.cache/huggingface
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8016/health', timeout=3).close()"]
+      interval: 30s
+      timeout: 5s
+      start_period: 300s
+      retries: 3
+
   dashboard:
     build:
       context: .
