@@ -578,3 +578,61 @@
 @media(max-width:900px){
   .market-momentum-now{align-items:flex-start;flex-direction:column}
 }
+
+
+/* Ultra-compact opportunity rows: explicit 12px row target. */
+.simple-trade-table tbody tr{
+  height:12px;
+  max-height:12px;
+}
+.simple-trade-table tbody td{
+  height:12px;
+  max-height:12px;
+  padding:0 4px;
+  line-height:12px;
+  font-size:9px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.simple-trade-table tbody .trade-recommendation,
+.simple-trade-table tbody .trade-confidence,
+.simple-trade-table tbody .trade-direction,
+.simple-trade-table tbody .trade-entry-price,
+.simple-trade-table tbody .trade-exit-advice,
+.simple-trade-table tbody .trade-position-state,
+.simple-trade-table tbody .trade-simple-reason{
+  line-height:12px;
+  font-size:9px;
+}
+.simple-trade-table tbody .trade-level-stack,
+.simple-trade-table tbody .trade-level-row,
+.simple-trade-table tbody .opportunity-actions,
+.simple-trade-table tbody .manual-scenario-list,
+.simple-trade-table tbody .manual-scenario-list.compact{
+  height:12px;
+  min-height:12px;
+  max-height:12px;
+  line-height:12px;
+  gap:2px;
+  margin:0;
+  padding:0;
+}
+.simple-trade-table tbody .scenario-entry,
+.simple-trade-table tbody .opportunity-entry{
+  height:11px;
+  min-height:11px;
+  max-height:11px;
+  padding:0 3px;
+  border-radius:3px;
+  font:700 8px/9px monospace;
+}
+.simple-trade-table tbody .trade-tech-details{
+  margin:0 2px 0 0;
+  padding:0;
+  line-height:10px;
+}
+.simple-trade-table tbody .trade-tech-details summary{
+  font-size:8px;
+  line-height:10px;
+}
