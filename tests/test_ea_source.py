@@ -218,7 +218,9 @@ def test_minimum_lot_override_has_hard_cap() -> None:
     assert 'StatusLine="TRADE BLOCKED: min lot > hard risk cap"' in source
     assert "return minimum;" in source
     assert "MaxExecutableRiskUSD>3.00" in source
-    assert "MaxExecutableRiskUSD<EffectiveRiskPerTradeUSD()" in source
+    assert "effective_cap<EffectiveRiskPerTradeUSD()" in source
+    assert "command_entry_cap" in source
+    assert "dashboard_entry_max_risk_usd" in source
     assert 'max_executable_risk_usd,' in source
     assert 'min_lot_override_used,' in source
 
