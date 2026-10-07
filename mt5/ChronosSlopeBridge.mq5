@@ -1,5 +1,5 @@
 #property copyright "Ramon AI Trader"
-#property version "1.023"
+#property version "1.024"
 #property strict
 
 // Read-only bridge. Attach to a SEPARATE chart from the Ramon trading EA.
@@ -83,7 +83,9 @@ void Refresh()
                        RequestTimeoutMs,request,response,response_headers);
    if(code!=200)
    {
+      string error_body=CharArrayToString(response,0,ArraySize(response),CP_UTF8);
       Print("ChronosSlopeBridge: forecast HTTP ",code," MT5 err ",GetLastError(),
+            " body=",StringSubstr(error_body,0,500),
             " (allow URL in Tools > Options > Expert Advisors)");
       return;
    }
