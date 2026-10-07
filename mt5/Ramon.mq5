@@ -1,6 +1,6 @@
 #property strict
-#property version "1.592"
-#define RAMON_EA_VERSION "0.59.2"
+#property version "1.593"
+#define RAMON_EA_VERSION "0.59.3"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -1357,7 +1357,7 @@ void DrawDashboard()
       +DoubleToString(MathAbs(live_profit_usd),2);
 
    // Compact panel: live summary only; model/handler map removed.
-   UiRect("PANEL",12,24,560,360,C'15,23,42',C'71,85,105');
+   UiRect("PANEL",12,24,560,(robot_on ? 410 : 360),C'15,23,42',C'71,85,105');
 
    UiLabel("TITLE","RAMON AI TRADER  v"+RAMON_EA_VERSION+" "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
@@ -1459,6 +1459,38 @@ void DrawDashboard()
       robot_on ? "Robot: On" : "Robot: Off",
       430,266,(robot_on ? clrLimeGreen : clrGray),10);
 
+   if(robot_on && PositionSelectByTicket(automatic_ticket))
+   {
+      long auto_type=PositionGetInteger(POSITION_TYPE);
+      string auto_side=(auto_type==POSITION_TYPE_BUY ? "BUY" : "SELL");
+      double auto_entry=PositionGetDouble(POSITION_PRICE_OPEN);
+      double auto_current=PositionGetDouble(POSITION_PRICE_CURRENT);
+      double auto_sl=PositionGetDouble(POSITION_SL);
+      double auto_tp=PositionGetDouble(POSITION_TP);
+      double auto_profit=PositionGetDouble(POSITION_PROFIT);
+      double auto_volume=PositionGetDouble(POSITION_VOLUME);
+      color auto_color=(auto_side=="BUY" ? clrLimeGreen : clrTomato);
+      color profit_color=(auto_profit>0.00001 ? clrLimeGreen
+         : auto_profit<-0.00001 ? clrTomato : clrWhite);
+
+      UiLabel("ROBOT_TRADE_1",
+         "AUTO "+auto_side+"  #"+IntegerToString((long)automatic_ticket)
+         +"  Vol "+DoubleToString(auto_volume,2)
+         +"  Entry "+DoubleToString(auto_entry,_Digits)
+         +"  Now "+DoubleToString(auto_current,_Digits),
+         28,310,auto_color,9);
+      UiLabel("ROBOT_TRADE_2",
+         "P/L "+(auto_profit>0.00001 ? "+" : "")+DoubleToString(auto_profit,2)
+         +"u  |  SL "+(auto_sl>0.0 ? DoubleToString(auto_sl,_Digits) : "--")
+         +"  |  TP "+(auto_tp>0.0 ? DoubleToString(auto_tp,_Digits) : "--"),
+         28,330,profit_color,9);
+   }
+   else
+   {
+      ObjectDelete(0,UiPrefix+"ROBOT_TRADE_1");
+      ObjectDelete(0,UiPrefix+"ROBOT_TRADE_2");
+   }
+
    // Detailed min-risk/gate/money-unit values remain in Trade Check + Diagnostic.
    ObjectDelete(0,UiPrefix+"MIN_RISK");
    ObjectDelete(0,UiPrefix+"RISK_GATE");
@@ -1469,17 +1501,18 @@ void DrawDashboard()
    ObjectsDeleteAll(0,UiPrefix+"MODEL_NAME_");
    ObjectsDeleteAll(0,UiPrefix+"MODEL_HANDLER_");
 
-   UiButton("COPY","COPY DIAGNOSTIC",28,320,176,30);
-   UiButton("CLOSE","CLOSE TRADE",218,320,110,30);
+   int action_y=(robot_on ? 365 : 320);
+   UiButton("COPY","COPY DIAGNOSTIC",28,action_y,176,30);
+   UiButton("CLOSE","CLOSE TRADE",218,action_y,110,30);
    ObjectSetInteger(0,UiPrefix+"CLOSE",OBJPROP_BGCOLOR,
       has_managed_position ? C'153,27,27' : C'55,65,81');
    ObjectSetInteger(0,UiPrefix+"CLOSE",OBJPROP_BORDER_COLOR,
       has_managed_position ? C'248,113,113' : C'75,85,99');
 
-   UiLabel("COPY_STATUS",LastCopyStatus,340,320,
+   UiLabel("COPY_STATUS",LastCopyStatus,340,action_y,
       (StringFind(LastCopyStatus,"failed")>=0 || StringFind(LastCopyStatus,"disabled")>=0
          ? clrTomato : clrWhite),8);
-   UiLabel("CLOSE_STATUS",LastCloseStatus,340,336,
+   UiLabel("CLOSE_STATUS",LastCloseStatus,340,action_y+16,
       (StringFind(LastCloseStatus,"FAILED")>=0 ? clrTomato : clrWhite),8);
 
    ChartRedraw();
