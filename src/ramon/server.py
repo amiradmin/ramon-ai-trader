@@ -511,6 +511,15 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         snapshot_age_seconds=decision_age,
                     )
                     display_steps = [float(x) for x in forecast.median_path]
+                    # Display-only heuristic confidence per step.  Chronos currently
+                    # exposes one low/high interval for the requested horizon, not
+                    # calibrated per-step probabilities.  Keep this out of /decision.
+                    interval_width = max(float(forecast.high) - float(forecast.low), float(market.point))
+                    def display_step_confidence(price: float) -> float:
+                        displacement = abs(float(price) - midpoint)
+                        raw = 0.50 + 0.45 * (displacement / (displacement + 0.5 * interval_width))
+                        return max(0.50, min(0.95, raw))
+                    display_conf = [display_step_confidence(x) for x in display_steps]
                     latest_display_forecast = {
                         "model": model.model_id,
                         "symbol": market.symbol,
@@ -520,6 +529,11 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         "forecast_step_2": display_steps[1] if horizon >= 2 else display_steps[0],
                         "forecast_step_3": display_steps[2] if horizon >= 3 else display_steps[-1],
                         "forecast_step_4": display_steps[3] if horizon >= 4 else display_steps[-1],
+                        "forecast_step_confidence_1": display_conf[0],
+                        "forecast_step_confidence_2": display_conf[1] if horizon >= 2 else display_conf[0],
+                        "forecast_step_confidence_3": display_conf[2] if horizon >= 3 else display_conf[-1],
+                        "forecast_step_confidence_4": display_conf[3] if horizon >= 4 else display_conf[-1],
+                        "confidence_kind": "display_heuristic_not_calibrated",
                         "horizon_minutes": horizon * 15,
                         "captured_utc": int(time.time()),
                         "ramon_context_age_seconds": decision_age,
@@ -538,6 +552,11 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         "forecast_step_2": display_steps[1] if horizon >= 2 else display_steps[0],
                         "forecast_step_3": display_steps[2] if horizon >= 3 else display_steps[-1],
                         "forecast_step_4": display_steps[3] if horizon >= 4 else display_steps[-1],
+                        "forecast_step_confidence_1": display_conf[0],
+                        "forecast_step_confidence_2": display_conf[1] if horizon >= 2 else display_conf[0],
+                        "forecast_step_confidence_3": display_conf[2] if horizon >= 3 else display_conf[-1],
+                        "forecast_step_confidence_4": display_conf[3] if horizon >= 4 else display_conf[-1],
+                        "confidence_kind": "display_heuristic_not_calibrated",
                         "forecast_horizon_bars": horizon,
                         "forecast_horizon_minutes": horizon * 15,
                         "signal_bar_time": market.bars[-1].time,
