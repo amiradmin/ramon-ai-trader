@@ -523,11 +523,18 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     # exposes one low/high interval for the requested horizon, not
                     # calibrated per-step probabilities.  Keep this out of /decision.
                     interval_width = max(float(forecast.high) - float(forecast.low), float(market.point))
-                    def display_step_confidence(price: float) -> float:
+                    def display_step_confidence(price: float, step_index: int) -> float:
                         displacement = abs(float(price) - midpoint)
-                        raw = 0.50 + 0.45 * (displacement / (displacement + 0.5 * interval_width))
-                        return max(0.50, min(0.95, raw))
-                    display_conf = [display_step_confidence(x) for x in display_steps]
+                        directional_signal = displacement / (displacement + 0.5 * interval_width)
+                        # Display-only horizon penalty: farther steps should not look
+                        # more trustworthy merely because their displacement grows.
+                        horizon_penalty = 0.04 * max(0, step_index - 1)
+                        raw = 0.50 + 0.45 * directional_signal - horizon_penalty
+                        return max(0.35, min(0.95, raw))
+                    display_conf = [
+                        display_step_confidence(price, idx)
+                        for idx, price in enumerate(display_steps, start=1)
+                    ]
                     latest_display_forecast = {
                         "model": model.model_id,
                         "symbol": market.symbol,
