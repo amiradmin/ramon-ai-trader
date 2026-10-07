@@ -249,7 +249,7 @@ def trade_trace(path, symbol, trade_key):
           {"ناهـنجاری": moment.get("moment_anomaly_label"), "نسبت ناهنجاری": moment.get("moment_anomaly_ratio"), "احساس خبر": finbert.get("finbert_sentiment_label"), "خبر": section("news_snapshot").get("news_event_title"), "برچسب رژیم": final.get("regime_label", final.get("shadow_regime_label")), "نقش‌ها": "LIVE" if final.get("role_shadow") == 0 else "legacy" if final.get("role_shadow") == 1 else None})
     stage("risk", "حجم و ریسک ورود", "observed" if trade.get("initial_risk_units") is not None else "unknown",
           "مقادیر ثبت‌شدهٔ معامله؛ تأیید جداگانهٔ تمام مجوزها و قفل‌ها موجود نیست",
-          {"حجم برنامه‌ریزی‌شده": trade.get("planned_volume"), "بودجهٔ ریسک، واحد حساب": trade.get("risk_budget_units"), "ریسک اولیه، واحد حساب": trade.get("initial_risk_units"), "سقف ریسک، دلار": trade.get("max_executable_risk_usd"), "استفاده از لات حداقل": trade.get("min_lot_override_used"), "فاصلهٔ حد ضرر": base.get("stop_distance"), "فاصلهٔ هدف": base.get("target_distance")})
+          {"حجم برنامه‌ریزی‌شده": trade.get("planned_volume"), "بودجهٔ ریسک، واحد حساب": trade.get("risk_budget_units"), "ریسک اولیه، واحد حساب": trade.get("initial_risk_units"), "سقف ریسک، دلار": trade.get("risk_per_trade_usd"), "استفاده از لات حداقل": trade.get("min_lot_override_used"), "فاصلهٔ حد ضرر": base.get("stop_distance"), "فاصلهٔ هدف": base.get("target_distance")})
     stage("execution", "اجرای واقعی سفارش", "observed", "ورود با تاریخچهٔ معامله تأیید شده است",
           {"جهت": trade.get("direction"), "قیمت اجرای واقعی": trade.get("actual_fill_price"), "نسخهٔ ثبت‌شده هنگام ورود": trade.get("entry_ea_version"), "نقش": trade.get("trade_role")})
     stage("exit", "خروج و نتیجه", "observed", trade.get("exit_detail") or trade.get("exit_reason") or "علت خروج ثبت نشده",
@@ -1654,9 +1654,9 @@ def queue_clone_auto_position(db, diagnostic, symbol, payload):
     auto = read_managed_auto_position(diagnostic)
     if not auto:
         raise ValueError("پوزیشن خودکار باز Ramon برای کپی پیدا نشد")
-    risk_value = number(payload.get("max_executable_risk_usd"))
+    risk_value = number(payload.get("risk_per_trade_usd"))
     if risk_value is None or not (0.01 <= risk_value <= 3.00):
-        raise ValueError("سقف ریسک معامله مشابه باید بین 0.01 و 3.00 دلار باشد")
+        raise ValueError("ریسک واقعی معامله مشابه باید بین 0.01 و 3.00 دلار باشد")
 
     current, _, _, error = read_history(db, symbol, "")
     if error or not current:
@@ -1698,7 +1698,7 @@ def queue_clone_auto_position(db, diagnostic, symbol, payload):
         "direction": direction,
         "ticket": auto["ticket"],
         "origin_sample_key": auto["origin_sample_key"],
-        "max_executable_risk_usd": float(risk_value),
+        "risk_per_trade_usd": float(risk_value),
     }
 
 
@@ -1882,7 +1882,7 @@ def daily_profit_summary(db, symbol, opened, diagnostic=None, now=None):
     }
 
 
-MIN_DASHBOARD_ENTRY_EA_VERSION = (0, 59, 5)
+MIN_DASHBOARD_ENTRY_EA_VERSION = (0, 59, 6)
 
 
 def dashboard_entry_compatibility(diagnostic):
@@ -1896,7 +1896,7 @@ def dashboard_entry_compatibility(diagnostic):
         return {"supported": False, "reason": f"نسخه EA قابل تشخیص نیست: {raw or 'نامشخص'}"}
     version = tuple(int(part) for part in match.groups())
     if version < MIN_DASHBOARD_ENTRY_EA_VERSION:
-        return {"supported": False, "reason": f"نسخه نصب‌شده Ramon {raw} از فرمان ورود دستی داشبورد پشتیبانی تأییدشده ندارد؛ نسخه 0.59.5 یا جدیدتر را کامپایل و روی چارت بارگذاری کن."}
+        return {"supported": False, "reason": f"نسخه نصب‌شده Ramon {raw} از فرمان ورود دستی داشبورد پشتیبانی تأییدشده ندارد؛ نسخه 0.59.6 یا جدیدتر را کامپایل و روی چارت بارگذاری کن."}
     stamp = float(diag.get("captured_epoch") or 0)
     if not -5 <= time.time() - stamp <= 90:
         return {"supported": False, "reason": "وضعیت EA تازه نیست؛ دریافت فرمان قابل تأیید نیست"}
@@ -2061,9 +2061,9 @@ def queue_manual_entry(db, diagnostic, symbol, payload):
     signal_bar_time = int(payload.get("signal_bar_time", 0))
     recheck = bool(payload.get("recheck"))
     unlocked = bool(payload.get("manual_unlocked"))
-    entry_risk_cap = number(payload.get("max_executable_risk_usd"))
+    entry_risk_cap = number(payload.get("risk_per_trade_usd"))
     if entry_risk_cap is not None and not (0.01 <= entry_risk_cap <= 3.00):
-        raise ValueError("سقف ریسک این ورود باید بین 0.01 و 3.00 دلار باشد")
+        raise ValueError("ریسک واقعی این ورود باید بین 0.01 و 3.00 دلار باشد")
     if direction not in {"BUY", "SELL"} or signal_bar_time <= 0:
         raise ValueError("فرصت انتخاب‌شده نامعتبر است")
 
@@ -2153,7 +2153,7 @@ def queue_manual_entry(db, diagnostic, symbol, payload):
         "success_probability": probability,
         "mode": mode,
         "manual_unlocked": unlocked,
-        "max_executable_risk_usd": float(entry_risk_cap) if entry_risk_cap is not None else None,
+        "risk_per_trade_usd": float(entry_risk_cap) if entry_risk_cap is not None else None,
         "safety": "Analytical Ramon gates bypassed; hard broker/account/risk/quote safety remains active",
     }
 
