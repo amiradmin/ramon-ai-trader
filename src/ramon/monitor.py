@@ -1436,8 +1436,8 @@ def live_momentum_v3(diagnostic, now=None):
     diag, error = read_diagnostic(diagnostic)
     raw = str(diag.get("Bid") or "")
     bid = number(raw.split()[0]) if raw else None
-    ask = number(match(raw, r"Ask:\\s*([0-9.]+)"))
-    spread_points = number(match(raw, r"Spread\\(points\\):\\s*([0-9.]+)"))
+    ask = number(match(raw, r"Ask:\s*([0-9.]+)"))
+    spread_points = number(match(raw, r"Spread\(points\):\s*([0-9.]+)"))
     captured = number(diag.get("captured_epoch"))
     if bid is None or ask is None or captured is None or ask <= bid:
         return {
