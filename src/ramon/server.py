@@ -29,6 +29,12 @@ from .market_state import POLICY_VERSION, assess_market, apply_market_policy
 from .reversal_strategy import apply_reversal
 from .trade_selector import apply_live_selector
 from .ai_decision_engine import apply_ai_decision_engine
+from .chronos_slope_calibration import (
+    apply_calibration,
+    load_horizon_calibrations,
+    record_forecast_steps,
+    resolve_due_forecasts,
+)
 
 
 
@@ -506,7 +512,46 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     with guard:
                         forecast = cached_model.forecast(closes, horizon)
                     midpoint = (float(market.bid) + float(market.ask)) / 2.0
-                    move = float(forecast.median) - midpoint
+                    observed_utc = int(quote_time or time.time())
+                    raw_display_steps = [float(x) for x in forecast.median_path]
+
+                    # Shadow/display-only auto-calibration. Matured forecasts are
+                    # compared with the live midpoint, and a robust median bias is
+                    # learned independently for each M15 horizon. The /decision path
+                    # never reads this telemetry or these corrected display values.
+                    calibrations = []
+                    display_steps = list(raw_display_steps)
+                    if history_db:
+                        try:
+                            resolve_due_forecasts(
+                                history_db,
+                                symbol=market.symbol,
+                                model=model.model_id,
+                                observed_utc=observed_utc,
+                                actual_mid=midpoint,
+                            )
+                            calibrations = load_horizon_calibrations(
+                                history_db,
+                                symbol=market.symbol,
+                                model=model.model_id,
+                                horizons=horizon,
+                            )
+                            display_steps = apply_calibration(raw_display_steps, calibrations)
+                            record_forecast_steps(
+                                history_db,
+                                symbol=market.symbol,
+                                model=model.model_id,
+                                captured_utc=observed_utc,
+                                source_mid=midpoint,
+                                steps=raw_display_steps,
+                            )
+                        except Exception:
+                            # Calibration telemetry must never make forecast-only fail.
+                            calibrations = []
+                            display_steps = list(raw_display_steps)
+
+                    final_display = display_steps[-1]
+                    move = float(final_display) - midpoint
                     deadband = max(float(market.point) * 5.0, abs(midpoint) * 1e-7)
                     direction = "UP" if move > deadband else "DOWN" if move < -deadband else "FLAT"
                     decision_age = (
@@ -518,22 +563,29 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         latest_decision_snapshot,
                         snapshot_age_seconds=decision_age,
                     )
-                    display_steps = [float(x) for x in forecast.median_path]
-                    # Display-only heuristic confidence per step.  Chronos currently
+                    # Display-only heuristic confidence per step. Chronos currently
                     # exposes one low/high interval for the requested horizon, not
-                    # calibrated per-step probabilities.  Keep this out of /decision.
+                    # calibrated per-step probabilities. Keep this out of /decision.
                     interval_width = max(float(forecast.high) - float(forecast.low), float(market.point))
                     def display_step_confidence(price: float, step_index: int) -> float:
                         displacement = abs(float(price) - midpoint)
                         directional_signal = displacement / (displacement + 0.5 * interval_width)
-                        # Display-only horizon penalty: farther steps should not look
-                        # more trustworthy merely because their displacement grows.
                         horizon_penalty = 0.04 * max(0, step_index - 1)
                         raw = 0.50 + 0.45 * directional_signal - horizon_penalty
                         return max(0.35, min(0.95, raw))
                     display_conf = [
                         display_step_confidence(price, idx)
                         for idx, price in enumerate(display_steps, start=1)
+                    ]
+                    calibration_meta = [
+                        {
+                            "horizon_bars": cal.horizon_bars,
+                            "samples": cal.samples,
+                            "bias": cal.bias,
+                            "mae": cal.mae,
+                            "active": cal.active,
+                        }
+                        for cal in calibrations
                     ]
                     latest_display_forecast = {
                         "model": model.model_id,
@@ -548,7 +600,10 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         "forecast_step_confidence_2": display_conf[1] if horizon >= 2 else display_conf[0],
                         "forecast_step_confidence_3": display_conf[2] if horizon >= 3 else display_conf[-1],
                         "forecast_step_confidence_4": display_conf[3] if horizon >= 4 else display_conf[-1],
-                        "confidence_kind": "display_heuristic_not_calibrated",
+                        "confidence_kind": "display_heuristic_with_shadow_bias_calibration",
+                        "calibration_mode": "shadow_display_only",
+                        "calibration": calibration_meta,
+                        "raw_forecast_steps": raw_display_steps,
                         "horizon_minutes": horizon * 15,
                         "captured_utc": int(time.time()),
                         "ramon_context_age_seconds": decision_age,
@@ -563,6 +618,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         "forecast_median": forecast.median,
                         "forecast_high": forecast.high,
                         "forecast_median_path": display_steps,
+                        "forecast_raw_median_path": raw_display_steps,
                         "forecast_step_1": display_steps[0],
                         "forecast_step_2": display_steps[1] if horizon >= 2 else display_steps[0],
                         "forecast_step_3": display_steps[2] if horizon >= 3 else display_steps[-1],
@@ -571,7 +627,10 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         "forecast_step_confidence_2": display_conf[1] if horizon >= 2 else display_conf[0],
                         "forecast_step_confidence_3": display_conf[2] if horizon >= 3 else display_conf[-1],
                         "forecast_step_confidence_4": display_conf[3] if horizon >= 4 else display_conf[-1],
-                        "confidence_kind": "display_heuristic_not_calibrated",
+                        "confidence_kind": "display_heuristic_with_shadow_bias_calibration",
+                        "calibration_mode": "shadow_display_only",
+                        "calibration": calibration_meta,
+                        "raw_forecast_steps": raw_display_steps,
                         "forecast_horizon_bars": horizon,
                         "forecast_horizon_minutes": horizon * 15,
                         "signal_bar_time": market.bars[-1].time,
