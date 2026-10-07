@@ -323,6 +323,13 @@ function renderOpportunities(data){
     return pnl*(targetMove/currentMove);
   };
   const pnlText=v=>typeof v!=="number"||!Number.isFinite(v)?"—":((v>=0?"+":"")+Math.abs(v).toFixed(1)+" سنت "+(v>=0?"سود":"ضرر"));
+  // Display-only estimate: never alter target prices or automatic trading logic.
+  const exitProfitAdvice=row=>{
+    const estimate=estimatedPnlAt(row,row.chronos_exit_price);
+    if(typeof estimate==="number"&&Number.isFinite(estimate))
+      return "نگه دار تا حدود "+Math.abs(estimate).toFixed(2)+" سنت "+(estimate>=0?"سود":"ضرر")+"، سپس خارج شو";
+    return "نگه دار تا "+format(row.chronos_exit_price)+" سپس خارج شو (سود قابل برآورد نیست)";
+  };
   const tradePriority=row=>{
     if(row.position_open){
       if(["EXIT_NOW","LOSS_EXIT_NOW"].includes(row.chronos_exit_action))return 60;
@@ -376,9 +383,9 @@ function renderOpportunities(data){
         :row.chronos_exit_action==="LOSS_EXIT_NOW"
           ?"الان خارج شو و ضرر را محدود کن"
           :row.chronos_exit_action==="RECOVERY_EXIT"&&typeof row.chronos_exit_price==="number"
-            ?"نگه دار تا "+format(row.chronos_exit_price)+" سپس خارج شو"
+            ?exitProfitAdvice(row)
             :row.chronos_exit_action==="TARGET"&&typeof row.chronos_exit_price==="number"
-              ?"نگه دار تا "+format(row.chronos_exit_price)
+              ?exitProfitAdvice(row)
               :row.chronos_exit_action==="NO_PROFIT_TARGET"
                 ?"هدف مطمئن ندارد؛ آماده خروج باش"
                 :"در حال محاسبه")
@@ -433,6 +440,7 @@ function renderOpportunities(data){
       "Trend: "+(row.ai_trend_confirmed===1?"تأیید":"عدم تأیید")+" "+(row.ai_trend_direction||"—"),
       "MOMENT: "+(row.moment_label||"—")+" · FinBERT: "+(row.finbert_label||"—"),
       "Edge: "+format(row.edge)+" / "+format(row.minimum_edge)+" · Strength: "+format(row.strength),
+      "قیمت خروج Chronos: "+format(row.chronos_exit_price)+" · سود تخمینی: "+(typeof row.chronos_exit_price==="number"?pnlText(estimatedPnlAt(row,row.chronos_exit_price)):"—"),
       "دلیل آخر: "+(reasons[row.last_reason]||row.last_reason||"—")
     ].join("\n");
     technical.append(summary,tech);
