@@ -188,6 +188,81 @@ function render(){const changed=lastKey!==snapshot.sample_key;$("decision").text
 const opportunityDate=new Intl.DateTimeFormat("fa-IR",{timeZone:"Asia/Tehran",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
 const opportunitySet=(id,text)=>{$(id).textContent=text;};
 function percent(v){return typeof v==="number"&&Number.isFinite(v)&&v>=0&&v<=1?(v*100).toFixed(1)+"%":"—";}
+function ensureRiskEntryDialog(){
+  let dialog=$("risk-entry-dialog");
+  if(dialog)return dialog;
+  dialog=document.createElement("dialog");
+  dialog.id="risk-entry-dialog";
+  dialog.className="risk-entry-dialog";
+  dialog.innerHTML=
+    '<form method="dialog" class="risk-entry-card" id="risk-entry-form" dir="rtl">'+
+      '<div class="risk-entry-head"><div><strong>ریسک این ورود</strong><span id="risk-entry-direction">—</span></div><button type="button" class="risk-entry-x" id="risk-entry-cancel" aria-label="بستن">×</button></div>'+
+      '<p>قبل از ارسال فرمان، سقف Max Executable Risk را برای همین ورود مشخص کن.</p>'+
+      '<label for="risk-entry-value">حداکثر ریسک مجاز (USD)</label>'+
+      '<div class="risk-entry-input"><input id="risk-entry-value" type="number" min="0.01" max="3.00" step="0.01" inputmode="decimal" dir="ltr" required><span>USD</span></div>'+
+      '<div class="risk-entry-presets" aria-label="مقادیر سریع"><button type="button" data-risk="0.35">$0.35</button><button type="button" data-risk="1">$1</button><button type="button" data-risk="2">$2</button><button type="button" data-risk="3">$3</button></div>'+
+      '<p class="risk-entry-help">بازه مجاز: $0.01 تا $3.00. این عدد سقف ریسک است؛ حجم واقعی همچنان توسط sizing رامون تعیین می‌شود.</p>'+
+      '<p class="risk-entry-error" id="risk-entry-error" role="alert"></p>'+
+      '<div class="risk-entry-actions"><button type="button" class="secondary" id="risk-entry-back">انصراف</button><button type="submit" class="primary" id="risk-entry-confirm">ذخیره ریسک و ارسال معامله</button></div>'+
+    '</form>';
+  document.body.append(dialog);
+  const cancel=()=>{if(dialog.open)dialog.close("cancel");};
+  $("risk-entry-cancel").addEventListener("click",cancel);
+  $("risk-entry-back").addEventListener("click",cancel);
+  dialog.addEventListener("click",event=>{if(event.target===dialog)cancel();});
+  dialog.querySelectorAll("[data-risk]").forEach(btn=>btn.addEventListener("click",()=>{$("risk-entry-value").value=btn.dataset.risk;$("risk-entry-value").focus();}));
+  return dialog;
+}
+async function openRiskEntryDialog(row,button,recheck=false,manualUnlocked=false,directionOverride=null){
+  const dialog=ensureRiskEntryDialog();
+  const form=$("risk-entry-form");
+  const input=$("risk-entry-value");
+  const error=$("risk-entry-error");
+  const confirm=$("risk-entry-confirm");
+  const selectedDirection=(directionOverride||row.direction||"").toUpperCase();
+  $("risk-entry-direction").textContent=selectedDirection||"—";
+  error.textContent="";
+  confirm.disabled=false;
+  confirm.textContent="ذخیره ریسک و ارسال معامله";
+  let current=.35;
+  try{
+    const response=await fetch("/api/control",{cache:"no-store"});
+    if(response.ok){
+      const control=await response.json();
+      const candidate=Number(control.requested??control.observed??control.default);
+      if(Number.isFinite(candidate)&&candidate>=.01&&candidate<=3)current=candidate;
+    }
+  }catch{}
+  input.value=Number(current).toFixed(2);
+
+  const submit=async event=>{
+    event.preventDefault();
+    const value=Number(input.value);
+    if(!Number.isFinite(value)||value<.01||value>3){
+      error.textContent="عدد ریسک باید بین 0.01 و 3.00 دلار باشد.";
+      input.focus();
+      return;
+    }
+    confirm.disabled=true;
+    confirm.textContent="در حال ذخیره ریسک…";
+    try{
+      const response=await fetch("/api/control",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({max_executable_risk_usd:value})});
+      let data={};try{data=await response.json();}catch{}
+      if(!response.ok)throw new Error(data.error||("HTTP "+response.status));
+      dialog.close("submit");
+      opportunitySet("opportunity-status","سقف ریسک روی $"+value.toFixed(2)+" ذخیره شد؛ فرمان "+selectedDirection+" در حال ارسال است.");
+      await manualOpportunity(row,button,recheck,manualUnlocked,directionOverride);
+    }catch(err){
+      error.textContent="ذخیره ریسک انجام نشد: "+err.message;
+      confirm.disabled=false;
+      confirm.textContent="ذخیره ریسک و ارسال معامله";
+    }
+  };
+  form.addEventListener("submit",submit,{once:true});
+  dialog.addEventListener("close",()=>{form.removeEventListener("submit",submit);},{once:true});
+  dialog.showModal();
+  requestAnimationFrame(()=>{input.focus();input.select();});
+}
 async function manualOpportunity(row,button,recheck=false,manualUnlocked=false,directionOverride=null){
   if(button.disabled)return;
   button.disabled=true;const old=button.textContent;button.textContent="در حال ارسال…";
@@ -573,7 +648,7 @@ function renderOpportunities(data){
         scenarioBtn.title=scenario.setup+" · ورود دستی مستقل از پوزیشن فعلی";
         scenarioBtn.disabled=!compatibility.supported||row.entry_queued||row.executed;
         if(!scenarioBtn.disabled){
-          scenarioBtn.addEventListener("click",()=>manualOpportunity(row,scenarioBtn,true,true,scenario.direction));
+          scenarioBtn.addEventListener("click",()=>openRiskEntryDialog(row,scenarioBtn,true,true,scenario.direction));
         }
         extra.append(scenarioBtn);
       }
@@ -593,7 +668,7 @@ function renderOpportunities(data){
       scenarioBtn.title=scenario.setup+(scenario.risk==="very_high"?" · ریسک بسیار بالا":scenario.risk==="high"?" · ریسک بالا":"");
       scenarioBtn.disabled=!compatibility.supported||row.entry_queued||row.executed;
       if(!scenarioBtn.disabled){
-        scenarioBtn.addEventListener("click",()=>manualOpportunity(row,scenarioBtn,true,true,scenario.direction));
+        scenarioBtn.addEventListener("click",()=>openRiskEntryDialog(row,scenarioBtn,true,true,scenario.direction));
       }
       scenarioWrap.append(scenarioBtn);
     }
@@ -608,7 +683,7 @@ function renderOpportunities(data){
         ?"انتخاب جهت با شماست؛ قفل‌های تحلیلی Ramon دخالت نمی‌کنند"
         :compatibility.reason;
       if(!fallback.disabled){
-        fallback.addEventListener("click",()=>manualOpportunity(row,fallback,true,true,row.direction));
+        fallback.addEventListener("click",()=>openRiskEntryDialog(row,fallback,true,true,row.direction));
       }
       scenarioWrap.append(fallback);
     }
