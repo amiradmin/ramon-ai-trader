@@ -438,3 +438,109 @@
   .simple-trade-table{min-width:1450px}
   .simple-trade-table th,.simple-trade-table td{padding:11px 9px}
 }
+
+
+/* Compact opportunity table: more visible rows, same trading behavior. */
+.opportunity-scroll{
+  max-height:76vh;
+  min-height:620px;
+  overflow:auto;
+  padding-bottom:4px;
+}
+.simple-trade-table{
+  min-width:1600px;
+  font-size:11px;
+}
+.simple-trade-table th,
+.simple-trade-table td{
+  padding:3px 6px;
+  line-height:1.15;
+  vertical-align:middle;
+}
+.simple-trade-table th{
+  padding-top:5px;
+  padding-bottom:5px;
+  font-size:10px;
+}
+.simple-trade-table th:nth-child(1),
+.simple-trade-table td:nth-child(1){width:115px}
+.simple-trade-table th:nth-child(2),
+.simple-trade-table td:nth-child(2){width:145px}
+.simple-trade-table th:nth-child(3),
+.simple-trade-table td:nth-child(3){width:135px}
+.simple-trade-table th:nth-child(4),
+.simple-trade-table td:nth-child(4){width:210px}
+.simple-trade-table th:nth-child(5),
+.simple-trade-table td:nth-child(5){width:220px}
+.simple-trade-table th:nth-child(6),
+.simple-trade-table td:nth-child(6){width:160px}
+.simple-trade-table th:nth-child(7),
+.simple-trade-table td:nth-child(7){width:130px}
+.simple-trade-table th:nth-child(8),
+.simple-trade-table td:nth-child(8){width:90px}
+.simple-trade-table th:nth-child(9),
+.simple-trade-table td:nth-child(9){width:395px}
+
+.trade-recommendation{
+  font-size:11px;
+  border-right-width:2px;
+}
+.trade-confidence{font:900 11px/1.1 monospace}
+.trade-direction,
+.trade-entry-price,
+.trade-exit-advice,
+.trade-position-state{font-size:10px;line-height:1.15}
+.trade-level-stack{
+  flex-direction:row;
+  gap:5px;
+  font:700 10px/1.1 monospace;
+}
+.trade-level-row{
+  width:auto;
+  gap:3px;
+}
+.trade-level-row .label{min-width:0}
+.trade-level-row .value{min-width:0}
+.trade-simple-reason{
+  line-height:1.15;
+  font-size:10px;
+}
+.trade-tech-details{
+  display:inline-block;
+  margin:0 4px 0 0;
+  padding:0;
+  border:0;
+  vertical-align:middle;
+}
+.trade-tech-details summary{
+  display:inline;
+  font-size:9px;
+  line-height:1;
+}
+.trade-tech-body{
+  margin-top:3px;
+  font:400 9px/1.3 monospace;
+}
+
+.opportunity-actions,
+.manual-scenario-list,
+.manual-scenario-list.compact{
+  display:flex;
+  flex-direction:row;
+  flex-wrap:nowrap;
+  align-items:center;
+  justify-content:center;
+  gap:3px;
+  min-width:0;
+  margin:0;
+  padding:0;
+  border:0;
+}
+.scenario-entry,
+.opportunity-entry{
+  width:auto;
+  min-width:0;
+  border-radius:5px;
+  padding:3px 5px;
+  font:700 9px/1.1 monospace;
+}
