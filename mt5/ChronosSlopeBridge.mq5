@@ -46,8 +46,8 @@ bool BuildRequest(string &payload)
 {
    MqlRates bars[];
    ArraySetAsSeries(bars,true);
-   int copied=CopyRates(ForecastSymbol,PERIOD_M15,1,256,bars);
-   if(copied<128) { Print("ChronosSlopeBridge: need >=128 closed M15 bars"); return false; }
+   int copied=CopyRates(ForecastSymbol,PERIOD_M15,0,256,bars); // Display-only: include the live/forming M15 bar so the slope can adapt intrabar.
+   if(copied<128) { Print("ChronosSlopeBridge: need >=128 M15 bars including current"); return false; }
    MqlTick tick;
    if(!SymbolInfoTick(ForecastSymbol,tick) || tick.bid<=0 || tick.ask<=tick.bid)
    { Print("ChronosSlopeBridge: invalid tick"); return false; }
