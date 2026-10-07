@@ -1,6 +1,6 @@
 #property strict
-#property version "1.593"
-#define RAMON_EA_VERSION "0.59.3"
+#property version "1.594"
+#define RAMON_EA_VERSION "0.59.4"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -644,7 +644,8 @@ string BuildDiagnosticText()
          +" open="+DoubleToString(PositionGetDouble(POSITION_PRICE_OPEN),_Digits)
          +" sl="+DoubleToString(PositionGetDouble(POSITION_SL),_Digits)
          +" tp="+DoubleToString(PositionGetDouble(POSITION_TP),_Digits)
-         +" profit="+DoubleToString(PositionGetDouble(POSITION_PROFIT),2);
+         +" profit="+DoubleToString(PositionGetDouble(POSITION_PROFIT),2)
+         +" comment="+PositionGetString(POSITION_COMMENT);
    }
 
    string text=
