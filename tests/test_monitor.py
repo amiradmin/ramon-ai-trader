@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 
 import pytest
 
-from ramon.monitor import build_snapshot, dollar_readiness, freshness, handler_for, income_roadmap, read_diagnostic, read_history, read_open_dashboard_positions, dashboard_entry_compatibility
+from ramon.monitor import build_snapshot, dollar_readiness, freshness, handler_for, income_roadmap, market_momentum_now, read_diagnostic, read_history, read_open_dashboard_positions, dashboard_entry_compatibility
 
 
 NOW = 1_800_000_000
@@ -52,6 +52,33 @@ def sources(tmp_path):
 
 def nodes(snapshot):
     return {n["id"]: n for n in snapshot["nodes"]}
+
+
+
+def test_market_momentum_now_detects_drop_but_never_controls_auto_trading():
+    recent_market = {
+        "m1": [
+            {"open": 100.0, "high": 100.2, "low": 99.7, "close": 99.8},
+            {"open": 99.8, "high": 99.9, "low": 99.3, "close": 99.4},
+            {"open": 99.4, "high": 99.5, "low": 98.9, "close": 99.0},
+            {"open": 99.0, "high": 99.1, "low": 98.5, "close": 98.6},
+            {"open": 98.6, "high": 98.7, "low": 98.1, "close": 98.2},
+        ],
+        "m15": [
+            {"open": 101.0, "close": 100.0},
+            {"open": 100.0, "close": 99.0},
+            {"open": 99.0, "close": 98.2},
+        ],
+    }
+    final = {"market_direction": "SELL", "market_direction_micro_move_atr": -0.4}
+    base = {"intrabar_confirmed": 1, "intrabar_direction": "SELL"}
+    result = market_momentum_now(recent_market, final, base)
+    assert result["state"] == "strong_drop"
+    assert result["direction"] == "SELL"
+    assert result["drop_score"] >= 70
+    assert result["drop_score"] > result["rally_score"]
+    assert result["observe_only"] is True
+    assert result["affects_auto_trading"] is False
 
 
 def test_observed_preview_does_not_claim_an_order_or_gate_pass(sources):
