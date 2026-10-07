@@ -1,5 +1,5 @@
 #property copyright "Ramon AI Trader"
-#property version "1.037"
+#property version "1.038"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -10,6 +10,8 @@ input int VisualLengthMultiplier = 1; // actual horizon
 input int ArrowWidth = 3;
 input bool ShowLabel = false; // keep chart clean; endpoint labels are optional
 input int MaxDataAgeSeconds = 120;
+input bool ShowShadowChronos2 = true; // Compare isolated multivariate/covariate Chronos-2 path
+input int ShadowLineWidth = 2;
 
 const string Prefix="CHRONOS_SLOPE_";
 double LastCurrentMid=0.0,LastForecastMedian=0.0,LastStep15=0.0,LastStep30=0.0,LastStep45=0.0,LastStep60=0.0;
@@ -20,7 +22,14 @@ string LastDirection="NONE";
 string LastBiasDirection="MIXED";
 string LastStatus="Waiting for ChronosSlopeBridge";
 
+const string ShadowPrefix="CHRONOS_SHADOW_";
+const string ShadowDrawPrefix="CHRONOS_SHADOW_DRAW_";
+double ShadowMid=0.0,ShadowStep15=0.0,ShadowStep30=0.0,ShadowStep45=0.0,ShadowStep60=0.0;
+int ShadowDirection=0;
+string ShadowStatus="OFF";
+
 string Key(const string suffix) { return Prefix+_Symbol+"_"+suffix; }
+string ShadowKey(const string suffix) { return ShadowPrefix+_Symbol+"_"+suffix; }
 
 void StatusLabel()
 {
@@ -35,6 +44,8 @@ void StatusLabel()
    string text="Chronos 60m: "+(LastStatus=="OK" ? LastDirection : LastStatus);
    if(LastStatus=="OK")
       text+=" | Bias: "+LastBiasDirection+" "+DoubleToString(LastBiasConfidence*100.0,0)+"%";
+   if(ShowShadowChronos2)
+      text+=" | C2-MV: "+ShadowStatus;
    ObjectSetString(0,obj,OBJPROP_TEXT,text);
 }
 
@@ -99,6 +110,124 @@ bool LoadForecast()
    LastBiasScore=bias_score;
    LastStatus="OK";
    return true;
+}
+
+bool LoadShadowForecast()
+{
+   if(!ShowShadowChronos2)
+   {
+      ShadowStatus="OFF";
+      return false;
+   }
+   if(!GlobalVariableCheck(ShadowKey("UPDATED"))
+      || !GlobalVariableCheck(ShadowKey("MID"))
+      || !GlobalVariableCheck(ShadowKey("DIR"))
+      || !GlobalVariableCheck(ShadowKey("HORIZON"))
+      || !GlobalVariableCheck(ShadowKey("STEP1"))
+      || !GlobalVariableCheck(ShadowKey("STEP2"))
+      || !GlobalVariableCheck(ShadowKey("STEP3"))
+      || !GlobalVariableCheck(ShadowKey("STEP4")))
+   {
+      ShadowStatus="NO BRIDGE";
+      return false;
+   }
+
+   double updated=GlobalVariableGet(ShadowKey("UPDATED"));
+   if(updated<=0 || (double)TimeCurrent()-updated>MaxDataAgeSeconds)
+   {
+      ShadowStatus="STALE";
+      return false;
+   }
+
+   double mid=GlobalVariableGet(ShadowKey("MID"));
+   double s1=GlobalVariableGet(ShadowKey("STEP1"));
+   double s2=GlobalVariableGet(ShadowKey("STEP2"));
+   double s3=GlobalVariableGet(ShadowKey("STEP3"));
+   double s4=GlobalVariableGet(ShadowKey("STEP4"));
+   int horizon=(int)GlobalVariableGet(ShadowKey("HORIZON"));
+   int dir=(int)GlobalVariableGet(ShadowKey("DIR"));
+   if(mid<=0 || s1<=0 || s2<=0 || s3<=0 || s4<=0 || horizon!=4 || dir < -1 || dir > 1)
+   {
+      ShadowStatus="INVALID";
+      return false;
+   }
+
+   ShadowMid=mid;
+   ShadowStep15=s1;
+   ShadowStep30=s2;
+   ShadowStep45=s3;
+   ShadowStep60=s4;
+   ShadowDirection=dir;
+   ShadowStatus=(dir>0 ? "UP" : dir<0 ? "DOWN" : "FLAT");
+   return true;
+}
+
+void ClearShadowForecast()
+{
+   for(int i=1;i<=4;i++)
+   {
+      ObjectDelete(0,ShadowDrawPrefix+"SEG"+IntegerToString(i));
+      ObjectDelete(0,ShadowDrawPrefix+"POINT"+IntegerToString(i));
+      ObjectDelete(0,ShadowDrawPrefix+"LABEL"+IntegerToString(i));
+   }
+}
+
+void DrawShadowForecast()
+{
+   datetime times[5];
+   double prices[5];
+   times[0]=TimeCurrent();
+   for(int i=1;i<=4;i++) times[i]=times[0]+i*PeriodSeconds(PERIOD_M15);
+   prices[0]=ShadowMid;
+   prices[1]=ShadowStep15;
+   prices[2]=ShadowStep30;
+   prices[3]=ShadowStep45;
+   prices[4]=ShadowStep60;
+
+   color shadow_color=(ShadowDirection>0 ? clrMediumSeaGreen : ShadowDirection<0 ? clrOrangeRed : clrSilver);
+   for(int i=0;i<4;i++)
+   {
+      string name=ShadowDrawPrefix+"SEG"+IntegerToString(i+1);
+      if(ObjectFind(0,name)<0)
+         ObjectCreate(0,name,OBJ_TREND,0,times[i],prices[i],times[i+1],prices[i+1]);
+      else
+      {
+         ObjectMove(0,name,0,times[i],prices[i]);
+         ObjectMove(0,name,1,times[i+1],prices[i+1]);
+      }
+      ObjectSetInteger(0,name,OBJPROP_RAY_RIGHT,false);
+      ObjectSetInteger(0,name,OBJPROP_RAY_LEFT,false);
+      ObjectSetInteger(0,name,OBJPROP_COLOR,shadow_color);
+      ObjectSetInteger(0,name,OBJPROP_STYLE,STYLE_DASH);
+      ObjectSetInteger(0,name,OBJPROP_WIDTH,MathMax(1,ShadowLineWidth));
+      ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+      ObjectSetInteger(0,name,OBJPROP_BACK,false);
+   }
+
+   for(int j=1;j<=4;j++)
+   {
+      string point=ShadowDrawPrefix+"POINT"+IntegerToString(j);
+      if(ObjectFind(0,point)<0) ObjectCreate(0,point,OBJ_ARROW,0,times[j],prices[j]);
+      else ObjectMove(0,point,0,times[j],prices[j]);
+      ObjectSetInteger(0,point,OBJPROP_ARROWCODE,108);
+      ObjectSetInteger(0,point,OBJPROP_WIDTH,1);
+      ObjectSetInteger(0,point,OBJPROP_COLOR,shadow_color);
+      ObjectSetInteger(0,point,OBJPROP_SELECTABLE,false);
+
+      string label=ShadowDrawPrefix+"LABEL"+IntegerToString(j);
+      if(ShowLabel)
+      {
+         if(ObjectFind(0,label)<0) ObjectCreate(0,label,OBJ_TEXT,0,times[j],prices[j]);
+         else ObjectMove(0,label,0,times[j],prices[j]);
+         ObjectSetString(0,label,OBJPROP_TEXT,
+            "C2-MV +"+IntegerToString(j*15)+"m "+DoubleToString(prices[j],_Digits));
+         ObjectSetInteger(0,label,OBJPROP_COLOR,shadow_color);
+         ObjectSetInteger(0,label,OBJPROP_FONTSIZE,8);
+         ObjectSetInteger(0,label,OBJPROP_ANCHOR,ANCHOR_LEFT_LOWER);
+         ObjectSetInteger(0,label,OBJPROP_SELECTABLE,false);
+      }
+      else ObjectDelete(0,label);
+   }
 }
 
 // Forecast path: current mid -> +15m -> +30m -> +45m -> +60m.
@@ -196,11 +325,15 @@ int OnInit()
    StatusLabel();
    return INIT_SUCCEEDED;
 }
-void OnDeinit(const int reason) { EventKillTimer(); ObjectsDeleteAll(0,Prefix); }
+void OnDeinit(const int reason) { EventKillTimer(); ObjectsDeleteAll(0,Prefix); ObjectsDeleteAll(0,ShadowDrawPrefix); }
 void OnTimer()
 {
    if(LoadForecast()) DrawForecast();
    else ClearForecast();
+
+   if(LoadShadowForecast()) DrawShadowForecast();
+   else ClearShadowForecast();
+
    StatusLabel();
    ChartRedraw(0);
 }
