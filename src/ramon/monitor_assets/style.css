@@ -635,3 +635,56 @@
   font-size:9px;
   line-height:14px;
 }
+
+
+/* Fit the current 7-column opportunity table into the panel with no horizontal scroll. */
+.opportunity-scroll{
+  overflow-x:hidden;
+}
+.simple-trade-table{
+  width:100%;
+  min-width:0;
+  max-width:100%;
+  table-layout:fixed;
+}
+.simple-trade-table th,
+.simple-trade-table td{
+  min-width:0 !important;
+  max-width:none;
+}
+.simple-trade-table th:nth-child(1),
+.simple-trade-table td:nth-child(1){width:8%}
+.simple-trade-table th:nth-child(2),
+.simple-trade-table td:nth-child(2){width:16%}
+.simple-trade-table th:nth-child(3),
+.simple-trade-table td:nth-child(3){width:24%}
+.simple-trade-table th:nth-child(4),
+.simple-trade-table td:nth-child(4){width:13%}
+.simple-trade-table th:nth-child(5),
+.simple-trade-table td:nth-child(5){width:13%}
+.simple-trade-table th:nth-child(6),
+.simple-trade-table td:nth-child(6){width:8%}
+.simple-trade-table th:nth-child(7),
+.simple-trade-table td:nth-child(7){width:18%}
+.simple-trade-table tbody td{
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.simple-trade-table tbody .trade-simple-reason{
+  white-space:normal;
+  overflow:hidden;
+  display:table-cell;
+}
+.simple-trade-table tbody .opportunity-actions,
+.simple-trade-table tbody .manual-scenario-list,
+.simple-trade-table tbody .manual-scenario-list.compact{
+  width:100%;
+  flex-wrap:wrap;
+  gap:2px;
+}
+.simple-trade-table tbody .scenario-entry,
+.simple-trade-table tbody .opportunity-entry{
+  padding-left:4px;
+  padding-right:4px;
+  font-size:9px;
+}
