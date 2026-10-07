@@ -577,141 +577,218 @@ def recent_market_context(db, symbol="XAUUSD_l", m15_limit=12, m1_limit=15, *,
 
 
 def market_momentum_now(recent_market, final, base):
-    """Observe-only description of current price momentum for the dashboard.
+    """Observe-only Momentum V2 for the dashboard.
 
-    This function is deliberately outside the trading decision path.  It turns
-    already-recorded M1/M15 structure and live direction fields into a compact
-    human-facing description; it never opens, blocks, resizes or closes trades.
+    Combines multi-scale M1/M5/M15 structure, short-term acceleration,
+    independent market direction, intrabar confirmation and basic spread/data
+    quality.  It is intentionally isolated from the trading path.
     """
-    m1 = list((recent_market or {}).get("m1") or [])[-5:]
-    m15 = list((recent_market or {}).get("m15") or [])[-3:]
+    m1 = list((recent_market or {}).get("m1") or [])[-15:]
+    m15 = list((recent_market or {}).get("m15") or [])[-4:]
 
     def finite(row, key):
         try:
             value = float(row.get(key))
             return value if math.isfinite(value) else None
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, AttributeError):
             return None
 
-    drop = 0
-    rally = 0
-    drop_reasons = []
-    rally_reasons = []
+    def usable(rows):
+        return [r for r in rows if all(finite(r, k) is not None for k in ("open", "high", "low", "close"))]
 
-    usable_m1 = [r for r in m1 if all(finite(r, k) is not None for k in ("open", "high", "low", "close"))]
-    if usable_m1:
-        bearish = sum(1 for r in usable_m1 if finite(r, "close") < finite(r, "open"))
-        bullish = sum(1 for r in usable_m1 if finite(r, "close") > finite(r, "open"))
-        required = max(2, len(usable_m1) - 1)
-        if bearish >= required:
-            drop += 25
-            drop_reasons.append(f"{bearish}/{len(usable_m1)} کندل M1 نزولی")
-        if bullish >= required:
-            rally += 25
-            rally_reasons.append(f"{bullish}/{len(usable_m1)} کندل M1 صعودی")
+    def aggregate_m5(rows):
+        rows = usable(rows)
+        if len(rows) < 5:
+            return []
+        # Use complete five-bar buckets from the newest data backwards.
+        complete = rows[-(len(rows) // 5) * 5:]
+        result = []
+        for index in range(0, len(complete), 5):
+            chunk = complete[index:index + 5]
+            result.append({
+                "open": finite(chunk[0], "open"),
+                "high": max(finite(r, "high") for r in chunk),
+                "low": min(finite(r, "low") for r in chunk),
+                "close": finite(chunk[-1], "close"),
+            })
+        return result
 
-        lower_steps = sum(
-            1 for a, b in zip(usable_m1, usable_m1[1:])
-            if finite(b, "high") < finite(a, "high") and finite(b, "low") < finite(a, "low")
-        )
-        higher_steps = sum(
-            1 for a, b in zip(usable_m1, usable_m1[1:])
+    def directional_score(rows):
+        rows = usable(rows)
+        if not rows:
+            return {"buy": 0.0, "sell": 0.0, "net": 0.0, "bars": 0}
+        ranges = [max(1e-12, finite(r, "high") - finite(r, "low")) for r in rows]
+        avg_range = sum(ranges) / len(ranges)
+        bullish = sum(1 for r in rows if finite(r, "close") > finite(r, "open"))
+        bearish = sum(1 for r in rows if finite(r, "close") < finite(r, "open"))
+        higher = sum(
+            1 for a, b in zip(rows, rows[1:])
             if finite(b, "high") > finite(a, "high") and finite(b, "low") > finite(a, "low")
         )
-        structure_required = max(1, (len(usable_m1) - 1) // 2)
-        if lower_steps >= structure_required:
-            drop += 20
-            drop_reasons.append("Lower High / Lower Low در M1")
-        if higher_steps >= structure_required:
-            rally += 20
-            rally_reasons.append("Higher High / Higher Low در M1")
+        lower = sum(
+            1 for a, b in zip(rows, rows[1:])
+            if finite(b, "high") < finite(a, "high") and finite(b, "low") < finite(a, "low")
+        )
+        net = (finite(rows[-1], "close") - finite(rows[0], "open")) / max(avg_range, 1e-12)
+        candle_den = max(1, len(rows))
+        step_den = max(1, len(rows) - 1)
+        buy = 45.0 * bullish / candle_den + 30.0 * higher / step_den + 25.0 * max(0.0, min(1.0, net / 2.0))
+        sell = 45.0 * bearish / candle_den + 30.0 * lower / step_den + 25.0 * max(0.0, min(1.0, -net / 2.0))
+        return {"buy": min(100.0, buy), "sell": min(100.0, sell), "net": net, "bars": len(rows)}
 
-        first_open = finite(usable_m1[0], "open")
-        last_close = finite(usable_m1[-1], "close")
-        total_range = sum(max(0.0, finite(r, "high") - finite(r, "low")) for r in usable_m1)
-        avg_range = total_range / len(usable_m1) if usable_m1 else 0.0
-        if avg_range > 0 and first_open is not None and last_close is not None:
-            normalized_move = (last_close - first_open) / avg_range
-            if normalized_move <= -1.0:
-                drop += 20
-                drop_reasons.append("شتاب نزولی کوتاه‌مدت")
-            elif normalized_move >= 1.0:
-                rally += 20
-                rally_reasons.append("شتاب صعودی کوتاه‌مدت")
+    usable_m1 = usable(m1)
+    usable_m15 = usable(m15)
+    m5 = aggregate_m5(usable_m1)
+    s1 = directional_score(usable_m1[-10:])
+    s5 = directional_score(m5)
+    s15 = directional_score(usable_m15)
 
-    usable_m15 = [r for r in m15 if all(finite(r, k) is not None for k in ("open", "close"))]
-    if usable_m15:
-        latest = usable_m15[-1]
-        if finite(latest, "close") < finite(latest, "open"):
-            drop += 10
-            drop_reasons.append("M15 نزولی")
-        elif finite(latest, "close") > finite(latest, "open"):
-            rally += 10
-            rally_reasons.append("M15 صعودی")
+    # Acceleration compares the latest five M1 bars with the preceding five.
+    latest5 = directional_score(usable_m1[-5:])
+    prev5 = directional_score(usable_m1[-10:-5]) if len(usable_m1) >= 10 else {"buy": 0.0, "sell": 0.0, "net": 0.0, "bars": 0}
+    acceleration_delta = abs(latest5["net"]) - abs(prev5["net"]) if prev5["bars"] else 0.0
+    acceleration_direction = "FLAT"
+    if latest5["net"] >= 0.25:
+        acceleration_direction = "BUY"
+    elif latest5["net"] <= -0.25:
+        acceleration_direction = "SELL"
+    accelerating = bool(prev5["bars"] and acceleration_delta >= 0.20)
+    weakening = bool(prev5["bars"] and acceleration_delta <= -0.20)
+
+    buy = 0.45 * s1["buy"] + 0.25 * s5["buy"] + 0.10 * s15["buy"]
+    sell = 0.45 * s1["sell"] + 0.25 * s5["sell"] + 0.10 * s15["sell"]
 
     direction = str((final or {}).get("market_direction") or "").upper()
-    if direction == "SELL":
-        drop += 15
-        drop_reasons.append("Market Direction = SELL")
-    elif direction == "BUY":
-        rally += 15
-        rally_reasons.append("Market Direction = BUY")
-
-    micro_move = number((final or {}).get("market_direction_micro_move_atr"))
-    if micro_move is not None:
-        if micro_move <= -0.15:
-            drop += 10
-            drop_reasons.append("حرکت M1 نسبت به ATR منفی")
-        elif micro_move >= 0.15:
-            rally += 10
-            rally_reasons.append("حرکت M1 نسبت به ATR مثبت")
+    if direction == "BUY":
+        buy += 10
+    elif direction == "SELL":
+        sell += 10
 
     intrabar_direction = str((base or {}).get("intrabar_direction") or "").upper()
     intrabar_confirmed = (base or {}).get("intrabar_confirmed") == 1
-    if intrabar_confirmed and intrabar_direction == "SELL":
-        drop += 10
-        drop_reasons.append("Intrabar SELL تأیید")
-    elif intrabar_confirmed and intrabar_direction == "BUY":
-        rally += 10
-        rally_reasons.append("Intrabar BUY تأیید")
+    if intrabar_confirmed and intrabar_direction == "BUY":
+        buy += 10
+    elif intrabar_confirmed and intrabar_direction == "SELL":
+        sell += 10
 
-    drop = min(100, drop)
-    rally = min(100, rally)
-    if drop >= 70 and drop >= rally + 15:
-        state, label, direction_now, confidence = "strong_drop", "ریزش شدید", "SELL", drop
-        reasons = drop_reasons
-    elif drop >= 50 and drop >= rally + 10:
-        state, label, direction_now, confidence = "confirmed_drop", "ریزش تأییدشده", "SELL", drop
-        reasons = drop_reasons
-    elif drop >= 30 and drop > rally:
-        state, label, direction_now, confidence = "weak_drop", "فشار نزولی", "SELL", drop
-        reasons = drop_reasons
-    elif rally >= 70 and rally >= drop + 15:
-        state, label, direction_now, confidence = "strong_rally", "صعود شدید", "BUY", rally
-        reasons = rally_reasons
-    elif rally >= 50 and rally >= drop + 10:
-        state, label, direction_now, confidence = "confirmed_rally", "صعود تأییدشده", "BUY", rally
-        reasons = rally_reasons
-    elif rally >= 30 and rally > drop:
-        state, label, direction_now, confidence = "weak_rally", "فشار صعودی", "BUY", rally
-        reasons = rally_reasons
+    micro_move = number((final or {}).get("market_direction_micro_move_atr"))
+    if micro_move is not None:
+        micro_bonus = min(8.0, abs(micro_move) * 12.0)
+        if micro_move > 0:
+            buy += micro_bonus
+        elif micro_move < 0:
+            sell += micro_bonus
+
+    # Spread quality is advisory: it reduces confidence when the latest spread
+    # is materially wider than the recent non-zero M1 baseline.
+    spread_values = [
+        finite(r, "spread_points") for r in usable_m1
+        if finite(r, "spread_points") is not None and finite(r, "spread_points") > 0
+    ]
+    liquidity = "unknown"
+    spread_ratio = None
+    confidence_factor = 1.0
+    if len(spread_values) >= 3:
+        ordered = sorted(spread_values[:-1] or spread_values)
+        baseline = ordered[len(ordered) // 2]
+        latest_spread = spread_values[-1]
+        if baseline > 0:
+            spread_ratio = latest_spread / baseline
+            if spread_ratio >= 1.8:
+                liquidity = "wide"
+                confidence_factor = 0.78
+            elif spread_ratio >= 1.35:
+                liquidity = "elevated"
+                confidence_factor = 0.90
+            else:
+                liquidity = "normal"
+
+    buy = min(100.0, buy * confidence_factor)
+    sell = min(100.0, sell * confidence_factor)
+
+    if sell >= 70 and sell >= buy + 12:
+        state, label, direction_now, confidence = "strong_drop", "ریزش شدید", "SELL", sell
+    elif sell >= 52 and sell >= buy + 8:
+        state, label, direction_now, confidence = "confirmed_drop", "ریزش تأییدشده", "SELL", sell
+    elif sell >= 32 and sell > buy:
+        state, label, direction_now, confidence = "weak_drop", "فشار نزولی", "SELL", sell
+    elif buy >= 70 and buy >= sell + 12:
+        state, label, direction_now, confidence = "strong_rally", "صعود شدید", "BUY", buy
+    elif buy >= 52 and buy >= sell + 8:
+        state, label, direction_now, confidence = "confirmed_rally", "صعود تأییدشده", "BUY", buy
+    elif buy >= 32 and buy > sell:
+        state, label, direction_now, confidence = "weak_rally", "فشار صعودی", "BUY", buy
     else:
-        state, label, direction_now, confidence = "mixed", "حرکت واضح نیست", "MIXED", max(drop, rally)
-        reasons = (drop_reasons if drop >= rally else rally_reasons)
+        state, label, direction_now, confidence = "mixed", "حرکت واضح نیست", "MIXED", max(buy, sell)
+
+    context_direction = "MIXED"
+    if s15["buy"] >= s15["sell"] + 8:
+        context_direction = "BUY"
+    elif s15["sell"] >= s15["buy"] + 8:
+        context_direction = "SELL"
+
+    if direction_now in {"BUY", "SELL"} and context_direction in {"BUY", "SELL"} and direction_now != context_direction:
+        label = ("ریزش کوتاه‌مدت داخل زمینه صعودی" if direction_now == "SELL"
+                 else "صعود کوتاه‌مدت داخل زمینه نزولی")
+
+    reasons = []
+    dominant = "sell" if direction_now == "SELL" else "buy"
+    if direction_now in {"BUY", "SELL"}:
+        reasons.append(f"M1 {direction_now} {round(s1[dominant])}/100")
+        if s5["bars"]:
+            reasons.append(f"M5 {direction_now} {round(s5[dominant])}/100")
+        reasons.append(f"M15 context {context_direction}")
+        if accelerating and acceleration_direction == direction_now:
+            reasons.append("شتاب در حال افزایش")
+        elif weakening and acceleration_direction == direction_now:
+            reasons.append("شتاب در حال کاهش")
+        elif intrabar_confirmed and intrabar_direction == direction_now:
+            reasons.append(f"Intrabar {direction_now} تأیید")
+    else:
+        reasons.append("M1/M5/M15 هم‌جهتی کافی ندارند")
+
+    expected_m1 = 10
+    quality = min(100, round(
+        55 * min(1.0, len(usable_m1) / expected_m1)
+        + 20 * min(1.0, len(m5) / 2)
+        + 15 * min(1.0, len(usable_m15) / 3)
+        + (10 if (recent_market or {}).get("exact_input") else 0)
+    ))
+    if (recent_market or {}).get("warnings"):
+        quality = max(0, quality - 10)
+
+    acceleration = (
+        "increasing" if accelerating and acceleration_direction == direction_now
+        else "weakening" if weakening and acceleration_direction == direction_now
+        else "steady"
+    )
 
     return {
+        "version": "v2",
         "state": state,
         "label": label,
         "direction": direction_now,
-        "score": confidence,
-        "drop_score": drop,
-        "rally_score": rally,
-        "reasons": reasons[:4],
+        "score": round(confidence, 1),
+        "drop_score": round(sell, 1),
+        "rally_score": round(buy, 1),
+        "reasons": reasons[:5],
+        "m1_score": round(s1[dominant], 1) if direction_now in {"BUY", "SELL"} else round(max(s1["buy"], s1["sell"]), 1),
+        "m5_score": round(s5[dominant], 1) if direction_now in {"BUY", "SELL"} and s5["bars"] else None,
+        "m15_score": round(s15[dominant], 1) if direction_now in {"BUY", "SELL"} else round(max(s15["buy"], s15["sell"]), 1),
+        "m15_context_direction": context_direction,
+        "acceleration": acceleration,
+        "acceleration_direction": acceleration_direction,
+        "acceleration_delta": round(acceleration_delta, 3),
+        "liquidity": liquidity,
+        "spread_ratio": round(spread_ratio, 2) if spread_ratio is not None else None,
+        "data_quality": quality,
         "m1_bars_used": len(usable_m1),
+        "m5_bars_used": len(m5),
         "m15_bars_used": len(usable_m15),
         "observe_only": True,
         "affects_auto_trading": False,
     }
+
 
 def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=None):
     now = time.time() if now is None else now
