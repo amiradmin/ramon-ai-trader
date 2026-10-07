@@ -560,18 +560,24 @@ function renderOpportunities(data){
   const perf=snapshot&&snapshot.dashboard_opportunity_performance;
   const perfText=perf&&perf.closed?(" · دستی جدول: "+perf.closed+" بسته · برد "+(perf.win_rate*100).toFixed(1)+"% · خالص "+perf.net_units.toFixed(2)):"";
   const lastDecision=Math.max(0,...(data.opportunities||[]).map(r=>Number(r.latest_captured||r.captured||0)));
-  const stale=lastDecision>0 && Date.now()/1000-lastDecision>120;
+  const dataAge=lastDecision>0?Math.max(0,Math.round(Date.now()/1000-lastDecision)):null;
+  const stale=dataAge!==null&&dataAge>120;
+  const loadMs=opportunityFetchStarted?Math.max(0,Math.round(performance.now()-opportunityFetchStarted)):null;
+  const freshnessText=" · سن آخرین نمونه: "+(dataAge===null?"نامشخص":dataAge+" ثانیه")
+    +" · زمان پاسخ جدول: "+(loadMs===null?"—":loadMs+" ms");
   const refreshedAt=new Intl.DateTimeFormat("fa-IR",{timeZone:"Asia/Tehran",hour:"2-digit",minute:"2-digit",second:"2-digit"}).format(new Date());
   const compatibilityWarning=compatibility.supported?"":" · ⚠ "+compatibility.reason;
   opportunitySet("opportunity-status",data.error?"دریافت جدول ناموفق: "+data.error:(data.opportunities||[]).length?
     "آخرین ۲۴ ساعت · "+data.opportunities.length+" کاندید · آخرین نمونه: "+(lastDecision?opportunityDate.format(new Date(lastDecision*1000)):"—")+
-    " · دریافت موفق: "+refreshedAt+(stale?" · هشدار: نمونه جدید ثبت نشده":"")+compatibilityWarning+perfText:
-    "هنوز کاندیدی با مزیت مثبت ثبت نشده · دریافت موفق: "+refreshedAt+compatibilityWarning+perfText);
+    " · دریافت موفق: "+refreshedAt+freshnessText+(stale?" · هشدار: نمونه جدید ثبت نشده":"")+compatibilityWarning+perfText:
+    "هنوز کاندیدی با مزیت مثبت ثبت نشده · دریافت موفق: "+refreshedAt+freshnessText+compatibilityWarning+perfText);
 }
 let opportunityInFlight=false;
+let opportunityFetchStarted=0;
 async function refreshOpportunities(){
   if(opportunityInFlight)return;
   opportunityInFlight=true;
+  opportunityFetchStarted=performance.now();
   const controller=new AbortController();
   const timeout=setTimeout(()=>controller.abort(),4500);
   try{
@@ -609,4 +615,4 @@ selectedNode?JSON.stringify(selectedNode,null,2):"NONE",
 "=== ALL DECISION / EXECUTION STEPS ==="
 ];for(const n of snapshot.nodes||[]){out.push(`[${nodeNumbers[n.id]||n.id}] ${n.title} | state=${n.state} observed=${n.observed_state} manual=${!!n.manual_override} engine=${n.engine||"Logic"}`);out.push(`detail: ${n.detail||"—"}`);out.push(`values: ${JSON.stringify(n.values||{})}`);}out.push("","=== RECENT DECISIONS ===");for(const x of snapshot.timeline||[])out.push(`${x.at||"—"} | ${x.decision} | ${x.reason} | ${x.strategy} | ${x.sample_key}`);out.push("",...candleLines(snapshot.recent_market?.m15,"M15"),"",...candleLines(snapshot.recent_market?.m1,"M1"),"","=== MODEL / HANDLER MAP ===");for(const row of snapshot.model_handler_map||[])out.push(`${row.name} | ${row.handler} | status=${row.status} | condition=${row.condition_state||"—"} | values=${JSON.stringify(row.values||{})}`);out.push("","=== WARNINGS ===",...(snapshot.warnings?.length?snapshot.warnings:["NONE"]));return out.join("\n");}
 async function copyAnalysis(){const btn=$("copy-analysis");const old=btn.textContent;btn.disabled=true;btn.textContent="COPYING...";let text="";try{const response=await fetch(`/api/analysis?stage=${encodeURIComponent(selected||"")}`,{cache:"no-store"});if(!response.ok)throw new Error(`HTTP ${response.status}`);text=await response.text();}catch{text=buildAnalysisBundle();}let copied=false;try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text);copied=true;}}catch{}if(!copied){const ta=document.createElement("textarea");ta.value=text;ta.setAttribute("readonly","");ta.style.position="absolute";ta.style.left="-9999px";document.body.append(ta);ta.select();try{copied=document.execCommand("copy");}catch{}ta.remove();}btn.textContent=copied?"COPIED ✓":"COPY FAILED";setTimeout(()=>{btn.disabled=false;btn.textContent=old;},1400);}
-$("copy-analysis").addEventListener("click",copyAnalysis);$("reset-overrides").addEventListener("click",resetOverrides);$("zoom").addEventListener("click",()=>{zoomed=!zoomed;$("zoom").textContent=zoomed?"−":"＋";$("zoom").setAttribute("aria-label",zoomed?"نمای کلی فلوچارت":"بزرگ‌نمایی فلوچارت");resize();});$("refresh").addEventListener("click",refresh);new ResizeObserver(resize).observe($("viewport"));document.addEventListener("visibilitychange",()=>{if(!document.hidden){void refresh();void refreshOpportunities();void refreshChronosSlope();setInterval(()=>{if(!document.hidden)void refreshChronosSlope();},5000);}});setInterval(()=>{if(!document.hidden)void refreshOpportunities();},5000);void refresh();void refreshOpportunities();
+$("copy-analysis").addEventListener("click",copyAnalysis);$("reset-overrides").addEventListener("click",resetOverrides);$("zoom").addEventListener("click",()=>{zoomed=!zoomed;$("zoom").textContent=zoomed?"−":"＋";$("zoom").setAttribute("aria-label",zoomed?"نمای کلی فلوچارت":"بزرگ‌نمایی فلوچارت");resize();});$("refresh").addEventListener("click",refresh);new ResizeObserver(resize).observe($("viewport"));document.addEventListener("visibilitychange",()=>{if(!document.hidden){void refresh();void refreshOpportunities();void refreshChronosSlope();}});setInterval(()=>{if(!document.hidden)void refreshChronosSlope();},5000);setInterval(()=>{if(!document.hidden)void refreshOpportunities();},3000);void refresh();void refreshOpportunities();
