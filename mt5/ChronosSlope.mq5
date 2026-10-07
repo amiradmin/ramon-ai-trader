@@ -1,5 +1,5 @@
 #property copyright "Ramon AI Trader"
-#property version "1.034"
+#property version "1.035"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -12,7 +12,7 @@ input bool ShowLabel = false; // keep chart clean; endpoint labels are optional
 input int MaxDataAgeSeconds = 120;
 
 const string Prefix="CHRONOS_SLOPE_";
-double LastCurrentMid=0.0,LastForecastMedian=0.0,LastStep15=0.0,LastStep30=0.0;
+double LastCurrentMid=0.0,LastForecastMedian=0.0,LastStep15=0.0,LastStep30=0.0,LastStep45=0.0,LastStep60=0.0;
 double LastBiasConfidence=0.0,LastBiasScore=0.0;
 int LastHorizonBars=4;
 string LastDirection="NONE";
@@ -31,7 +31,7 @@ void StatusLabel()
    ObjectSetInteger(0,obj,OBJPROP_YDISTANCE,42);
    ObjectSetInteger(0,obj,OBJPROP_COLOR,LastStatus=="OK" ? clrLimeGreen : clrOrange);
    ObjectSetInteger(0,obj,OBJPROP_FONTSIZE,10);
-   string text="Chronos 30m: "+(LastStatus=="OK" ? LastDirection : LastStatus);
+   string text="Chronos 60m: "+(LastStatus=="OK" ? LastDirection : LastStatus);
    if(LastStatus=="OK")
       text+=" | Bias: "+LastBiasDirection+" "+DoubleToString(LastBiasConfidence*100.0,0)+"%";
    ObjectSetString(0,obj,OBJPROP_TEXT,text);
@@ -43,6 +43,7 @@ bool LoadForecast()
       || !GlobalVariableCheck(Key("MEDIAN")) || !GlobalVariableCheck(Key("DIR"))
       || !GlobalVariableCheck(Key("HORIZON"))
       || !GlobalVariableCheck(Key("STEP1")) || !GlobalVariableCheck(Key("STEP2"))
+      || !GlobalVariableCheck(Key("STEP3")) || !GlobalVariableCheck(Key("STEP4"))
       || !GlobalVariableCheck(Key("BIAS_DIR")) || !GlobalVariableCheck(Key("BIAS_CONF"))
       || !GlobalVariableCheck(Key("BIAS_SCORE")))
    {
@@ -60,11 +61,13 @@ bool LoadForecast()
    int horizon=(int)GlobalVariableGet(Key("HORIZON"));
    double step15=GlobalVariableGet(Key("STEP1"));
    double step30=GlobalVariableGet(Key("STEP2"));
+   double step45=GlobalVariableGet(Key("STEP3"));
+   double step60=GlobalVariableGet(Key("STEP4"));
    int direction=(int)GlobalVariableGet(Key("DIR"));
    int bias_direction=(int)GlobalVariableGet(Key("BIAS_DIR"));
    double bias_confidence=GlobalVariableGet(Key("BIAS_CONF"));
    double bias_score=GlobalVariableGet(Key("BIAS_SCORE"));
-   if(mid<=0 || median<=0 || step15<=0 || step30<=0 || horizon!=2
+   if(mid<=0 || median<=0 || step15<=0 || step30<=0 || step45<=0 || step60<=0 || horizon!=4
       || direction < -1 || direction > 1 || bias_direction < -1 || bias_direction > 1
       || bias_confidence<0.0 || bias_confidence>1.0 || !MathIsValidNumber(bias_score))
    {
@@ -75,6 +78,8 @@ bool LoadForecast()
    LastForecastMedian=median;
    LastStep15=step15;
    LastStep30=step30;
+   LastStep45=step45;
+   LastStep60=step60;
    LastHorizonBars=horizon;
    LastDirection=direction>0 ? "UP" : direction<0 ? "DOWN" : "FLAT";
    LastBiasDirection=bias_direction>0 ? "BUY" : bias_direction<0 ? "SELL" : "MIXED";
@@ -84,19 +89,22 @@ bool LoadForecast()
    return true;
 }
 
-// Forecast path: current mid -> +15m -> +30m.
-// Drawn from the latest quote time, not a stretched endpoint.
+// Forecast path: current mid -> +15m -> +30m -> +45m -> +60m.
+// Drawn from the latest quote time.  Display-only; Ramon execution is independent.
 void DrawForecast()
 {
-   datetime t0=TimeCurrent();
-   datetime t15=t0+PeriodSeconds(PERIOD_M15);
-   datetime t30=t15+PeriodSeconds(PERIOD_M15);
+   datetime times[5];
+   double prices[5];
+   times[0]=TimeCurrent();
+   for(int i=1;i<=4;i++) times[i]=times[0]+i*PeriodSeconds(PERIOD_M15);
+   prices[0]=LastCurrentMid;
+   prices[1]=LastStep15;
+   prices[2]=LastStep30;
+   prices[3]=LastStep45;
+   prices[4]=LastStep60;
    color overall=LastDirection=="UP" ? clrLimeGreen : LastDirection=="DOWN" ? clrTomato : clrSilver;
-   double prices[3];
-   datetime times[3];
-   prices[0]=LastCurrentMid; prices[1]=LastStep15; prices[2]=LastStep30;
-   times[0]=t0; times[1]=t15; times[2]=t30;
-   for(int i=0;i<2;i++)
+
+   for(int i=0;i<4;i++)
    {
       string name=Prefix+"SEG"+IntegerToString(i+1);
       color segment=prices[i+1]>prices[i] ? clrLimeGreen : prices[i+1]<prices[i] ? clrTomato : clrSilver;
@@ -114,19 +122,20 @@ void DrawForecast()
       ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
       ObjectSetInteger(0,name,OBJPROP_BACK,false);
    }
-   // Projected endpoints are two independently forecast model outputs.
-   for(int j=1;j<=2;j++)
+
+   for(int j=1;j<=4;j++)
    {
       string point=Prefix+"POINT"+IntegerToString(j);
       if(ObjectFind(0,point)<0) ObjectCreate(0,point,OBJ_ARROW,0,times[j],prices[j]);
       else ObjectMove(0,point,0,times[j],prices[j]);
       ObjectSetInteger(0,point,OBJPROP_ARROWCODE,159);
       ObjectSetInteger(0,point,OBJPROP_WIDTH,2);
-      color endpoint_color=overall;
-      if(j==2 && LastBiasConfidence>=0.50)
-         endpoint_color=(LastBiasDirection=="BUY" ? clrLimeGreen : LastBiasDirection=="SELL" ? clrTomato : clrSilver);
-      ObjectSetInteger(0,point,OBJPROP_COLOR,j==2 ? endpoint_color : clrAqua);
+      color endpoint_color=(j==4 && LastBiasConfidence>=0.50)
+         ? (LastBiasDirection=="BUY" ? clrLimeGreen : LastBiasDirection=="SELL" ? clrTomato : clrSilver)
+         : (j==4 ? overall : clrAqua);
+      ObjectSetInteger(0,point,OBJPROP_COLOR,endpoint_color);
       ObjectSetInteger(0,point,OBJPROP_SELECTABLE,false);
+
       string label=Prefix+"STEP_LABEL"+IntegerToString(j);
       if(ShowLabel)
       {
@@ -134,16 +143,14 @@ void DrawForecast()
          else ObjectMove(0,label,0,times[j],prices[j]);
          ObjectSetString(0,label,OBJPROP_TEXT,
             "Chronos +"+IntegerToString(j*15)+"m "+DoubleToString(prices[j],_Digits));
-         ObjectSetInteger(0,label,OBJPROP_COLOR,j==2 ? overall : clrAqua);
+         ObjectSetInteger(0,label,OBJPROP_COLOR,j==4 ? overall : clrAqua);
          ObjectSetInteger(0,label,OBJPROP_FONTSIZE,9);
-         // Put 15m text to the left/above and 30m text right/below.
-         // This prevents text overlap even when forecast prices nearly match.
-         ObjectSetInteger(0,label,OBJPROP_ANCHOR,j==1 ? ANCHOR_RIGHT_LOWER : ANCHOR_LEFT_UPPER);
+         ObjectSetInteger(0,label,OBJPROP_ANCHOR,(j%2==1) ? ANCHOR_RIGHT_LOWER : ANCHOR_LEFT_UPPER);
          ObjectSetInteger(0,label,OBJPROP_SELECTABLE,false);
       }
       else ObjectDelete(0,label);
    }
-   // Remove legacy single-arrow objects during upgrade.
+
    ObjectDelete(0,Prefix+"LINE");
    ObjectDelete(0,Prefix+"ARROW");
    ObjectDelete(0,Prefix+"LABEL");
@@ -154,7 +161,7 @@ void ClearForecast()
    ObjectDelete(0,Prefix+"LINE");
    ObjectDelete(0,Prefix+"ARROW");
    ObjectDelete(0,Prefix+"LABEL");
-   for(int i=1;i<=2;i++)
+   for(int i=1;i<=4;i++)
    {
       ObjectDelete(0,Prefix+"SEG"+IntegerToString(i));
       ObjectDelete(0,Prefix+"POINT"+IntegerToString(i));
