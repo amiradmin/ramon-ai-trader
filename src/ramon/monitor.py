@@ -1429,211 +1429,134 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
             "income_roadmap": roadmap, "warnings": warnings}
 
 
-def _live_quote_from_diagnostic(diag):
-    raw = str((diag or {}).get("Bid") or "")
-    bid = number(raw.split()[0]) if raw else None
-    ask = number(match(raw, String.raw\`Ask:\\s*([0-9.]+)\`))
-    spread_points = number(match(raw, String.raw\`Spread\\(points\\):\\s*([0-9.]+)\`))
-    captured = number((diag or {}).get("captured_epoch"))
-    if bid is None or ask is None or ask <= bid or captured is None:
-        return None
-    return {
-        "captured": captured,
-        "bid": bid,
-        "ask": ask,
-        "mid": (bid + ask) / 2.0,
-        "spread_points": spread_points,
-    }
 
-
-def _latest_live_decision_context(path, symbol):
-    p = Path(path).expanduser().resolve()
-    if not p.is_file():
-        return {}, {}
-    try:
-        with sqlite3.connect(p.as_uri() + "?mode=ro", uri=True, timeout=.15) as con:
-            con.row_factory = sqlite3.Row
-            con.execute("PRAGMA query_only=ON")
-            row = con.execute(
-                "SELECT model_metadata FROM decision_samples WHERE symbol=? ORDER BY id DESC LIMIT 1",
-                (symbol,),
-            ).fetchone()
-        metadata = object_json(row["model_metadata"]) if row else {}
-        audit = metadata.get("decision_audit")
-        audit = audit if isinstance(audit, dict) else {}
-        base = audit.get("base") if isinstance(audit.get("base"), dict) else {}
-        final = audit.get("final") if isinstance(audit.get("final"), dict) else {}
-        return base, final
-    except sqlite3.Error:
-        return {}, {}
-
-
-def live_momentum_v3(db, diagnostic, symbol, now=None):
-    """Read-only dashboard momentum; never participates in Ramon execution."""
+def live_momentum_v3(diagnostic, now=None):
+    """Dashboard-only live momentum helper; never changes Ramon execution."""
     now = time.time() if now is None else float(now)
-    diag, diag_error = read_diagnostic(diagnostic)
-    quote = _live_quote_from_diagnostic(diag)
-    base, final = _latest_live_decision_context(db, symbol)
-    recent = recent_market_context(db, symbol)
-    core = market_momentum_now(recent, final, base)
-
-    cache_key = str(Path(diagnostic).expanduser().resolve()) if diagnostic is not None else "none"
-    samples = []
-    if quote is not None:
-        with _LIVE_MOMENTUM_LOCK:
-            bucket = _LIVE_MOMENTUM_SAMPLES.setdefault(cache_key, deque(maxlen=180))
-            if not bucket or bucket[-1]["captured"] != quote["captured"] or bucket[-1]["mid"] != quote["mid"]:
-                bucket.append(dict(quote))
-            while bucket and quote["captured"] - bucket[0]["captured"] > 180:
-                bucket.popleft()
-            samples = list(bucket)
-
-    atr = number(base.get("atr"))
-    if atr is None or atr <= 0:
-        ranges = []
-        for row in list((recent or {}).get("m1") or [])[-10:]:
-            high, low = number(row.get("high")), number(row.get("low"))
-            if high is not None and low is not None and high > low:
-                ranges.append(high - low)
-        atr = (sum(ranges) / len(ranges)) if ranges else None
-
-    def delta_for(seconds):
-        if len(samples) < 2 or atr is None or atr <= 0:
-            return None
-        latest = samples[-1]
-        target = latest["captured"] - seconds
-        candidate = min(samples[:-1], key=lambda row: abs(row["captured"] - target))
-        span = latest["captured"] - candidate["captured"]
-        if span < max(2.0, seconds * 0.55):
-            return None
-        change = latest["mid"] - candidate["mid"]
+    diag, error = read_diagnostic(diagnostic)
+    raw = str(diag.get("Bid") or "")
+    bid = number(raw.split()[0]) if raw else None
+    ask = number(match(raw, r"Ask:\\s*([0-9.]+)"))
+    spread_points = number(match(raw, r"Spread\\(points\\):\\s*([0-9.]+)"))
+    captured = number(diag.get("captured_epoch"))
+    if bid is None or ask is None or captured is None or ask <= bid:
         return {
-            "seconds": int(round(span)),
-            "price": round(change, 5),
-            "atr": round(change / atr, 4),
+            "ready": False,
+            "version": "v3",
+            "reason": error or "live_quote_unavailable",
+            "observe_only": True,
+            "affects_auto_trading": False,
         }
 
-    windows = {str(seconds): delta_for(seconds) for seconds in (5, 15, 30, 60)}
-    available = [row for row in windows.values() if row is not None]
-    weights = {5: 0.42, 15: 0.28, 30: 0.18, 60: 0.12}
-    weighted = sum(weights[int(key)] * row["atr"] for key, row in windows.items() if row is not None)
-    weight_total = sum(weights[int(key)] for key, row in windows.items() if row is not None)
-    weighted = weighted / weight_total if weight_total else 0.0
+    mid = (bid + ask) / 2.0
+    point = ((ask - bid) / spread_points) if spread_points and spread_points > 0 else None
+    key = str(Path(diagnostic).expanduser().resolve()) if diagnostic else "default"
+    with _LIVE_MOMENTUM_LOCK:
+        samples = _LIVE_MOMENTUM_SAMPLES.setdefault(key, deque(maxlen=180))
+        if not samples or samples[-1]["captured"] != captured or samples[-1]["mid"] != mid:
+            samples.append({"captured": captured, "mid": mid})
+        while samples and captured - samples[0]["captured"] > 180:
+            samples.popleft()
+        rows = list(samples)
 
-    micro_direction = "MIXED"
-    if weighted >= 0.025:
-        micro_direction = "BUY"
-    elif weighted <= -0.025:
-        micro_direction = "SELL"
+    def move_for(seconds):
+        if len(rows) < 2:
+            return None
+        target = captured - seconds
+        candidates = [row for row in rows[:-1] if row["captured"] <= captured - 1]
+        if not candidates:
+            return None
+        row = min(candidates, key=lambda item: abs(item["captured"] - target))
+        elapsed = captured - row["captured"]
+        if elapsed < max(2.0, seconds * 0.50):
+            return None
+        price = mid - row["mid"]
+        points = price / point if point and point > 0 else None
+        spread_units = points / spread_points if points is not None and spread_points else None
+        return {
+            "elapsed_seconds": round(elapsed, 1),
+            "price": round(price, 5),
+            "points": round(points, 1) if points is not None else None,
+            "spread_units": round(spread_units, 3) if spread_units is not None else None,
+        }
 
-    agreement = 0
-    for row in available:
-        if micro_direction == "BUY" and row["atr"] > 0:
-            agreement += 1
-        elif micro_direction == "SELL" and row["atr"] < 0:
-            agreement += 1
-    agreement_ratio = agreement / len(available) if available else 0.0
-    micro_confidence = min(100.0, abs(weighted) / 0.30 * 100.0)
-    micro_confidence *= (0.55 + 0.45 * agreement_ratio) if available else 0.0
+    windows = {str(seconds): move_for(seconds) for seconds in (5, 15, 30, 60)}
+    weighted = 0.0
+    used_weight = 0.0
+    weights = {5: 0.45, 15: 0.30, 30: 0.17, 60: 0.08}
+    for seconds, weight in weights.items():
+        row = windows[str(seconds)]
+        if row and row["spread_units"] is not None:
+            weighted += row["spread_units"] * weight
+            used_weight += weight
+    weighted = weighted / used_weight if used_weight else 0.0
 
-    core_direction = str(core.get("direction") or "MIXED")
-    core_score = float(number(core.get("score")) or 0.0)
-    if micro_direction in {"BUY", "SELL"}:
-        if core_direction == micro_direction:
-            score = min(100.0, 0.65 * micro_confidence + 0.35 * core_score + 8.0)
-        elif core_direction in {"BUY", "SELL"}:
-            score = max(0.0, 0.70 * micro_confidence + 0.30 * core_score - 15.0)
-        else:
-            score = 0.75 * micro_confidence + 0.25 * core_score
-        direction = micro_direction
-    else:
-        direction = core_direction
-        score = core_score * 0.72
+    direction = "MIXED"
+    if weighted >= 0.18:
+        direction = "BUY"
+    elif weighted <= -0.18:
+        direction = "SELL"
 
-    d5, d15, d30, d60 = (windows[str(x)] for x in (5, 15, 30, 60))
-    fast_speed = abs(d5["atr"]) / max(1, d5["seconds"]) if d5 else None
-    slow_speed = abs(d30["atr"]) / max(1, d30["seconds"]) if d30 else None
+    available = [row for row in windows.values() if row and row["spread_units"] is not None]
+    agree = sum(
+        1 for row in available
+        if (direction == "BUY" and row["spread_units"] > 0)
+        or (direction == "SELL" and row["spread_units"] < 0)
+    )
+    consistency = agree / len(available) if available and direction != "MIXED" else 0.0
+    score = min(100.0, abs(weighted) * 38.0)
+    if direction != "MIXED":
+        score *= 0.65 + 0.35 * consistency
+
+    w5, w15, w30, w60 = (windows[str(v)] for v in (5, 15, 30, 60))
     acceleration = "steady"
-    if fast_speed is not None and slow_speed is not None and slow_speed > 1e-9:
-        ratio = fast_speed / slow_speed
-        if ratio >= 1.45:
-            acceleration = "increasing"
-        elif ratio <= 0.65:
-            acceleration = "weakening"
+    if w5 and w30 and w5["spread_units"] is not None and w30["spread_units"] is not None:
+        fast = abs(w5["spread_units"]) / max(1.0, w5["elapsed_seconds"])
+        slow = abs(w30["spread_units"]) / max(1.0, w30["elapsed_seconds"])
+        if slow > 1e-9:
+            ratio = fast / slow
+            if ratio >= 1.45:
+                acceleration = "increasing"
+            elif ratio <= 0.65:
+                acceleration = "weakening"
 
     reversal = False
-    if d15 and d60 and abs(d15["atr"]) >= 0.04 and abs(d60["atr"]) >= 0.06:
-        reversal = (d15["atr"] > 0 > d60["atr"]) or (d15["atr"] < 0 < d60["atr"])
+    if w15 and w60 and w15["spread_units"] is not None and w60["spread_units"] is not None:
+        reversal = (
+            abs(w15["spread_units"]) >= 0.35
+            and abs(w60["spread_units"]) >= 0.55
+            and ((w15["spread_units"] > 0 > w60["spread_units"]) or
+                 (w15["spread_units"] < 0 < w60["spread_units"]))
+        )
 
-    source_age = None
-    if quote is not None:
-        source_age = round(max(0.0, now - quote["captured"]), 1)
-    source_state = (
-        "fresh" if source_age is not None and source_age <= 12
-        else "stale" if source_age is not None
-        else "unknown"
-    )
+    age = round(max(0.0, now - captured), 1)
+    source_state = "fresh" if age <= 12 else "stale"
+    confidence = min(100, round(
+        35 * min(1.0, len(rows) / 6.0)
+        + 35 * min(1.0, len(available) / 4.0)
+        + 20 * consistency
+        + (10 if source_state == "fresh" else 0)
+    ))
 
-    if direction == "BUY":
-        label = "صعود لحظه‌ای"
-        if score >= 75:
-            label = "صعود لحظه‌ای قوی"
-    elif direction == "SELL":
-        label = "ریزش لحظه‌ای"
-        if score >= 75:
-            label = "ریزش لحظه‌ای قوی"
-    else:
-        label = "حرکت لحظه‌ای نامشخص"
-    if reversal and direction in {"BUY", "SELL"}:
-        label = ("برگشت صعودی کوتاه‌مدت" if direction == "BUY" else "برگشت نزولی کوتاه‌مدت")
-
-    confirmations = sum(
-        1 for row in available
-        if (direction == "BUY" and row["atr"] > 0) or (direction == "SELL" and row["atr"] < 0)
-    )
-    warnings = []
-    if diag_error:
-        warnings.append(diag_error)
-    if source_state != "fresh":
-        warnings.append("منبع Bid/Ask تازه نیست؛ نتیجه لحظه‌ای را قطعی تلقی نکن")
-    if len(available) < 2:
-        warnings.append("تاریخچه کوتاه‌مدت هنوز برای همه بازه‌های زمانی کامل نشده است")
-
-    result = dict(core)
-    result.update({
+    return {
+        "ready": True,
         "version": "v3",
-        "state": (
-            "strong_rally" if direction == "BUY" and score >= 75 else
-            "confirmed_rally" if direction == "BUY" and score >= 52 else
-            "weak_rally" if direction == "BUY" else
-            "strong_drop" if direction == "SELL" and score >= 75 else
-            "confirmed_drop" if direction == "SELL" and score >= 52 else
-            "weak_drop" if direction == "SELL" else "mixed"
-        ),
-        "label": label,
         "direction": direction,
         "score": round(score, 1),
-        "micro_score": round(micro_confidence, 1),
-        "micro_weighted_atr": round(weighted, 4),
-        "confirmation_count": confirmations,
-        "confirmation_total": len(available),
-        "reversal_detected": reversal,
+        "confidence": confidence,
         "acceleration": acceleration,
+        "reversal_detected": reversal,
         "windows": windows,
-        "bid": quote["bid"] if quote else None,
-        "ask": quote["ask"] if quote else None,
-        "mid": quote["mid"] if quote else None,
-        "spread_points_live": quote["spread_points"] if quote else None,
-        "source_age_seconds": source_age,
+        "bid": bid,
+        "ask": ask,
+        "spread_points": spread_points,
+        "source_age_seconds": age,
         "source_state": source_state,
-        "source_cadence": str(diag.get("Snapshot cadence") or "unknown"),
-        "generated_at": utc_time(now),
-        "warnings": warnings,
+        "samples": len(rows),
         "observe_only": True,
         "affects_auto_trading": False,
-        "automatic_ramon_untouched": True,
-    })
-    return result
+        "manual_guidance_only": True,
+    }
 
 
 def analysis_bundle(snapshot: dict, selected_stage: str = "") -> str:
@@ -2501,7 +2424,7 @@ def handler_for(db, diagnostic, symbol, health_url):
             elif route == "/api/opportunities":
                 self.reply(json.dumps(opportunities_with_execution_state(db, diagnostic, symbol, health_url), ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
             elif route == "/api/live-momentum":
-                data = live_momentum_v3(db, diagnostic, symbol)
+                data = live_momentum_v3(diagnostic)
                 self.reply(json.dumps(data, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
             elif route == "/api/snapshot":
                 health = None
