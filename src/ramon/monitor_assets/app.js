@@ -571,7 +571,7 @@ function renderOpportunities(data){
         const p=typeof scenario.probability==="number"?" · "+Math.round(scenario.probability*100)+"٪":"";
         scenarioBtn.textContent="ورود جدید: "+scenario.label+" · "+scenario.direction+p;
         scenarioBtn.title=scenario.setup+" · ورود دستی مستقل از پوزیشن فعلی";
-        scenarioBtn.disabled=!compatibility.supported||row.entry_queued;
+        scenarioBtn.disabled=!compatibility.supported||row.entry_queued||row.executed;
         if(!scenarioBtn.disabled){
           scenarioBtn.addEventListener("click",()=>manualOpportunity(row,scenarioBtn,true,true,scenario.direction));
         }
@@ -591,7 +591,7 @@ function renderOpportunities(data){
       const p=typeof scenario.probability==="number"?" · "+Math.round(scenario.probability*100)+"٪":"";
       scenarioBtn.textContent=scenario.label+" · "+scenario.direction+p;
       scenarioBtn.title=scenario.setup+(scenario.risk==="very_high"?" · ریسک بسیار بالا":scenario.risk==="high"?" · ریسک بالا":"");
-      scenarioBtn.disabled=!compatibility.supported||row.entry_queued;
+      scenarioBtn.disabled=!compatibility.supported||row.entry_queued||row.executed;
       if(!scenarioBtn.disabled){
         scenarioBtn.addEventListener("click",()=>manualOpportunity(row,scenarioBtn,true,true,scenario.direction));
       }
@@ -603,7 +603,7 @@ function renderOpportunities(data){
       fallback.type="button";
       fallback.className="opportunity-entry "+(row.direction==="BUY"?"buy":"sell");
       fallback.textContent=!compatibility.supported?"EA نیاز به به‌روزرسانی دارد":"ورود دستی "+row.direction;
-      fallback.disabled=!compatibility.supported||row.entry_queued;
+      fallback.disabled=!compatibility.supported||row.entry_queued||row.executed;
       fallback.title=compatibility.supported
         ?"انتخاب جهت با شماست؛ قفل‌های تحلیلی Ramon دخالت نمی‌کنند"
         :compatibility.reason;
