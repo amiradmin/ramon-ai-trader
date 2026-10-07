@@ -446,14 +446,14 @@ function renderOpportunities(data){
     technical.append(summary,tech);
 
     const simpleCells=[
-      {text:recommendation,cls:"trade-recommendation "+recClass},
       {text:directionFa,cls:"trade-direction "+(row.direction==="BUY"?"buy":"sell"),dir:"ltr"},
-      {text:confidenceText,cls:"trade-confidence",dir:"ltr"},
       {text:entryAdvice,cls:"trade-entry-price",dir:"ltr"},
       {levels:true,cls:"trade-levels"},
       {text:exitAdvice,cls:"trade-exit-advice",dir:"ltr"},
       {text:simpleReason,cls:"trade-simple-reason",extra:technical},
-      {text:positionText,cls:"trade-position-state"}
+      {text:positionText,cls:"trade-position-state"},
+      {text:recommendation,cls:"trade-recommendation "+recClass},
+      {text:confidenceText,cls:"trade-confidence",dir:"ltr"}
     ];
     simpleCells.forEach(cell=>{
       const td=document.createElement("td");
