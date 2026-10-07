@@ -575,6 +575,144 @@ def recent_market_context(db, symbol="XAUUSD_l", m15_limit=12, m1_limit=15, *,
     return result
 
 
+
+def market_momentum_now(recent_market, final, base):
+    """Observe-only description of current price momentum for the dashboard.
+
+    This function is deliberately outside the trading decision path.  It turns
+    already-recorded M1/M15 structure and live direction fields into a compact
+    human-facing description; it never opens, blocks, resizes or closes trades.
+    """
+    m1 = list((recent_market or {}).get("m1") or [])[-5:]
+    m15 = list((recent_market or {}).get("m15") or [])[-3:]
+
+    def finite(row, key):
+        try:
+            value = float(row.get(key))
+            return value if math.isfinite(value) else None
+        except (TypeError, ValueError):
+            return None
+
+    drop = 0
+    rally = 0
+    drop_reasons = []
+    rally_reasons = []
+
+    usable_m1 = [r for r in m1 if all(finite(r, k) is not None for k in ("open", "high", "low", "close"))]
+    if usable_m1:
+        bearish = sum(1 for r in usable_m1 if finite(r, "close") < finite(r, "open"))
+        bullish = sum(1 for r in usable_m1 if finite(r, "close") > finite(r, "open"))
+        required = max(2, len(usable_m1) - 1)
+        if bearish >= required:
+            drop += 25
+            drop_reasons.append(f"{bearish}/{len(usable_m1)} کندل M1 نزولی")
+        if bullish >= required:
+            rally += 25
+            rally_reasons.append(f"{bullish}/{len(usable_m1)} کندل M1 صعودی")
+
+        lower_steps = sum(
+            1 for a, b in zip(usable_m1, usable_m1[1:])
+            if finite(b, "high") < finite(a, "high") and finite(b, "low") < finite(a, "low")
+        )
+        higher_steps = sum(
+            1 for a, b in zip(usable_m1, usable_m1[1:])
+            if finite(b, "high") > finite(a, "high") and finite(b, "low") > finite(a, "low")
+        )
+        structure_required = max(1, (len(usable_m1) - 1) // 2)
+        if lower_steps >= structure_required:
+            drop += 20
+            drop_reasons.append("Lower High / Lower Low در M1")
+        if higher_steps >= structure_required:
+            rally += 20
+            rally_reasons.append("Higher High / Higher Low در M1")
+
+        first_open = finite(usable_m1[0], "open")
+        last_close = finite(usable_m1[-1], "close")
+        total_range = sum(max(0.0, finite(r, "high") - finite(r, "low")) for r in usable_m1)
+        avg_range = total_range / len(usable_m1) if usable_m1 else 0.0
+        if avg_range > 0 and first_open is not None and last_close is not None:
+            normalized_move = (last_close - first_open) / avg_range
+            if normalized_move <= -1.0:
+                drop += 20
+                drop_reasons.append("شتاب نزولی کوتاه‌مدت")
+            elif normalized_move >= 1.0:
+                rally += 20
+                rally_reasons.append("شتاب صعودی کوتاه‌مدت")
+
+    usable_m15 = [r for r in m15 if all(finite(r, k) is not None for k in ("open", "close"))]
+    if usable_m15:
+        latest = usable_m15[-1]
+        if finite(latest, "close") < finite(latest, "open"):
+            drop += 10
+            drop_reasons.append("M15 نزولی")
+        elif finite(latest, "close") > finite(latest, "open"):
+            rally += 10
+            rally_reasons.append("M15 صعودی")
+
+    direction = str((final or {}).get("market_direction") or "").upper()
+    if direction == "SELL":
+        drop += 15
+        drop_reasons.append("Market Direction = SELL")
+    elif direction == "BUY":
+        rally += 15
+        rally_reasons.append("Market Direction = BUY")
+
+    micro_move = number((final or {}).get("market_direction_micro_move_atr"))
+    if micro_move is not None:
+        if micro_move <= -0.15:
+            drop += 10
+            drop_reasons.append("حرکت M1 نسبت به ATR منفی")
+        elif micro_move >= 0.15:
+            rally += 10
+            rally_reasons.append("حرکت M1 نسبت به ATR مثبت")
+
+    intrabar_direction = str((base or {}).get("intrabar_direction") or "").upper()
+    intrabar_confirmed = (base or {}).get("intrabar_confirmed") == 1
+    if intrabar_confirmed and intrabar_direction == "SELL":
+        drop += 10
+        drop_reasons.append("Intrabar SELL تأیید")
+    elif intrabar_confirmed and intrabar_direction == "BUY":
+        rally += 10
+        rally_reasons.append("Intrabar BUY تأیید")
+
+    drop = min(100, drop)
+    rally = min(100, rally)
+    if drop >= 70 and drop >= rally + 15:
+        state, label, direction_now, confidence = "strong_drop", "ریزش شدید", "SELL", drop
+        reasons = drop_reasons
+    elif drop >= 50 and drop >= rally + 10:
+        state, label, direction_now, confidence = "confirmed_drop", "ریزش تأییدشده", "SELL", drop
+        reasons = drop_reasons
+    elif drop >= 30 and drop > rally:
+        state, label, direction_now, confidence = "weak_drop", "فشار نزولی", "SELL", drop
+        reasons = drop_reasons
+    elif rally >= 70 and rally >= drop + 15:
+        state, label, direction_now, confidence = "strong_rally", "صعود شدید", "BUY", rally
+        reasons = rally_reasons
+    elif rally >= 50 and rally >= drop + 10:
+        state, label, direction_now, confidence = "confirmed_rally", "صعود تأییدشده", "BUY", rally
+        reasons = rally_reasons
+    elif rally >= 30 and rally > drop:
+        state, label, direction_now, confidence = "weak_rally", "فشار صعودی", "BUY", rally
+        reasons = rally_reasons
+    else:
+        state, label, direction_now, confidence = "mixed", "حرکت واضح نیست", "MIXED", max(drop, rally)
+        reasons = (drop_reasons if drop >= rally else rally_reasons)
+
+    return {
+        "state": state,
+        "label": label,
+        "direction": direction_now,
+        "confidence": confidence,
+        "drop_score": drop,
+        "rally_score": rally,
+        "reasons": reasons[:4],
+        "m1_bars_used": len(usable_m1),
+        "m15_bars_used": len(usable_m15),
+        "observe_only": True,
+        "affects_auto_trading": False,
+    }
+
 def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=None):
     now = time.time() if now is None else now
     diag, diag_error = read_diagnostic(diagnostic)
@@ -1175,6 +1313,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
         db, symbol, sample_key=sample.get("sample_key"),
         signal_bar_time=base.get("signal_bar_time"), quote_time=sample.get("quote_time")
     )
+    momentum_now = market_momentum_now(recent_market, final, base)
     warnings = [x for x in (diag_error, db_error) if x]
     warnings.extend(recent_market.get("warnings", []))
     if model_time["state"] != "fresh":
@@ -1204,7 +1343,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
             "ea_version": diag.get("EA version"), "nodes": nodes,
             "edges": [{"from": a, "to": b, "label": label} for a, b, label in edges],
             "timeline": timeline, "trades": outcomes, "model_handler_map": model_handler_map,
-            "recent_market": recent_market,
+            "recent_market": recent_market, "market_momentum_now": momentum_now,
             "dollar_readiness": readiness, "dashboard_opportunity_performance": dashboard_performance,
             "income_roadmap": roadmap, "warnings": warnings}
 
