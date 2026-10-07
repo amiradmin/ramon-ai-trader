@@ -5038,7 +5038,8 @@ void OnTimer()
       dashboard_command=ReadDashboardManualEntry(
          closed,dashboard_direction,dashboard_sample_key,
          dashboard_risk_distance,dashboard_target_distance,
-         dashboard_edge,dashboard_probability,dashboard_command_mode,dashboard_origin_sample_key,dashboard_command_reason
+         dashboard_edge,dashboard_probability,dashboard_command_mode,dashboard_origin_sample_key,
+         dashboard_entry_max_risk_usd,dashboard_command_reason
       );
       if(dashboard_command<0)
          Print("Ramon manual dashboard entry ignored: ",dashboard_command_reason);
