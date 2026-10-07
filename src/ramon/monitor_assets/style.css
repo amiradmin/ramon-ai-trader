@@ -781,3 +781,5 @@
   font:800 12px/1.4 monospace;
   color:var(--muted);
 }
+
+.auto-risk-button:disabled{opacity:.42;cursor:not-allowed;filter:grayscale(.35)}
