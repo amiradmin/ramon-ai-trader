@@ -654,11 +654,7 @@ function renderOpportunities(data){
 
 
     let recommendation="صبر کن",recClass="wait",simpleReason=blockers[0]||"هنوز زمان ورود تأیید نشده";
-    if(!row.position_open){
-      simpleReason=(simpleReason?simpleReason+" · ":"")+v3Guide+
-        (v3?.reversal_detected?" · برگشت کوتاه‌مدت ⚠":"")+
-        (v3?.acceleration==="increasing"?" · شتاب ↑":v3?.acceleration==="weakening"?" · شتاب ↓":"");
-    }
+
     if(row.position_open){
       if(["EXIT_NOW","LOSS_EXIT_NOW"].includes(row.chronos_exit_action)){
         recommendation="خارج شو";recClass="exit";simpleReason="Ramon خروج را بهتر از ادامه پوزیشن می‌داند";
@@ -677,6 +673,14 @@ function renderOpportunities(data){
       recommendation="فقط زیرنظر";recClass="watch";simpleReason=blockers[0]||"سیگنال متوسط است";
     }else{
       recommendation="نگیر";recClass="avoid";simpleReason=blockers[0]||"کیفیت کافی نیست";
+    }
+
+    if(!row.position_open){
+      const v3Extra=
+        v3Guide+
+        (v3?.reversal_detected?" · برگشت کوتاه‌مدت ⚠":"")+
+        (v3?.acceleration==="increasing"?" · شتاب ↑":v3?.acceleration==="weakening"?" · شتاب ↓":"");
+      simpleReason=(simpleReason?simpleReason+" · ":"")+v3Extra;
     }
 
     const directionFa=row.direction==="BUY"?"خرید (BUY)":row.direction==="SELL"?"فروش (SELL)":"صبر";
