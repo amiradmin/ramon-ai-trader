@@ -2061,8 +2061,8 @@ def queue_manual_entry(db, diagnostic, symbol, payload):
     signal_bar_time = int(payload.get("signal_bar_time", 0))
     recheck = bool(payload.get("recheck"))
     unlocked = bool(payload.get("manual_unlocked"))
-    entry_risk_cap = number(payload.get("risk_per_trade_usd"))
-    if entry_risk_cap is not None and not (0.01 <= entry_risk_cap <= 3.00):
+    entry_risk_budget = number(payload.get("risk_per_trade_usd"))
+    if entry_risk_budget is not None and not (0.01 <= entry_risk_budget <= 3.00):
         raise ValueError("ریسک واقعی این ورود باید بین 0.01 و 3.00 دلار باشد")
     if direction not in {"BUY", "SELL"} or signal_bar_time <= 0:
         raise ValueError("فرصت انتخاب‌شده نامعتبر است")
@@ -2139,7 +2139,7 @@ def queue_manual_entry(db, diagnostic, symbol, payload):
         f"{risk_distance:.10f}|{target_distance:.10f}|{edge:.10f}|"
         f"{probability_value:.10f}"
         + (f"|{mode}|{origin_sample_key}" if mode != "NORMAL" else f"|NORMAL|{sample_key}")
-        + f"|{float(entry_risk_cap or 0.0):.4f}"
+        + f"|{float(entry_risk_budget or 0.0):.4f}"
         + "\n"
     )
     with open(queue_path, "a", encoding="ascii", newline="") as out:
@@ -2153,7 +2153,7 @@ def queue_manual_entry(db, diagnostic, symbol, payload):
         "success_probability": probability,
         "mode": mode,
         "manual_unlocked": unlocked,
-        "risk_per_trade_usd": float(entry_risk_cap) if entry_risk_cap is not None else None,
+        "risk_per_trade_usd": float(entry_risk_budget) if entry_risk_budget is not None else None,
         "safety": "Analytical Ramon gates bypassed; hard broker/account/risk/quote safety remains active",
     }
 
