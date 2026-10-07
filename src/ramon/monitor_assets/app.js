@@ -243,21 +243,25 @@ function renderTradingGuidance(){
   const title=$("trade-guidance-title"),reason=$("trade-guidance-reason"),container=title?.parentElement;
   if(!title||!reason||!container)return;
   const value=chronosSlope;
-  const valid=value?.ready===true && value?.horizon_minutes===30 &&
+  const valid=value?.ready===true && [30,60].includes(value?.horizon_minutes) &&
     ["UP","DOWN","FLAT"].includes(value?.direction) &&
     typeof value.current_mid==="number" &&
     typeof value.forecast_step_1==="number" &&
     typeof value.forecast_step_2==="number";
-  let mode="wait",heading="صبر — پیش‌بینی ۳۰ دقیقه‌ای Chronos در دسترس نیست";
+  const horizon=value?.horizon_minutes===60?60:30;
+  let mode="wait",heading="صبر — پیش‌بینی Chronos در دسترس نیست";
   if(valid){
-    if(value.direction==="UP"){mode="buy";heading="تمایل به BUY — پیش‌بینی صعودی Chronos (+۳۰ دقیقه)";}
-    else if(value.direction==="DOWN"){mode="sell";heading="تمایل به SELL — پیش‌بینی نزولی Chronos (+۳۰ دقیقه)";}
+    if(value.direction==="UP"){mode="buy";heading="تمایل به BUY — پیش‌بینی صعودی Chronos (+"+horizon+" دقیقه)";}
+    else if(value.direction==="DOWN"){mode="sell";heading="تمایل به SELL — پیش‌بینی نزولی Chronos (+"+horizon+" دقیقه)";}
     else heading="صبر — پیش‌بینی Chronos خنثی است";
   }
   title.textContent=heading;
+  const extra=value?.horizon_minutes===60 && typeof value.forecast_step_3==="number" && typeof value.forecast_step_4==="number"
+    ?" · +۴۵ دقیقه: "+value.forecast_step_3.toFixed(2)+" · +۶۰ دقیقه: "+value.forecast_step_4.toFixed(2)
+    :"";
   reason.textContent=valid
     ?"قیمت فعلی: "+value.current_mid.toFixed(2)+" · +۱۵ دقیقه: "+value.forecast_step_1.toFixed(2)+
-     " · +۳۰ دقیقه: "+value.forecast_step_2.toFixed(2)+" · تازگی: "+(value.age_seconds??"—")+
+     " · +۳۰ دقیقه: "+value.forecast_step_2.toFixed(2)+extra+" · تازگی: "+(value.age_seconds??"—")+
      " ثانیه · فقط جهت احتمالی؛ برای ورود واقعی تأیید زمان‌بندی، اسپرد و ریسک لازم است."
     :"Bridge باید پیش‌بینی معتبر و تازه ارسال کند. هیچ سیگنال معامله‌ای از داده قدیمی صادر نمی‌شود.";
   container.className="trade-guidance "+mode;
