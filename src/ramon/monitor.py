@@ -249,7 +249,7 @@ def trade_trace(path, symbol, trade_key):
           {"ناهـنجاری": moment.get("moment_anomaly_label"), "نسبت ناهنجاری": moment.get("moment_anomaly_ratio"), "احساس خبر": finbert.get("finbert_sentiment_label"), "خبر": section("news_snapshot").get("news_event_title"), "برچسب رژیم": final.get("regime_label", final.get("shadow_regime_label")), "نقش‌ها": "LIVE" if final.get("role_shadow") == 0 else "legacy" if final.get("role_shadow") == 1 else None})
     stage("risk", "حجم و ریسک ورود", "observed" if trade.get("initial_risk_units") is not None else "unknown",
           "مقادیر ثبت‌شدهٔ معامله؛ تأیید جداگانهٔ تمام مجوزها و قفل‌ها موجود نیست",
-          {"حجم برنامه‌ریزی‌شده": trade.get("planned_volume"), "بودجهٔ ریسک، واحد حساب": trade.get("risk_budget_units"), "ریسک اولیه، واحد حساب": trade.get("initial_risk_units"), "سقف ریسک، دلار": trade.get("risk_per_trade_usd"), "استفاده از لات حداقل": trade.get("min_lot_override_used"), "فاصلهٔ حد ضرر": base.get("stop_distance"), "فاصلهٔ هدف": base.get("target_distance")})
+          {"حجم برنامه‌ریزی‌شده": trade.get("planned_volume"), "بودجهٔ ریسک، واحد حساب": trade.get("risk_budget_units"), "ریسک اولیه، واحد حساب": trade.get("initial_risk_units"), "سقف ریسک، دلار": trade.get("max_executable_risk_usd"), "استفاده از لات حداقل": trade.get("min_lot_override_used"), "فاصلهٔ حد ضرر": base.get("stop_distance"), "فاصلهٔ هدف": base.get("target_distance")})
     stage("execution", "اجرای واقعی سفارش", "observed", "ورود با تاریخچهٔ معامله تأیید شده است",
           {"جهت": trade.get("direction"), "قیمت اجرای واقعی": trade.get("actual_fill_price"), "نسخهٔ ثبت‌شده هنگام ورود": trade.get("entry_ea_version"), "نقش": trade.get("trade_role")})
     stage("exit", "خروج و نتیجه", "observed", trade.get("exit_detail") or trade.get("exit_reason") or "علت خروج ثبت نشده",
@@ -1530,7 +1530,7 @@ def control_state(diagnostic):
 
 def save_control(diagnostic, value):
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0.01 <= value <= 3.00:
-        raise ValueError("مقدار باید عددی بین ۰٫۰۱ و ۰٫۵۰ دلار باشد")
+        raise ValueError("مقدار باید عددی بین ۰٫۰۱ و ۳٫۰۰ دلار باشد")
     if diagnostic is None:
         raise ValueError("مسیر فایل اکسپرت در دسترس نیست")
     path = Path(diagnostic).with_name("Ramon_Control.txt")
