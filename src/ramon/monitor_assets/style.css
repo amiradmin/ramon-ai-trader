@@ -688,3 +688,17 @@
   padding-right:4px;
   font-size:9px;
 }
+
+
+/* Live P/L emphasis for the trade-status column. */
+.simple-trade-table .trade-position-state.profit-positive{
+  color:var(--green);
+  font-weight:900;
+}
+.simple-trade-table .trade-position-state.profit-negative{
+  color:var(--red);
+  font-weight:900;
+}
+.simple-trade-table .trade-position-state.profit-flat{
+  color:var(--text);
+}
