@@ -1,5 +1,5 @@
 #property copyright "Ramon AI Trader"
-#property version "1.038"
+#property version "1.039"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -206,13 +206,8 @@ void DrawShadowForecast()
 
    for(int j=1;j<=4;j++)
    {
-      string point=ShadowDrawPrefix+"POINT"+IntegerToString(j);
-      if(ObjectFind(0,point)<0) ObjectCreate(0,point,OBJ_ARROW,0,times[j],prices[j]);
-      else ObjectMove(0,point,0,times[j],prices[j]);
-      ObjectSetInteger(0,point,OBJPROP_ARROWCODE,108);
-      ObjectSetInteger(0,point,OBJPROP_WIDTH,1);
-      ObjectSetInteger(0,point,OBJPROP_COLOR,shadow_color);
-      ObjectSetInteger(0,point,OBJPROP_SELECTABLE,false);
+      // Keep the forecast path unchanged; endpoint circles are visual-only and removed.
+      ObjectDelete(0,ShadowDrawPrefix+"POINT"+IntegerToString(j));
 
       string label=ShadowDrawPrefix+"LABEL"+IntegerToString(j);
       if(ShowLabel)
@@ -267,14 +262,8 @@ void DrawForecast()
 
    for(int j=1;j<=4;j++)
    {
-      string point=Prefix+"POINT"+IntegerToString(j);
-      if(ObjectFind(0,point)<0) ObjectCreate(0,point,OBJ_ARROW,0,times[j],prices[j]);
-      else ObjectMove(0,point,0,times[j],prices[j]);
-      ObjectSetInteger(0,point,OBJPROP_ARROWCODE,159);
-      ObjectSetInteger(0,point,OBJPROP_WIDTH,2);
-      color endpoint_color=(j==1 ? clrAqua : j==2 ? clrGold : j==3 ? clrMagenta : clrDeepSkyBlue);
-      ObjectSetInteger(0,point,OBJPROP_COLOR,endpoint_color);
-      ObjectSetInteger(0,point,OBJPROP_SELECTABLE,false);
+      // Preserve calibrated +15/+30/+45/+60 path and labels; remove only endpoint circles.
+      ObjectDelete(0,Prefix+"POINT"+IntegerToString(j));
 
       string label=Prefix+"STEP_LABEL"+IntegerToString(j);
       if(ShowLabel)
