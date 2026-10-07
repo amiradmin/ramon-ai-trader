@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import deque
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -12,6 +13,7 @@ import re
 import sqlite3
 import time
 import tempfile
+from threading import Lock
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
@@ -19,6 +21,8 @@ from .opportunities import read_opportunities, _live_direction
 
 
 ASSETS = Path(__file__).with_name("monitor_assets")
+_LIVE_MOMENTUM_LOCK = Lock()
+_LIVE_MOMENTUM_SAMPLES = {}
 REASONS = {
     "confirmed_countertrend_reversal": "برگشت خلاف روند با تأیید مدل و حرکت کوتاه‌مدت",
     "reversal_sample_not_saved": "تصمیم برگشت ثبت نشده؛ ورود متوقف است",
@@ -1425,6 +1429,213 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
             "income_roadmap": roadmap, "warnings": warnings}
 
 
+def _live_quote_from_diagnostic(diag):
+    raw = str((diag or {}).get("Bid") or "")
+    bid = number(raw.split()[0]) if raw else None
+    ask = number(match(raw, String.raw\`Ask:\\s*([0-9.]+)\`))
+    spread_points = number(match(raw, String.raw\`Spread\\(points\\):\\s*([0-9.]+)\`))
+    captured = number((diag or {}).get("captured_epoch"))
+    if bid is None or ask is None or ask <= bid or captured is None:
+        return None
+    return {
+        "captured": captured,
+        "bid": bid,
+        "ask": ask,
+        "mid": (bid + ask) / 2.0,
+        "spread_points": spread_points,
+    }
+
+
+def _latest_live_decision_context(path, symbol):
+    p = Path(path).expanduser().resolve()
+    if not p.is_file():
+        return {}, {}
+    try:
+        with sqlite3.connect(p.as_uri() + "?mode=ro", uri=True, timeout=.15) as con:
+            con.row_factory = sqlite3.Row
+            con.execute("PRAGMA query_only=ON")
+            row = con.execute(
+                "SELECT model_metadata FROM decision_samples WHERE symbol=? ORDER BY id DESC LIMIT 1",
+                (symbol,),
+            ).fetchone()
+        metadata = object_json(row["model_metadata"]) if row else {}
+        audit = metadata.get("decision_audit")
+        audit = audit if isinstance(audit, dict) else {}
+        base = audit.get("base") if isinstance(audit.get("base"), dict) else {}
+        final = audit.get("final") if isinstance(audit.get("final"), dict) else {}
+        return base, final
+    except sqlite3.Error:
+        return {}, {}
+
+
+def live_momentum_v3(db, diagnostic, symbol, now=None):
+    """Read-only dashboard momentum; never participates in Ramon execution."""
+    now = time.time() if now is None else float(now)
+    diag, diag_error = read_diagnostic(diagnostic)
+    quote = _live_quote_from_diagnostic(diag)
+    base, final = _latest_live_decision_context(db, symbol)
+    recent = recent_market_context(db, symbol)
+    core = market_momentum_now(recent, final, base)
+
+    cache_key = str(Path(diagnostic).expanduser().resolve()) if diagnostic is not None else "none"
+    samples = []
+    if quote is not None:
+        with _LIVE_MOMENTUM_LOCK:
+            bucket = _LIVE_MOMENTUM_SAMPLES.setdefault(cache_key, deque(maxlen=180))
+            if not bucket or bucket[-1]["captured"] != quote["captured"] or bucket[-1]["mid"] != quote["mid"]:
+                bucket.append(dict(quote))
+            while bucket and quote["captured"] - bucket[0]["captured"] > 180:
+                bucket.popleft()
+            samples = list(bucket)
+
+    atr = number(base.get("atr"))
+    if atr is None or atr <= 0:
+        ranges = []
+        for row in list((recent or {}).get("m1") or [])[-10:]:
+            high, low = number(row.get("high")), number(row.get("low"))
+            if high is not None and low is not None and high > low:
+                ranges.append(high - low)
+        atr = (sum(ranges) / len(ranges)) if ranges else None
+
+    def delta_for(seconds):
+        if len(samples) < 2 or atr is None or atr <= 0:
+            return None
+        latest = samples[-1]
+        target = latest["captured"] - seconds
+        candidate = min(samples[:-1], key=lambda row: abs(row["captured"] - target))
+        span = latest["captured"] - candidate["captured"]
+        if span < max(2.0, seconds * 0.55):
+            return None
+        change = latest["mid"] - candidate["mid"]
+        return {
+            "seconds": int(round(span)),
+            "price": round(change, 5),
+            "atr": round(change / atr, 4),
+        }
+
+    windows = {str(seconds): delta_for(seconds) for seconds in (5, 15, 30, 60)}
+    available = [row for row in windows.values() if row is not None]
+    weights = {5: 0.42, 15: 0.28, 30: 0.18, 60: 0.12}
+    weighted = sum(weights[int(key)] * row["atr"] for key, row in windows.items() if row is not None)
+    weight_total = sum(weights[int(key)] for key, row in windows.items() if row is not None)
+    weighted = weighted / weight_total if weight_total else 0.0
+
+    micro_direction = "MIXED"
+    if weighted >= 0.025:
+        micro_direction = "BUY"
+    elif weighted <= -0.025:
+        micro_direction = "SELL"
+
+    agreement = 0
+    for row in available:
+        if micro_direction == "BUY" and row["atr"] > 0:
+            agreement += 1
+        elif micro_direction == "SELL" and row["atr"] < 0:
+            agreement += 1
+    agreement_ratio = agreement / len(available) if available else 0.0
+    micro_confidence = min(100.0, abs(weighted) / 0.30 * 100.0)
+    micro_confidence *= (0.55 + 0.45 * agreement_ratio) if available else 0.0
+
+    core_direction = str(core.get("direction") or "MIXED")
+    core_score = float(number(core.get("score")) or 0.0)
+    if micro_direction in {"BUY", "SELL"}:
+        if core_direction == micro_direction:
+            score = min(100.0, 0.65 * micro_confidence + 0.35 * core_score + 8.0)
+        elif core_direction in {"BUY", "SELL"}:
+            score = max(0.0, 0.70 * micro_confidence + 0.30 * core_score - 15.0)
+        else:
+            score = 0.75 * micro_confidence + 0.25 * core_score
+        direction = micro_direction
+    else:
+        direction = core_direction
+        score = core_score * 0.72
+
+    d5, d15, d30, d60 = (windows[str(x)] for x in (5, 15, 30, 60))
+    fast_speed = abs(d5["atr"]) / max(1, d5["seconds"]) if d5 else None
+    slow_speed = abs(d30["atr"]) / max(1, d30["seconds"]) if d30 else None
+    acceleration = "steady"
+    if fast_speed is not None and slow_speed is not None and slow_speed > 1e-9:
+        ratio = fast_speed / slow_speed
+        if ratio >= 1.45:
+            acceleration = "increasing"
+        elif ratio <= 0.65:
+            acceleration = "weakening"
+
+    reversal = False
+    if d15 and d60 and abs(d15["atr"]) >= 0.04 and abs(d60["atr"]) >= 0.06:
+        reversal = (d15["atr"] > 0 > d60["atr"]) or (d15["atr"] < 0 < d60["atr"])
+
+    source_age = None
+    if quote is not None:
+        source_age = round(max(0.0, now - quote["captured"]), 1)
+    source_state = (
+        "fresh" if source_age is not None and source_age <= 12
+        else "stale" if source_age is not None
+        else "unknown"
+    )
+
+    if direction == "BUY":
+        label = "صعود لحظه‌ای"
+        if score >= 75:
+            label = "صعود لحظه‌ای قوی"
+    elif direction == "SELL":
+        label = "ریزش لحظه‌ای"
+        if score >= 75:
+            label = "ریزش لحظه‌ای قوی"
+    else:
+        label = "حرکت لحظه‌ای نامشخص"
+    if reversal and direction in {"BUY", "SELL"}:
+        label = ("برگشت صعودی کوتاه‌مدت" if direction == "BUY" else "برگشت نزولی کوتاه‌مدت")
+
+    confirmations = sum(
+        1 for row in available
+        if (direction == "BUY" and row["atr"] > 0) or (direction == "SELL" and row["atr"] < 0)
+    )
+    warnings = []
+    if diag_error:
+        warnings.append(diag_error)
+    if source_state != "fresh":
+        warnings.append("منبع Bid/Ask تازه نیست؛ نتیجه لحظه‌ای را قطعی تلقی نکن")
+    if len(available) < 2:
+        warnings.append("تاریخچه کوتاه‌مدت هنوز برای همه بازه‌های زمانی کامل نشده است")
+
+    result = dict(core)
+    result.update({
+        "version": "v3",
+        "state": (
+            "strong_rally" if direction == "BUY" and score >= 75 else
+            "confirmed_rally" if direction == "BUY" and score >= 52 else
+            "weak_rally" if direction == "BUY" else
+            "strong_drop" if direction == "SELL" and score >= 75 else
+            "confirmed_drop" if direction == "SELL" and score >= 52 else
+            "weak_drop" if direction == "SELL" else "mixed"
+        ),
+        "label": label,
+        "direction": direction,
+        "score": round(score, 1),
+        "micro_score": round(micro_confidence, 1),
+        "micro_weighted_atr": round(weighted, 4),
+        "confirmation_count": confirmations,
+        "confirmation_total": len(available),
+        "reversal_detected": reversal,
+        "acceleration": acceleration,
+        "windows": windows,
+        "bid": quote["bid"] if quote else None,
+        "ask": quote["ask"] if quote else None,
+        "mid": quote["mid"] if quote else None,
+        "spread_points_live": quote["spread_points"] if quote else None,
+        "source_age_seconds": source_age,
+        "source_state": source_state,
+        "source_cadence": str(diag.get("Snapshot cadence") or "unknown"),
+        "generated_at": utc_time(now),
+        "warnings": warnings,
+        "observe_only": True,
+        "affects_auto_trading": False,
+        "automatic_ramon_untouched": True,
+    })
+    return result
+
+
 def analysis_bundle(snapshot: dict, selected_stage: str = "") -> str:
     node_numbers = {
         "market": "01", "service": "02", "forecast": "03", "timing": "04",
@@ -2289,6 +2500,9 @@ def handler_for(db, diagnostic, symbol, health_url):
                 self.reply(json.dumps(forecast, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
             elif route == "/api/opportunities":
                 self.reply(json.dumps(opportunities_with_execution_state(db, diagnostic, symbol, health_url), ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
+            elif route == "/api/live-momentum":
+                data = live_momentum_v3(db, diagnostic, symbol)
+                self.reply(json.dumps(data, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
             elif route == "/api/snapshot":
                 health = None
                 try:
