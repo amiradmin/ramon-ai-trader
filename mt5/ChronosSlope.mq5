@@ -1,5 +1,5 @@
 #property copyright "Ramon AI Trader"
-#property version "1.039"
+#property version "1.040"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -12,6 +12,8 @@ input bool ShowLabel = false; // keep chart clean; endpoint labels are optional
 input int MaxDataAgeSeconds = 120;
 input bool ShowShadowChronos2 = true; // Compare isolated multivariate/covariate Chronos-2 path
 input int ShadowLineWidth = 2;
+input int ShadowLabelOffsetPoints = 180; // visual-only vertical spacing for C2-MV labels
+input bool ShadowShowAllLabels = true;
 
 const string Prefix="CHRONOS_SLOPE_";
 double LastCurrentMid=0.0,LastForecastMedian=0.0,LastStep15=0.0,LastStep30=0.0,LastStep45=0.0,LastStep60=0.0;
@@ -112,6 +114,32 @@ bool LoadForecast()
    return true;
 }
 
+color ShadowStepColor(const int step_index)
+{
+   switch(step_index)
+   {
+      case 1: return clrLimeGreen;
+      case 2: return clrGold;
+      case 3: return clrMagenta;
+      case 4: return clrDeepSkyBlue;
+   }
+   return clrSilver;
+}
+
+double ShadowLabelPrice(const double price,const int step_index)
+{
+   double point=SymbolInfoDouble(_Symbol,SYMBOL_POINT);
+   double offset=ShadowLabelOffsetPoints*point;
+   switch(step_index)
+   {
+      case 1: return price+offset*1.0;
+      case 2: return price+offset*1.4;
+      case 3: return price+offset*1.8;
+      case 4: return price+offset*2.2;
+   }
+   return price+offset;
+}
+
 bool LoadShadowForecast()
 {
    if(!ShowShadowChronos2)
@@ -184,10 +212,12 @@ void DrawShadowForecast()
    prices[3]=ShadowStep45;
    prices[4]=ShadowStep60;
 
-   color shadow_color=(ShadowDirection>0 ? clrMediumSeaGreen : ShadowDirection<0 ? clrOrangeRed : clrSilver);
+   // Visual-only comparison path: preserve all C2-MV forecast values and timing.
+   // Each horizon segment gets its own color for easier comparison with Chronos.
    for(int i=0;i<4;i++)
    {
       string name=ShadowDrawPrefix+"SEG"+IntegerToString(i+1);
+      color seg_color=ShadowStepColor(i+1);
       if(ObjectFind(0,name)<0)
          ObjectCreate(0,name,OBJ_TREND,0,times[i],prices[i],times[i+1],prices[i+1]);
       else
@@ -197,7 +227,7 @@ void DrawShadowForecast()
       }
       ObjectSetInteger(0,name,OBJPROP_RAY_RIGHT,false);
       ObjectSetInteger(0,name,OBJPROP_RAY_LEFT,false);
-      ObjectSetInteger(0,name,OBJPROP_COLOR,shadow_color);
+      ObjectSetInteger(0,name,OBJPROP_COLOR,seg_color);
       ObjectSetInteger(0,name,OBJPROP_STYLE,STYLE_DASH);
       ObjectSetInteger(0,name,OBJPROP_WIDTH,MathMax(1,ShadowLineWidth));
       ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
@@ -206,22 +236,31 @@ void DrawShadowForecast()
 
    for(int j=1;j<=4;j++)
    {
-      // Keep the forecast path unchanged; endpoint circles are visual-only and removed.
+      // Endpoint circles stay hidden; only the path and optional labels are shown.
       ObjectDelete(0,ShadowDrawPrefix+"POINT"+IntegerToString(j));
 
       string label=ShadowDrawPrefix+"LABEL"+IntegerToString(j);
-      if(ShowLabel)
+      if(ShowLabel && ShadowShowAllLabels)
       {
-         if(ObjectFind(0,label)<0) ObjectCreate(0,label,OBJ_TEXT,0,times[j],prices[j]);
-         else ObjectMove(0,label,0,times[j],prices[j]);
+         double label_price=ShadowLabelPrice(prices[j],j);
+         if(ObjectFind(0,label)<0)
+            ObjectCreate(0,label,OBJ_TEXT,0,times[j],label_price);
+         else
+            ObjectMove(0,label,0,times[j],label_price);
+
          ObjectSetString(0,label,OBJPROP_TEXT,
             "C2-MV +"+IntegerToString(j*15)+"m "+DoubleToString(prices[j],_Digits));
-         ObjectSetInteger(0,label,OBJPROP_COLOR,shadow_color);
+         ObjectSetInteger(0,label,OBJPROP_COLOR,ShadowStepColor(j));
          ObjectSetInteger(0,label,OBJPROP_FONTSIZE,8);
-         ObjectSetInteger(0,label,OBJPROP_ANCHOR,ANCHOR_LEFT_LOWER);
+         ObjectSetInteger(0,label,OBJPROP_ANCHOR,
+            j==1 ? ANCHOR_LEFT_LOWER :
+            j==2 ? ANCHOR_RIGHT_LOWER :
+            j==3 ? ANCHOR_LEFT_LOWER :
+                   ANCHOR_RIGHT_LOWER);
          ObjectSetInteger(0,label,OBJPROP_SELECTABLE,false);
       }
-      else ObjectDelete(0,label);
+      else
+         ObjectDelete(0,label);
    }
 }
 
