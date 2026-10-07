@@ -5,10 +5,10 @@ let dirty = false;
 const dollars = value => value == null ? 'نامشخص' : `$${Number(value).toFixed(2)}`;
 function preview() {
   const value = Number(el('risk').value);
-  const valid = el('risk').value !== '' && Number.isFinite(value) && value >= .01 && value <= .50;
+  const valid = el('risk').value !== '' && Number.isFinite(value) && value >= .01 && value <= 3.00;
   el('save').disabled = !valid || !state?.writable;
   const base = state?.requested ?? state?.observed ?? .35;
-  el('impact').textContent = !valid ? 'مقدار باید بین ۰٫۰۱ و ۰٫۵۰ دلار باشد.' :
+  el('impact').textContent = !valid ? 'مقدار باید بین ۰٫۰۱ و ۳٫۰۰ دلار باشد.' :
     value === base ? 'سقف انتخاب‌شده با مقدار فعلی برابر است.' :
     `${dollars(base)} ← ${dollars(value)}: ${value > base ? 'سقف بالاتر می‌رود؛ ورودهای بیشتری با لات حداقل ممکن است مجاز شوند و ریسک مجاز هر ورود افزایش می‌یابد.' : 'سقف پایین‌تر می‌آید؛ بعضی ورودها رد می‌شوند یا حجم کمتری می‌گیرند.'} این تغییر تضمین نمی‌کند معامله‌ای انجام شود.`;
 }
