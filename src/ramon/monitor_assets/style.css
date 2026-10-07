@@ -544,3 +544,37 @@
   padding:3px 5px;
   font:700 9px/1.1 monospace;
 }
+
+
+/* Observe-only live momentum banner.  This is presentation only. */
+.market-momentum-now{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin:8px 0 6px;
+  padding:7px 10px;
+  border:1px solid var(--border);
+  border-radius:8px;
+  background:#101925;
+  font-size:11px;
+  line-height:1.35;
+}
+.market-momentum-now strong{font-size:12px;white-space:nowrap}
+.market-momentum-now span{color:var(--muted);text-align:right}
+.market-momentum-now.strong_drop,
+.market-momentum-now.confirmed_drop{border-color:#75434a;background:#3e272e55}
+.market-momentum-now.weak_drop{border-color:#6d5338;background:#34291f55}
+.market-momentum-now.strong_rally,
+.market-momentum-now.confirmed_rally{border-color:#3f7565;background:#173a3255}
+.market-momentum-now.weak_rally{border-color:#496b63;background:#18332f44}
+.market-momentum-now.mixed{border-color:#46566d;background:#141e2c}
+.market-momentum-now.strong_drop strong,
+.market-momentum-now.confirmed_drop strong{color:var(--red)}
+.market-momentum-now.strong_rally strong,
+.market-momentum-now.confirmed_rally strong{color:var(--green)}
+.market-momentum-now.weak_drop strong,
+.market-momentum-now.weak_rally strong{color:var(--amber)}
+@media(max-width:900px){
+  .market-momentum-now{align-items:flex-start;flex-direction:column}
+}
