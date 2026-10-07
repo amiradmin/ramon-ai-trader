@@ -478,7 +478,11 @@ function renderOpportunities(data){
       {text:directionFa,cls:"trade-direction "+(row.direction==="BUY"?"buy":"sell"),dir:"ltr"},
       {text:exitAdvice,cls:"trade-exit-advice",dir:"ltr"},
       {text:simpleReason,cls:"trade-simple-reason",extra:technical},
-      {text:positionText,cls:"trade-position-state"},
+      {text:positionText,cls:"trade-position-state "+(
+        row.position_open && typeof row.live_profit_units==="number"
+          ? (row.live_profit_units>0?"profit-positive":row.live_profit_units<0?"profit-negative":"profit-flat")
+          : "profit-flat"
+      )},
       {text:recommendation,cls:"trade-recommendation "+recClass},
       {text:confidenceText,cls:"trade-confidence",dir:"ltr"}
     ];
