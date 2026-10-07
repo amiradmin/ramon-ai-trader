@@ -256,12 +256,14 @@ function renderTradingGuidance(){
     else heading="صبر — پیش‌بینی Chronos خنثی است";
   }
   title.textContent=heading;
+  const conf=v=>typeof v==="number"&&Number.isFinite(v)?" ("+Math.round(v*100)+"٪)":"";
   const extra=value?.horizon_minutes===60 && typeof value.forecast_step_3==="number" && typeof value.forecast_step_4==="number"
-    ?" · +۴۵ دقیقه: "+value.forecast_step_3.toFixed(2)+" · +۶۰ دقیقه: "+value.forecast_step_4.toFixed(2)
+    ?" · +۴۵ دقیقه"+conf(value.forecast_step_confidence_3)+": "+value.forecast_step_3.toFixed(2)+
+     " · +۶۰ دقیقه"+conf(value.forecast_step_confidence_4)+": "+value.forecast_step_4.toFixed(2)
     :"";
   reason.textContent=valid
-    ?"قیمت فعلی: "+value.current_mid.toFixed(2)+" · +۱۵ دقیقه: "+value.forecast_step_1.toFixed(2)+
-     " · +۳۰ دقیقه: "+value.forecast_step_2.toFixed(2)+extra+" · تازگی: "+(value.age_seconds??"—")+
+    ?"قیمت فعلی: "+value.current_mid.toFixed(2)+" · +۱۵ دقیقه"+conf(value.forecast_step_confidence_1)+": "+value.forecast_step_1.toFixed(2)+
+     " · +۳۰ دقیقه"+conf(value.forecast_step_confidence_2)+": "+value.forecast_step_2.toFixed(2)+extra+" · تازگی: "+(value.age_seconds??"—")+
      " ثانیه · فقط جهت احتمالی؛ برای ورود واقعی تأیید زمان‌بندی، اسپرد و ریسک لازم است."
     :"Bridge باید پیش‌بینی معتبر و تازه ارسال کند. هیچ سیگنال معامله‌ای از داده قدیمی صادر نمی‌شود.";
   container.className="trade-guidance "+mode;
