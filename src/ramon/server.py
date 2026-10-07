@@ -489,7 +489,15 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 if self.path == "/forecast-only":
                     market = Market.from_dict(payload)
                     quote_time = int(payload["quote_time"]) if "quote_time" in payload else None
-                    market.validate_quote_context(quote_time)
+                    # Display-only ChronosSlope intentionally includes the currently
+                    # forming M15 bar so the visual slope can adapt intrabar.  The
+                    # trading /decision path keeps the stricter completed-bar
+                    # validation unchanged.
+                    if quote_time is not None:
+                        last_bar_time = int(market.bars[-1].time)
+                        forming_bar_ok = last_bar_time <= quote_time <= last_bar_time + 930
+                        if not forming_bar_ok:
+                            market.validate_quote_context(quote_time)
                     # Display-only horizon override; Ramon trading horizon is unchanged.
                     horizon = int(payload.get("forecast_horizon_bars", settings.horizon))
                     if horizon < 1 or horizon > 16:
