@@ -4,7 +4,7 @@ const labels = {pass:"فعال/معتبر",blocked:"مسدود",active:"پوزی
 const coords = {market:[35,28],service:[280,28],forecast:[525,28],models:[280,218],timing:[770,28],extension:[770,218],edge:[770,408],strength:[525,408],market_direction:[280,408],entry_timing:[35,408],base:[280,598],range:[35,598],decision:[525,598],news:[770,598],account:[770,798],limits:[525,798],risk:[280,798],order:[35,798],position:[35,1018]};
 
 const marketStates={TREND_UP:"روند صعودی",TREND_DOWN:"روند نزولی",PULLBACK_UP:"پولبک در روند صعودی",PULLBACK_DOWN:"پولبک در روند نزولی",RANGE_LOW:"لبهٔ پایین رنج",RANGE_HIGH:"لبهٔ بالای رنج",RANGE_MIDDLE:"وسط رنج",BREAKOUT_UP:"شکست صعودی",BREAKOUT_DOWN:"شکست نزولی",BREAKOUT_RETEST_UP:"آزمون مجدد شکست صعودی",BREAKOUT_RETEST_DOWN:"آزمون مجدد شکست نزولی",FALSE_BREAKOUT_UP:"شکست کاذب سقف",FALSE_BREAKOUT_DOWN:"شکست کاذب کف",REGIME_TRANSITION:"تغییر رژیم",PRICE_GAP:"جهش قیمت",VOLATILITY_SHOCK:"شوک نوسان",LOW_LIQUIDITY:"اسپرد زیاد نسبت به نوسان",FLAT_MARKET:"بازار تخت",DISORDERLY_MARKET:"بازار نامنظم",VOLATILITY_COMPRESSION:"فشردگی نوسان",CONFLICTING_STRUCTURE:"ساختارهای متعارض",UNCERTAIN:"نامشخص"};
-let snapshot = null, liveMomentum = null, selected = "decision", lastKey = null, busy = false, timer = null, zoomed = false, overrideBusy = false, liveMomentumBusy = false;
+let snapshot = null, selected = "decision", lastKey = null, busy = false, timer = null, zoomed = false, overrideBusy = false;
 const overrideStages = new Set(["timing","extension","edge","strength","market_direction","entry_timing","base","decision","range"]);
 const timeFormat = new Intl.DateTimeFormat("fa-IR", {timeZone:"Asia/Tehran", hour:"2-digit",minute:"2-digit",second:"2-digit"});
 const dateFormat = new Intl.DateTimeFormat("fa-IR", {timeZone:"Asia/Tehran", year:"numeric",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit",second:"2-digit"});
@@ -458,56 +458,36 @@ async function refreshChronosSlope(){
 function renderMarketMomentumNow(){
   const box=$("market-momentum-now"),title=$("market-momentum-title"),reason=$("market-momentum-reason");
   if(!box||!title||!reason)return;
-  const m=liveMomentum?.ready?liveMomentum:snapshot?.market_momentum_now;
+  const m=snapshot?.market_momentum_now;
   if(!m){
     box.className="market-momentum-now mixed";
     title.textContent="حرکت لحظه‌ای بازار: داده کافی نیست";
-    reason.textContent="Observe-only — فقط راهنمای تصمیم دستی است.";
-    return;
-  }
-  if(m.version==="v3"){
-    const score=Number.isFinite(Number(m.score))?Math.round(Number(m.score)):0;
-    const confidence=Number.isFinite(Number(m.confidence))?Math.round(Number(m.confidence)):0;
-    const accel=m.acceleration==="increasing"?"↑ شتاب بیشتر":m.acceleration==="weakening"?"↓ شتاب کمتر":"→ شتاب پایدار";
-    const direction=m.direction==="BUY"?"BUY صعود":m.direction==="SELL"?"SELL نزول":"MIXED نامشخص";
-    const w=sec=>{
-      const row=m.windows?.[String(sec)];
-      if(!row||row.spread_units==null)return sec+"s —";
-      const v=Number(row.spread_units);
-      return sec+"s "+(v>0?"+":"")+v.toFixed(2)+"×spread";
-    };
-    box.className="market-momentum-now "+(m.direction==="BUY"?"confirmed_rally":m.direction==="SELL"?"confirmed_drop":"mixed");
-    title.textContent="حرکت لحظه‌ای V3: "+direction+" · "+score+"/100 · "+accel;
-    reason.textContent=
-      [5,15,30,60].map(w).join(" | ")+
-      " · اطمینان داده "+confidence+"%"+
-      (m.reversal_detected?" · ⚠ برگشت کوتاه‌مدت":"")+
-      " · سن داده "+(m.source_age_seconds==null?"—":Number(m.source_age_seconds).toFixed(1)+"s")+
-      " · فقط راهنما؛ روی Ramon خودکار و مجوز ورود اثر ندارد.";
+    reason.textContent="Observe-only — روی ورود خودکار Ramon اثری ندارد.";
     return;
   }
   const score=Number.isFinite(Number(m.score))?Math.round(Number(m.score)):0;
+  const drop=Number.isFinite(Number(m.drop_score))?Math.round(Number(m.drop_score)):0;
+  const rally=Number.isFinite(Number(m.rally_score))?Math.round(Number(m.rally_score)):0;
+  const chronos=chronosSlope?.ready===true&&["UP","DOWN","FLAT"].includes(chronosSlope?.direction)?chronosSlope.direction:null;
+  const agrees=(m.direction==="SELL"&&chronos==="DOWN")||(m.direction==="BUY"&&chronos==="UP");
+  const disagrees=(m.direction==="SELL"&&chronos==="UP")||(m.direction==="BUY"&&chronos==="DOWN");
+  const accel=m.acceleration==="increasing"?"↑ شتاب بیشتر":m.acceleration==="weakening"?"↓ شتاب کمتر":"→ شتاب پایدار";
+  const liquidity={normal:"نقدشوندگی نرمال",elevated:"اسپرد بالاتر",wide:"اسپرد زیاد",unknown:"کیفیت اسپرد نامشخص"}[m.liquidity]||"";
+  const m1=m.m1_score==null?"—":Math.round(Number(m.m1_score));
+  const m5=m.m5_score==null?"—":Math.round(Number(m.m5_score));
+  const m15=m.m15_score==null?"—":Math.round(Number(m.m15_score));
+  const quality=m.data_quality==null?"—":Math.round(Number(m.data_quality));
   box.className="market-momentum-now "+(m.state||"mixed");
-  title.textContent="حرکت لحظه‌ای V2: "+(m.label||"نامشخص")+" · "+score+"/100";
-  reason.textContent="M1 "+(m.m1_score??"—")+" · M5 "+(m.m5_score??"—")+" · M15 "+(m.m15_score??"—")+" · Observe-only.";
-}
-
-async function refreshLiveMomentum(){
-  if(liveMomentumBusy)return;
-  liveMomentumBusy=true;
-  const controller=new AbortController();
-  const timeout=setTimeout(()=>controller.abort(),1500);
-  try{
-    const response=await fetch("/api/live-momentum",{cache:"no-store",signal:controller.signal});
-    if(!response.ok)throw Error("HTTP "+response.status);
-    liveMomentum=await response.json();
-    renderMarketMomentumNow();
-  }catch{
-    if(liveMomentum)liveMomentum.source_state="stale";
-  }finally{
-    clearTimeout(timeout);
-    liveMomentumBusy=false;
-  }
+  title.textContent="حرکت لحظه‌ای V2: "+(m.label||"نامشخص")+" · "+score+"/100 · "+accel;
+  const reasons=Array.isArray(m.reasons)&&m.reasons.length?m.reasons.join(" + "):"نشانه کافی ثبت نشده";
+  const chronosText=chronos?(" · Chronos "+chronos+(agrees?" هم‌جهت ✓":disagrees?" مخالف ⚠":"")):"";
+  reason.textContent=
+    "M1 "+m1+" · M5 "+m5+" · M15 "+m15+
+    " · زمینه M15: "+(m.m15_context_direction||"—")+
+    " · "+liquidity+" · کیفیت داده "+quality+"%"+
+    chronosText+" · "+reasons+
+    " · Drop "+drop+" / Rally "+rally+
+    " · Observe-only؛ روی ورود خودکار Ramon اثر ندارد.";
 }
 function renderLiveMarketSync(){
   renderTradingGuidance();
@@ -638,23 +618,7 @@ function renderOpportunities(data){
     if(row.entry_timing_ready===1&&row.entry_timing_direction===row.direction)positives.push("زمان ورود مناسب");
     if(row.moment_ratio>=5)blockers.push("بازار غیرعادی است");
 
-    // Advisory only: never add V3 to blockers and never disable an entry button.
-    const v3=liveMomentum?.ready?liveMomentum:null;
-    const v3Fresh=v3?.source_state==="fresh";
-    const v3Aligned=v3Fresh&&["BUY","SELL"].includes(v3.direction)&&v3.direction===row.direction;
-    const v3Opposed=v3Fresh&&["BUY","SELL"].includes(v3.direction)&&v3.direction!==row.direction;
-    const v3Score=Number.isFinite(Number(v3?.score))?Math.round(Number(v3.score)):null;
-    const v3Guide=!v3Fresh
-      ?"V3: داده تازه نیست"
-      :v3Aligned
-        ?"V3: هم‌جهت"+(v3Score!==null?" "+v3Score+"/100":"")
-        :v3Opposed
-          ?"V3: خلاف جهت"+(v3Score!==null?" "+v3Score+"/100":"")
-          :"V3: جهت لحظه‌ای نامشخص";
-
-
     let recommendation="صبر کن",recClass="wait",simpleReason=blockers[0]||"هنوز زمان ورود تأیید نشده";
-
     if(row.position_open){
       if(["EXIT_NOW","LOSS_EXIT_NOW"].includes(row.chronos_exit_action)){
         recommendation="خارج شو";recClass="exit";simpleReason="Ramon خروج را بهتر از ادامه پوزیشن می‌داند";
@@ -673,14 +637,6 @@ function renderOpportunities(data){
       recommendation="فقط زیرنظر";recClass="watch";simpleReason=blockers[0]||"سیگنال متوسط است";
     }else{
       recommendation="نگیر";recClass="avoid";simpleReason=blockers[0]||"کیفیت کافی نیست";
-    }
-
-    if(!row.position_open){
-      const v3Extra=
-        v3Guide+
-        (v3?.reversal_detected?" · برگشت کوتاه‌مدت ⚠":"")+
-        (v3?.acceleration==="increasing"?" · شتاب ↑":v3?.acceleration==="weakening"?" · شتاب ↓":"");
-      simpleReason=(simpleReason?simpleReason+" · ":"")+v3Extra;
     }
 
     const directionFa=row.direction==="BUY"?"خرید (BUY)":row.direction==="SELL"?"فروش (SELL)":"صبر";
@@ -703,10 +659,6 @@ function renderOpportunities(data){
       "MOMENT: "+(row.moment_label||"—")+" · FinBERT: "+(row.finbert_label||"—"),
       "Edge: "+format(row.edge)+" / "+format(row.minimum_edge)+" · Strength: "+format(row.strength),
       "قیمت خروج Chronos: "+format(row.chronos_exit_price)+" · سود تخمینی: "+(typeof row.chronos_exit_price==="number"?pnlText(estimatedPnlAt(row,row.chronos_exit_price)):"—"),
-      "Live Momentum V3 (راهنما): "+v3Guide+
-        (v3?.confidence!=null?" · confidence "+Math.round(Number(v3.confidence))+"%":"")+
-        (v3?.source_age_seconds!=null?" · age "+Number(v3.source_age_seconds).toFixed(1)+"s":""),
-
       "دلیل آخر: "+(reasons[row.last_reason]||row.last_reason||"—")
     ].join("\n");
     technical.append(summary,tech);
@@ -891,4 +843,4 @@ selectedNode?JSON.stringify(selectedNode,null,2):"NONE",
 "=== ALL DECISION / EXECUTION STEPS ==="
 ];for(const n of snapshot.nodes||[]){out.push(`[${nodeNumbers[n.id]||n.id}] ${n.title} | state=${n.state} observed=${n.observed_state} manual=${!!n.manual_override} engine=${n.engine||"Logic"}`);out.push(`detail: ${n.detail||"—"}`);out.push(`values: ${JSON.stringify(n.values||{})}`);}out.push("","=== RECENT DECISIONS ===");for(const x of snapshot.timeline||[])out.push(`${x.at||"—"} | ${x.decision} | ${x.reason} | ${x.strategy} | ${x.sample_key}`);out.push("",...candleLines(snapshot.recent_market?.m15,"M15"),"",...candleLines(snapshot.recent_market?.m1,"M1"),"","=== MODEL / HANDLER MAP ===");for(const row of snapshot.model_handler_map||[])out.push(`${row.name} | ${row.handler} | status=${row.status} | condition=${row.condition_state||"—"} | values=${JSON.stringify(row.values||{})}`);out.push("","=== WARNINGS ===",...(snapshot.warnings?.length?snapshot.warnings:["NONE"]));return out.join("\n");}
 async function copyAnalysis(){const btn=$("copy-analysis");const old=btn.textContent;btn.disabled=true;btn.textContent="COPYING...";let text="";try{const response=await fetch(`/api/analysis?stage=${encodeURIComponent(selected||"")}`,{cache:"no-store"});if(!response.ok)throw new Error(`HTTP ${response.status}`);text=await response.text();}catch{text=buildAnalysisBundle();}let copied=false;try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text);copied=true;}}catch{}if(!copied){const ta=document.createElement("textarea");ta.value=text;ta.setAttribute("readonly","");ta.style.position="absolute";ta.style.left="-9999px";document.body.append(ta);ta.select();try{copied=document.execCommand("copy");}catch{}ta.remove();}btn.textContent=copied?"COPIED ✓":"COPY FAILED";setTimeout(()=>{btn.disabled=false;btn.textContent=old;},1400);}
-$("copy-analysis").addEventListener("click",copyAnalysis);$("reset-overrides").addEventListener("click",resetOverrides);$("zoom").addEventListener("click",()=>{zoomed=!zoomed;$("zoom").textContent=zoomed?"−":"＋";$("zoom").setAttribute("aria-label",zoomed?"نمای کلی فلوچارت":"بزرگ‌نمایی فلوچارت");resize();});$("refresh").addEventListener("click",refresh);$("clone-auto-button")?.addEventListener("click",openCloneAutoDialog);new ResizeObserver(resize).observe($("viewport"));document.addEventListener("visibilitychange",()=>{if(!document.hidden){void refresh();void refreshLiveMomentum();void refreshOpportunities();void refreshChronosSlope();void refreshCloneAutoState();}});setInterval(()=>{if(!document.hidden)void refreshLiveMomentum();},1000);setInterval(()=>{if(!document.hidden)void refreshChronosSlope();},5000);setInterval(()=>{if(!document.hidden){void refreshOpportunities();void refreshCloneAutoState();}},3000);void refresh();void refreshLiveMomentum();void refreshOpportunities();void refreshCloneAutoState();
+$("copy-analysis").addEventListener("click",copyAnalysis);$("reset-overrides").addEventListener("click",resetOverrides);$("zoom").addEventListener("click",()=>{zoomed=!zoomed;$("zoom").textContent=zoomed?"−":"＋";$("zoom").setAttribute("aria-label",zoomed?"نمای کلی فلوچارت":"بزرگ‌نمایی فلوچارت");resize();});$("refresh").addEventListener("click",refresh);$("clone-auto-button")?.addEventListener("click",openCloneAutoDialog);new ResizeObserver(resize).observe($("viewport"));document.addEventListener("visibilitychange",()=>{if(!document.hidden){void refresh();void refreshOpportunities();void refreshChronosSlope();void refreshCloneAutoState();}});setInterval(()=>{if(!document.hidden)void refreshChronosSlope();},5000);setInterval(()=>{if(!document.hidden){void refreshOpportunities();void refreshCloneAutoState();}},3000);void refresh();void refreshOpportunities();void refreshCloneAutoState();
