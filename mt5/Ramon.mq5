@@ -266,6 +266,7 @@ string LockedAccountServer = "";
 string LastCopyStatus = "Ready";
 string LastCloseStatus = "Ready";
 const string UiPrefix = "RAMON_UI_";
+ulong LastDashboardRenderMs = 0; // Visual-only throttle; never gates trading or diagnostics.
 const string TpUiPrefix = "RAMON_TP_";
 const string RamonEyeResourceName = "RamonEyeHQ96";
 const int RamonEyeDisplaySize = 96;
@@ -1304,10 +1305,19 @@ void DrawDashboard()
 {
    if(!ShowDashboard)
    {
-      ObjectsDeleteAll(0,UiPrefix);
+      if(LastDashboardRenderMs!=0)
+         ObjectsDeleteAll(0,UiPrefix);
+      LastDashboardRenderMs=0;
       return;
    }
 
+   // Heavy chart-object rendering is visual-only. Keep the 1s trading timer,
+   // risk checks, position management and diagnostic writes at full cadence.
+   ulong render_now=GetTickCount64();
+   if(LastDashboardRenderMs!=0 && render_now>=LastDashboardRenderMs
+      && render_now-LastDashboardRenderMs<10000)
+      return;
+   LastDashboardRenderMs=render_now;
    UiEyeLogo();
 
    int spread_points=(int)SymbolInfoInteger(_Symbol,SYMBOL_SPREAD);
@@ -5444,6 +5454,7 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
    {
       ObjectSetInteger(0,sparam,OBJPROP_STATE,false);
       CopyDiagnosticToClipboard();
+      LastDashboardRenderMs=0; // Immediate feedback after a user action.
       DrawDashboard();
       return;
    }
@@ -5452,6 +5463,7 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
    {
       ObjectSetInteger(0,sparam,OBJPROP_STATE,false);
       CloseManagedPositionFromDashboard();
+      LastDashboardRenderMs=0; // Immediate feedback after a user action.
       DrawDashboard();
    }
 }
