@@ -476,8 +476,6 @@ function renderOpportunities(data){
 
     const simpleCells=[
       {text:directionFa,cls:"trade-direction "+(row.direction==="BUY"?"buy":"sell"),dir:"ltr"},
-      {text:entryAdvice,cls:"trade-entry-price",dir:"ltr"},
-      {levels:true,cls:"trade-levels"},
       {text:exitAdvice,cls:"trade-exit-advice",dir:"ltr"},
       {text:simpleReason,cls:"trade-simple-reason",extra:technical},
       {text:positionText,cls:"trade-position-state"},
