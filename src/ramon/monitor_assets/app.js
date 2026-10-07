@@ -490,11 +490,23 @@ function renderMarketMomentumNow(){
   const chronos=chronosSlope?.ready===true&&["UP","DOWN","FLAT"].includes(chronosSlope?.direction)?chronosSlope.direction:null;
   const agrees=(m.direction==="SELL"&&chronos==="DOWN")||(m.direction==="BUY"&&chronos==="UP");
   const disagrees=(m.direction==="SELL"&&chronos==="UP")||(m.direction==="BUY"&&chronos==="DOWN");
+  const accel=m.acceleration==="increasing"?"↑ شتاب بیشتر":m.acceleration==="weakening"?"↓ شتاب کمتر":"→ شتاب پایدار";
+  const liquidity={normal:"نقدشوندگی نرمال",elevated:"اسپرد بالاتر",wide:"اسپرد زیاد",unknown:"کیفیت اسپرد نامشخص"}[m.liquidity]||"";
+  const m1=m.m1_score==null?"—":Math.round(Number(m.m1_score));
+  const m5=m.m5_score==null?"—":Math.round(Number(m.m5_score));
+  const m15=m.m15_score==null?"—":Math.round(Number(m.m15_score));
+  const quality=m.data_quality==null?"—":Math.round(Number(m.data_quality));
   box.className="market-momentum-now "+(m.state||"mixed");
-  title.textContent="حرکت لحظه‌ای بازار: "+(m.label||"نامشخص")+" · امتیاز "+score+"/100";
+  title.textContent="حرکت لحظه‌ای V2: "+(m.label||"نامشخص")+" · "+score+"/100 · "+accel;
   const reasons=Array.isArray(m.reasons)&&m.reasons.length?m.reasons.join(" + "):"نشانه کافی ثبت نشده";
   const chronosText=chronos?(" · Chronos "+chronos+(agrees?" هم‌جهت ✓":disagrees?" مخالف ⚠":"")):"";
-  reason.textContent=reasons+" · Drop "+drop+" / Rally "+rally+chronosText+" · Observe-only؛ این شاخص به‌تنهایی معامله باز یا مسدود نمی‌کند.";
+  reason.textContent=
+    "M1 "+m1+" · M5 "+m5+" · M15 "+m15+
+    " · زمینه M15: "+(m.m15_context_direction||"—")+
+    " · "+liquidity+" · کیفیت داده "+quality+"%"+
+    chronosText+" · "+reasons+
+    " · Drop "+drop+" / Rally "+rally+
+    " · Observe-only؛ روی ورود خودکار Ramon اثر ندارد.";
 }
 function renderLiveMarketSync(){
   renderTradingGuidance();
