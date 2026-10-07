@@ -25,7 +25,8 @@ def test_cap_is_checked_before_broker_order():
     gate = source.index('Entry risk exceeds Control cap')
     order = source.index('Trade.Buy(volume,_Symbol,0.0,stop,target,trade_comment)')
     assert gate < order
-    assert 'MathMin(EffectiveRiskPerTradeUSD(),effective_cap)' in source
+    assert 'double preferred_risk=(entry_risk_budget_usd>0.0 ? entry_risk_budget_usd : EffectiveRiskPerTradeUSD())' in source
+    assert 'double budget=MathMin(preferred_risk,effective_cap)*MoneyUnitsPerUSD' in source
     assert 'entry_hard_cap_units' in source
     assert 'if(SmallOnlyMode) return;' in source[source.index('void ReadControlRiskCap()'):]
 
