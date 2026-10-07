@@ -510,20 +510,22 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         latest_decision_snapshot,
                         snapshot_age_seconds=decision_age,
                     )
-                    if horizon == 2:
-                        latest_display_forecast = {
-                            "model": model.model_id,
-                            "symbol": market.symbol,
-                            "direction": direction,
-                            "current_mid": midpoint,
-                            "forecast_step_1": float(forecast.median_path[0]),
-                            "forecast_step_2": float(forecast.median_path[1]),
-                            "horizon_minutes": 30,
-                            "captured_utc": int(time.time()),
-                            "ramon_context_age_seconds": decision_age,
-                            **bias,
-                            "advisory_only": True,
-                        }
+                    display_steps = [float(x) for x in forecast.median_path]
+                    latest_display_forecast = {
+                        "model": model.model_id,
+                        "symbol": market.symbol,
+                        "direction": direction,
+                        "current_mid": midpoint,
+                        "forecast_step_1": display_steps[0],
+                        "forecast_step_2": display_steps[1] if horizon >= 2 else display_steps[0],
+                        "forecast_step_3": display_steps[2] if horizon >= 3 else display_steps[-1],
+                        "forecast_step_4": display_steps[3] if horizon >= 4 else display_steps[-1],
+                        "horizon_minutes": horizon * 15,
+                        "captured_utc": int(time.time()),
+                        "ramon_context_age_seconds": decision_age,
+                        **bias,
+                        "advisory_only": True,
+                    }
                     self.reply(200, {
                         "model": model.model_id,
                         "direction": direction,
@@ -531,9 +533,11 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         "forecast_low": forecast.low,
                         "forecast_median": forecast.median,
                         "forecast_high": forecast.high,
-                        "forecast_median_path": list(forecast.median_path),
-                        "forecast_step_1": float(forecast.median_path[0]),
-                        "forecast_step_2": float(forecast.median_path[1]) if horizon >= 2 else float(forecast.median_path[0]),
+                        "forecast_median_path": display_steps,
+                        "forecast_step_1": display_steps[0],
+                        "forecast_step_2": display_steps[1] if horizon >= 2 else display_steps[0],
+                        "forecast_step_3": display_steps[2] if horizon >= 3 else display_steps[-1],
+                        "forecast_step_4": display_steps[3] if horizon >= 4 else display_steps[-1],
                         "forecast_horizon_bars": horizon,
                         "forecast_horizon_minutes": horizon * 15,
                         "signal_bar_time": market.bars[-1].time,
