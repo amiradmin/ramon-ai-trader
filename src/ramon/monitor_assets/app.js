@@ -184,7 +184,7 @@ $("trade-dialog-close").addEventListener("click",()=>$("trade-dialog").close());
 $("trade-dialog").addEventListener("close",()=>{tradeController?.abort();tradeController=null;tradeResizeObserver?.disconnect();tradeResizeObserver=null;});
 $("trade-dialog").addEventListener("click",event=>{if(event.target!==$("trade-dialog"))return;const bounds=event.target.getBoundingClientRect();if(event.clientX<bounds.left||event.clientX>bounds.right||event.clientY<bounds.top||event.clientY>bounds.bottom)event.target.close();});
 function resize(){const width=$("viewport").clientWidth;const scale=zoomed?1:Math.min(1,Math.max(.3,width/1020));$("canvas").style.setProperty("--zoom",scale);$("canvas-space").style.width=`${1020*scale}px`;$("canvas-space").style.height=`${1190*scale}px`;}
-function render(){const changed=lastKey!==snapshot.sample_key;$("decision").textContent=snapshot.decision;$("reason").textContent=snapshot.reason_fa;const state=snapshot.nodes.find(n=>n.id==="decision")?.values["حالت بازار"];$("market-state").textContent=`حالت بازار: ${marketStates[state]||state||"ثبت نشده"}`;$("strategy").textContent=snapshot.nodes.find(n=>n.id==="decision")?.values["مسیر"]||"—";$("model-age").textContent=age(snapshot.model_freshness);$("model-time").textContent=formattedTime(snapshot.model_freshness.at,true);$("ea-age").textContent=age(snapshot.ea_freshness);$("ea-status").textContent=snapshot.ea_status;$("service-status").textContent=snapshot.nodes.find(n=>n.id==="service")?.state==="pass"?"پاسخ‌گو":"در دسترس نیست";$("source-link").textContent=snapshot.joined?`شناسهٔ مدل و اکسپرت یکسان · نسخه ${snapshot.ea_version||"—"}`:"شناسهٔ مدل و اکسپرت قابل تطبیق نیست";$("warning").hidden=snapshot.warnings.length===0;$("warning").textContent=snapshot.warnings.join(" · ");$("updated").textContent=`بازخوانی ${formattedTime(snapshot.generated_at)}`;$("sample-id").textContent=`DECISION ID ${snapshot.sample_key||"—"}`;renderNodes();renderEdges(changed);detail();renderReadiness();renderRoadmap();renderModelMap();renderHistory();resize();lastKey=snapshot.sample_key;}
+function render(){const changed=lastKey!==snapshot.sample_key;$("decision").textContent=snapshot.decision;$("reason").textContent=snapshot.reason_fa;const state=snapshot.nodes.find(n=>n.id==="decision")?.values["حالت بازار"];$("market-state").textContent=`حالت بازار: ${marketStates[state]||state||"ثبت نشده"}`;$("strategy").textContent=snapshot.nodes.find(n=>n.id==="decision")?.values["مسیر"]||"—";$("model-age").textContent=age(snapshot.model_freshness);$("model-time").textContent=formattedTime(snapshot.model_freshness.at,true);$("ea-age").textContent=age(snapshot.ea_freshness);$("ea-status").textContent=snapshot.ea_status;$("service-status").textContent=snapshot.nodes.find(n=>n.id==="service")?.state==="pass"?"پاسخ‌گو":"در دسترس نیست";$("source-link").textContent=snapshot.joined?`شناسهٔ مدل و اکسپرت یکسان · نسخه ${snapshot.ea_version||"—"}`:"شناسهٔ مدل و اکسپرت قابل تطبیق نیست";$("warning").hidden=snapshot.warnings.length===0;$("warning").textContent=snapshot.warnings.join(" · ");$("updated").textContent=`بازخوانی ${formattedTime(snapshot.generated_at)}`;$("sample-id").textContent=`DECISION ID ${snapshot.sample_key||"—"}`;renderNodes();renderEdges(changed);detail();renderReadiness();renderRoadmap();renderModelMap();renderHistory();renderMarketMomentumNow();resize();lastKey=snapshot.sample_key;}
 const opportunityDate=new Intl.DateTimeFormat("fa-IR",{timeZone:"Asia/Tehran",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
 const opportunitySet=(id,text)=>{$(id).textContent=text;};
 function percent(v){return typeof v==="number"&&Number.isFinite(v)&&v>=0&&v<=1?(v*100).toFixed(1)+"%":"—";}
@@ -272,8 +272,31 @@ async function refreshChronosSlope(){
   }catch{chronosSlope=null;}
   finally{clearTimeout(timeout);renderTradingGuidance();}
 }
+function renderMarketMomentumNow(){
+  const box=$("market-momentum-now"),title=$("market-momentum-title"),reason=$("market-momentum-reason");
+  if(!box||!title||!reason)return;
+  const m=snapshot?.market_momentum_now;
+  if(!m){
+    box.className="market-momentum-now mixed";
+    title.textContent="حرکت لحظه‌ای بازار: داده کافی نیست";
+    reason.textContent="Observe-only — روی ورود خودکار Ramon اثری ندارد.";
+    return;
+  }
+  const score=Number.isFinite(Number(m.score))?Math.round(Number(m.score)):0;
+  const drop=Number.isFinite(Number(m.drop_score))?Math.round(Number(m.drop_score)):0;
+  const rally=Number.isFinite(Number(m.rally_score))?Math.round(Number(m.rally_score)):0;
+  const chronos=chronosSlope?.ready===true&&["UP","DOWN","FLAT"].includes(chronosSlope?.direction)?chronosSlope.direction:null;
+  const agrees=(m.direction==="SELL"&&chronos==="DOWN")||(m.direction==="BUY"&&chronos==="UP");
+  const disagrees=(m.direction==="SELL"&&chronos==="UP")||(m.direction==="BUY"&&chronos==="DOWN");
+  box.className="market-momentum-now "+(m.state||"mixed");
+  title.textContent="حرکت لحظه‌ای بازار: "+(m.label||"نامشخص")+" · امتیاز "+score+"/100";
+  const reasons=Array.isArray(m.reasons)&&m.reasons.length?m.reasons.join(" + "):"نشانه کافی ثبت نشده";
+  const chronosText=chronos?(" · Chronos "+chronos+(agrees?" هم‌جهت ✓":disagrees?" مخالف ⚠":"")):"";
+  reason.textContent=reasons+" · Drop "+drop+" / Rally "+rally+chronosText+" · Observe-only؛ این شاخص به‌تنهایی معامله باز یا مسدود نمی‌کند.";
+}
 function renderLiveMarketSync(){
   renderTradingGuidance();
+  renderMarketMomentumNow();
   const target=$("live-market-sync");
   if(!target)return;
   if(!snapshot){
