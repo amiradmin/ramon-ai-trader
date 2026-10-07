@@ -229,10 +229,10 @@ async function openCloneAutoDialog(){
       '<form method="dialog" class="risk-entry-card" id="clone-auto-form" dir="rtl">'+
         '<div class="risk-entry-head"><div><strong>گرفتن معامله مشابه Ramon</strong><span id="clone-auto-direction">—</span></div><button type="button" class="risk-entry-x" id="clone-auto-x" aria-label="بستن">×</button></div>'+
         '<p id="clone-auto-info">—</p>'+
-        '<label for="clone-auto-risk">Max Executable Risk برای معامله جدید (USD)</label>'+
+        '<label for="clone-auto-risk">RiskPerTradeUSD برای همین معامله (USD)</label>'+
         '<div class="risk-entry-input"><input id="clone-auto-risk" type="number" min="0.01" max="3.00" step="0.01" inputmode="decimal" dir="ltr" required><span>USD</span></div>'+
-        '<div class="risk-entry-presets" aria-label="مقادیر سریع"><button type="button" data-clone-risk="0.35">$0.35</button><button type="button" data-clone-risk="1">$1</button><button type="button" data-clone-risk="2">$2</button><button type="button" data-clone-risk="3">$3</button></div>'+
-        '<p class="risk-entry-help">جهت معامله از پوزیشن باز خودکار Ramon کپی می‌شود. معامله جدید دستی است و فقط کنترل‌های سخت اجرا، حساب و ریسک باقی می‌مانند.</p>'+
+        '<div class="risk-entry-presets" aria-label="مقادیر سریع"><button type="button" data-clone-risk="0.06">$0.06</button><button type="button" data-clone-risk="0.20">$0.20</button><button type="button" data-clone-risk="0.50">$0.50</button><button type="button" data-clone-risk="1">$1</button><button type="button" data-clone-risk="2">$2</button><button type="button" data-clone-risk="3">$3</button></div>'+
+        '<p class="risk-entry-help">جهت معامله از پوزیشن باز خودکار Ramon کپی می‌شود. این عدد بودجهٔ واقعی ریسک همین ورود است و روی حجم معامله اثر می‌گذارد؛ RiskPerTradeUSD اصلی Ramon تغییر نمی‌کند.</p>'+
         '<p class="risk-entry-error" id="clone-auto-error" role="alert"></p>'+
         '<div class="risk-entry-actions"><button type="button" class="secondary" id="clone-auto-cancel">انصراف</button><button type="submit" class="primary" id="clone-auto-submit">گرفتن معامله مشابه</button></div>'+
       '</form>';
@@ -257,11 +257,11 @@ async function openCloneAutoDialog(){
       submit.textContent="در حال ارسال…";
       error.textContent="";
       try{
-        const response=await fetch("/api/clone-auto-position",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({max_executable_risk_usd:value})});
+        const response=await fetch("/api/clone-auto-position",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({risk_per_trade_usd:value})});
         let data={};try{data=await response.json();}catch{}
         if(!response.ok||!data.queued)throw new Error(data.error||("HTTP "+response.status));
         dialog.close("queued");
-        opportunitySet("opportunity-status","معامله مشابه "+data.direction+" با سقف ریسک $"+value.toFixed(2)+" برای EA ارسال شد.");
+        opportunitySet("opportunity-status","معامله مشابه "+data.direction+" با RiskPerTradeUSD همین ورود $"+value.toFixed(2)+" برای EA ارسال شد.");
         setTimeout(()=>void refreshOpportunities(),800);
       }catch(err){
         error.textContent="معامله مشابه ارسال نشد: "+err.message;
@@ -276,15 +276,7 @@ async function openCloneAutoDialog(){
   $("clone-auto-direction").textContent=p.direction;
   $("clone-auto-info").textContent="پوزیشن مرجع: #"+p.ticket+" · حجم "+(p.volume??"—")+" · ورود "+(p.open_price??"—")+" · SL "+(p.stop??"—")+" · TP "+(p.target??"—");
   $("clone-auto-error").textContent="";
-  let current=.35;
-  try{
-    const response=await fetch("/api/control",{cache:"no-store"});
-    if(response.ok){
-      const control=await response.json();
-      const value=Number(control.requested??control.observed??control.default);
-      if(Number.isFinite(value)&&value>=.01&&value<=3)current=value;
-    }
-  }catch{}
+  const current=.06;
   $("clone-auto-risk").value=current.toFixed(2);
   dialog.showModal();
   requestAnimationFrame(()=>{$("clone-auto-risk").focus();$("clone-auto-risk").select();});
@@ -298,13 +290,13 @@ function ensureRiskEntryDialog(){
   dialog.innerHTML=
     '<form method="dialog" class="risk-entry-card" id="risk-entry-form" dir="rtl">'+
       '<div class="risk-entry-head"><div><strong>ریسک این ورود</strong><span id="risk-entry-direction">—</span></div><button type="button" class="risk-entry-x" id="risk-entry-cancel" aria-label="بستن">×</button></div>'+
-      '<p>قبل از ارسال فرمان، سقف Max Executable Risk را برای همین ورود مشخص کن.</p>'+
-      '<label for="risk-entry-value">حداکثر ریسک مجاز (USD)</label>'+
+      '<p>قبل از ارسال فرمان، RiskPerTradeUSD همین ورود را مشخص کن؛ این مقدار فقط روی همین معامله و حجم آن اثر می‌گذارد.</p>'+
+      '<label for="risk-entry-value">RiskPerTradeUSD همین معامله (USD)</label>'+
       '<div class="risk-entry-input"><input id="risk-entry-value" type="number" min="0.01" max="3.00" step="0.01" inputmode="decimal" dir="ltr" required><span>USD</span></div>'+
-      '<div class="risk-entry-presets" aria-label="مقادیر سریع"><button type="button" data-risk="0.35">$0.35</button><button type="button" data-risk="1">$1</button><button type="button" data-risk="2">$2</button><button type="button" data-risk="3">$3</button></div>'+
-      '<p class="risk-entry-help">بازه مجاز: $0.01 تا $3.00. این عدد سقف ریسک است؛ حجم واقعی همچنان توسط sizing رامون تعیین می‌شود.</p>'+
+      '<div class="risk-entry-presets" aria-label="مقادیر سریع"><button type="button" data-risk="0.06">$0.06</button><button type="button" data-risk="0.20">$0.20</button><button type="button" data-risk="0.50">$0.50</button><button type="button" data-risk="1">$1</button><button type="button" data-risk="2">$2</button><button type="button" data-risk="3">$3</button></div>'+
+      '<p class="risk-entry-help">بازه مجاز: $0.01 تا $3.00. این عدد بودجهٔ واقعی ریسک همین معامله است؛ Ramon حجم را بر اساس فاصله SL محاسبه می‌کند.</p>'+
       '<p class="risk-entry-error" id="risk-entry-error" role="alert"></p>'+
-      '<div class="risk-entry-actions"><button type="button" class="secondary" id="risk-entry-back">انصراف</button><button type="submit" class="primary" id="risk-entry-confirm">ذخیره ریسک و ارسال معامله</button></div>'+
+      '<div class="risk-entry-actions"><button type="button" class="secondary" id="risk-entry-back">انصراف</button><button type="submit" class="primary" id="risk-entry-confirm">محاسبه حجم و ارسال معامله</button></div>'+
     '</form>';
   document.body.append(dialog);
   const cancel=()=>{if(dialog.open)dialog.close("cancel");};
@@ -325,15 +317,7 @@ async function openRiskEntryDialog(row,button,recheck=false,manualUnlocked=false
   error.textContent="";
   confirm.disabled=false;
   confirm.textContent="ذخیره ریسک و ارسال معامله";
-  let current=.35;
-  try{
-    const response=await fetch("/api/control",{cache:"no-store"});
-    if(response.ok){
-      const control=await response.json();
-      const candidate=Number(control.requested??control.observed??control.default);
-      if(Number.isFinite(candidate)&&candidate>=.01&&candidate<=3)current=candidate;
-    }
-  }catch{}
+  const current=.06;
   input.value=Number(current).toFixed(2);
 
   const submit=async event=>{
@@ -348,7 +332,7 @@ async function openRiskEntryDialog(row,button,recheck=false,manualUnlocked=false
     confirm.textContent="در حال ارسال معامله…";
     try{
       dialog.close("submit");
-      opportunitySet("opportunity-status","فرمان "+selectedDirection+" با سقف ریسک همین ورود $"+value.toFixed(2)+" در حال ارسال است.");
+      opportunitySet("opportunity-status","فرمان "+selectedDirection+" با RiskPerTradeUSD همین ورود $"+value.toFixed(2)+" در حال ارسال است.");
       await manualOpportunity(row,button,recheck,manualUnlocked,directionOverride,value);
     }catch(err){
       error.textContent="ارسال معامله انجام نشد: "+err.message;
@@ -361,18 +345,18 @@ async function openRiskEntryDialog(row,button,recheck=false,manualUnlocked=false
   dialog.showModal();
   requestAnimationFrame(()=>{input.focus();input.select();});
 }
-async function manualOpportunity(row,button,recheck=false,manualUnlocked=false,directionOverride=null,entryRiskCap=null){
+async function manualOpportunity(row,button,recheck=false,manualUnlocked=false,directionOverride=null,entryRiskBudget=null){
   if(button.disabled)return;
   button.disabled=true;const old=button.textContent;button.textContent="در حال ارسال…";
   const selectedDirection=(directionOverride||row.direction||"").toUpperCase();
   try{
-    const response=await fetch("/api/manual-entry",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({direction:selectedDirection,signal_bar_time:row.signal_bar_time,recheck,manual_unlocked:manualUnlocked,max_executable_risk_usd:entryRiskCap})});
+    const response=await fetch("/api/manual-entry",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({direction:selectedDirection,signal_bar_time:row.signal_bar_time,recheck,manual_unlocked:manualUnlocked,risk_per_trade_usd:entryRiskBudget})});
     let data={};try{data=await response.json();}catch{}
     if(!response.ok||!data.queued)throw new Error(data.error||("HTTP "+response.status));
     button.textContent="ارسال شد";
     opportunitySet("opportunity-status",
       manualUnlocked
-        ?"فرمان دستی "+selectedDirection+(entryRiskCap?" با سقف ریسک همین ورود $"+Number(entryRiskCap).toFixed(2):"")+" ارسال شد؛ قفل‌های تحلیلی Ramon دخالت نمی‌کنند و فقط کنترل‌های سخت اجرای سفارش/ریسک باقی می‌مانند."
+        ?"فرمان دستی "+selectedDirection+(entryRiskBudget?" با سقف ریسک همین ورود $"+Number(entryRiskBudget).toFixed(2):"")+" ارسال شد؛ قفل‌های تحلیلی Ramon دخالت نمی‌کنند و فقط کنترل‌های سخت اجرای سفارش/ریسک باقی می‌مانند."
         :(recheck?"جهت انتخابی روی snapshot تازه بازبینی و ارسال شد؛ ":"فرمان "+selectedDirection+" ارسال شد؛ ")+"EA قبل از بازکردن پوزیشن کنترل‌های اجرایی و ریسک را دوباره بررسی می‌کند.");
     setTimeout(()=>void refreshOpportunities(),1500);
   }catch(err){button.textContent="رد شد";opportunitySet("opportunity-status","ورود دستی انجام نشد: "+err.message);setTimeout(()=>{button.disabled=!row.actionable;button.textContent=old;},1800);}
