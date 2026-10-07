@@ -1531,6 +1531,99 @@ def read_open_dashboard_positions(diagnostic):
     return result
 
 
+def read_managed_auto_position(diagnostic):
+    """Return the fresh PRIMARY Ramon-managed automatic position, if any."""
+    if diagnostic is None:
+        return None
+    diag, error = read_diagnostic(diagnostic)
+    if error:
+        return None
+    captured = number(diag.get("captured_epoch"))
+    if captured is None or abs(time.time() - captured) > 90:
+        return None
+    raw = str(diag.get("Managed position") or "").strip()
+    if not raw or raw.upper().startswith("NONE") or raw.lower().startswith("no "):
+        return None
+    match_obj = re.match(
+        r"^(BUY|SELL) #(\d+) vol=([-+0-9.eE]+) open=([-+0-9.eE]+) "
+        r"sl=([-+0-9.eE]+) tp=([-+0-9.eE]+) profit=([-+0-9.eE]+) comment=(\S+)$",
+        raw,
+    )
+    if not match_obj:
+        return None
+    direction, ticket, volume, open_price, stop, target, profit, comment = match_obj.groups()
+    if not comment.startswith("Ramon:") or ":M" in comment:
+        return None
+    sample_match = re.match(r"^Ramon:([a-f0-9]{16})(?::[A-Z])?$", comment)
+    origin_sample_key = sample_match.group(1) if sample_match else ""
+    if not origin_sample_key:
+        return None
+    return {
+        "open": True,
+        "direction": direction,
+        "ticket": ticket,
+        "volume": number(volume),
+        "open_price": number(open_price),
+        "stop": number(stop),
+        "target": number(target),
+        "profit_units": number(profit),
+        "comment": comment,
+        "origin_sample_key": origin_sample_key,
+    }
+
+
+def queue_clone_auto_position(db, diagnostic, symbol, payload):
+    """Clone the current automatic Ramon position as a discretionary dashboard entry."""
+    auto = read_managed_auto_position(diagnostic)
+    if not auto:
+        raise ValueError("پوزیشن خودکار باز Ramon برای کپی پیدا نشد")
+    risk_value = payload.get("max_executable_risk_usd")
+    save_control(diagnostic, risk_value)
+
+    current, _, _, error = read_history(db, symbol, "")
+    if error or not current:
+        raise ValueError("snapshot تازه برای ورود مشابه در دسترس نیست")
+    metadata = object_json(current.get("model_metadata"))
+    audit = metadata.get("decision_audit") if isinstance(metadata.get("decision_audit"), dict) else {}
+    base = audit.get("base") if isinstance(audit.get("base"), dict) else {}
+    direction = str(auto.get("direction") or "").upper()
+    _, live_probability, buy_probability, sell_probability = _live_direction(audit)
+    captured = number(current.get("captured"))
+    if captured is None or time.time() - captured > 45:
+        raise ValueError("snapshot مدل برای ورود مشابه تازه نیست")
+    sample_key = str(current.get("sample_key") or "")
+    signal_bar_time = int(number(base.get("signal_bar_time")) or 0)
+    risk_distance = float(number(base.get("stop_distance")) or 0.0)
+    target_distance = float(number(base.get("target_distance")) or 0.0)
+    edge = float(number(base.get("buy_edge" if direction == "BUY" else "sell_edge")) or 0.0)
+    probability = buy_probability if direction == "BUY" else sell_probability
+    if probability is None:
+        probability = live_probability
+    if not re.fullmatch(r"[a-f0-9]{16}", sample_key) or signal_bar_time <= 0:
+        raise ValueError("شناسه snapshot تازه برای ورود مشابه معتبر نیست")
+    if risk_distance <= 0 or target_distance <= 0:
+        raise ValueError("SL/TP snapshot تازه برای ورود مشابه معتبر نیست")
+
+    queue_path = Path(diagnostic).with_name("Ramon_ManualEntries.txt")
+    probability_value = -1.0 if probability is None else float(probability)
+    command = (
+        f"{int(time.time())}|{signal_bar_time}|{direction}|{sample_key}|"
+        f"{risk_distance:.10f}|{target_distance:.10f}|{edge:.10f}|"
+        f"{probability_value:.10f}|DISCRETIONARY|{auto['origin_sample_key']}\n"
+    )
+    with open(queue_path, "a", encoding="ascii", newline="") as out:
+        out.write(command)
+        out.flush()
+        os.fsync(out.fileno())
+    return {
+        "queued": True,
+        "direction": direction,
+        "ticket": auto["ticket"],
+        "origin_sample_key": auto["origin_sample_key"],
+        "max_executable_risk_usd": float(risk_value),
+    }
+
+
 def chronos_entry_advice(health_url, row):
     probability = number(row.get("success_probability"))
     if probability is None or probability < 0.60 or not health_url:
@@ -2084,6 +2177,9 @@ def handler_for(db, diagnostic, symbol, health_url):
                 self.reply(json.dumps(data, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
             elif route == "/api/control":
                 self.reply(json.dumps(control_state(diagnostic), ensure_ascii=False).encode(), "application/json; charset=utf-8")
+            elif route == "/api/auto-position":
+                auto = read_managed_auto_position(diagnostic)
+                self.reply(json.dumps(auto or {"open": False}, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
             elif route == "/api/analysis":
                 params = parse_qs(urlsplit(self.path).query)
                 selected_stage = str(params.get("stage", [""])[0])[:64]
@@ -2127,7 +2223,7 @@ def handler_for(db, diagnostic, symbol, health_url):
                 self.send_error(404)
 
         def do_POST(self):
-            if self.path not in {"/api/control", "/api/override", "/api/override/reset", "/api/manual-entry", "/api/manual-close", "/api/predicted-auto-close", "/api/today-profit/reset"}:
+            if self.path not in {"/api/control", "/api/clone-auto-position", "/api/override", "/api/override/reset", "/api/manual-entry", "/api/manual-close", "/api/predicted-auto-close", "/api/today-profit/reset"}:
                 self.send_error(404)
                 return
             origin = self.headers.get("Origin")
@@ -2147,6 +2243,11 @@ def handler_for(db, diagnostic, symbol, health_url):
                 if self.path == "/api/control":
                     save_control(diagnostic, payload.get("max_executable_risk_usd"))
                     self.reply(json.dumps(control_state(diagnostic), ensure_ascii=False).encode(), "application/json; charset=utf-8")
+                    return
+
+                if self.path == "/api/clone-auto-position":
+                    result = queue_clone_auto_position(db, diagnostic, symbol, payload)
+                    self.reply(json.dumps(result, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
                     return
 
                 if self.path == "/api/manual-entry":
