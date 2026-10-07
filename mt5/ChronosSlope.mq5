@@ -1,5 +1,5 @@
 #property copyright "Ramon AI Trader"
-#property version "1.035"
+#property version "1.036"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -14,6 +14,7 @@ input int MaxDataAgeSeconds = 120;
 const string Prefix="CHRONOS_SLOPE_";
 double LastCurrentMid=0.0,LastForecastMedian=0.0,LastStep15=0.0,LastStep30=0.0,LastStep45=0.0,LastStep60=0.0;
 double LastBiasConfidence=0.0,LastBiasScore=0.0;
+double LastStepConf15=0.0,LastStepConf30=0.0,LastStepConf45=0.0,LastStepConf60=0.0;
 int LastHorizonBars=4;
 string LastDirection="NONE";
 string LastBiasDirection="MIXED";
@@ -44,6 +45,8 @@ bool LoadForecast()
       || !GlobalVariableCheck(Key("HORIZON"))
       || !GlobalVariableCheck(Key("STEP1")) || !GlobalVariableCheck(Key("STEP2"))
       || !GlobalVariableCheck(Key("STEP3")) || !GlobalVariableCheck(Key("STEP4"))
+      || !GlobalVariableCheck(Key("CONF1")) || !GlobalVariableCheck(Key("CONF2"))
+      || !GlobalVariableCheck(Key("CONF3")) || !GlobalVariableCheck(Key("CONF4"))
       || !GlobalVariableCheck(Key("BIAS_DIR")) || !GlobalVariableCheck(Key("BIAS_CONF"))
       || !GlobalVariableCheck(Key("BIAS_SCORE")))
    {
@@ -63,11 +66,16 @@ bool LoadForecast()
    double step30=GlobalVariableGet(Key("STEP2"));
    double step45=GlobalVariableGet(Key("STEP3"));
    double step60=GlobalVariableGet(Key("STEP4"));
+   double conf15=GlobalVariableGet(Key("CONF1"));
+   double conf30=GlobalVariableGet(Key("CONF2"));
+   double conf45=GlobalVariableGet(Key("CONF3"));
+   double conf60=GlobalVariableGet(Key("CONF4"));
    int direction=(int)GlobalVariableGet(Key("DIR"));
    int bias_direction=(int)GlobalVariableGet(Key("BIAS_DIR"));
    double bias_confidence=GlobalVariableGet(Key("BIAS_CONF"));
    double bias_score=GlobalVariableGet(Key("BIAS_SCORE"));
-   if(mid<=0 || median<=0 || step15<=0 || step30<=0 || step45<=0 || step60<=0 || horizon!=4
+   if(mid<=0 || median<=0 || step15<=0 || step30<=0 || step45<=0 || step60<=0
+      || conf15<0 || conf15>1 || conf30<0 || conf30>1 || conf45<0 || conf45>1 || conf60<0 || conf60>1 || horizon!=4
       || direction < -1 || direction > 1 || bias_direction < -1 || bias_direction > 1
       || bias_confidence<0.0 || bias_confidence>1.0 || !MathIsValidNumber(bias_score))
    {
@@ -80,6 +88,10 @@ bool LoadForecast()
    LastStep30=step30;
    LastStep45=step45;
    LastStep60=step60;
+   LastStepConf15=conf15;
+   LastStepConf30=conf30;
+   LastStepConf45=conf45;
+   LastStepConf60=conf60;
    LastHorizonBars=horizon;
    LastDirection=direction>0 ? "UP" : direction<0 ? "DOWN" : "FLAT";
    LastBiasDirection=bias_direction>0 ? "BUY" : bias_direction<0 ? "SELL" : "MIXED";
@@ -141,8 +153,9 @@ void DrawForecast()
       {
          if(ObjectFind(0,label)<0) ObjectCreate(0,label,OBJ_TEXT,0,times[j],prices[j]);
          else ObjectMove(0,label,0,times[j],prices[j]);
+         double conf=(j==1 ? LastStepConf15 : j==2 ? LastStepConf30 : j==3 ? LastStepConf45 : LastStepConf60);
          ObjectSetString(0,label,OBJPROP_TEXT,
-            "Chronos +"+IntegerToString(j*15)+"m "+DoubleToString(prices[j],_Digits));
+            "Chronos +"+IntegerToString(j*15)+"m ("+DoubleToString(conf*100.0,0)+"%) "+DoubleToString(prices[j],_Digits));
          ObjectSetInteger(0,label,OBJPROP_COLOR,j==4 ? overall : clrAqua);
          ObjectSetInteger(0,label,OBJPROP_FONTSIZE,9);
          ObjectSetInteger(0,label,OBJPROP_ANCHOR,(j%2==1) ? ANCHOR_RIGHT_LOWER : ANCHOR_LEFT_UPPER);
