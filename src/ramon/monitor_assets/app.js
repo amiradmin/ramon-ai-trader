@@ -345,16 +345,13 @@ async function openRiskEntryDialog(row,button,recheck=false,manualUnlocked=false
       return;
     }
     confirm.disabled=true;
-    confirm.textContent="در حال ذخیره ریسک…";
+    confirm.textContent="در حال ارسال معامله…";
     try{
-      const response=await fetch("/api/control",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({max_executable_risk_usd:value})});
-      let data={};try{data=await response.json();}catch{}
-      if(!response.ok)throw new Error(data.error||("HTTP "+response.status));
       dialog.close("submit");
-      opportunitySet("opportunity-status","سقف ریسک روی $"+value.toFixed(2)+" ذخیره شد؛ فرمان "+selectedDirection+" در حال ارسال است.");
-      await manualOpportunity(row,button,recheck,manualUnlocked,directionOverride);
+      opportunitySet("opportunity-status","فرمان "+selectedDirection+" با سقف ریسک همین ورود $"+value.toFixed(2)+" در حال ارسال است.");
+      await manualOpportunity(row,button,recheck,manualUnlocked,directionOverride,value);
     }catch(err){
-      error.textContent="ذخیره ریسک انجام نشد: "+err.message;
+      error.textContent="ارسال معامله انجام نشد: "+err.message;
       confirm.disabled=false;
       confirm.textContent="ذخیره ریسک و ارسال معامله";
     }
@@ -364,18 +361,18 @@ async function openRiskEntryDialog(row,button,recheck=false,manualUnlocked=false
   dialog.showModal();
   requestAnimationFrame(()=>{input.focus();input.select();});
 }
-async function manualOpportunity(row,button,recheck=false,manualUnlocked=false,directionOverride=null){
+async function manualOpportunity(row,button,recheck=false,manualUnlocked=false,directionOverride=null,entryRiskCap=null){
   if(button.disabled)return;
   button.disabled=true;const old=button.textContent;button.textContent="در حال ارسال…";
   const selectedDirection=(directionOverride||row.direction||"").toUpperCase();
   try{
-    const response=await fetch("/api/manual-entry",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({direction:selectedDirection,signal_bar_time:row.signal_bar_time,recheck,manual_unlocked:manualUnlocked})});
+    const response=await fetch("/api/manual-entry",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({direction:selectedDirection,signal_bar_time:row.signal_bar_time,recheck,manual_unlocked:manualUnlocked,max_executable_risk_usd:entryRiskCap})});
     let data={};try{data=await response.json();}catch{}
     if(!response.ok||!data.queued)throw new Error(data.error||("HTTP "+response.status));
     button.textContent="ارسال شد";
     opportunitySet("opportunity-status",
       manualUnlocked
-        ?"فرمان دستی "+selectedDirection+" ارسال شد؛ قفل‌های تحلیلی Ramon دخالت نمی‌کنند و فقط کنترل‌های سخت اجرای سفارش/ریسک باقی می‌مانند."
+        ?"فرمان دستی "+selectedDirection+(entryRiskCap?" با سقف ریسک همین ورود $"+Number(entryRiskCap).toFixed(2):"")+" ارسال شد؛ قفل‌های تحلیلی Ramon دخالت نمی‌کنند و فقط کنترل‌های سخت اجرای سفارش/ریسک باقی می‌مانند."
         :(recheck?"جهت انتخابی روی snapshot تازه بازبینی و ارسال شد؛ ":"فرمان "+selectedDirection+" ارسال شد؛ ")+"EA قبل از بازکردن پوزیشن کنترل‌های اجرایی و ریسک را دوباره بررسی می‌کند.");
     setTimeout(()=>void refreshOpportunities(),1500);
   }catch(err){button.textContent="رد شد";opportunitySet("opportunity-status","ورود دستی انجام نشد: "+err.message);setTimeout(()=>{button.disabled=!row.actionable;button.textContent=old;},1800);}
