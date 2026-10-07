@@ -1,6 +1,6 @@
 #property strict
-#property version "1.595"
-#define RAMON_EA_VERSION "0.59.5"
+#property version "1.596"
+#define RAMON_EA_VERSION "0.59.6"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -2016,7 +2016,7 @@ bool SmallProfitStop(const ENUM_ORDER_TYPE side,const double entry,
    return false;
 }
 
-double SelectVolume(ENUM_ORDER_TYPE direction,double entry,double stop,double entry_max_risk_usd=0.0)
+double SelectVolume(ENUM_ORDER_TYPE direction,double entry,double stop,double entry_risk_budget_usd=0.0)
 {
    double minimum=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN);
    double maximum=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MAX);
@@ -2026,14 +2026,15 @@ double SelectVolume(ENUM_ORDER_TYPE direction,double entry,double stop,double en
    double money=0.0;
    if(!OrderCalcProfit(direction,_Symbol,minimum,entry,stop,money) || money>=0.0)
       return 0.0;
-   double effective_cap=(entry_max_risk_usd>0.0 ? entry_max_risk_usd : MaxExecutableRiskUSD);
-   double budget=MathMin(EffectiveRiskPerTradeUSD(),effective_cap)*MoneyUnitsPerUSD;
+   double preferred_risk=(entry_risk_budget_usd>0.0 ? entry_risk_budget_usd : EffectiveRiskPerTradeUSD());
+   double effective_cap=(entry_risk_budget_usd>0.0 ? entry_risk_budget_usd : MaxExecutableRiskUSD);
+   double budget=MathMin(preferred_risk,effective_cap)*MoneyUnitsPerUSD;
    double hard_cap=effective_cap*MoneyUnitsPerUSD;
    if(budget<=0.0 || hard_cap<=0.0)
       return 0.0;
    if(-money>budget+0.00001)
    {
-      if(!AllowMinLotRiskOverride || effective_cap<EffectiveRiskPerTradeUSD()
+      if(!AllowMinLotRiskOverride || effective_cap<preferred_risk
          || -money>hard_cap+0.00001)
          return 0.0;
       // Override is deliberately minimum-lot only; never scale volume using the larger cap.
@@ -2070,7 +2071,7 @@ bool StageEntrySizing(
    const double entry,
    const double stop,
    const double volume,
-   const double entry_max_risk_usd=0.0
+   const double entry_risk_budget_usd=0.0
 )
 {
    ClearPendingSizing();
@@ -2079,9 +2080,10 @@ bool StageEntrySizing(
    if(!ValidSampleKey(sample_key) || minimum<=0.0 || volume<=0.0
       || !OrderCalcProfit(side,_Symbol,minimum,entry,stop,min_loss) || min_loss>=0.0)
       return false;
+   double preferred_risk=(entry_risk_budget_usd>0.0 ? entry_risk_budget_usd : EffectiveRiskPerTradeUSD());
    double budget=(SmallOnlyMode ? SmallProfitRiskCapUnits()
-      : EffectiveRiskPerTradeUSD()*MoneyUnitsPerUSD);
-   double effective_cap=(entry_max_risk_usd>0.0 ? entry_max_risk_usd : MaxExecutableRiskUSD);
+      : preferred_risk*MoneyUnitsPerUSD);
+   double effective_cap=(entry_risk_budget_usd>0.0 ? entry_risk_budget_usd : MaxExecutableRiskUSD);
    double hard_cap=(SmallOnlyMode ? SmallProfitRiskCapUnits()
       : effective_cap*MoneyUnitsPerUSD);
    if(budget<=0.0 || hard_cap<=0.0 || MoneyUnitsPerUSD<=0.0)
@@ -4343,7 +4345,7 @@ int ReadDashboardManualEntry(
    double &probability,
    string &mode,
    string &origin_sample_key,
-   double &entry_max_risk_usd,
+   double &entry_risk_budget_usd,
    string &why
 )
 {
@@ -4355,7 +4357,7 @@ int ReadDashboardManualEntry(
    probability=-1.0;
    mode="NORMAL";
    origin_sample_key="";
-   entry_max_risk_usd=0.0;
+   entry_risk_budget_usd=0.0;
    why="";
    if(SmallOnlyMode)
       return 0;
@@ -4411,7 +4413,7 @@ int ReadDashboardManualEntry(
    double command_probability=StringToDouble(parts[7]);
    string command_mode=(count>=9 ? parts[8] : "NORMAL");
    string command_origin=(count>=10 ? parts[9] : command_sample);
-   double command_entry_cap=(count==11 ? StringToDouble(parts[10]) : 0.0);
+   double command_risk_budget=(count==11 ? StringToDouble(parts[10]) : 0.0);
    datetime utc_now=TimeGMT();
 
    if(side!="BUY" && side!="SELL")
@@ -4424,8 +4426,8 @@ int ReadDashboardManualEntry(
    { why="invalid command mode"; return -1; }
    if(!ValidSampleKey(command_origin))
    { why="invalid origin sample"; return -1; }
-   if(command_entry_cap<0.0 || command_entry_cap>3.0 || (command_entry_cap>0.0 && command_entry_cap<0.01))
-   { why="invalid per-entry risk cap"; return -1; }
+   if(command_risk_budget<0.0 || command_risk_budget>3.0 || (command_risk_budget>0.0 && command_risk_budget<0.01))
+   { why="invalid per-entry risk budget"; return -1; }
    if(command_mode=="NORMAL" && command_edge<=0.0)
    { why="invalid opportunity edge"; return -1; }
    if(command_probability>1.0 || command_probability< -1.0)
@@ -4444,13 +4446,13 @@ int ReadDashboardManualEntry(
    probability=command_probability;
    mode=command_mode;
    origin_sample_key=command_origin;
-   entry_max_risk_usd=command_entry_cap;
+   entry_risk_budget_usd=command_risk_budget;
    Print("Ramon manual dashboard command consumed side=",side,
       " sample=",command_sample,
       " bar=",IntegerToString((long)signal_bar),
       " edge=",DoubleToString(command_edge,_Digits),
       " p=",DoubleToString(command_probability,3),
-      " entryCap=",DoubleToString(command_entry_cap,2),
+      " entryRiskBudget=",DoubleToString(command_risk_budget,2),
       " queued_after=",IntegerToString(total-1));
    return 1;
 }
@@ -4706,7 +4708,7 @@ void OnTimer()
    // when a network/parser/telemetry return happens earlier in the timer cycle.
    string dashboard_direction="",dashboard_sample_key="",dashboard_command_mode="NORMAL",dashboard_origin_sample_key="",dashboard_command_reason="";
    double dashboard_risk_distance=0.0,dashboard_target_distance=0.0;
-   double dashboard_edge=0.0,dashboard_probability=-1.0,dashboard_entry_max_risk_usd=0.0;
+   double dashboard_edge=0.0,dashboard_probability=-1.0,dashboard_entry_risk_budget_usd=0.0;
    int dashboard_command=0;
    bool dashboard_pending=FileIsExist("Ramon_ManualEntries.txt",FILE_COMMON);
    if(dashboard_pending)
@@ -5039,7 +5041,7 @@ void OnTimer()
          closed,dashboard_direction,dashboard_sample_key,
          dashboard_risk_distance,dashboard_target_distance,
          dashboard_edge,dashboard_probability,dashboard_command_mode,dashboard_origin_sample_key,
-         dashboard_entry_max_risk_usd,dashboard_command_reason
+         dashboard_entry_risk_budget_usd,dashboard_command_reason
       );
       if(dashboard_command<0)
          Print("Ramon manual dashboard entry ignored: ",dashboard_command_reason);
@@ -5227,7 +5229,7 @@ void OnTimer()
    }
 
    double volume=(small_profit ? SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN)
-      : SelectVolume(side,entry,stop,(dashboard_manual_entry ? dashboard_entry_max_risk_usd : 0.0)));
+      : SelectVolume(side,entry,stop,(dashboard_manual_entry ? dashboard_entry_risk_budget_usd : 0.0)));
    if(volume<=0.0)
    { StatusLine="TRADE BLOCKED: min lot > hard risk cap"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
 
@@ -5271,8 +5273,8 @@ void OnTimer()
       { StatusLine="Broker cannot place 2-cent target"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
    }
    double executable_loss=0.0;
-   double entry_hard_cap_units=((dashboard_manual_entry && dashboard_entry_max_risk_usd>0.0)
-      ? dashboard_entry_max_risk_usd*MoneyUnitsPerUSD
+   double entry_hard_cap_units=((dashboard_manual_entry && dashboard_entry_risk_budget_usd>0.0)
+      ? dashboard_entry_risk_budget_usd*MoneyUnitsPerUSD
       : MaxExecutableRiskUnits());
    if(!SmallOnlyMode && (!OrderCalcProfit(side,_Symbol,volume,entry,stop,executable_loss)
       || executable_loss>=0.0 || -executable_loss>entry_hard_cap_units+0.00001))
@@ -5284,7 +5286,7 @@ void OnTimer()
 
    // Telemetry/management staging must never block an otherwise valid entry.
    StageEntrySizing(LastSampleKey,side,entry,stop,volume,
-      (dashboard_manual_entry ? dashboard_entry_max_risk_usd : 0.0));
+      (dashboard_manual_entry ? dashboard_entry_risk_budget_usd : 0.0));
    if(!small_profit && !range_trade && !dashboard_manual_entry)
       PersistTPPlan(LastSampleKey,decision,entry,stop,
          LastTargetTP1,LastTargetTP2,LastTargetTP3);
