@@ -1,6 +1,6 @@
 #property strict
-#property version "1.591"
-#define RAMON_EA_VERSION "0.59.1"
+#property version "1.592"
+#define RAMON_EA_VERSION "0.59.2"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -1338,6 +1338,10 @@ void DrawDashboard()
    ulong managed_ticket=0;
    datetime managed_opened=0;
    bool has_managed_position=ManagedPosition(managed_ticket,managed_opened);
+
+   ulong automatic_ticket=0;
+   datetime automatic_opened=0;
+   bool robot_on=ManagedAutomaticPosition(automatic_ticket,automatic_opened);
    double live_profit_units=0.0;
    double live_profit_usd=0.0;
    if(has_managed_position && PositionSelectByTicket(managed_ticket))
@@ -1352,8 +1356,8 @@ void DrawDashboard()
       (live_profit_usd<-0.00001 ? "-$" : "$"))
       +DoubleToString(MathAbs(live_profit_usd),2);
 
-   // Compact panel: live summary plus model/handler map.
-   UiRect("PANEL",12,24,560,655,C'15,23,42',C'71,85,105');
+   // Compact panel: live summary only; model/handler map removed.
+   UiRect("PANEL",12,24,560,360,C'15,23,42',C'71,85,105');
 
    UiLabel("TITLE","RAMON AI TRADER  v"+RAMON_EA_VERSION+" "
       +(SmallOnlyMode ? "SMALL" : "MAIN"),28,36,clrWhite,12);
@@ -1451,143 +1455,31 @@ void DrawDashboard()
       +"   Cap: $"+DoubleToString(MaxExecutableRiskUSD,2),
       28,288,sizing_color,9);
 
+   UiLabel("ROBOT_STATUS",
+      robot_on ? "Robot: On" : "Robot: Off",
+      430,266,(robot_on ? clrLimeGreen : clrGray),10);
+
    // Detailed min-risk/gate/money-unit values remain in Trade Check + Diagnostic.
    ObjectDelete(0,UiPrefix+"MIN_RISK");
    ObjectDelete(0,UiPrefix+"RISK_GATE");
    ObjectDelete(0,UiPrefix+"MONEY_CONFIRM");
 
-   // ---------------------- model / handler map ----------------------
-   int mx=24, my=320, mw=520, mh=244;
-   UiRect("MODEL_MAP_BG",mx,my,mw,mh,C'17,27,46',C'71,85,105');
-   UiRect("MODEL_MAP_HEAD",mx+4,my+4,mw-8,26,C'30,41,59',C'71,85,105');
-   UiLabel("MODEL_MAP_TITLE","MODEL / HANDLER MAP",mx+12,my+9,clrWhite,10);
+   // MODEL / HANDLER MAP intentionally removed from the MT5 chart UI.
+   ObjectsDeleteAll(0,UiPrefix+"MODEL_MAP");
+   ObjectsDeleteAll(0,UiPrefix+"MODEL_NAME_");
+   ObjectsDeleteAll(0,UiPrefix+"MODEL_HANDLER_");
 
-   string mnames[12]={"Forecast","Forecast Experimental","Regime","Anomaly Detection",
-      "Entry","News Calendar","News Model","News Sentiment",
-      "Meta","Risk / SL","Market State","TP Structure"};
-   string mhandlers[12]={
-      ModelTag(LastForecastModelHandler),
-      ModelTag(LastForecastExperimentalModelHandler),
-      ModelTag(LastRegimeModelHandler),
-      ModelTag(LastAnomalyModelHandler)+" [LIVE GATE]",
-      ModelTag(LastEntryModelHandler),
-      LastNewsSourceHandler,
-      ModelTag(LastNewsModelHandler),
-      ModelTag(LastNewsSentimentModelHandler)+" [LIVE GATE]",
-      ModelTag(LastMetaModelHandler),
-      ModelTag(LastRiskModelHandler),
-      ModelTag(LastMarketStateHandler),
-      ModelTag(LastTargetModelHandler)
-   };
-
-   string mtips[12];
-   mtips[0]="Forecast | "+ModelTag(LastForecastModelHandler)+"\n"
-      +"Decision: "+LastModelDecision+" | Reason: "+LastModelReason+"\n"
-      +"Low/Median/High: "+DoubleToString(LastForecastLow,_Digits)+" / "
-      +DoubleToString(LastForecast,_Digits)+" / "+DoubleToString(LastForecastHigh,_Digits)+"\n"
-      +"BUY edge: "+DoubleToString(LastBuyEdge,3)+" | SELL edge: "+DoubleToString(LastSellEdge,3)+"\n"
-      +"Strength: "+DoubleToString(LastSignalStrength,3)+" / min "+DoubleToString(LastMinimumStrength,3);
-
-   mtips[1]="Forecast Experimental | "+ModelTag(LastForecastExperimentalModelHandler)+"\n"
-      +"Ready: "+BoolText(LastTimesFMReady)+" | Direction: "+LastTimesFMDirection+"\n"
-      +"Low/Median/High: "+DoubleToString(LastTimesFMLow,_Digits)+" / "
-      +DoubleToString(LastTimesFMMedian,_Digits)+" / "+DoubleToString(LastTimesFMHigh,_Digits)+"\n"
-      +"Move ATR: "+DoubleToString(LastTimesFMMoveAtr,3)
-      +" | Agrees Chronos: "+BoolText(LastTimesFMAgreesChronos)+"\n"
-      +"EXPERIMENTAL: no execution effect.";
-
-   mtips[2]="Regime | "+ModelTag(LastRegimeModelHandler)+"\n"
-      +"Probability: "+RoleProbabilityText(LastRegimeProbability)+"\n"
-      +"Label: "+LastRegimeLabel+"\n"
-      +"Current market state: "+LastMarketState+" | route "+LastMarketStateRoute+"\n"
-      +"Role active: "+BoolText(LastEnsembleActive);
-
-   mtips[3]="Anomaly Detection | "+ModelTag(LastAnomalyModelHandler)+"\n"
-      +"Label: "+LastMomentAnomalyLabel+"\n"
-      +"Score: "+DoubleToString(LastMomentAnomalyScore,6)+" | Ratio: "+DoubleToString(LastMomentAnomalyRatio,3)+"\n"
-      +"Threshold: "+DoubleToString(LastMomentLiveThreshold,2)+" | Fresh: "+BoolText(LastMomentLiveFresh)+"\n"
-      +"LIVE veto: "+BoolText(LastMomentLiveVeto);
-
-   mtips[4]="Entry | "+ModelTag(LastEntryModelHandler)+"\n"
-      +"Entry probability: "+RoleProbabilityText(LastEntryProbability)+"\n"
-      +"Signal strength: "+DoubleToString(LastSignalStrength,3)+" / "+DoubleToString(LastMinimumStrength,3)+"\n"
-      +"Edge BUY/SELL: "+DoubleToString(LastBuyEdge,3)+" / "+DoubleToString(LastSellEdge,3)+"\n"
-      +"Intrabar: "+LastIntrabarDirection+" "+BoolText(LastIntrabarConfirmed)
-      +" | AI trend: "+LastAiTrendDirection+" "+BoolText(LastAiTrendConfirmed)+"\n"
-      +"Role active: "+BoolText(LastEnsembleActive);
-
-   mtips[5]="News Calendar | "+LastNewsSourceHandler+"\n"
-      +"Source: "+LastNewsSource+" | Ready: "+BoolText(LastNewsSourceReady)+"\n"
-      +"Event: "+LastNewsEventCountry+" "+LastNewsEventImpact+" "+LastNewsEventTitle+"\n"
-      +"Delta: "+DoubleToString(LastNewsEventDeltaMinutes,1)+" min | Age: "
-      +DoubleToString(LastNewsSourceAgeSeconds,0)+" sec";
-
-   mtips[6]="News Model | "+ModelTag(LastNewsModelHandler)+"\n"
-      +"Probability: "+RoleProbabilityText(LastNewsProbability)+"\n"
-      +"Model ready: "+BoolText(LastNewsModelReady)+"\n"
-      +"Event input: "+LastNewsEventCountry+" "+LastNewsEventImpact+" "+LastNewsEventTitle+"\n"
-      +"Role active: "+BoolText(LastEnsembleActive);
-
-   mtips[7]="News Sentiment | "+ModelTag(LastNewsSentimentModelHandler)+"\n"
-      +"Sentiment: "+LastFinbertSentimentLabel+"\n"
-      +"Directional score: "+DoubleToString(LastFinbertDirectionalScore,3)+"\n"
-      +"Threshold: "+DoubleToString(LastFinbertLiveThreshold,2)+"\n"
-      +"LIVE veto: "+BoolText(LastFinbertLiveVeto);
-
-   mtips[8]="Meta | "+ModelTag(LastMetaModelHandler)+"\n"
-      +"Meta probability: "+RoleProbabilityText(LastMetaProbability)+"\n"
-      +"Base decision: "+LastBaseDecision+" | "+LastBaseReason+"\n"
-      +"Final decision: "+LastModelDecision+" | "+LastModelReason+"\n"
-      +"Ensemble ready/active: "+BoolText(LastEnsembleReady)+" / "+BoolText(LastEnsembleActive);
-
-   mtips[9]="Risk / SL | "+ModelTag(LastRiskModelHandler)+"\n"
-      +"Risk probability: "+RoleProbabilityText(LastRiskProbability)+" | Target: "+LastRiskTarget+"\n"
-      +"Risk multiplier: "+DoubleToString(LastRiskMultiplier,2)+"x\n"
-      +"SL distance: "+DoubleToString(LastStopDistance,3)+" | TP distance: "+DoubleToString(LastTargetDistance,3)+"\n"
-      +"Planned volume: "+DoubleToString(LastPlannedVolume,2)+" | Side: "+LastSizingSide;
-
-   mtips[10]="Market State | "+ModelTag(LastMarketStateHandler)+"\n"
-      +"State: "+LastMarketState+"\n"
-      +"Route: "+LastMarketStateRoute+"\n"
-      +"Policy: "+LastMarketStatePolicy+"\n"
-      +"ATR: "+DoubleToString(LastAtr,3)+" | Spread: "+IntegerToString(LastModelSpreadPoints)+" pts";
-
-   mtips[11]="TP Structure | "+ModelTag(LastTargetModelHandler)+"\n"
-      +"Ready: "+BoolText(LastTargetStructureReady)+" | Method: "+LastTargetMethod+"\n"
-      +"Direction: "+LastTargetDirection+" | Impulse ATR: "+DoubleToString(LastTargetImpulseAtr,3)+"\n"
-      +"TP1/TP2/TP3: "+DoubleToString(LastTargetTP1,_Digits)+" / "
-      +DoubleToString(LastTargetTP2,_Digits)+" / "+DoubleToString(LastTargetTP3,_Digits);
-
-   for(int mi=0;mi<12;mi++)
-   {
-      int mrow=my+36+mi*16;
-      string name_id="MODEL_NAME_"+IntegerToString(mi);
-      string handler_id="MODEL_HANDLER_"+IntegerToString(mi);
-      string condition=ModelMapConditionState(mi);
-      color map_color=(condition=="OK" ? clrLimeGreen
-         : condition=="VETO" || condition=="BLOCKED" ? clrTomato
-         : condition=="EXPERIMENTAL" ? C'192,155,235'
-         : condition=="STALE" ? clrOrange
-         : condition=="OFF" || condition=="UNKNOWN" ? clrGray : clrWhite);
-      mtips[mi]+="\nCondition: "+condition
-         +"\nGreen = this row's condition is OK, not permission to trade.";
-      UiLabel(name_id,mnames[mi],mx+12,mrow,map_color,8);
-      UiLabel(handler_id,"-> "+mhandlers[mi],mx+170,mrow,map_color,8);
-      ObjectSetString(0,UiPrefix+name_id,OBJPROP_TOOLTIP,mtips[mi]);
-      ObjectSetString(0,UiPrefix+handler_id,OBJPROP_TOOLTIP,mtips[mi]);
-   }
-
-   UiButton("COPY","COPY DIAGNOSTIC",28,578,176,30);
-   UiButton("CLOSE","CLOSE TRADE",218,578,110,30);
+   UiButton("COPY","COPY DIAGNOSTIC",28,320,176,30);
+   UiButton("CLOSE","CLOSE TRADE",218,320,110,30);
    ObjectSetInteger(0,UiPrefix+"CLOSE",OBJPROP_BGCOLOR,
       has_managed_position ? C'153,27,27' : C'55,65,81');
    ObjectSetInteger(0,UiPrefix+"CLOSE",OBJPROP_BORDER_COLOR,
       has_managed_position ? C'248,113,113' : C'75,85,99');
 
-   UiLabel("COPY_STATUS",LastCopyStatus,340,578,
+   UiLabel("COPY_STATUS",LastCopyStatus,340,320,
       (StringFind(LastCopyStatus,"failed")>=0 || StringFind(LastCopyStatus,"disabled")>=0
          ? clrTomato : clrWhite),8);
-   UiLabel("CLOSE_STATUS",LastCloseStatus,340,594,
+   UiLabel("CLOSE_STATUS",LastCloseStatus,340,336,
       (StringFind(LastCloseStatus,"FAILED")>=0 ? clrTomato : clrWhite),8);
 
    ChartRedraw();
