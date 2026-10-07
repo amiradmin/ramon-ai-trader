@@ -5,7 +5,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import math
 import os
-from threading import Lock
+from threading import Lock, Thread
 import time
 
 import numpy as np
@@ -97,7 +97,33 @@ class MultivariateChronos2:
         }
 
 
-def serve(host: str, port: int, model: MultivariateChronos2) -> None:
+class ShadowModelState:
+    def __init__(self, model_id: str, device: str) -> None:
+        self.model_id = model_id
+        self.device = device
+        self.model: MultivariateChronos2 | None = None
+        self.status = "loading"
+        self.error = ""
+        self.started_utc = int(time.time())
+        self.ready_utc = 0
+        self._thread = Thread(target=self._load, name="chronos-shadow-loader", daemon=True)
+        self._thread.start()
+
+    def _load(self) -> None:
+        try:
+            self.model = MultivariateChronos2(self.model_id, self.device)
+            self.ready_utc = int(time.time())
+            self.status = "ready"
+        except Exception as exc:
+            self.error = f"{type(exc).__name__}: {exc}"
+            self.status = "error"
+
+    @property
+    def ready(self) -> bool:
+        return self.status == "ready" and self.model is not None
+
+
+def serve(host: str, port: int, state: ShadowModelState) -> None:
     started = int(time.time())
 
     class Handler(BaseHTTPRequestHandler):
@@ -116,19 +142,35 @@ def serve(host: str, port: int, model: MultivariateChronos2) -> None:
             if self.path.split("?", 1)[0] != "/health":
                 self.send_error(404)
                 return
-            self.reply(200, {
-                "ready": True,
-                "model": model.model_id,
+            payload = {
+                "ready": state.ready,
+                "status": state.status,
+                "model": state.model_id,
                 "mode": "shadow_multivariate_covariate",
                 "effect": "NONE",
                 "uptime_seconds": int(time.time()) - started,
-            })
+                "loading_seconds": (
+                    max(0, (state.ready_utc or int(time.time())) - state.started_utc)
+                ),
+                "error": state.error,
+            }
+            self.reply(200 if state.ready else 503, payload)
 
         def do_POST(self) -> None:
             if self.path.split("?", 1)[0] != "/forecast-only":
                 self.send_error(404)
                 return
             try:
+                if not state.ready or state.model is None:
+                    self.reply(503, {
+                        "ready": False,
+                        "status": state.status,
+                        "model": state.model_id,
+                        "error": state.error,
+                        "advisory_only": True,
+                    })
+                    return
+                model = state.model
                 length = int(self.headers.get("Content-Length", "0"))
                 payload = json.loads(self.rfile.read(length))
                 market = Market.from_dict(payload)
@@ -195,8 +237,8 @@ def main() -> None:
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8016)
     args = parser.parse_args()
-    model = MultivariateChronos2(args.model, args.device)
-    serve(args.host, args.port, model)
+    state = ShadowModelState(args.model, args.device)
+    serve(args.host, args.port, state)
 
 
 if __name__ == "__main__":
