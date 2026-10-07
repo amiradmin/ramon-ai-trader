@@ -1448,11 +1448,11 @@ def control_state(diagnostic):
             "supported": diag.get("ControlBridge") == "PRIMARY file-v1",
             "fresh": freshness(diag.get("captured_epoch"), time.time(), 30)["state"] == "fresh",
             "writable": bool(path and path.parent.is_dir() and os.access(path.parent, os.W_OK)),
-            "error": error, "default": 0.35, "minimum": 0.01, "maximum": 0.50}
+            "error": error, "default": 0.35, "minimum": 0.01, "maximum": 3.00}
 
 
 def save_control(diagnostic, value):
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0.01 <= value <= 0.50:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0.01 <= value <= 3.00:
         raise ValueError("مقدار باید عددی بین ۰٫۰۱ و ۰٫۵۰ دلار باشد")
     if diagnostic is None:
         raise ValueError("مسیر فایل اکسپرت در دسترس نیست")
