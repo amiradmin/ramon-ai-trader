@@ -79,6 +79,49 @@ def test_market_momentum_now_detects_drop_but_never_controls_auto_trading():
     assert result["drop_score"] > result["rally_score"]
     assert result["observe_only"] is True
     assert result["affects_auto_trading"] is False
+    assert result["version"] == "v2"
+    assert result["m1_score"] >= 70
+    assert result["m15_context_direction"] == "SELL"
+    assert result["data_quality"] > 0
+
+
+def test_market_momentum_v2_detects_acceleration_and_m5_confirmation():
+    m1 = []
+    price = 105.0
+    # First five bars: gentle decline. Last ten: progressively stronger decline.
+    for i in range(15):
+        step = 0.08 if i < 5 else (0.18 if i < 10 else 0.35)
+        open_price = price
+        close = open_price - step
+        m1.append({
+            "open": open_price,
+            "high": open_price + 0.04,
+            "low": close - 0.05,
+            "close": close,
+            "spread_points": 42,
+        })
+        price = close
+    recent_market = {
+        "m1": m1,
+        "m15": [
+            {"open": 106.0, "high": 106.2, "low": 104.8, "close": 105.1},
+            {"open": 105.1, "high": 105.2, "low": 103.8, "close": 104.0},
+            {"open": 104.0, "high": 104.1, "low": 102.7, "close": 102.9},
+        ],
+        "exact_input": True,
+        "warnings": [],
+    }
+    result = market_momentum_now(
+        recent_market,
+        {"market_direction": "SELL", "market_direction_micro_move_atr": -0.5},
+        {"intrabar_confirmed": 1, "intrabar_direction": "SELL"},
+    )
+    assert result["direction"] == "SELL"
+    assert result["m5_score"] is not None
+    assert result["m5_bars_used"] == 3
+    assert result["acceleration"] == "increasing"
+    assert result["data_quality"] == 100
+    assert result["observe_only"] is True
 
 
 def test_observed_preview_does_not_claim_an_order_or_gate_pass(sources):
