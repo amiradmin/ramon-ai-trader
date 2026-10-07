@@ -1,5 +1,5 @@
 #property copyright "Ramon AI Trader"
-#property version "1.022"
+#property version "1.023"
 #property strict
 
 // Read-only bridge. Attach to a SEPARATE chart from the Ramon trading EA.
@@ -89,7 +89,7 @@ void Refresh()
    }
    string reply=CharArrayToString(response,0,ArraySize(response),CP_UTF8);
    string direction="",model="",bias_direction="",bias_source="";
-   double mid=0,median=0,horizon=0,step1=0,step2=0,step3=0,step4=0,bias_confidence=0,bias_score=0;
+   double mid=0,median=0,horizon=0,step1=0,step2=0,step3=0,step4=0,conf1=0,conf2=0,conf3=0,conf4=0,bias_confidence=0,bias_score=0;
    if(!JsonText(reply,"direction",direction) || !JsonText(reply,"model",model)
       || !JsonNumber(reply,"current_mid",mid) || !JsonNumber(reply,"forecast_median",median)
        || !JsonNumber(reply,"forecast_horizon_bars",horizon)
@@ -97,11 +97,16 @@ void Refresh()
       || !JsonNumber(reply,"forecast_step_2",step2)
       || !JsonNumber(reply,"forecast_step_3",step3)
       || !JsonNumber(reply,"forecast_step_4",step4)
+      || !JsonNumber(reply,"forecast_step_confidence_1",conf1)
+      || !JsonNumber(reply,"forecast_step_confidence_2",conf2)
+      || !JsonNumber(reply,"forecast_step_confidence_3",conf3)
+      || !JsonNumber(reply,"forecast_step_confidence_4",conf4)
       || !JsonText(reply,"bias_direction",bias_direction)
       || !JsonText(reply,"bias_source",bias_source)
       || !JsonNumber(reply,"bias_confidence",bias_confidence)
       || !JsonNumber(reply,"bias_score",bias_score)
-      || mid<=0 || median<=0 || step1<=0 || step2<=0 || step3<=0 || step4<=0 || horizon!=4)
+      || mid<=0 || median<=0 || step1<=0 || step2<=0 || step3<=0 || step4<=0
+      || conf1<0 || conf1>1 || conf2<0 || conf2>1 || conf3<0 || conf3>1 || conf4<0 || conf4>1 || horizon!=4)
    { Print("ChronosSlopeBridge: invalid forecast response: ",StringSubstr(reply,0,300)); return; }
    int dir=direction=="UP" ? 1 : direction=="DOWN" ? -1 : 0;
    GlobalVariableSet(Key("MID"),mid);
@@ -111,6 +116,10 @@ void Refresh()
    GlobalVariableSet(Key("STEP2"),step2);
    GlobalVariableSet(Key("STEP3"),step3);
    GlobalVariableSet(Key("STEP4"),step4);
+   GlobalVariableSet(Key("CONF1"),conf1);
+   GlobalVariableSet(Key("CONF2"),conf2);
+   GlobalVariableSet(Key("CONF3"),conf3);
+   GlobalVariableSet(Key("CONF4"),conf4);
    int bias_dir=bias_direction=="BUY" ? 1 : bias_direction=="SELL" ? -1 : 0;
    GlobalVariableSet(Key("DIR"),dir);
    GlobalVariableSet(Key("BIAS_DIR"),bias_dir);
@@ -122,7 +131,9 @@ void Refresh()
       " conf=",DoubleToString(bias_confidence,3),
       " score=",DoubleToString(bias_score,3),
       " mid=",mid," forecast=",median," step15=",step1," step30=",step2,
-      " step45=",step3," step60=",step4," horizon=",horizon);
+      " step45=",step3," step60=",step4,
+      " conf=",DoubleToString(conf1,2),"/",DoubleToString(conf2,2),"/",DoubleToString(conf3,2),"/",DoubleToString(conf4,2),
+      " horizon=",horizon);
 }
 int OnInit()
 {
