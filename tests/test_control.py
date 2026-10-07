@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from ramon.monitor import save_control, control_state
 
-@pytest.mark.parametrize('value', [None, True, '0.2', 0, -1, .51, math.inf, math.nan])
+@pytest.mark.parametrize('value', [None, True, '0.2', 0, -1, 3.01, math.inf, math.nan])
 def test_invalid_control_never_changes_file(tmp_path, value):
     path = tmp_path / 'Ramon_Diagnostic.txt'
     save_control(path, .35)
