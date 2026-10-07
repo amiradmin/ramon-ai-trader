@@ -467,7 +467,7 @@ function renderOpportunities(data){
     if(p>=0.55)return 20;
     return 10;
   };
-  const sortedOpportunities=[...(data.opportunities||[])].sort((a,b)=>{
+  const sortedOpportunities=(data.opportunities||[]).filter(row=>row.position_open||!row.executed).sort((a,b)=>{
     const priority=tradePriority(b)-tradePriority(a);
     if(priority!==0)return priority;
     const ap=typeof a.success_probability==="number"&&Number.isFinite(a.success_probability)?a.success_probability:-1;
