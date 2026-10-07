@@ -702,3 +702,16 @@
 .simple-trade-table .trade-position-state.profit-flat{
   color:var(--text);
 }
+
+
+.chronos-calibration-status{
+  display:block;
+  margin-top:6px;
+  font:700 10px/1.5 monospace;
+  direction:ltr;
+  text-align:right;
+  color:var(--muted);
+  white-space:normal;
+}
+.chronos-calibration-status.learning{color:var(--amber)}
+.chronos-calibration-status.active{color:var(--green)}
