@@ -266,6 +266,26 @@ function renderTradingGuidance(){
      " · +۳۰ دقیقه"+conf(value.forecast_step_confidence_2)+": "+value.forecast_step_2.toFixed(2)+extra+" · تازگی: "+(value.age_seconds??"—")+
      " ثانیه · فقط جهت احتمالی؛ برای ورود واقعی تأیید زمان‌بندی، اسپرد و ریسک لازم است."
     :"Bridge باید پیش‌بینی معتبر و تازه ارسال کند. هیچ سیگنال معامله‌ای از داده قدیمی صادر نمی‌شود.";
+  const calibrationEl=$("chronos-calibration-status");
+  if(calibrationEl){
+    const rows=Array.isArray(value?.calibration)?value.calibration:[];
+    if(rows.length){
+      const labels=rows.slice(0,4).map((row,idx)=>{
+        const minutes=(idx+1)*15;
+        const samples=Number.isFinite(row?.samples)?row.samples:0;
+        const active=row?.active===true;
+        const bias=Number.isFinite(row?.bias)?row.bias:0;
+        const mae=Number.isFinite(row?.mae)?row.mae:0;
+        return "+"+minutes+"m "+(active?"CALIBRATED":"LEARNING")+" "+samples+"/12"+
+          " · bias "+bias.toFixed(2)+" · MAE "+mae.toFixed(2);
+      });
+      calibrationEl.textContent="Auto-Calibration: "+labels.join(" | ");
+      calibrationEl.className="chronos-calibration-status "+(rows.some(row=>row?.active===true)?"active":"learning");
+    }else{
+      calibrationEl.textContent="Auto-Calibration: در انتظار اولین نمونه‌های واقعی…";
+      calibrationEl.className="chronos-calibration-status learning";
+    }
+  }
   container.className="trade-guidance "+mode;
 }
 async function refreshChronosSlope(){
