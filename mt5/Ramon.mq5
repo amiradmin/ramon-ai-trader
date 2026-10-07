@@ -562,7 +562,7 @@ void ReadControlRiskCap()
    string raw=FileReadString(handle);
    FileClose(handle);
    double value=StringToDouble(raw);
-   if(MathIsValidNumber(value) && value>=0.01 && value<=0.50)
+   if(MathIsValidNumber(value) && value>=0.01 && value<=3.00)
       MaxExecutableRiskUSD=value;
 }
 
@@ -5405,7 +5405,7 @@ int OnInit()
    if(!SmallOnlyMode && MagicNumber==SmallProfitMagicNumber)
    { Print("Primary mode cannot use the small-trade magic number"); return INIT_FAILED; }
    if(MoneyUnitsPerUSD<=0.0 || RiskPerTradeUSD<=0.0 || RiskPerTradeUSD>0.50
-      || MaxExecutableRiskUSD<=0.0 || MaxExecutableRiskUSD>0.50
+      || MaxExecutableRiskUSD<=0.0 || MaxExecutableRiskUSD>3.00
       || MaxSpreadPoints<=0 || (!SmallOnlyMode && MaxTradesPerDay<1) || MaximumHoldBars<1
       || ProfitProtectionFallbackActivationUnits<=0.0
       || ProfitProtectionActivationMinUnits<=0.0
