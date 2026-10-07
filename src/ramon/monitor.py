@@ -703,7 +703,7 @@ def market_momentum_now(recent_market, final, base):
         "state": state,
         "label": label,
         "direction": direction_now,
-        "confidence": confidence,
+        "score": confidence,
         "drop_score": drop,
         "rally_score": rally,
         "reasons": reasons[:4],
