@@ -1,5 +1,5 @@
 #property copyright "Ramon AI Trader"
-#property version "1.036"
+#property version "1.037"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -119,7 +119,8 @@ void DrawForecast()
    for(int i=0;i<4;i++)
    {
       string name=Prefix+"SEG"+IntegerToString(i+1);
-      color segment=prices[i+1]>prices[i] ? clrLimeGreen : prices[i+1]<prices[i] ? clrTomato : clrSilver;
+      color step_color=(i==0 ? clrAqua : i==1 ? clrGold : i==2 ? clrMagenta : clrDeepSkyBlue);
+      color segment=step_color;
       if(ObjectFind(0,name)<0)
          ObjectCreate(0,name,OBJ_TREND,0,times[i],prices[i],times[i+1],prices[i+1]);
       else
@@ -142,9 +143,7 @@ void DrawForecast()
       else ObjectMove(0,point,0,times[j],prices[j]);
       ObjectSetInteger(0,point,OBJPROP_ARROWCODE,159);
       ObjectSetInteger(0,point,OBJPROP_WIDTH,2);
-      color endpoint_color=(j==4 && LastBiasConfidence>=0.50)
-         ? (LastBiasDirection=="BUY" ? clrLimeGreen : LastBiasDirection=="SELL" ? clrTomato : clrSilver)
-         : (j==4 ? overall : clrAqua);
+      color endpoint_color=(j==1 ? clrAqua : j==2 ? clrGold : j==3 ? clrMagenta : clrDeepSkyBlue);
       ObjectSetInteger(0,point,OBJPROP_COLOR,endpoint_color);
       ObjectSetInteger(0,point,OBJPROP_SELECTABLE,false);
 
@@ -156,9 +155,15 @@ void DrawForecast()
          double conf=(j==1 ? LastStepConf15 : j==2 ? LastStepConf30 : j==3 ? LastStepConf45 : LastStepConf60);
          ObjectSetString(0,label,OBJPROP_TEXT,
             "Chronos +"+IntegerToString(j*15)+"m ("+DoubleToString(conf*100.0,0)+"%) "+DoubleToString(prices[j],_Digits));
-         ObjectSetInteger(0,label,OBJPROP_COLOR,j==4 ? overall : clrAqua);
+         color label_color=(j==1 ? clrAqua : j==2 ? clrGold : j==3 ? clrMagenta : clrDeepSkyBlue);
+         ObjectSetInteger(0,label,OBJPROP_COLOR,label_color);
          ObjectSetInteger(0,label,OBJPROP_FONTSIZE,9);
-         ObjectSetInteger(0,label,OBJPROP_ANCHOR,(j%2==1) ? ANCHOR_RIGHT_LOWER : ANCHOR_LEFT_UPPER);
+         // Alternate anchors to keep the four step labels visually separated.
+         ObjectSetInteger(0,label,OBJPROP_ANCHOR,
+            j==1 ? ANCHOR_RIGHT_LOWER :
+            j==2 ? ANCHOR_LEFT_UPPER :
+            j==3 ? ANCHOR_RIGHT_UPPER :
+                   ANCHOR_LEFT_LOWER);
          ObjectSetInteger(0,label,OBJPROP_SELECTABLE,false);
       }
       else ObjectDelete(0,label);
