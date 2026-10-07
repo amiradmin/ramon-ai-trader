@@ -1882,7 +1882,7 @@ def daily_profit_summary(db, symbol, opened, diagnostic=None, now=None):
     }
 
 
-MIN_DASHBOARD_ENTRY_EA_VERSION = (0, 59, 1)
+MIN_DASHBOARD_ENTRY_EA_VERSION = (0, 59, 5)
 
 
 def dashboard_entry_compatibility(diagnostic):
@@ -1896,7 +1896,7 @@ def dashboard_entry_compatibility(diagnostic):
         return {"supported": False, "reason": f"نسخه EA قابل تشخیص نیست: {raw or 'نامشخص'}"}
     version = tuple(int(part) for part in match.groups())
     if version < MIN_DASHBOARD_ENTRY_EA_VERSION:
-        return {"supported": False, "reason": f"نسخه نصب‌شده Ramon {raw} از فرمان ورود دستی داشبورد پشتیبانی تأییدشده ندارد؛ نسخه 0.58.7 یا جدیدتر را کامپایل و روی چارت بارگذاری کن."}
+        return {"supported": False, "reason": f"نسخه نصب‌شده Ramon {raw} از فرمان ورود دستی داشبورد پشتیبانی تأییدشده ندارد؛ نسخه 0.59.5 یا جدیدتر را کامپایل و روی چارت بارگذاری کن."}
     stamp = float(diag.get("captured_epoch") or 0)
     if not -5 <= time.time() - stamp <= 90:
         return {"supported": False, "reason": "وضعیت EA تازه نیست؛ دریافت فرمان قابل تأیید نیست"}
