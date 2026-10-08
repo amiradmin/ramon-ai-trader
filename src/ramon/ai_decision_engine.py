@@ -32,10 +32,12 @@ def apply_ai_decision_engine(
     maximum_full_sl_probability: float = 0.50,
     anomaly_soft_threshold: float = 2.0,
     anomaly_hard_threshold: float = 5.0,
+    conservative_policy: bool = False,
 ) -> bool:
     """Choose BUY/SELL/WAIT from learned directional quality and specialists."""
     response.update({
         "ai_engine_v2_enabled": int(enabled),
+        "ai_engine_v2_conservative_policy": int(conservative_policy),
         "ai_engine_v2_active": 0,
         "ai_engine_v2_selected": 0,
         "ai_engine_v2_minimum_score": minimum_score,
@@ -59,6 +61,19 @@ def apply_ai_decision_engine(
             ai_engine_v2_block="market_hazard_route",
         )
         return True
+
+    if conservative_policy:
+        # Candidate direction must never override an unconfirmed WAIT in this
+        # opt-in policy. Direction and timing confirmation are separate gates.
+        if (response.get("decision") == "WAIT"
+                and not (response.get("intrabar_confirmed") and response.get("ai_trend_confirmed"))):
+            response.update(decision="WAIT", reason="ai_engine_v2_unconfirmed_base_wait",
+                            ai_engine_v2_block="unconfirmed_base_wait")
+            return True
+        if not response.get("entry_timing_ready"):
+            response.update(decision="WAIT", reason="ai_engine_v2_timing_not_ready",
+                            ai_engine_v2_block="entry_timing_not_ready")
+            return True
 
     buy_quality = _p(response.get("buy_success_probability"), -1.0)
     sell_quality = _p(response.get("sell_success_probability"), -1.0)
@@ -128,6 +143,15 @@ def apply_ai_decision_engine(
             ai_engine_v2_block="independent_direction_conflict",
         )
         return True
+
+    if conservative_policy:
+        for source, confirmed in (("intrabar", "intrabar_confirmed"),
+                                  ("ai_trend", "ai_trend_confirmed")):
+            direction = str(response.get(source + "_direction", "NEUTRAL"))
+            if response.get(confirmed) and direction in {"BUY", "SELL"} and direction != selected:
+                response.update(decision="WAIT", reason="ai_engine_v2_confirmed_direction_conflict",
+                                ai_engine_v2_block=source + "_direction_conflict")
+                return True
 
     if full_sl > maximum_full_sl_probability:
         response.update(
