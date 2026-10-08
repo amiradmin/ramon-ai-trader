@@ -10,7 +10,9 @@ def test_direction_abstains_in_neutral_band():
 def test_kronos_skips_weekend_gap():
     bars=[(i*900,100,101,99,100) for i in range(30)]
     bars[10]=(bars[10][0]+172800,100,101,99,100)
-    assert list(pairs(bars,lookback=8,horizon=3,stride=1)) == []
+    indices=list(pairs(bars,lookback=8,horizon=3,stride=1))
+    assert indices
+    assert all(not (i-8 <= 10 < i+3) for i in indices)
     assert summarize([])["status"]=="insufficient_contiguous_bars"
 
 def test_timing_uses_only_prior_features_and_future_labels():
@@ -25,4 +27,5 @@ def test_timing_uses_only_prior_features_and_future_labels():
 def test_timing_rejects_gapped_input():
     bars=[(i*60,100,101,99,100) for i in range(90)]
     bars[30]=(bars[30][0]+86400,100,101,99,100)
-    assert build_examples(bars,horizon=5,stride=5)==[]
+    examples=build_examples(bars,horizon=5,stride=5)
+    assert all(not (10*60 <= t <= 35*60) for t,_,_ in examples)
