@@ -278,6 +278,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
     selector_maximum_full_sl = float(os.getenv("RAMON_SELECTOR_MAX_FULL_SL", "0.50"))
     selector_minimum_margin = float(os.getenv("RAMON_SELECTOR_MIN_MARGIN", "0.05"))
     ai_engine_v2_enabled = os.getenv("RAMON_AI_ENGINE_V2_ENABLED", "1").strip().lower() in {"1","true","yes","on"}
+    ai_engine_v2_conservative_policy = os.getenv("RAMON_AI_ENGINE_V2_CONSERVATIVE_POLICY", "0").strip().lower() in {"1","true","yes","on"}
     ai_engine_v2_minimum_score = float(os.getenv("RAMON_AI_ENGINE_V2_MIN_SCORE", "0.56"))
     ai_engine_v2_minimum_margin = float(os.getenv("RAMON_AI_ENGINE_V2_MIN_MARGIN", "0.03"))
     model_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ramon-model")
@@ -942,6 +943,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         maximum_full_sl_probability=selector_maximum_full_sl,
                         anomaly_soft_threshold=moment_live_threshold,
                         anomaly_hard_threshold=moment_hard_veto_threshold,
+                        conservative_policy=ai_engine_v2_conservative_policy,
                     )
 
                 if ai_engine_authoritative:
