@@ -188,99 +188,6 @@ function render(){const changed=lastKey!==snapshot.sample_key;$("decision").text
 const opportunityDate=new Intl.DateTimeFormat("fa-IR",{timeZone:"Asia/Tehran",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
 const opportunitySet=(id,text)=>{$(id).textContent=text;};
 function percent(v){return typeof v==="number"&&Number.isFinite(v)&&v>=0&&v<=1?(v*100).toFixed(1)+"%":"—";}
-let managedAutoPosition=null;
-async function refreshCloneAutoState(){
-  const button=$("clone-auto-button");
-  const stateEl=$("clone-auto-state");
-  if(!button||!stateEl)return;
-  try{
-    const response=await fetch("/api/auto-position",{cache:"no-store"});
-    if(!response.ok)throw new Error();
-    const data=await response.json();
-    managedAutoPosition=data?.open?data:null;
-    if(managedAutoPosition){
-      button.disabled=false;
-      const pnl=typeof managedAutoPosition.profit_units==="number"
-        ?(" · P/L "+(managedAutoPosition.profit_units>=0?"+":"")+managedAutoPosition.profit_units.toFixed(2))
-        :"";
-      stateEl.textContent="پوزیشن خودکار باز: "+managedAutoPosition.direction+" #"+managedAutoPosition.ticket+
-        " · vol "+(managedAutoPosition.volume??"—")+pnl;
-    }else{
-      button.disabled=true;
-      stateEl.textContent="پوزیشن خودکار باز Ramon وجود ندارد";
-    }
-  }catch{
-    managedAutoPosition=null;
-    button.disabled=true;
-    stateEl.textContent="وضعیت پوزیشن خودکار نامشخص";
-  }
-}
-async function openCloneAutoDialog(){
-  if(!managedAutoPosition){
-    await refreshCloneAutoState();
-    if(!managedAutoPosition)return;
-  }
-  let dialog=$("clone-auto-dialog");
-  if(!dialog){
-    dialog=document.createElement("dialog");
-    dialog.id="clone-auto-dialog";
-    dialog.className="risk-entry-dialog";
-    dialog.innerHTML=
-      '<form method="dialog" class="risk-entry-card" id="clone-auto-form" dir="rtl">'+
-        '<div class="risk-entry-head"><div><strong>گرفتن معامله مشابه Ramon</strong><span id="clone-auto-direction">—</span></div><button type="button" class="risk-entry-x" id="clone-auto-x" aria-label="بستن">×</button></div>'+
-        '<p id="clone-auto-info">—</p>'+
-        '<label for="clone-auto-risk">RiskPerTradeUSD برای همین معامله (USD)</label>'+
-        '<div class="risk-entry-input"><input id="clone-auto-risk" type="number" min="0.01" max="3.00" step="0.01" inputmode="decimal" dir="ltr" required><span>USD</span></div>'+
-        '<div class="risk-entry-presets" aria-label="مقادیر سریع"><button type="button" data-clone-risk="0.06">$0.06</button><button type="button" data-clone-risk="0.20">$0.20</button><button type="button" data-clone-risk="0.50">$0.50</button><button type="button" data-clone-risk="1">$1</button><button type="button" data-clone-risk="2">$2</button><button type="button" data-clone-risk="3">$3</button></div>'+
-        '<p class="risk-entry-help">جهت معامله از پوزیشن باز خودکار Ramon کپی می‌شود. این عدد بودجهٔ واقعی ریسک همین ورود است و روی حجم معامله اثر می‌گذارد؛ RiskPerTradeUSD اصلی Ramon تغییر نمی‌کند.</p>'+
-        '<p class="risk-entry-error" id="clone-auto-error" role="alert"></p>'+
-        '<div class="risk-entry-actions"><button type="button" class="secondary" id="clone-auto-cancel">انصراف</button><button type="submit" class="primary" id="clone-auto-submit">گرفتن معامله مشابه</button></div>'+
-      '</form>';
-    document.body.append(dialog);
-    const close=()=>{if(dialog.open)dialog.close("cancel");};
-    $("clone-auto-x").addEventListener("click",close);
-    $("clone-auto-cancel").addEventListener("click",close);
-    dialog.addEventListener("click",event=>{if(event.target===dialog)close();});
-    dialog.querySelectorAll("[data-clone-risk]").forEach(btn=>btn.addEventListener("click",()=>{$("clone-auto-risk").value=btn.dataset.cloneRisk;$("clone-auto-risk").focus();}));
-    $("clone-auto-form").addEventListener("submit",async event=>{
-      event.preventDefault();
-      const input=$("clone-auto-risk");
-      const error=$("clone-auto-error");
-      const submit=$("clone-auto-submit");
-      const value=Number(input.value);
-      if(!Number.isFinite(value)||value<.01||value>3){
-        error.textContent="عدد ریسک باید بین 0.01 و 3.00 دلار باشد.";
-        input.focus();
-        return;
-      }
-      submit.disabled=true;
-      submit.textContent="در حال ارسال…";
-      error.textContent="";
-      try{
-        const response=await fetch("/api/clone-auto-position",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({risk_per_trade_usd:value})});
-        let data={};try{data=await response.json();}catch{}
-        if(!response.ok||!data.queued)throw new Error(data.error||("HTTP "+response.status));
-        dialog.close("queued");
-        opportunitySet("opportunity-status","معامله مشابه "+data.direction+" با RiskPerTradeUSD همین ورود $"+value.toFixed(2)+" برای EA ارسال شد.");
-        setTimeout(()=>void refreshOpportunities(),800);
-      }catch(err){
-        error.textContent="معامله مشابه ارسال نشد: "+err.message;
-      }finally{
-        submit.disabled=false;
-        submit.textContent="گرفتن معامله مشابه";
-        void refreshCloneAutoState();
-      }
-    });
-  }
-  const p=managedAutoPosition;
-  $("clone-auto-direction").textContent=p.direction;
-  $("clone-auto-info").textContent="پوزیشن مرجع: #"+p.ticket+" · حجم "+(p.volume??"—")+" · ورود "+(p.open_price??"—")+" · SL "+(p.stop??"—")+" · TP "+(p.target??"—");
-  $("clone-auto-error").textContent="";
-  const current=.06;
-  $("clone-auto-risk").value=current.toFixed(2);
-  dialog.showModal();
-  requestAnimationFrame(()=>{$("clone-auto-risk").focus();$("clone-auto-risk").select();});
-}
 function ensureRiskEntryDialog(){
   let dialog=$("risk-entry-dialog");
   if(dialog)return dialog;
@@ -843,4 +750,4 @@ selectedNode?JSON.stringify(selectedNode,null,2):"NONE",
 "=== ALL DECISION / EXECUTION STEPS ==="
 ];for(const n of snapshot.nodes||[]){out.push(`[${nodeNumbers[n.id]||n.id}] ${n.title} | state=${n.state} observed=${n.observed_state} manual=${!!n.manual_override} engine=${n.engine||"Logic"}`);out.push(`detail: ${n.detail||"—"}`);out.push(`values: ${JSON.stringify(n.values||{})}`);}out.push("","=== RECENT DECISIONS ===");for(const x of snapshot.timeline||[])out.push(`${x.at||"—"} | ${x.decision} | ${x.reason} | ${x.strategy} | ${x.sample_key}`);out.push("",...candleLines(snapshot.recent_market?.m15,"M15"),"",...candleLines(snapshot.recent_market?.m1,"M1"),"","=== MODEL / HANDLER MAP ===");for(const row of snapshot.model_handler_map||[])out.push(`${row.name} | ${row.handler} | status=${row.status} | condition=${row.condition_state||"—"} | values=${JSON.stringify(row.values||{})}`);out.push("","=== WARNINGS ===",...(snapshot.warnings?.length?snapshot.warnings:["NONE"]));return out.join("\n");}
 async function copyAnalysis(){const btn=$("copy-analysis");const old=btn.textContent;btn.disabled=true;btn.textContent="COPYING...";let text="";try{const response=await fetch(`/api/analysis?stage=${encodeURIComponent(selected||"")}`,{cache:"no-store"});if(!response.ok)throw new Error(`HTTP ${response.status}`);text=await response.text();}catch{text=buildAnalysisBundle();}let copied=false;try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text);copied=true;}}catch{}if(!copied){const ta=document.createElement("textarea");ta.value=text;ta.setAttribute("readonly","");ta.style.position="absolute";ta.style.left="-9999px";document.body.append(ta);ta.select();try{copied=document.execCommand("copy");}catch{}ta.remove();}btn.textContent=copied?"COPIED ✓":"COPY FAILED";setTimeout(()=>{btn.disabled=false;btn.textContent=old;},1400);}
-$("copy-analysis").addEventListener("click",copyAnalysis);$("reset-overrides").addEventListener("click",resetOverrides);$("zoom").addEventListener("click",()=>{zoomed=!zoomed;$("zoom").textContent=zoomed?"−":"＋";$("zoom").setAttribute("aria-label",zoomed?"نمای کلی فلوچارت":"بزرگ‌نمایی فلوچارت");resize();});$("refresh").addEventListener("click",()=>{void refresh();void refreshOpportunities();void refreshChronosSlope();void refreshCloneAutoState();});$("clone-auto-button")?.addEventListener("click",openCloneAutoDialog);new ResizeObserver(resize).observe($("viewport"));document.addEventListener("visibilitychange",()=>{if(!document.hidden){void refresh();void refreshOpportunities();void refreshChronosSlope();void refreshCloneAutoState();}});setInterval(()=>{if(!document.hidden)void refreshChronosSlope();},5000);setInterval(()=>{if(!document.hidden){void refreshOpportunities();void refreshCloneAutoState();}},3000);void refresh();void refreshOpportunities();void refreshCloneAutoState();
+$("copy-analysis").addEventListener("click",copyAnalysis);$("reset-overrides").addEventListener("click",resetOverrides);$("zoom").addEventListener("click",()=>{zoomed=!zoomed;$("zoom").textContent=zoomed?"−":"＋";$("zoom").setAttribute("aria-label",zoomed?"نمای کلی فلوچارت":"بزرگ‌نمایی فلوچارت");resize();});$("refresh").addEventListener("click",()=>{void refresh();void refreshOpportunities();void refreshChronosSlope();});new ResizeObserver(resize).observe($("viewport"));document.addEventListener("visibilitychange",()=>{if(!document.hidden){void refresh();void refreshOpportunities();void refreshChronosSlope();}});setInterval(()=>{if(!document.hidden)void refreshChronosSlope();},5000);setInterval(()=>{if(!document.hidden){void refreshOpportunities();}},3000);void refresh();void refreshOpportunities();

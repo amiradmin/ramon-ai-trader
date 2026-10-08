@@ -764,22 +764,9 @@
   flex-wrap:wrap;
   margin:10px 0 8px;
 }
-.auto-risk-button{
-  min-height:40px;
-  border:1px solid #3f6685;
-  border-radius:9px;
-  padding:0 14px;
-  background:#142735;
-  color:#9bd9ff;
-  font-weight:800;
-  cursor:pointer;
-}
-.auto-risk-button:hover{border-color:#5f8fb4;background:#183044}
-.auto-risk-current{
   direction:ltr;
   unicode-bidi:plaintext;
   font:800 12px/1.4 monospace;
   color:var(--muted);
 }
 
-.auto-risk-button:disabled{opacity:.42;cursor:not-allowed;filter:grayscale(.35)}
