@@ -1,6 +1,6 @@
 #property strict
-#property version "1.596"
-#define RAMON_EA_VERSION "0.59.6"
+#property version "1.597"
+#define RAMON_EA_VERSION "0.59.7"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -5280,9 +5280,34 @@ void OnTimer()
       || executable_loss>=0.0 || -executable_loss>entry_hard_cap_units+0.00001))
    { StatusLine="Entry risk exceeds Control cap"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
    double margin=0.0;
-   if(!OrderCalcMargin(side,_Symbol,volume,entry,margin)
-      || margin>AccountInfoDouble(ACCOUNT_MARGIN_FREE)*0.8)
-   { StatusLine="Insufficient margin"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+   // Manual entries from the dashboard table: expose the actual margin numbers
+   // without weakening the same 80% free-margin safety gate used by auto entries.
+   ResetLastError();
+   bool margin_calculated=OrderCalcMargin(side,_Symbol,volume,entry,margin);
+   int margin_error=margin_calculated ? 0 : GetLastError();
+   double free_margin=AccountInfoDouble(ACCOUNT_MARGIN_FREE);
+   double allowed_margin=free_margin*0.8;
+   if(dashboard_manual_entry)
+      Print("Ramon manual dashboard MARGIN CHECK: side=",decision,
+         " volume=",DoubleToString(volume,2),
+         " required=",DoubleToString(margin,2),
+         " free=",DoubleToString(free_margin,2),
+         " allowed80pct=",DoubleToString(allowed_margin,2),
+         " account_currency=",AccountInfoString(ACCOUNT_CURRENCY),
+         " calc_ok=",margin_calculated ? "true" : "false",
+         " calc_error=",margin_error);
+   if(!margin_calculated || margin>allowed_margin)
+   {
+      StatusLine=margin_calculated ? "Insufficient margin" : "Margin calculation failed";
+      if(dashboard_manual_entry)
+         Print("Ramon manual dashboard BLOCKED: ",StatusLine,
+            " required=",DoubleToString(margin,2),
+            " free=",DoubleToString(free_margin,2),
+            " allowed80pct=",DoubleToString(allowed_margin,2),
+            " calc_error=",margin_error);
+      ShowStatus();
+      return;
+   }
 
    // Telemetry/management staging must never block an otherwise valid entry.
    StageEntrySizing(LastSampleKey,side,entry,stop,volume,
