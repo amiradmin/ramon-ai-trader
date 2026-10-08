@@ -9,7 +9,7 @@ from pathlib import Path
 from .core import Forecast
 
 
-SUPPORTED_CHRONOS_MODELS = frozenset({"autogluon/chronos-2-small", "amazon/chronos-2"})
+SUPPORTED_CHRONOS_MODELS = frozenset({"autogluon/chronos-2-small"})
 
 
 def configure_cpu_workers(workers: int) -> dict[str, int]:
