@@ -1687,7 +1687,7 @@ def queue_clone_auto_position(db, diagnostic, symbol, payload):
     command = (
         f"{int(time.time())}|{signal_bar_time}|{direction}|{sample_key}|"
         f"{risk_distance:.10f}|{target_distance:.10f}|{edge:.10f}|"
-        f"{probability_value:.10f}|DISCRETIONARY|{auto['origin_sample_key']}|{float(risk_value):.4f}\n"
+        f"{probability_value:.10f}|CLONE_AUTO|{auto['origin_sample_key']}|{float(risk_value):.4f}|{auto['ticket']}\n"
     )
     with open(queue_path, "a", encoding="ascii", newline="") as out:
         out.write(command)
