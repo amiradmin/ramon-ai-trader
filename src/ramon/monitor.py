@@ -1751,6 +1751,9 @@ def queue_manual_entry(db, diagnostic, symbol, payload):
     signal_bar_time = int(payload.get("signal_bar_time", 0))
     recheck = bool(payload.get("recheck"))
     unlocked = bool(payload.get("manual_unlocked"))
+    risk_budget = number(payload.get("risk_per_trade_usd"))
+    if risk_budget is None or not (0.01 <= risk_budget <= 3.0):
+        raise ValueError("ریسک ورود دستی باید بین 0.01 تا 3 دلار باشد")
     if direction not in {"BUY", "SELL"} or signal_bar_time <= 0:
         raise ValueError("فرصت انتخاب‌شده نامعتبر است")
 
@@ -1825,7 +1828,7 @@ def queue_manual_entry(db, diagnostic, symbol, payload):
         f"{int(time.time())}|{signal_bar_time}|{direction}|{sample_key}|"
         f"{risk_distance:.10f}|{target_distance:.10f}|{edge:.10f}|"
         f"{probability_value:.10f}"
-        + (f"|{mode}|{origin_sample_key}" if mode != "NORMAL" else "")
+        + f"|{mode}|{origin_sample_key}|{risk_budget:.2f}"
         + "\n"
     )
     with open(queue_path, "a", encoding="ascii", newline="") as out:
@@ -1839,6 +1842,7 @@ def queue_manual_entry(db, diagnostic, symbol, payload):
         "success_probability": probability,
         "mode": mode,
         "manual_unlocked": unlocked,
+        "risk_per_trade_usd": risk_budget,
         "safety": "Analytical Ramon gates bypassed; hard broker/account/risk/quote safety remains active",
     }
 
