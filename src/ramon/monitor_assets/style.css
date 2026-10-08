@@ -584,3 +584,19 @@
     white-space:normal;padding:3px 4px;font-size:9px;line-height:1.1
   }
 }
+
+/* Eight-column opportunity view; SL/TP remains available in model data, not in the table. */
+@media(min-width:1050px){
+  .simple-trade-table{width:100%;min-width:0;table-layout:fixed}
+  .simple-trade-table th:nth-child(1),.simple-trade-table td:nth-child(1){width:8%}
+  .simple-trade-table th:nth-child(2),.simple-trade-table td:nth-child(2){width:11%}
+  .simple-trade-table th:nth-child(3),.simple-trade-table td:nth-child(3){width:13%}
+  .simple-trade-table th:nth-child(4),.simple-trade-table td:nth-child(4){width:14%}
+  .simple-trade-table th:nth-child(5),.simple-trade-table td:nth-child(5){width:13%}
+  .simple-trade-table th:nth-child(6),.simple-trade-table td:nth-child(6){width:11%}
+  .simple-trade-table th:nth-child(7),.simple-trade-table td:nth-child(7){width:7%}
+  .simple-trade-table th:nth-child(8),.simple-trade-table td:nth-child(8){width:23%}
+}
+.simple-trade-table .trade-status-pnl.profit-positive{color:#46d19b;font-weight:900}
+.simple-trade-table .trade-status-pnl.profit-negative{color:#ff6676;font-weight:900}
+.simple-trade-table .trade-status-pnl.profit-flat{color:var(--muted)}
