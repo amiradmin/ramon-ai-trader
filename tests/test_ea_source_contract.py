@@ -13,8 +13,8 @@ def source() -> str:
 
 def test_current_ea_keeps_sizing_telemetry_observational():
     text = source()
-    assert '#property version "1.591"' in text
-    assert '#define RAMON_EA_VERSION "0.59.1"' in text
+    assert '#property version "1.592"' in text
+    assert '#define RAMON_EA_VERSION "0.59.2"' in text
     assert '+"EA version: "+RAMON_EA_VERSION+' in text
     assert '"RAMON AI TRADER  v"+RAMON_EA_VERSION+' in text
     assert 'version=RAMON_EA_VERSION;' in text
@@ -133,3 +133,11 @@ def test_discretionary_dashboard_entry_bypasses_analytical_direction_gate_only()
     assert 'manual_execution_override=1.0;' in text
     assert 'Entry risk exceeds Control cap' in text
     assert 'Insufficient margin' in text
+
+
+def test_manual_risk_only_affects_dashboard_entries():
+    text = source()
+    assert 'double manual_risk_usd=0.0' in text
+    assert 'dashboard_manual_entry ? dashboard_manual_risk_usd : 0.0' in text
+    assert 'manual_risk_usd>0.0 ? manual_risk_usd : EffectiveRiskPerTradeUSD()' in text
+    assert 'dashboard_manual_entry && dashboard_manual_risk_usd>0.0' in text
