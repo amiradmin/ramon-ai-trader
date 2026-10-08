@@ -1,6 +1,6 @@
 #property strict
-#property version "1.592"
-#define RAMON_EA_VERSION "0.59.2"
+#property version "1.593"
+#define RAMON_EA_VERSION "0.59.3"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -5290,6 +5290,24 @@ void OnTimer()
 
    double volume=(small_profit ? SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN)
       : SelectVolume(side,entry,stop,(dashboard_manual_entry ? dashboard_manual_risk_usd : 0.0)));
+   // Explicit human dashboard entry: use broker minimum lot if the user's
+   // risk budget is too small for that minimum. Automatic entries still use
+   // SelectVolume() and its original strict risk gate unchanged.
+   if(dashboard_manual_entry && volume<=0.0)
+   {
+      double manual_min_lot=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN);
+      double manual_min_loss=0.0;
+      if(manual_min_lot>0.0
+         && OrderCalcProfit(side,_Symbol,manual_min_lot,entry,stop,manual_min_loss)
+         && manual_min_loss<0.0)
+      {
+         volume=manual_min_lot;
+         Print("Ramon MANUAL MIN LOT RISK OVERRIDE: requested_usd=",
+            DoubleToString(dashboard_manual_risk_usd,2),
+            " actual_risk_units=",DoubleToString(-manual_min_loss,2),
+            " volume=",DoubleToString(volume,2));
+      }
+   }
    if(volume<=0.0)
    { StatusLine="TRADE BLOCKED: min lot > hard risk cap"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
 
@@ -5336,7 +5354,8 @@ void OnTimer()
    double order_cap_units=(dashboard_manual_entry && dashboard_manual_risk_usd>0.0
       ? dashboard_manual_risk_usd*MoneyUnitsPerUSD : MaxExecutableRiskUnits());
    if(!SmallOnlyMode && (!OrderCalcProfit(side,_Symbol,volume,entry,stop,executable_loss)
-      || executable_loss>=0.0 || -executable_loss>order_cap_units+0.00001))
+      || executable_loss>=0.0
+      || (!dashboard_manual_entry && -executable_loss>order_cap_units+0.00001)))
    { StatusLine="Entry risk exceeds Control cap"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
    double margin=0.0;
    if(!OrderCalcMargin(side,_Symbol,volume,entry,margin)

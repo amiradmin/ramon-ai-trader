@@ -13,8 +13,8 @@ def source() -> str:
 
 def test_current_ea_keeps_sizing_telemetry_observational():
     text = source()
-    assert '#property version "1.592"' in text
-    assert '#define RAMON_EA_VERSION "0.59.2"' in text
+    assert '#property version "1.593"' in text
+    assert '#define RAMON_EA_VERSION "0.59.3"' in text
     assert '+"EA version: "+RAMON_EA_VERSION+' in text
     assert '"RAMON AI TRADER  v"+RAMON_EA_VERSION+' in text
     assert 'version=RAMON_EA_VERSION;' in text
@@ -141,3 +141,12 @@ def test_manual_risk_only_affects_dashboard_entries():
     assert 'dashboard_manual_entry ? dashboard_manual_risk_usd : 0.0' in text
     assert 'manual_risk_usd>0.0 ? manual_risk_usd : EffectiveRiskPerTradeUSD()' in text
     assert 'dashboard_manual_entry && dashboard_manual_risk_usd>0.0' in text
+
+
+def test_manual_minimum_lot_override_does_not_bypass_auto_risk():
+    text = source()
+    assert 'if(dashboard_manual_entry && volume<=0.0)' in text
+    assert 'manual_min_lot=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN)' in text
+    assert 'OrderCalcProfit(side,_Symbol,manual_min_lot,entry,stop,manual_min_loss)' in text
+    assert '(!dashboard_manual_entry && -executable_loss>order_cap_units+0.00001)' in text
+    assert 'SelectVolume(side,entry,stop,(dashboard_manual_entry ? dashboard_manual_risk_usd : 0.0))' in text
