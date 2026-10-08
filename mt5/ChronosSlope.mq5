@@ -1,5 +1,5 @@
 #property copyright "Ramon AI Trader"
-#property version "1.041"
+#property version "1.042"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -144,20 +144,22 @@ void DrawForecast()
       string label=Prefix+"STEP_LABEL"+IntegerToString(j);
       if(ShowLabel)
       {
-         if(ObjectFind(0,label)<0) ObjectCreate(0,label,OBJ_TEXT,0,times[j],prices[j]);
-         else ObjectMove(0,label,0,times[j],prices[j]);
+         // Fixed pixel-space legend keeps all four forecast labels readable,
+         // independent of candle spacing, chart zoom or near-identical prices.
+         // Recreate older OBJ_TEXT labels (same names) as screen-space OBJ_LABELs.
+         if(ObjectFind(0,label)>=0 && (ENUM_OBJECT)ObjectGetInteger(0,label,OBJPROP_TYPE)!=OBJ_LABEL)
+            ObjectDelete(0,label);
+         if(ObjectFind(0,label)<0) ObjectCreate(0,label,OBJ_LABEL,0,0,0);
          double conf=(j==1 ? LastStepConf15 : j==2 ? LastStepConf30 : j==3 ? LastStepConf45 : LastStepConf60);
          ObjectSetString(0,label,OBJPROP_TEXT,
             "Chronos +"+IntegerToString(j*15)+"m ("+DoubleToString(conf*100.0,0)+"%) "+DoubleToString(prices[j],_Digits));
          color label_color=(j==1 ? clrAqua : j==2 ? clrGold : j==3 ? clrMagenta : clrDeepSkyBlue);
          ObjectSetInteger(0,label,OBJPROP_COLOR,label_color);
          ObjectSetInteger(0,label,OBJPROP_FONTSIZE,9);
-         // Alternate anchors to keep the four step labels visually separated.
-         ObjectSetInteger(0,label,OBJPROP_ANCHOR,
-            j==1 ? ANCHOR_RIGHT_LOWER :
-            j==2 ? ANCHOR_LEFT_UPPER :
-            j==3 ? ANCHOR_RIGHT_UPPER :
-                   ANCHOR_LEFT_LOWER);
+         ObjectSetInteger(0,label,OBJPROP_CORNER,CORNER_RIGHT_UPPER);
+         ObjectSetInteger(0,label,OBJPROP_ANCHOR,ANCHOR_RIGHT_UPPER);
+         ObjectSetInteger(0,label,OBJPROP_XDISTANCE,30);
+         ObjectSetInteger(0,label,OBJPROP_YDISTANCE,72+(j-1)*19);
          ObjectSetInteger(0,label,OBJPROP_SELECTABLE,false);
       }
       else ObjectDelete(0,label);
