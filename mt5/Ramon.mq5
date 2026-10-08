@@ -1,6 +1,6 @@
 #property strict
-#property version "1.598"
-#define RAMON_EA_VERSION "0.59.8"
+#property version "1.599"
+#define RAMON_EA_VERSION "0.59.9"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -4278,86 +4278,6 @@ void SaveDashboardAlias(const string execution_sample,const string origin_sample
    FileClose(handle);
 }
 
-// Persistent exact-ticket links: a dashboard clone follows its original Ramon
-// position. This intentionally excludes other discretionary/manual positions.
-string ClonePositionLinksFileName() { return "Ramon_ClonePositionLinks.txt"; }
-
-void SaveClonePositionLink(const ulong parent_ticket,const ulong child_ticket)
-{
-   if(parent_ticket==0 || child_ticket==0 || parent_ticket==child_ticket) return;
-   int f=FileOpen(ClonePositionLinksFileName(),
-      FILE_READ|FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
-   if(f==INVALID_HANDLE)
-      f=FileOpen(ClonePositionLinksFileName(),
-         FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
-   if(f==INVALID_HANDLE)
-   {
-      Print("Ramon clone ERROR: cannot persist parent-child ticket link");
-      return;
-   }
-   FileSeek(f,0,SEEK_END);
-   FileWriteString(f,IntegerToString((long)parent_ticket)+"|"+IntegerToString((long)child_ticket)+"\r\n");
-   FileFlush(f);
-   FileClose(f);
-}
-
-void ProcessCloneAutoClosures()
-{
-   if(SmallOnlyMode || !FileIsExist(ClonePositionLinksFileName(),FILE_COMMON)) return;
-   int f=FileOpen(ClonePositionLinksFileName(),
-      FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
-   if(f==INVALID_HANDLE) return;
-   string remaining[];
-   int count=0;
-   while(!FileIsEnding(f))
-   {
-      string line=FileReadString(f);
-      StringTrimLeft(line); StringTrimRight(line);
-      string parts[];
-      if(StringSplit(line,StringGetCharacter("|",0),parts)!=2) continue;
-      ulong parent=(ulong)StringToInteger(parts[0]);
-      ulong child=(ulong)StringToInteger(parts[1]);
-      if(parent==0 || child==0) continue;
-      if(!PositionSelectByTicket(child)) continue; // Already closed.
-      // Never close anything other than a currently owned Ramon manual clone.
-      if(PositionGetString(POSITION_SYMBOL)!=_Symbol
-         || (ulong)PositionGetInteger(POSITION_MAGIC)!=MagicNumber
-         || StringFind(PositionGetString(POSITION_COMMENT),":M")<0)
-         continue;
-      if(PositionSelectByTicket(parent))
-      {
-         // Parent still exists: keep tracking this exact linked pair.
-         ArrayResize(remaining,count+1);
-         remaining[count++]=line;
-         continue;
-      }
-      bool can_close=AccountLockHealthy()
-         && (bool)TerminalInfoInteger(TERMINAL_CONNECTED)
-         && (bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED)
-         && (bool)MQLInfoInteger(MQL_TRADE_ALLOWED)
-         && (bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED);
-      if(can_close && Trade.PositionClose(child,MaxDeviationPoints)
-         && (Trade.ResultRetcode()==TRADE_RETCODE_DONE))
-      {
-         Print("Ramon clone FOLLOW PARENT: closed child #",child,
-            " because original position #",parent," closed");
-         RecordDealTelemetry(Trade.ResultDeal(),"clone_parent_closed");
-         continue;
-      }
-      Print("Ramon clone FOLLOW PARENT: close pending child #",child,
-         " after parent #",parent," closed; retcode=",Trade.ResultRetcode());
-      ArrayResize(remaining,count+1);
-      remaining[count++]=line; // Retry on next timer.
-   }
-   FileClose(f);
-   int out=FileOpen(ClonePositionLinksFileName(),
-      FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
-   if(out==INVALID_HANDLE) return;
-   for(int k=0;k<count;k++) FileWriteString(out,remaining[k]+"\r\n");
-   FileFlush(out);
-   FileClose(out);
-}
-
 void WriteOpenDashboardPositions()
 {
    const string file_name="Ramon_OpenDashboardPositions.txt";
@@ -4426,7 +4346,6 @@ int ReadDashboardManualEntry(
    string &mode,
    string &origin_sample_key,
    double &entry_risk_budget_usd,
-   ulong &clone_parent_ticket,
    string &why
 )
 {
@@ -4439,7 +4358,6 @@ int ReadDashboardManualEntry(
    mode="NORMAL";
    origin_sample_key="";
    entry_risk_budget_usd=0.0;
-   clone_parent_ticket=0;
    why="";
    if(SmallOnlyMode)
       return 0;
@@ -4482,7 +4400,7 @@ int ReadDashboardManualEntry(
    string parts[];
    ushort separator=StringGetCharacter("|",0);
    int count=StringSplit(lines[0],separator,parts);
-   if(count!=8 && count!=9 && count!=10 && count!=11 && count!=12)
+   if(count!=8 && count!=9 && count!=10 && count!=11)
    { why="invalid command"; return -1; }
 
    datetime requested=(datetime)StringToInteger(parts[0]);
@@ -4496,7 +4414,6 @@ int ReadDashboardManualEntry(
    string command_mode=(count>=9 ? parts[8] : "NORMAL");
    string command_origin=(count>=10 ? parts[9] : command_sample);
    double command_risk_budget=(count>=11 ? StringToDouble(parts[10]) : 0.0);
-   ulong command_parent_ticket=(count==12 ? (ulong)StringToInteger(parts[11]) : 0);
    datetime utc_now=TimeGMT();
 
    if(side!="BUY" && side!="SELL")
@@ -4505,19 +4422,17 @@ int ReadDashboardManualEntry(
    { why="invalid sample key"; return -1; }
    if(command_risk<=0.0 || command_target<=0.0)
    { why="invalid opportunity geometry"; return -1; }
-   if(command_mode!="NORMAL" && command_mode!="RECHECK" && command_mode!="DISCRETIONARY" && command_mode!="CLONE_AUTO")
+   if(command_mode!="NORMAL" && command_mode!="RECHECK" && command_mode!="DISCRETIONARY")
    { why="invalid command mode"; return -1; }
    if(!ValidSampleKey(command_origin))
    { why="invalid origin sample"; return -1; }
-   if(command_mode=="CLONE_AUTO" && (count!=12 || command_parent_ticket==0))
-   { why="invalid clone parent ticket"; return -1; }
    if(command_risk_budget<0.0 || command_risk_budget>3.0 || (command_risk_budget>0.0 && command_risk_budget<0.01))
    { why="invalid per-entry risk budget"; return -1; }
    if(command_mode=="NORMAL" && command_edge<=0.0)
    { why="invalid opportunity edge"; return -1; }
    if(command_probability>1.0 || command_probability< -1.0)
    { why="invalid probability"; return -1; }
-   int command_ttl=((command_mode=="RECHECK" || command_mode=="DISCRETIONARY" || command_mode=="CLONE_AUTO") ? 120 : 90);
+   int command_ttl=((command_mode=="RECHECK" || command_mode=="DISCRETIONARY") ? 120 : 90);
    if(requested<=0 || utc_now-requested>command_ttl || requested-utc_now>5)
    { why="command expired"; return -1; }
    if(signal_bar!=current_bar)
@@ -4532,7 +4447,6 @@ int ReadDashboardManualEntry(
    mode=command_mode;
    origin_sample_key=command_origin;
    entry_risk_budget_usd=command_risk_budget;
-   clone_parent_ticket=command_parent_ticket;
    Print("Ramon manual dashboard command consumed side=",side,
       " sample=",command_sample,
       " bar=",IntegerToString((long)signal_bar),
@@ -4769,7 +4683,6 @@ void OnTimer()
    ProcessDashboardPredictedAutoCloseCommand();
    ProcessDashboardManualClose();
    ProcessDashboardPredictedAutoCloseCrossings();
-   ProcessCloneAutoClosures();
    WriteOpenDashboardPositions();
    datetime now=TimeCurrent();
    bool management_due=(LastPositionManagementTime==0 || now-LastPositionManagementTime>=5);
@@ -4796,7 +4709,6 @@ void OnTimer()
    string dashboard_direction="",dashboard_sample_key="",dashboard_command_mode="NORMAL",dashboard_origin_sample_key="",dashboard_command_reason="";
    double dashboard_risk_distance=0.0,dashboard_target_distance=0.0;
    double dashboard_edge=0.0,dashboard_probability=-1.0,dashboard_entry_risk_budget_usd=0.0;
-   ulong dashboard_clone_parent_ticket=0;
    int dashboard_command=0;
    bool dashboard_pending=FileIsExist("Ramon_ManualEntries.txt",FILE_COMMON);
    if(dashboard_pending)
@@ -5129,7 +5041,7 @@ void OnTimer()
          closed,dashboard_direction,dashboard_sample_key,
          dashboard_risk_distance,dashboard_target_distance,
          dashboard_edge,dashboard_probability,dashboard_command_mode,dashboard_origin_sample_key,
-         dashboard_entry_risk_budget_usd,dashboard_clone_parent_ticket,dashboard_command_reason
+         dashboard_entry_risk_budget_usd,dashboard_command_reason
       );
       if(dashboard_command<0)
          Print("Ramon manual dashboard entry ignored: ",dashboard_command_reason);
@@ -5147,7 +5059,7 @@ void OnTimer()
    if(dashboard_command>0)
    {
       decision=dashboard_direction;
-      reason=((dashboard_command_mode=="DISCRETIONARY" || dashboard_command_mode=="CLONE_AUTO")
+      reason=((dashboard_command_mode=="DISCRETIONARY")
          ? "manual_dashboard_discretionary"
          : dashboard_command_mode=="RECHECK"
             ? "manual_dashboard_recheck"
@@ -5397,19 +5309,6 @@ void OnTimer()
       return;
    }
 
-   // A cloned order must never open after its exact parent position is gone.
-   if(dashboard_manual_entry && dashboard_command_mode=="CLONE_AUTO"
-      && (!PositionSelectByTicket(dashboard_clone_parent_ticket)
-         || PositionGetString(POSITION_SYMBOL)!=_Symbol
-         || (ulong)PositionGetInteger(POSITION_MAGIC)!=MagicNumber
-         || StringFind(PositionGetString(POSITION_COMMENT),":M")>=0))
-   {
-      StatusLine="CLONE AUTO BLOCKED: parent position no longer open";
-      Print("Ramon execution: ",StatusLine);
-      ShowStatus();
-      return;
-   }
-
    // Telemetry/management staging must never block an otherwise valid entry.
    StageEntrySizing(LastSampleKey,side,entry,stop,volume,
       (dashboard_manual_entry ? dashboard_entry_risk_budget_usd : 0.0));
@@ -5434,14 +5333,7 @@ void OnTimer()
    }
    else
    {
-      if(dashboard_manual_entry && dashboard_command_mode=="CLONE_AUTO")
-      {
-         ulong child_ticket=Trade.ResultOrder();
-         if(child_ticket>0)
-            SaveClonePositionLink(dashboard_clone_parent_ticket,child_ticket);
-         else
-            Print("Ramon clone WARNING: missing new order ticket; unable to link closing");
-      }
+
       LastEntrySignalBar=bar_time;
       if(SmallOnlyMode)
          LastSmallEntriesOnSignalBar=small_entries_on_bar+1;
