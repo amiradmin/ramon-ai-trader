@@ -600,3 +600,31 @@
 .simple-trade-table .trade-status-pnl.profit-positive{color:#46d19b;font-weight:900}
 .simple-trade-table .trade-status-pnl.profit-negative{color:#ff6676;font-weight:900}
 .simple-trade-table .trade-status-pnl.profit-flat{color:var(--muted)}
+
+/* Dashboard-only manual RiskPerTradeUSD confirmation modal. */
+.risk-entry-dialog{
+  border:1px solid #405774;border-radius:16px;
+  padding:0;width:min(460px,calc(100vw - 32px));max-width:calc(100vw - 32px);
+  max-height:min(86vh,720px);overflow:auto;
+  background:#111d2c;color:#e7edf7;box-shadow:0 25px 75px #000b;
+  font:13px/1.8 Tahoma,Arial,sans-serif;direction:rtl;
+}
+.risk-entry-dialog::backdrop{background:rgba(2,8,18,.76);backdrop-filter:blur(4px)}
+.risk-entry-card{display:flex;flex-direction:column;gap:13px;padding:22px 24px}
+.risk-entry-head{display:flex;justify-content:space-between;align-items:center;gap:12px;border-bottom:1px solid #314055;padding-bottom:12px}
+.risk-entry-head strong{font-size:17px;color:#eaf1fa}
+.risk-entry-x{background:#253248;color:#eaf1fa;border:1px solid #45546c;border-radius:7px;width:31px;height:31px;cursor:pointer}
+.risk-entry-card>p{margin:0;color:#b7c6d8}
+.risk-entry-card>label{display:block;color:#e5edf8;font-weight:700;font-size:12px}
+.risk-entry-input{display:flex;align-items:center;gap:10px;direction:ltr}
+.risk-entry-input input{min-width:0;flex:1;width:100%;background:#0b1421;color:#f5f8ff;border:1px solid #506987;border-radius:9px;padding:10px 12px;font:700 18px monospace;outline-offset:2px}
+.risk-entry-input input:focus{border-color:#69a9e9}
+.risk-entry-input span{color:#a6b7cc;font:700 12px monospace}
+.risk-entry-help{background:#1b2a3b;border-right:3px solid #dfb566;padding:10px 12px;border-radius:7px;font-size:11px;line-height:1.9}
+.risk-entry-error{color:#ff7682!important;font-size:11px;min-height:0}
+.risk-entry-actions{display:flex;justify-content:flex-start;gap:10px;flex-wrap:wrap;margin-top:4px}
+.risk-entry-actions button{cursor:pointer;border-radius:8px;padding:9px 15px;font:700 12px Tahoma,Arial,sans-serif}
+.risk-entry-actions .primary{background:#2d8269;color:#fff;border:1px solid #3ca589}
+.risk-entry-actions .secondary{background:#27374c;color:#d9e5f3;border:1px solid #50617a}
+.risk-entry-actions button:hover{filter:brightness(1.12)}
+@media(max-width:520px){.risk-entry-card{padding:16px}.risk-entry-actions button{flex:1}}
