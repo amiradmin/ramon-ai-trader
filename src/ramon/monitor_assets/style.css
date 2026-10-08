@@ -544,3 +544,43 @@
   padding:3px 5px;
   font:700 9px/1.1 monospace;
 }
+
+
+/* Full-width nine-column opportunity table, with 38px header/rows.
+   View-only overrides; do not change execution or manual actions. */
+@media(min-width:1050px){
+  .market-review-main{max-width:none;width:100%;padding-right:clamp(8px,1vw,20px);padding-left:clamp(8px,1vw,20px)}
+  .opportunity-scroll{max-width:100%;overflow-x:hidden}
+  .simple-trade-table{width:100%;min-width:0;table-layout:fixed;font-size:clamp(9px,.7vw,11px)}
+  .simple-trade-table th,.simple-trade-table td{
+    min-width:0!important;max-width:none;padding:2px 4px;
+    line-height:1.2;vertical-align:middle;overflow-wrap:anywhere
+  }
+  .simple-trade-table thead tr,.simple-trade-table tbody tr{height:38px}
+  .simple-trade-table th,.simple-trade-table td{height:38px}
+  .simple-trade-table th{font-size:10px;white-space:normal}
+  .simple-trade-table td>div,.simple-trade-table td>span,.simple-trade-table td>details{
+    max-height:33px;overflow:hidden
+  }
+  .simple-trade-table th:nth-child(1),.simple-trade-table td:nth-child(1){width:7%}
+  .simple-trade-table th:nth-child(2),.simple-trade-table td:nth-child(2){width:10%}
+  .simple-trade-table th:nth-child(3),.simple-trade-table td:nth-child(3){width:9%}
+  .simple-trade-table th:nth-child(4),.simple-trade-table td:nth-child(4){width:12%}
+  .simple-trade-table th:nth-child(5),.simple-trade-table td:nth-child(5){width:13%}
+  .simple-trade-table th:nth-child(6),.simple-trade-table td:nth-child(6){width:10%}
+  .simple-trade-table th:nth-child(7),.simple-trade-table td:nth-child(7){width:10%}
+  .simple-trade-table th:nth-child(8),.simple-trade-table td:nth-child(8){width:7%}
+  .simple-trade-table th:nth-child(9),.simple-trade-table td:nth-child(9){width:22%}
+  .simple-trade-table .trade-level-stack{flex-wrap:wrap}
+  .simple-trade-table .trade-level-row{min-width:0;width:auto}
+  .simple-trade-table .trade-level-row .value{min-width:0}
+  .simple-trade-table .trade-direction,.simple-trade-table .trade-entry-price,
+  .simple-trade-table .trade-exit-advice,.simple-trade-table .trade-position-state{white-space:normal}
+  .simple-trade-table .opportunity-actions,.simple-trade-table .manual-scenario-list,
+  .simple-trade-table .manual-scenario-list.compact{
+    flex-wrap:nowrap;gap:2px;max-height:33px;overflow:visible
+  }
+  .simple-trade-table .scenario-entry,.simple-trade-table .opportunity-entry{
+    white-space:normal;padding:3px 4px;font-size:9px;line-height:1.1
+  }
+}
