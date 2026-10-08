@@ -2,7 +2,7 @@
 """Read-only direction trace for selected Ramon trades.
 
 Run inside the model container (where /data/ramon_history.sqlite3 is mounted):
-    python scripts/trace_direction_trades.py --db /data/ramon_history.sqlite3
+    python /tmp/trace_direction_trades.py --db /data/ramon_history.sqlite3
 """
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-TARGETS = (413, 415, 416, 424, 426)
+TARGETS = {413: "50380302249", 415: "50380325780", 416: "50380334890", 424: "50380396738", 426: "50380409327"}
 KEYS = (
     "decision", "reason", "direction", "final_decision", "market_direction",
     "forecast_direction", "intrabar_direction", "intrabar_confirmed",
@@ -51,17 +51,21 @@ def main():
         print("trade_outcomes columns:", ", ".join(sorted(tc)))
         if not {"sample_key", "opened"}.issubset(tc):
             parser.error("trade_outcomes schema cannot be matched safely")
-        # The report is ordered by closure time. Align with report numbering,
-        # but ALWAYS check trade_key/sample_key against report before conclusions.
-        order = "closed, opened, trade_key" if "closed" in tc else "opened, trade_key"
-        rows = con.execute(f"SELECT * FROM trade_outcomes ORDER BY {order}").fetchall()
         for number in args.numbers:
             print("\n" + "=" * 70)
-            print("REPORT ROW CANDIDATE:", number)
-            if number < 1 or number > len(rows):
-                print("UNAVAILABLE: row number exceeds database trade count")
+            print("REPORT ROW:", number)
+            suffix = TARGETS.get(number)
+            if suffix is None:
+                print("UNKNOWN REPORT ROW NUMBER")
                 continue
-            trade = dict(rows[number - 1])
+            matches = con.execute(
+                "SELECT * FROM trade_outcomes WHERE trade_key LIKE ?",
+                ("%:" + suffix,),
+            ).fetchall()
+            if len(matches) != 1:
+                print(f"Expected one matching trade for ticket {suffix}; got {len(matches)}")
+                continue
+            trade = dict(matches[0])
             print("TRADE:", json.dumps(trade, ensure_ascii=False, default=str))
             key = trade.get("sample_key")
             if not key:
@@ -97,8 +101,7 @@ def main():
                     print("NO INFERENCE AUDIT FOR SAMPLE KEY")
             else:
                 print("NO INFERENCE AUDIT TABLE")
-        print("\nCAUTION: candidate report-row indexing must be verified using")
-        print("trade_key and timestamps; do not use a row-number match as proof.")
+        print("\nMatched by position ticket suffix from the uploaded report.")
         print("Censored/manual exits cannot validate the entry direction.")
 
 if __name__ == "__main__":
