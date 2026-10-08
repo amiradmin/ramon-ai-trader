@@ -188,12 +188,28 @@ function render(){const changed=lastKey!==snapshot.sample_key;$("decision").text
 const opportunityDate=new Intl.DateTimeFormat("fa-IR",{timeZone:"Asia/Tehran",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
 const opportunitySet=(id,text)=>{$(id).textContent=text;};
 function percent(v){return typeof v==="number"&&Number.isFinite(v)&&v>=0&&v<=1?(v*100).toFixed(1)+"%":"—";}
+function askManualRisk(direction,label){
+  return new Promise(resolve=>{
+    const dialog=document.createElement("dialog");dialog.className="risk-entry-dialog";dialog.dir="rtl";
+    dialog.innerHTML='<form method="dialog" class="risk-entry-card"><div class="risk-entry-head"><strong>ورود دستی '+(direction==="SELL"?"فروش":"خرید")+'</strong><button type="button" class="risk-entry-x">×</button></div><p></p><label>حداکثر ریسک همین معامله (USD)</label><div class="risk-entry-input"><input type="number" min="0.01" max="3" step="0.01" value="0.06" required><span>USD</span></div><p class="risk-entry-help">فقط برای همین ورود دستی؛ ریسک خودکار Ramon تغییر نمی‌کند.</p><p class="risk-entry-error" role="alert"></p><div class="risk-entry-actions"><button type="button" class="secondary">انصراف</button><button type="submit" class="primary">تأیید و ارسال</button></div></form>';
+    dialog.querySelector("p").textContent=label;document.body.append(dialog);
+    const input=dialog.querySelector("input"),error=dialog.querySelector(".risk-entry-error");
+    let completed=false;const finish=v=>{if(completed)return;completed=true;if(dialog.open)dialog.close();dialog.remove();resolve(v)};
+    dialog.querySelector(".risk-entry-x").addEventListener("click",()=>finish(null));
+    dialog.querySelector(".secondary").addEventListener("click",()=>finish(null));
+    dialog.addEventListener("cancel",e=>{e.preventDefault();finish(null)});
+    dialog.querySelector("form").addEventListener("submit",e=>{e.preventDefault();const n=Number(input.value);if(!Number.isFinite(n)||n<.01||n>3){error.textContent="ریسک باید بین ۰٫۰۱ و ۳ دلار باشد";return;}finish(Math.round(n*100)/100)});
+    dialog.showModal();input.focus();input.select();
+  });
+}
 async function manualOpportunity(row,button,recheck=false,manualUnlocked=false,directionOverride=null){
   if(button.disabled)return;
-  button.disabled=true;const old=button.textContent;button.textContent="در حال ارسال…";
   const selectedDirection=(directionOverride||row.direction||"").toUpperCase();
+  const riskUSD=await askManualRisk(selectedDirection,button.textContent);
+  if(riskUSD===null||button.disabled)return;
+  button.disabled=true;const old=button.textContent;button.textContent="در حال ارسال…";
   try{
-    const response=await fetch("/api/manual-entry",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({direction:selectedDirection,signal_bar_time:row.signal_bar_time,recheck,manual_unlocked:manualUnlocked})});
+    const response=await fetch("/api/manual-entry",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({direction:selectedDirection,signal_bar_time:row.signal_bar_time,recheck,manual_unlocked:manualUnlocked,risk_per_trade_usd:riskUSD})});
     let data={};try{data=await response.json();}catch{}
     if(!response.ok||!data.queued)throw new Error(data.error||("HTTP "+response.status));
     button.textContent="ارسال شد";
