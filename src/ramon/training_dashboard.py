@@ -14,7 +14,7 @@ from urllib.request import Request, urlopen
 from uuid import uuid4
 
 from .bundles import FEATURES, atomic_json, load_active_bundle
-from .shadow_roles import SHADOW_EXTRA_FEATURES
+from .shadow_roles import DIRECTION_EXTRA_FEATURES
 from .train_roles import fit_direction_quality_role, load_trade_examples, train_bundle
 
 
@@ -183,7 +183,7 @@ def _publish_promoted_shadow(db: Path, out: Path, symbol: str, chronos_model: st
     directory = out / "shadow" / "versions" / bundle_id
     directory.mkdir(parents=True, exist_ok=False)
     hashes: dict[str, str] = {}
-    expected = {**FEATURES, **SHADOW_EXTRA_FEATURES}
+    expected = {**FEATURES, **DIRECTION_EXTRA_FEATURES}
     for role, model in published.items():
         if role not in expected:
             continue
