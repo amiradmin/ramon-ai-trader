@@ -35,5 +35,8 @@ def test_timing_supports_5_minute_candles():
     for i in range(90):
         p=100+i*0.1
         bars.append((i*300,p,p+0.5,p-0.5,p+0.1))
-    assert build_examples(bars,horizon=3,stride=5,bar_seconds=300)
-    assert not build_examples(bars,horizon=3,stride=5,bar_seconds=60)
+    # Use reachable TP/SL distances; the default 2.0 units are outside the
+    # synthetic three-candle window and would legitimately yield no labels.
+    kwargs=dict(horizon=3,stride=5,stop=0.2,target=0.2,spread=0.02)
+    assert build_examples(bars,bar_seconds=300,**kwargs)
+    assert not build_examples(bars,bar_seconds=60,**kwargs)
