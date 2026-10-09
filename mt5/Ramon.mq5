@@ -1,6 +1,6 @@
 #property strict
-#property version "1.592"
-#define RAMON_EA_VERSION "0.59.2"
+#property version "1.593"
+#define RAMON_EA_VERSION "0.59.3"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -2848,7 +2848,7 @@ bool ClosedTradePayload(const ulong identifier,string &payload)
       +",\"trade_role\":\""+(SmallOnlyMode ? "SMALL" : "MAIN")+"\""
       +",\"entry_magic\":"+IntegerToString((long)MagicNumber);
    string opening_comment=HistoryDealGetString(opening_deal,DEAL_COMMENT);
-   string entry_source=(StringFind(opening_comment,":M")>=0 ? "DASHBOARD_OPPORTUNITY"
+   string entry_source=(StringFind(opening_comment,":M")>=0 ? "HUMAN_ASSISTED"
       : (StringFind(opening_comment,":R")>=0 ? "RANGE_AUTO"
       : (StringFind(opening_comment,":S")>=0 ? "SMALL_AUTO" : "AUTO_RAMON")));
    payload+=",\"entry_source\":\""+entry_source+"\"";
