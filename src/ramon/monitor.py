@@ -1158,8 +1158,9 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
         if row["name"] in {"Anomaly Detection", "News Sentiment"}:
             row["status"] = {"pass": "OK", "blocked": "VETO", "idle": "OFF", "stale": "STALE", "unknown": "NO GATE SNAPSHOT"}.get(row["condition_state"], row["status"])
 
-    auto_trades = [row for row in trades if (row.get("entry_source") or "AUTO_RAMON") != "DASHBOARD_OPPORTUNITY"]
-    dashboard_trades = [row for row in trades if row.get("entry_source") == "DASHBOARD_OPPORTUNITY"]
+    manual_sources = {"DASHBOARD_OPPORTUNITY", "HUMAN_ASSISTED"}
+    auto_trades = [row for row in trades if (row.get("entry_source") or "AUTO_RAMON") not in manual_sources]
+    dashboard_trades = [row for row in trades if row.get("entry_source") in manual_sources]
     readiness = dollar_readiness(auto_trades, diag.get("EA version"))
     dashboard_closed = [row for row in dashboard_trades if number(row.get("closed")) is not None]
     dashboard_wins = [row for row in dashboard_closed if (number(row.get("net_units")) or 0.0) > 0]
@@ -1769,6 +1770,99 @@ def opportunities_with_execution_state(db, diagnostic, symbol, health_url=None):
     return data
 
 
+def _ensure_human_assisted_table(db):
+    if not db:
+        return
+    with sqlite3.connect(db, timeout=5) as con:
+        con.execute("""CREATE TABLE IF NOT EXISTS human_assisted_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_utc INTEGER NOT NULL,
+            symbol TEXT NOT NULL,
+            sample_key TEXT NOT NULL,
+            signal_bar_time INTEGER NOT NULL,
+            action TEXT NOT NULL,
+            human_direction TEXT,
+            entry_mode TEXT,
+            v2_decision TEXT,
+            v2_reason TEXT,
+            v3_shadow_decision TEXT,
+            v3_shadow_reason TEXT,
+            v3_shadow_block TEXT,
+            buy_quality REAL,
+            sell_quality REAL,
+            entry_timing_ready INTEGER,
+            forecast_distance_atr REAL,
+            market_state TEXT,
+            moment_label TEXT,
+            snapshot_json TEXT NOT NULL
+        )""")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_human_assisted_events_sample ON human_assisted_events(sample_key, created_utc)")
+        con.commit()
+
+
+def _human_assisted_snapshot(row):
+    return {
+        "v2_decision": row.get("v2_decision"),
+        "v2_reason": row.get("v2_reason"),
+        "v3_shadow_decision": row.get("v3_shadow_decision"),
+        "v3_shadow_reason": row.get("v3_shadow_reason"),
+        "v3_shadow_block": row.get("v3_shadow_block"),
+        "buy_quality": row.get("buy_success_probability"),
+        "sell_quality": row.get("sell_success_probability"),
+        "entry_timing_ready": row.get("entry_timing_ready"),
+        "forecast_distance_atr": row.get("forecast_distance_atr"),
+        "market_state": row.get("market_state"),
+        "moment_label": row.get("moment_label"),
+        "market_direction": row.get("market_direction"),
+        "entry_probability": row.get("entry_probability"),
+        "full_sl_probability": row.get("full_sl_probability"),
+        "ai_score": row.get("ai_score"),
+    }
+
+
+def persist_human_assisted_event(db, symbol, row, *, action, direction=None, mode=None):
+    _ensure_human_assisted_table(db)
+    snap = _human_assisted_snapshot(row)
+    with sqlite3.connect(db, timeout=5) as con:
+        con.execute(
+            """INSERT INTO human_assisted_events
+               (created_utc,symbol,sample_key,signal_bar_time,action,human_direction,entry_mode,
+                v2_decision,v2_reason,v3_shadow_decision,v3_shadow_reason,v3_shadow_block,
+                buy_quality,sell_quality,entry_timing_ready,forecast_distance_atr,market_state,
+                moment_label,snapshot_json)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                int(time.time()), symbol, str(row.get("sample_key") or ""),
+                int(row.get("signal_bar_time") or 0), str(action),
+                direction if direction in {"BUY", "SELL"} else None,
+                mode, snap.get("v2_decision"), snap.get("v2_reason"),
+                snap.get("v3_shadow_decision"), snap.get("v3_shadow_reason"),
+                snap.get("v3_shadow_block"), number(snap.get("buy_quality")),
+                number(snap.get("sell_quality")),
+                int(bool(snap.get("entry_timing_ready"))) if snap.get("entry_timing_ready") is not None else None,
+                number(snap.get("forecast_distance_atr")), snap.get("market_state"),
+                snap.get("moment_label"), json.dumps(snap, ensure_ascii=False, allow_nan=False),
+            ),
+        )
+        con.commit()
+
+
+def record_human_skip(db, diagnostic, symbol, payload):
+    signal_bar_time = int(payload.get("signal_bar_time") or 0)
+    sample_key = str(payload.get("sample_key") or "")
+    data = opportunities_with_execution_state(db, diagnostic, symbol)
+    row = next(
+        (item for item in data.get("opportunities", [])
+         if int(item.get("signal_bar_time") or 0) == signal_bar_time
+         and (not sample_key or str(item.get("sample_key") or "") == sample_key)),
+        None,
+    )
+    if not row:
+        raise ValueError("فرصت برای ثبت SKIP پیدا نشد")
+    persist_human_assisted_event(db, symbol, row, action="SKIP", mode="HUMAN_REVIEW")
+    return {"saved": True, "action": "SKIP", "sample_key": row.get("sample_key")}
+
+
 def queue_manual_entry(db, diagnostic, symbol, payload):
     if diagnostic is None:
         raise ValueError("مسیر فایل اکسپرت در دسترس نیست")
@@ -1860,6 +1954,30 @@ def queue_manual_entry(db, diagnostic, symbol, payload):
         out.write(command)
         out.flush()
         os.fsync(out.fileno())
+    event_row = dict(row)
+    event_row.update({
+        "sample_key": sample_key,
+        "signal_bar_time": signal_bar_time,
+    })
+    if recheck or unlocked:
+        event_row.update({
+            "v2_decision": final.get("decision"),
+            "v2_reason": final.get("reason"),
+            "v3_shadow_decision": final.get("ai_engine_v3_shadow_decision"),
+            "v3_shadow_reason": final.get("ai_engine_v3_shadow_reason"),
+            "v3_shadow_block": final.get("ai_engine_v3_shadow_block"),
+            "buy_success_probability": buy_probability,
+            "sell_success_probability": sell_probability,
+            "entry_timing_ready": final.get("entry_timing_ready"),
+            "forecast_distance_atr": final.get("ai_engine_v3_shadow_forecast_distance_atr"),
+            "market_state": final.get("market_state"),
+        })
+        external = audit.get("external_models") if isinstance(audit.get("external_models"), dict) else {}
+        moment = external.get("moment") if isinstance(external.get("moment"), dict) else {}
+        event_row["moment_label"] = moment.get("moment_anomaly_label")
+    persist_human_assisted_event(
+        db, symbol, event_row, action="ENTER", direction=direction, mode=mode
+    )
     return {
         "queued": True,
         "direction": direction,
@@ -2016,7 +2134,7 @@ def handler_for(db, diagnostic, symbol, health_url):
                 self.send_error(404)
 
         def do_POST(self):
-            if self.path not in {"/api/control", "/api/override", "/api/override/reset", "/api/manual-entry", "/api/manual-close", "/api/predicted-auto-close", "/api/today-profit/reset"}:
+            if self.path not in {"/api/control", "/api/override", "/api/override/reset", "/api/manual-entry", "/api/human-skip", "/api/manual-close", "/api/predicted-auto-close", "/api/today-profit/reset"}:
                 self.send_error(404)
                 return
             origin = self.headers.get("Origin")
@@ -2040,6 +2158,10 @@ def handler_for(db, diagnostic, symbol, health_url):
 
                 if self.path == "/api/manual-entry":
                     result = queue_manual_entry(db, diagnostic, symbol, payload)
+                    self.reply(json.dumps(result, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
+                    return
+                if self.path == "/api/human-skip":
+                    result = record_human_skip(db, diagnostic, symbol, payload)
                     self.reply(json.dumps(result, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
                     return
                 if self.path == "/api/manual-close":
