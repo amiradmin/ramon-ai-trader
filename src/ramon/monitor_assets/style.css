@@ -502,3 +502,22 @@
   min-height:45px;
   max-height:45px;
 }
+
+
+/* Automatic Ramon position indicator in the opportunity action column. */
+.simple-trade-table .robot-on-badge{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  width:100%;
+  height:34px;
+  min-height:34px;
+  border:1px solid #2fd38a;
+  border-radius:8px;
+  background:#123e2b;
+  color:#52f0a0;
+  font:800 11px/1 monospace;
+  letter-spacing:.2px;
+  white-space:nowrap;
+  box-shadow:0 0 0 1px rgba(47,211,138,.08) inset;
+}
