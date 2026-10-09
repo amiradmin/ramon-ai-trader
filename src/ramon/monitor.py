@@ -793,8 +793,21 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
     range_execution = final.get("range_execution") == 1
     range_setup = metadata.get("range_setup") if isinstance(metadata.get("range_setup"), dict) else {}
     range_disabled = (health or {}).get("range_main_enabled") is False or diag.get("Range MAIN", "").startswith("NO")
-    node("range", "مسیر جایگزین: برگشت رنج", "pass" if range_execution else "idle" if range_disabled else "blocked",
+    range_rejected = bool(
+        final.get("range_rejected") == 1
+        or final.get("range_rejection_reason")
+        or range_setup.get("rejected") is True
+        or range_setup.get("rejection_reason")
+    )
+    range_state = (
+        "pass" if range_execution
+        else "idle" if range_disabled
+        else "blocked" if range_rejected
+        else "unknown"
+    )
+    node("range", "مسیر جایگزین: برگشت رنج", range_state,
          "برگشت رنج تأیید شده؛ اکسپرت سقف ریسک و هدف را دوباره بررسی می‌کند" if range_execution else
+         "مسیر رنج صریحاً رد شده است" if range_rejected else
          "علت رد هر شرط رنج در تاریخچهٔ این نسخه ذخیره نشده؛ نتیجه را حدس نمی‌زنیم",
          values={"فعال در سرویس": (health or {}).get("range_main_enabled"), "فعال در اکسپرت": diag.get("Range MAIN"),
                  "مجاز برای WAIT": "قدرت / مزیت ناکافی، حرکت مخالف، نبود تأیید جهت", "Setup ثبت‌شده": range_setup or None})
