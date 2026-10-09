@@ -840,10 +840,19 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
                  "مجوز حساب": match(permissions, r"account=(\w+)"),
                  "واحد حساب در هر دلار": number(match(diag.get("MoneyUnitsConfirmed"), r"MoneyUnitsPerUSD: ([\d.]+)"))})
     cooldown_block = any(x in ea_status for x in ("cooldown", "Daily trade limit", "Entry already used", "history unavailable", "ACCOUNT LOSS LIMITS"))
-    node("limits", "محدودیت ورود و زیان حساب", "blocked" if cooldown_block else "pass" if diag else "unknown",
-         ea_status if cooldown_block else "بعد از دو SL زیان‌دهٔ پیاپی هم‌جهت: ۳۰ دقیقه وقفه؛ یک ورود MAIN در هر M15",
+    cooldown_pass = any(
+        x in ea_status
+        for x in ("LIMITS PASS", "COOLDOWN PASS", "ENTRY LIMITS PASS")
+    )
+    limits_state = "blocked" if cooldown_block else "pass" if cooldown_pass else "unknown"
+    node("limits", "محدودیت ورود و زیان حساب", limits_state,
+         ea_status if cooldown_block else (
+             "عبور محدودیت ورود در وضعیت EA ثبت شده است"
+             if cooldown_pass
+             else "نتیجهٔ اجرایی cooldown/limit برای این تصمیم ثبت نشده است"
+         ),
          source="ea", values={"ورودهای امروز": diag.get("Trades today"), "قفل زیان حساب": diag.get("AccountLossLimits"), "وقفهٔ رنج": "۵ دقیقه پس از بسته‌شدن",
-                               "نتیجهٔ اجرای گیت": "ثبت نشده" if not cooldown_block else ea_status})
+                               "نتیجهٔ اجرای گیت": ea_status if (cooldown_block or cooldown_pass) else "ثبت نشده"})
     risk = diag.get("RiskGate", "")
     risk_blocked = "BLOCK" in risk or any(
         x in ea_status
