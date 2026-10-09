@@ -313,6 +313,9 @@ function renderOpportunities(data){
     });
   }
   const labels={OPEN:"هنوز باز",TP_OBSERVED:"هدف در نمونه‌ها دیده شد",SL_OBSERVED:"حد ضرر در نمونه‌ها دیده شد",TIMEOUT_OBSERVED:"پایان ۴ ساعت",DATA_GAP:"نامشخص؛ شکاف داده"};
+  const robotPositionOpen=data.robot_position_open===true;
+  const robotPositionDirection=data.robot_position_direction||"";
+  const robotPositionTicket=data.robot_position_ticket||"";
   const reasons={trend_conflict:"تعارض جهت",insufficient_model_edge:"مزیت ناکافی",insufficient_model_strength:"قدرت ناکافی",adverse_intrabar_timing:"حرکت کوتاه مخالف",late_entry_extension:"ورود دیرهنگام",direction_confirmation_required:"نبود تأیید جهت",market_direction_conflict:"تعارض جهت مستقل",market_direction_neutral:"جهت خنثی",confirmed_countertrend_reversal:"برگشت تأییدشده"};
   const format=v=>typeof v!=="number"||!Number.isFinite(v)?"—":v.toFixed(3);
   const estimatedPnlAt=(row,target)=>{
@@ -500,6 +503,17 @@ function renderOpportunities(data){
       }
       actions.append(extra);
       action.append(actions);
+      tr.append(action);body.append(tr);
+      continue;
+    }
+
+    if(robotPositionOpen){
+      const robotOn=document.createElement("div");
+      robotOn.className="robot-on-badge";
+      robotOn.textContent="Robot On";
+      const details=[robotPositionDirection,robotPositionTicket?("#"+robotPositionTicket):""].filter(Boolean).join(" · ");
+      robotOn.title=details?("Ramon automatic position is active · "+details):"Ramon automatic position is active";
+      action.append(robotOn);
       tr.append(action);body.append(tr);
       continue;
     }
