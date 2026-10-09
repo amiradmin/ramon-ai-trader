@@ -521,3 +521,48 @@
   white-space:nowrap;
   box-shadow:0 0 0 1px rgba(47,211,138,.08) inset;
 }
+
+
+/* Human-assisted console: V2/V3 advice plus explicit human action controls. */
+.simple-trade-table .engine-advice{
+  display:flex;
+  flex-wrap:wrap;
+  justify-content:center;
+  gap:2px 5px;
+  margin-top:2px;
+  font:700 8px/1.15 monospace;
+  direction:ltr;
+}
+.simple-trade-table .engine-advice-line{
+  padding:1px 4px;
+  border-radius:5px;
+  background:rgba(255,255,255,.045);
+}
+.simple-trade-table .engine-advice-line.v2{color:#9bd9ff}
+.simple-trade-table .engine-advice-line.v3{color:#b8a3ff}
+.simple-trade-table .engine-advice-block{
+  flex-basis:100%;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:var(--muted);
+  font-size:7px;
+}
+.simple-trade-table .human-action-list{
+  display:flex;
+  flex-direction:row;
+  align-items:center;
+  gap:3px;
+  width:100%;
+  min-width:0;
+}
+.simple-trade-table .human-action-list .scenario-entry{
+  flex:1 1 0;
+  min-width:0;
+  width:auto;
+}
+.simple-trade-table .scenario-entry.skip{
+  border-color:#6b7280;
+  color:#d1d5db;
+  background:#26303e;
+}
