@@ -1,6 +1,6 @@
 #property strict
-#property version "1.591"
-#define RAMON_EA_VERSION "0.59.1"
+#property version "1.592"
+#define RAMON_EA_VERSION "0.59.2"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -646,6 +646,21 @@ string BuildDiagnosticText()
          +" profit="+DoubleToString(PositionGetDouble(POSITION_PROFIT),2);
    }
 
+   ulong automatic_ticket=0;
+   datetime automatic_opened=0;
+   bool automatic_managed=ManagedAutomaticPosition(automatic_ticket,automatic_opened);
+   string automatic_position_line="NONE";
+   if(automatic_managed && PositionSelectByTicket(automatic_ticket))
+   {
+      long automatic_type=PositionGetInteger(POSITION_TYPE);
+      string automatic_side=(automatic_type==POSITION_TYPE_BUY ? "BUY" : "SELL");
+      automatic_position_line=automatic_side
+         +" #"+IntegerToString((long)automatic_ticket)
+         +" vol="+DoubleToString(PositionGetDouble(POSITION_VOLUME),2)
+         +" open="+DoubleToString(PositionGetDouble(POSITION_PRICE_OPEN),_Digits)
+         +" profit="+DoubleToString(PositionGetDouble(POSITION_PROFIT),2);
+   }
+
    string text=
       "=== RAMON DIAGNOSTIC ===\n"
       +"EA version: "+RAMON_EA_VERSION+"\n"
@@ -798,6 +813,7 @@ string BuildDiagnosticText()
       +" account="+BoolText((bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED))+"\n"
       +"Status: "+StatusLine+"\n"
       +"Managed position: "+position_line+"\n"
+      +"Managed automatic position: "+automatic_position_line+"\n"
       +"MarketClosedExitPause: "+BoolText(MarketClosedExitPause)
       +"  PauseTicket: "+IntegerToString((long)MarketClosedExitPauseTicket)
       +"  PauseTick: "+(MarketClosedExitPauseTickTime>0 ? UTCText(MarketClosedExitPauseTickTime,TIME_DATE|TIME_SECONDS) : "NONE")+"\n"
