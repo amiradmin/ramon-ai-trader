@@ -55,7 +55,14 @@ def kronos_advisor(db, symbol, signal_bar, *, now=None):
         if (data.get("mode") != "DISPLAY_ONLY" or data.get("model") != result["model"]
                 or data.get("symbol") != symbol or generated is None or bar is None):
             return result
-        if (int(bar) != int(signal_bar) or int(bar) != int(now // 900) * 900 - 900
+        source_bar = bar
+        if data.get("clock") == "UTC_FROM_LIVE_REQUEST":
+            offset = data.get("broker_utc_offset_seconds")
+            source_bar = finite(data.get("source_signal_bar_time"))
+            if (type(offset) is not int or abs(offset) > 14 * 3600 or offset % 900
+                    or source_bar is None or source_bar - offset != bar):
+                return result
+        if (int(source_bar) != int(signal_bar) or int(bar) != int(now // 900) * 900 - 900
                 or generated < bar + 900 or not 0 <= now - generated <= 900):
             return dict(result, status="STALE")
         horizon = data.get("horizon_bars")

@@ -52,7 +52,7 @@ services:
       - ./data:/data
       - ./checkpoints:/checkpoints:ro
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8012/health', timeout=3).close()"]
+      test: ["CMD", "python", "-c", "import json,urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8012/health', timeout=3); assert json.load(r).get('ready') is True"]
       interval: 30s
       timeout: 5s
       start_period: 180s
@@ -90,6 +90,13 @@ services:
       - ./data:/data:ro
       - ${HOME}/.mt5/drive_c/users:/mt5-users
 
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8013/monitor', timeout=5).close()"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
   kronos-advisor:
     profiles: ["advisors"]
     build:
@@ -98,6 +105,9 @@ services:
     image: ramon-ai-trader-advisors:local
     init: true
     restart: unless-stopped
+    depends_on:
+      model:
+        condition: service_healthy
     cpus: 2.0
     mem_limit: 2g
     environment:
@@ -142,6 +152,13 @@ services:
       - ./data:/data
       - ./checkpoints:/checkpoints
 
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8015/', timeout=5).close()"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
   market-dashboard:
     image: ramon-ai-trader:local
     init: true
@@ -170,6 +187,13 @@ services:
     volumes:
       - ./data:/data:ro
       - ${HOME}/.mt5/drive_c/users:/mt5-users:ro
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8014/', timeout=5).close()"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
 
   trade-outbox:
     image: ramon-ai-trader:local

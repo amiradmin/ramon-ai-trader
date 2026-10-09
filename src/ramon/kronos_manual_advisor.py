@@ -7,11 +7,43 @@ import argparse
 import json
 import math
 import os
+import sqlite3
 from pathlib import Path
 import sys
 import time
+import zlib
 
-from .kronos_direction_shadow import acceptable_gap, fetch_bars
+from .kronos_direction_shadow import acceptable_gap
+
+
+def live_utc_rows(db, symbol, *, now=None):
+    """Use the exact live request and its recorded offset, never infer a clock."""
+    now = time.time() if now is None else now
+    with sqlite3.connect(Path(db).resolve().as_uri() + "?mode=ro", uri=True) as con:
+        row = con.execute("""SELECT a.recorded_utc, a.provenance_json, b.codec, b.body
+            FROM inference_audit a JOIN input_blobs b ON b.sha256=a.input_sha256
+            JOIN decision_samples d ON d.sample_key=a.sample_key
+            WHERE d.symbol=? ORDER BY a.recorded_utc DESC LIMIT 1""", (symbol,)).fetchone()
+    if row is None or not 0 <= now - row[0] <= 180:
+        raise ValueError("fresh live request provenance unavailable")
+    provenance = json.loads(row[1])
+    request = provenance["request"]
+    offset = request.get("broker_utc_offset_seconds")
+    if type(offset) is not int or abs(offset) > 14 * 3600 or offset % 900:
+        raise ValueError("explicit broker UTC offset unavailable")
+    quote = request.get("quote_time")
+    if type(quote) is not int or not -5 <= now - (quote - offset) <= 180:
+        raise ValueError("live quote clock disagrees with recorded UTC offset")
+    if row[2] != "zlib-json-v1":
+        raise ValueError("unsupported live input codec")
+    context = json.loads(zlib.decompress(row[3]))
+    if context.get("symbol") != symbol or context.get("timeframe") != "M15":
+        raise ValueError("live input symbol/timeframe mismatch")
+    rows = [(int(b["time"]) - offset, float(b["open"]), float(b["high"]),
+             float(b["low"]), float(b["close"])) for b in context["bars"]]
+    if any(a[0] >= b[0] for a, b in zip(rows, rows[1:])):
+        raise ValueError("live input timestamps not increasing")
+    return rows, offset
 
 
 def predict_latest(rows, predictor, *, symbol, lookback=256, horizon=4, neutral_band=.42, now=None):
@@ -77,12 +109,14 @@ def main():
     last_bar = None
     while True:
         try:
-            rows = fetch_bars(args.db, args.symbol, args.lookback + 16)
+            rows, offset = live_utc_rows(args.db, args.symbol)
             completed = [r for r in rows if r[0] + 900 <= time.time()]
             current = completed[-1][0] if completed else None
             if current != last_bar or not output.exists():
                 report = predict_latest(rows, predictor, symbol=args.symbol, lookback=args.lookback,
                                         horizon=args.horizon, neutral_band=args.neutral_band)
+                report.update(clock="UTC_FROM_LIVE_REQUEST", broker_utc_offset_seconds=offset,
+                              source_signal_bar_time=report["signal_bar_time"] + offset)
                 publish(output, report)
                 last_bar = current
                 print(json.dumps(report), flush=True)
