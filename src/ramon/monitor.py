@@ -1402,6 +1402,9 @@ def read_open_dashboard_positions(diagnostic):
             return result
         for raw in path.read_text(encoding="ascii", errors="ignore").splitlines():
             parts = raw.strip().split("|")
+            guardian_state = None
+            if len(parts) == 11:
+                guardian_state = parts.pop()
             legacy_key = False
             if len(parts) == 10:
                 sample_key, execution_sample_key, direction, ticket, opened, profit, volume, open_price, current_price, auto_close_target = parts
@@ -1441,6 +1444,7 @@ def read_open_dashboard_positions(diagnostic):
                 "open_price": number(open_price),
                 "current_price": number(current_price),
                 "auto_close_target": number(auto_close_target),
+                "guardian_state": guardian_state,
             }
     except OSError:
         return {}
@@ -1722,6 +1726,7 @@ def opportunities_with_execution_state(db, diagnostic, symbol, health_url=None):
             row["position_ticket"] = open_info.get("ticket") if open_info else None
             row["execution_sample_key"] = open_info.get("execution_sample_key") if open_info else None
             row["live_profit_units"] = open_info.get("profit_units") if open_info else None
+            row["guardian_state"] = open_info.get("guardian_state") if open_info else None
             row["position_volume"] = open_info.get("volume") if open_info else None
             row["position_open_price"] = open_info.get("open_price") if open_info else None
             row["position_current_price"] = open_info.get("current_price") if open_info else None
@@ -1782,6 +1787,7 @@ def opportunities_with_execution_state(db, diagnostic, symbol, health_url=None):
             "position_open": True,
             "position_ticket": open_info.get("ticket"),
             "live_profit_units": open_info.get("profit_units"),
+            "guardian_state": open_info.get("guardian_state"),
             "position_volume": open_info.get("volume"),
             "position_open_price": open_info.get("open_price"),
             "position_current_price": open_info.get("current_price"),
@@ -2019,6 +2025,31 @@ def queue_manual_entry(db, diagnostic, symbol, payload):
     }
 
 
+def queue_manual_guardian(diagnostic, payload):
+    if diagnostic is None:
+        raise ValueError("مسیر فایل اکسپرت در دسترس نیست")
+    sample = str(payload.get("sample_key") or "")
+    ticket = str(payload.get("ticket") or "")
+    action = payload.get("action", "ARM")
+    if not re.fullmatch(r"[a-f0-9]{16}", sample) or not ticket.isdigit() or int(ticket) <= 0 or action not in {"ARM", "CANCEL"}:
+        raise ValueError("فرمان محافظ نامعتبر است")
+    row = read_open_dashboard_positions(diagnostic).get(ticket)
+    if not row or row.get("sample_key") != sample:
+        raise ValueError("پوزیشن باز پیدا نشد")
+    if row.get("guardian_state") not in {"OFF", "ARMED"}:
+        raise ValueError("محافظ نیاز به EA جدید دارد یا برای این پوزیشن قبلاً استفاده شده است")
+    if action == "ARM" and (number(row.get("profit_units")) is None or number(row.get("profit_units")) >= 0):
+        raise ValueError("محافظ فقط برای پوزیشن زیان‌ده فعال می‌شود")
+    execution = str(row.get("execution_sample_key") or sample)
+    if not re.fullmatch(r"[a-f0-9]{16}", execution):
+        raise ValueError("شناسه اجرای پوزیشن نامعتبر است")
+    with open(Path(diagnostic).with_name("Ramon_GuardianCommands.txt"), "a", encoding="ascii", newline="") as out:
+        out.write(f"{int(time.time())}|{sample}|{execution}|{ticket}|{action}\n")
+        out.flush()
+        os.fsync(out.fileno())
+    return {"queued": True, "ticket": ticket, "action": action}
+
+
 def queue_manual_close(diagnostic, payload):
     if diagnostic is None:
         raise ValueError("مسیر فایل اکسپرت در دسترس نیست")
@@ -2164,7 +2195,7 @@ def handler_for(db, diagnostic, symbol, health_url):
                 self.send_error(404)
 
         def do_POST(self):
-            if self.path not in {"/api/control", "/api/override", "/api/override/reset", "/api/manual-entry", "/api/human-skip", "/api/manual-close", "/api/predicted-auto-close", "/api/today-profit/reset"}:
+            if self.path not in {"/api/control", "/api/override", "/api/override/reset", "/api/manual-entry", "/api/human-skip", "/api/manual-close", "/api/manual-guardian", "/api/predicted-auto-close", "/api/today-profit/reset"}:
                 self.send_error(404)
                 return
             origin = self.headers.get("Origin")
@@ -2196,6 +2227,11 @@ def handler_for(db, diagnostic, symbol, health_url):
                     return
                 if self.path == "/api/manual-close":
                     result = queue_manual_close(diagnostic, payload)
+                    self.reply(json.dumps(result, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
+                    return
+
+                if self.path == "/api/manual-guardian":
+                    result = queue_manual_guardian(diagnostic, payload)
                     self.reply(json.dumps(result, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
                     return
 

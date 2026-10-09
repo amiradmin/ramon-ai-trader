@@ -3,6 +3,7 @@ import json
 import sqlite3
 import time
 from pathlib import Path
+from .manual_advisors import snapshot_advisors, kronos_advisor
 
 
 ACTIONABLE_SECONDS = 90
@@ -165,6 +166,7 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
                 # Use MAIN geometry, never substitute a range decision's levels.
                 stop=base.get('stop_distance');target=base.get('target_distance')
                 if not stop or not target:continue
+                advisors = snapshot_advisors(audit, row['mid'], row['spread'], row['captured'])
                 if key in grouped:
                     # Later snapshots from the same M15 signal bar are observation
                     # updates, not new candidates. Preserve the original entry
@@ -195,6 +197,7 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
                     'v3_shadow_candidate_direction': final.get('ai_engine_v3_shadow_candidate_direction'),
                     'v3_shadow_direction_quality': final.get('ai_engine_v3_shadow_direction_quality'),
                     'v3_shadow_quality_margin': final.get('ai_engine_v3_shadow_quality_margin'),
+                    'model_advisors': advisors,
                     'forecast_distance_atr': final.get('ai_engine_v3_shadow_forecast_distance_atr'),
                     'entry_probability':final.get('ai_engine_v2_entry_probability',final.get('entry_probability')),
                     'full_sl_probability':final.get('ai_engine_v2_full_sl_probability',final.get('full_sl_probability',final.get('shadow_full_sl_probability'))),
@@ -227,6 +230,10 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
             except (ValueError,TypeError,KeyError):continue
         now=int(time.time())
         for item in grouped.values():
+            for advisor in item['model_advisors']:
+                if advisor['status']=='READY' and not 0 <= now-advisor['captured'] <= ACTIONABLE_SECONDS:
+                    advisor['status']='HISTORICAL'
+            item['model_advisors'].append(kronos_advisor(db, symbol, item['signal_bar_time'], now=now))
             previous=item['quote_time'];sign=1 if item['direction']=='BUY' else -1
             for row in rows:
                 q=row['quote_time']

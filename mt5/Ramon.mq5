@@ -1,6 +1,6 @@
 #property strict
-#property version "1.594"
-#define RAMON_EA_VERSION "0.59.4"
+#property version "1.595"
+#define RAMON_EA_VERSION "0.59.5"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -44,6 +44,9 @@ double MaxExecutableRiskUSD = 0.35; // Default; updated by the Control dashboard
 input int MaxSpreadPoints = 50;
 input int MaxTradesPerDay = 400;
 input int MaxDashboardOpportunityPositions = 20; // Hedging accounts only; manual opportunity positions with broker SL/TP.
+input double GuardianMaxRiskUSD = 0.06; // Additional one-shot reversal SL budget; no minimum-lot override.
+const int GuardianArmSeconds = 1800;
+const int GuardianRecoverySeconds = 900;
 input int MaximumHoldBars = 4;
 input bool EnableAccountLossLimits = false; // Entry-only account guard; configure and validate before activation.
 input double DailyLossLimitPercent = 0.0; // 0 disables this limit; include realized costs and floating loss.
@@ -4315,6 +4318,7 @@ bool ProcessDashboardPredictedAutoCloseCrossings()
 
 void OnTick()
 {
+   ProcessGuardianRecoveryExits();
    // Predicted dashboard exits are exact ticket-bound price crossings and must
    // not wait for the five-second timer.
    ProcessDashboardPredictedAutoCloseCrossings();
@@ -4400,7 +4404,7 @@ void WriteOpenDashboardPositions()
          +IntegerToString((long)ticket)+"|"+IntegerToString((long)opened)+"|"
          +DoubleToString(profit_units,8)+"|"+DoubleToString(volume,2)+"|"
          +DoubleToString(open_price,_Digits)+"|"+DoubleToString(current_price,_Digits)+"|"
-         +DoubleToString(auto_close_target,_Digits)+"\r\n");
+         +DoubleToString(auto_close_target,_Digits)+"|"+GuardianState(ticket,comment)+"\r\n");
    }
    FileFlush(handle);
    FileClose(handle);
@@ -4756,6 +4760,226 @@ bool ProcessDashboardManualClose()
    return false;
 }
 
+string GuardianKey(const ulong ticket,const string field)
+{
+   uint server_hash=2166136261;
+   string server=AccountInfoString(ACCOUNT_SERVER);
+   for(int i=0;i<StringLen(server);i++) server_hash=(server_hash^(uint)StringGetCharacter(server,i))*16777619;
+   return "RG_"+StringFormat("%08x",server_hash)+"_"+IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN))
+      +"_"+IntegerToString((long)ticket)+"_"+field;
+}
+
+double GuardianValue(const ulong ticket,const string field)
+{
+   string key=GuardianKey(ticket,field);
+   return GlobalVariableCheck(key) ? GlobalVariableGet(key) : 0.0;
+}
+
+string GuardianState(const ulong ticket,const string comment)
+{
+   if(StringFind(comment,":MG")>=0) return "RECOVERY";
+   if(GuardianValue(ticket,"used")>0.0) return "USED";
+   double armed=GuardianValue(ticket,"armed");
+   return armed>0.0 && TimeCurrent()-armed<GuardianArmSeconds ? "ARMED" : "OFF";
+}
+
+void ProcessGuardianCommand()
+{
+   if(SmallOnlyMode || !AccountLockHealthy()) return;
+   const string file="Ramon_GuardianCommands.txt";
+   int handle=FileOpen(file,FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
+   if(handle==INVALID_HANDLE) return;
+   string lines[];
+   while(!FileIsEnding(handle))
+   {
+      string line=FileReadString(handle);
+      if(line=="") continue;
+      int n=ArraySize(lines); ArrayResize(lines,n+1); lines[n]=line;
+   }
+   FileClose(handle);
+   int total=ArraySize(lines);
+   if(total<=1) FileDelete(file,FILE_COMMON);
+   else
+   {
+      handle=FileOpen(file,FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON);
+      if(handle==INVALID_HANDLE) return;
+      for(int i=1;i<total;i++) FileWriteString(handle,lines[i]+"\r\n");
+      FileFlush(handle); FileClose(handle);
+   }
+   if(total==0) return;
+   string parts[];
+   if(StringSplit(lines[0],StringGetCharacter("|",0),parts)!=5) return;
+   datetime requested=(datetime)StringToInteger(parts[0]);
+   ulong ticket=(ulong)StringToInteger(parts[3]);
+   if(requested<=0 || TimeGMT()-requested>120 || requested-TimeGMT()>5
+      || !ValidSampleKey(parts[1]) || !ValidSampleKey(parts[2]) || ticket==0
+      || (parts[4]!="ARM" && parts[4]!="CANCEL") || !PositionSelectByTicket(ticket)) return;
+   string comment=PositionGetString(POSITION_COMMENT);
+   if(PositionGetString(POSITION_SYMBOL)!=_Symbol
+      || (ulong)PositionGetInteger(POSITION_MAGIC)!=MagicNumber
+      || comment!="Ramon:"+parts[2]+":M" || DashboardOriginSample(parts[2])!=parts[1]) return;
+   if(parts[4]=="CANCEL")
+   {
+      GlobalVariableDel(GuardianKey(ticket,"armed"));
+      StatusLine="GUARDIAN CANCELLED #"+IntegerToString((long)ticket);
+   }
+   else
+   {
+      string why="";
+      if(!LiveExecutionReady(why) || GuardianValue(ticket,"used")>0.0
+         || PositionGetDouble(POSITION_PROFIT)+PositionGetDouble(POSITION_SWAP)>=0.0
+         || PositionGetDouble(POSITION_SL)<=0.0 || !MathIsValidNumber(GuardianMaxRiskUSD)
+         || GuardianMaxRiskUSD<=0.0) return;
+      if(GuardianState(ticket,comment)=="ARMED") return; // Repeated clicks never extend the deadline.
+      if(!GlobalVariableCheck(GuardianKey(ticket,"used"))
+         && !GlobalVariableSet(GuardianKey(ticket,"used"),0.0)) return;
+      if(!GlobalVariableSet(GuardianKey(ticket,"seen"),0.0)
+         || !GlobalVariableSet(GuardianKey(ticket,"count"),0.0)
+         || !GlobalVariableSet(GuardianKey(ticket,"armed"),(double)TimeCurrent())) return;
+      StatusLine="GUARDIAN ARMED #"+IntegerToString((long)ticket);
+   }
+   GlobalVariablesFlush();
+   Print("Ramon guardian: ",StatusLine);
+}
+
+bool GuardianPermissions()
+{
+   string why="";
+   return LiveExecutionReady(why) && (bool)TerminalInfoInteger(TERMINAL_CONNECTED)
+      && (bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED)
+      && (bool)MQLInfoInteger(MQL_TRADE_ALLOWED)
+      && (bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED)
+      && SymbolInfoInteger(_Symbol,SYMBOL_TRADE_MODE)==SYMBOL_TRADE_MODE_FULL;
+}
+
+bool GuardianGeometry(const string direction,const double original_volume,
+   double &volume,double &stop,double &target)
+{
+   MqlTick tick;
+   if(!SymbolInfoTick(_Symbol,tick) || tick.bid<=0.0 || tick.ask<tick.bid
+      || TimeCurrent()-tick.time>30 || tick.time>TimeCurrent()+5) return false;
+   double point=SymbolInfoDouble(_Symbol,SYMBOL_POINT);
+   double size=SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_SIZE);
+   double minimum=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN);
+   double step=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_STEP);
+   if(point<=0.0 || size<=0.0 || minimum<=0.0 || step<=0.0
+      || (tick.ask-tick.bid)/point>MaxSpreadPoints
+      || LastStopDistance<=0.0 || LastTargetDistance<=0.0) return false;
+   double entry=direction=="BUY" ? tick.ask : tick.bid;
+   double distance=MathMax(LastStopDistance,
+      SymbolInfoInteger(_Symbol,SYMBOL_TRADE_STOPS_LEVEL)*point+(tick.ask-tick.bid)+2*size);
+   double reward=MathMax(LastTargetDistance,distance);
+   stop=(direction=="BUY" ? MathFloor((entry-distance)/size) : MathCeil((entry+distance)/size))*size;
+   target=(direction=="BUY" ? MathCeil((entry+reward)/size) : MathFloor((entry-reward)/size))*size;
+   stop=NormalizeDouble(stop,_Digits); target=NormalizeDouble(target,_Digits);
+   if(stop<=0.0 || target<=0.0) return false;
+   ENUM_ORDER_TYPE side=direction=="BUY" ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+   double money=0.0;
+   double cap=MathMin(GuardianMaxRiskUSD,MaxExecutableRiskUSD)*MoneyUnitsPerUSD;
+   if(cap<=0.0 || !OrderCalcProfit(side,_Symbol,minimum,entry,stop,money)
+      || money>=0.0 || -money>cap) return false;
+   double limit=MathMin(original_volume,SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MAX));
+   limit=MathMin(limit,minimum*cap/(-money));
+   volume=NormalizeDouble(minimum+MathFloor((limit-minimum)/step+0.00000001)*step,8);
+   if(volume<minimum || volume>original_volume+0.00000001
+      || !OrderCalcProfit(side,_Symbol,volume,entry,stop,money)
+      || money>=0.0 || -money>cap+0.00001) return false;
+   double margin=0.0;
+   return OrderCalcMargin(side,_Symbol,volume,entry,margin)
+      && margin<=AccountInfoDouble(ACCOUNT_MARGIN_FREE)*0.8;
+}
+
+bool ProcessGuardianReversals()
+{
+   if(SmallOnlyMode || !GuardianPermissions()) return false;
+   datetime now=TimeCurrent();
+   for(int i=PositionsTotal()-1;i>=0;i--)
+   {
+      ulong ticket=PositionGetTicket(i);
+      if(ticket==0 || !PositionSelectByTicket(ticket)
+         || PositionGetString(POSITION_SYMBOL)!=_Symbol
+         || (ulong)PositionGetInteger(POSITION_MAGIC)!=MagicNumber) continue;
+      string comment=PositionGetString(POSITION_COMMENT);
+      double armed=GuardianValue(ticket,"armed");
+      if(GuardianState(ticket,comment)!="ARMED") continue;
+      string direction=PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY ? "SELL" : "BUY";
+      bool fresh=LastModelSnapshotTime>armed && LastModelSnapshotTime<=now
+         && now-LastModelSnapshotTime<=30 && ValidSampleKey(LastSampleKey);
+      if(!fresh || PositionGetDouble(POSITION_PROFIT)+PositionGetDouble(POSITION_SWAP)>=0.0)
+      { GlobalVariableSet(GuardianKey(ticket,"count"),0.0); continue; }
+      if(GuardianValue(ticket,"seen")==LastModelSnapshotTime) continue;
+      bool confirmed=LastModelDecision==direction
+         && LastIntrabarConfirmed && LastIntrabarDirection==direction
+         && LastAiTrendConfirmed && LastAiTrendDirection==direction;
+      int count=confirmed ? (int)GuardianValue(ticket,"count")+1 : 0;
+      if(!GlobalVariableSet(GuardianKey(ticket,"seen"),(double)LastModelSnapshotTime)
+         || !GlobalVariableSet(GuardianKey(ticket,"count"),(double)count)) continue;
+      if(count<2) continue;
+      string why="";
+      if(NewsGuardEntryBlocked() || AccountLossLimitsBlocked(why)
+         || LocalLossCooldownBlocked(direction,why)) continue;
+      if(!PositionSelectByTicket(ticket) || PositionGetString(POSITION_COMMENT)!=comment) continue;
+      // Never close first and hope that an unaffordable reverse order will fit.
+      double original_volume=PositionGetDouble(POSITION_VOLUME);
+      double volume=0.0,stop=0.0,target=0.0;
+      if(!GuardianGeometry(direction,original_volume,volume,stop,target))
+      { StatusLine="GUARDIAN WAIT: reverse risk/spread/margin blocked"; continue; }
+      string origin=DashboardOriginSample(StringSubstr(comment,6,16));
+      // Durable one-shot before any broker action; a crash cannot trigger another reversal.
+      if(!GlobalVariableSetOnCondition(GuardianKey(ticket,"used"),1.0,0.0)) continue;
+      GlobalVariableDel(GuardianKey(ticket,"armed")); GlobalVariablesFlush();
+      bool closed=Trade.PositionClose(ticket,MaxDeviationPoints);
+      uint close_code=Trade.ResultRetcode();
+      RecordDealTelemetry(Trade.ResultDeal(),"guardian_original_close");
+      if(!closed || close_code!=TRADE_RETCODE_DONE || PositionSelectByTicket(ticket))
+      { StatusLine="GUARDIAN STOP: original close unconfirmed; no reverse"; Print(StatusLine); return true; }
+      ClearDashboardAutoCloseTarget(ticket);
+      // Reprice after the confirmed close; failure leaves us flat, without a retry.
+      if(!GuardianPermissions() || AccountLossLimitsBlocked(why)
+         || NewsGuardEntryBlocked() || LocalLossCooldownBlocked(direction,why)
+         || !GuardianGeometry(direction,original_volume,volume,stop,target))
+      { StatusLine="GUARDIAN CLOSED: reverse preflight blocked"; Print(StatusLine); return true; }
+      string recovery_sample=StringFormat("%08x%08x",(uint)ticket,(uint)now);
+      StageEntrySizing(recovery_sample,direction=="BUY" ? ORDER_TYPE_BUY : ORDER_TYPE_SELL,
+         direction=="BUY" ? SymbolInfoDouble(_Symbol,SYMBOL_ASK) : SymbolInfoDouble(_Symbol,SYMBOL_BID),stop,volume);
+      SaveDashboardAlias(recovery_sample,origin);
+      string recovery_comment="Ramon:"+recovery_sample+":MG";
+      bool submitted=direction=="BUY" ? Trade.Buy(volume,_Symbol,0.0,stop,target,recovery_comment)
+         : Trade.Sell(volume,_Symbol,0.0,stop,target,recovery_comment);
+      uint code=Trade.ResultRetcode();
+      RecordDealTelemetry(Trade.ResultDeal(),"guardian_recovery_entry");
+      if(!submitted || (code!=TRADE_RETCODE_DONE && code!=TRADE_RETCODE_DONE_PARTIAL && code!=TRADE_RETCODE_PLACED))
+      { ClearPendingSizing(); StatusLine="GUARDIAN CLOSED: reverse rejected"; }
+      else { LastEntrySignalBar=LastSignalBarTime; StatusLine="GUARDIAN REVERSE "+direction; }
+      Print("Ramon guardian: original #",ticket," ",StatusLine," volume=",volume," SL=",stop," TP=",target);
+      WriteOpenDashboardPositions();
+      return true;
+   }
+   return false;
+}
+
+void ProcessGuardianRecoveryExits()
+{
+   if(SmallOnlyMode || !AccountLockHealthy()) return;
+   for(int i=PositionsTotal()-1;i>=0;i--)
+   {
+      ulong ticket=PositionGetTicket(i);
+      if(ticket==0 || !PositionSelectByTicket(ticket)
+         || PositionGetString(POSITION_SYMBOL)!=_Symbol
+         || (ulong)PositionGetInteger(POSITION_MAGIC)!=MagicNumber
+         || StringFind(PositionGetString(POSITION_COMMENT),":MG")<0) continue;
+      if(TimeCurrent()-PositionGetInteger(POSITION_TIME)<GuardianRecoverySeconds) continue;
+      if(ManagedExitPausedForMarketClosed(ticket)) continue;
+      if(Trade.PositionClose(ticket,MaxDeviationPoints) && Trade.ResultRetcode()==TRADE_RETCODE_DONE)
+      {
+         ResetMarketClosedExitPause();
+         RecordDealTelemetry(Trade.ResultDeal(),"guardian_timeout_exit");
+         Print("Ramon guardian timeout #",ticket);
+      }
+      else HandleManagedExitFailure(ticket,"GUARDIAN TIME EXIT");
+   }
+}
+
 void OnTimer()
 {
    ReadControlRiskCap();
@@ -4763,6 +4987,9 @@ void OnTimer()
    WriteOpenDashboardPositions();
    ProcessDashboardPredictedAutoCloseCommand();
    ProcessDashboardManualClose();
+   ProcessGuardianCommand();
+   ProcessGuardianRecoveryExits();
+   if(ProcessGuardianReversals()) { ShowStatus(); return; }
    ProcessDashboardPredictedAutoCloseCrossings();
    WriteOpenDashboardPositions();
    datetime now=TimeCurrent();
@@ -5115,6 +5342,7 @@ void OnTimer()
    AppendExperimentalImprovementCsv();
    Print("Ramon ",UTCText(bar_time,TIME_DATE|TIME_SECONDS)," ",decision," ",reason,
       " median=",DoubleToString(median,_Digits));
+   if(ProcessGuardianReversals()) { ShowStatus(); return; }
 
    if(dashboard_pending)
    {

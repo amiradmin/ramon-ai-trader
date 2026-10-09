@@ -90,6 +90,22 @@ services:
       - ./data:/data:ro
       - ${HOME}/.mt5/drive_c/users:/mt5-users
 
+  kronos-advisor:
+    profiles: ["advisors"]
+    build:
+      context: .
+      dockerfile: Dockerfile.advisors
+    image: ramon-ai-trader-advisors:local
+    init: true
+    restart: unless-stopped
+    cpus: 2.0
+    mem_limit: 2g
+    environment:
+      HF_HOME: /home/ramon/.cache/huggingface
+    volumes:
+      - chronos_cache:/home/ramon/.cache/huggingface
+      - ./data:/data
+
   training-dashboard:
     build:
       context: .

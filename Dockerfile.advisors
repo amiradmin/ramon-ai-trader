@@ -1,0 +1,15 @@
+# syntax=docker/dockerfile:1.7
+# Build the current model image first: docker compose build model dashboard
+FROM ramon-ai-trader:local
+USER root
+# Official upstream snapshot; model weights are loaded only when this optional service starts.
+ADD https://github.com/shiyu-coder/Kronos/archive/67b630e67f6a18c9e9be918d9b4337c960db1e9a.tar.gz /tmp/kronos.tar.gz
+RUN mkdir -p /opt/kronos \
+    && tar -xzf /tmp/kronos.tar.gz --strip-components=1 -C /opt/kronos \
+    && rm /tmp/kronos.tar.gz \
+    && python -m pip install 'einops==0.8.1' 'pandas>=2.2,<3'
+COPY src/ /app/src/
+RUN python -m pip install --no-deps /app
+USER ramon
+ENV OMP_NUM_THREADS=2 MKL_NUM_THREADS=2
+CMD ["python", "-m", "ramon.kronos_manual_advisor", "--db", "/data/ramon_history.sqlite3", "--kronos-source", "/opt/kronos", "--watch"]

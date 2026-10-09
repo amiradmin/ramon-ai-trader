@@ -220,6 +220,19 @@ async function humanSkipOpportunity(row,button){
     setTimeout(()=>{button.disabled=false;button.textContent=old;},1600);
   }
 }
+async function manualGuardianOpportunity(row,button){
+  if(button.disabled)return;
+  const action=row.guardian_state==="ARMED"?"CANCEL":"ARM";
+  button.disabled=true;button.textContent="در حال ارسال…";
+  try{
+    const response=await fetch("/api/manual-guardian",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sample_key:row.sample_key,ticket:row.position_ticket,action})});
+    const data=await response.json();
+    if(!response.ok||!data.queued)throw new Error(data.error||("HTTP "+response.status));
+    button.textContent="فرمان ارسال شد";
+    opportunitySet("opportunity-status",action==="ARM"?"فرمان محافظ ارسال شد؛ پس از تأیید EA و دو سیگنال تازه مخالف، پوزیشن بسته و حداکثر یک ورود محدود بررسی می‌شود. سود تضمین نیست.":"فرمان لغو محافظ ارسال شد.");
+  }catch(err){opportunitySet("opportunity-status","محافظ: "+err.message);}
+  setTimeout(()=>void refreshOpportunities(),1000);
+}
 async function manualCloseOpportunity(row,button){
   if(button.disabled)return;
   button.disabled=true;const old=button.textContent;button.textContent="در حال بستن…";
@@ -462,6 +475,15 @@ function renderOpportunities(data){
     const v2=document.createElement("span");v2.className="engine-advice-line v2";v2.textContent="V2: "+(row.v2_decision||"—");
     const v3=document.createElement("span");v3.className="engine-advice-line v3";v3.textContent="V3: "+(row.v3_shadow_decision||"—");
     engineAdvice.append(v2,v3);
+    for(const advisor of row.model_advisors||[]){
+      const line=document.createElement("span");line.className="engine-advice-line model-advisor";
+      const state=advisor.status==="READY"?advisor.direction:advisor.status==="HISTORICAL"?"ثبت‌شده · "+advisor.direction:advisor.status==="STALE"?"قدیمی / کندل متفاوت":"در دسترس نیست";
+      line.textContent=advisor.name+": "+state;
+      const horizon=advisor.horizon_bars?" · افق "+(advisor.horizon_bars*15)+" دقیقه":"";
+      const stamp=advisor.captured?" · زمان "+opportunityDate.format(new Date(advisor.captured*1000)):"";
+      line.title="فقط جهت پیش‌بینی؛ تأیید ورود یا احتمال سود نیست"+horizon+stamp+(typeof advisor.forecast_price==="number"?" · قیمت پیش‌بینی "+format(advisor.forecast_price):"");
+      engineAdvice.append(line);
+    }
     if(row.v3_shadow_block){
       const why=document.createElement("small");why.className="engine-advice-block";why.textContent=row.v3_shadow_block;
       engineAdvice.append(why);
@@ -493,6 +515,15 @@ function renderOpportunities(data){
       closeNow.title="بستن فوری همین پوزیشن Human-assisted · Ticket "+row.position_ticket;
       closeNow.addEventListener("click",()=>manualCloseOpportunity(row,closeNow));
       actions.append(closeNow);
+
+      const guardian=document.createElement("button");
+      guardian.type="button";
+      guardian.className="opportunity-entry auto-close"+(row.guardian_state==="ARMED"?" armed":"");
+      guardian.textContent=row.guardian_state==="ARMED"?"محافظ فعال · لغو":row.guardian_state==="RECOVERY"?"ورود محافظ":row.guardian_state==="USED"?"محافظ استفاده شد":"محافظ";
+      guardian.disabled=!["OFF","ARMED"].includes(row.guardian_state)||(row.guardian_state==="OFF"&&!(row.live_profit_units<0));
+      guardian.title="فقط این پوزیشن؛ خروج با دو تأیید مخالف، سپس یک ورود با ریسک محدود و بدون افزایش حجم. انتظار حداکثر ۳۰ دقیقه.";
+      guardian.addEventListener("click",()=>manualGuardianOpportunity(row,guardian));
+      actions.append(guardian);
 
       const autoClose=document.createElement("button");
       autoClose.type="button";
