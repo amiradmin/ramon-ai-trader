@@ -458,3 +458,47 @@
 /* Compact main monitor trade table rows. */
 .simple-trade-table tbody tr{height:45px}
 .simple-trade-table tbody td{height:45px;padding-top:4px;padding-bottom:4px;vertical-align:middle}
+
+
+/* Force compact 45px rows in the main /monitor decision table. */
+.simple-trade-table .opportunity-actions,
+.simple-trade-table .manual-scenario-list{
+  display:flex;
+  flex-direction:row;
+  align-items:center;
+  gap:3px;
+  min-width:0;
+  width:100%;
+  margin:0;
+  padding:0;
+  border:0;
+}
+.simple-trade-table .manual-scenario-list.compact{
+  margin:0;
+  padding:0;
+  border:0;
+}
+.simple-trade-table .scenario-entry,
+.simple-trade-table .opportunity-entry{
+  flex:1 1 0;
+  min-width:0;
+  width:auto;
+  height:34px;
+  max-height:34px;
+  padding:2px 3px;
+  font-size:8px;
+  line-height:1.15;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.simple-trade-table .trade-tech-details{
+  margin-top:2px;
+  padding-top:2px;
+}
+.simple-trade-table tbody tr,
+.simple-trade-table tbody td{
+  height:45px;
+  min-height:45px;
+  max-height:45px;
+}
