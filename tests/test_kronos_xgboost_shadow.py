@@ -1,4 +1,5 @@
 """Unit tests for offline shadow dataset boundaries and decisions."""
+from datetime import datetime, timezone
 from ramon.kronos_direction_shadow import acceptable_gap, direction, pairs, summarize
 from ramon.xgboost_timing_shadow import build_examples
 
@@ -9,11 +10,12 @@ def test_direction_abstains_in_neutral_band():
 
 def test_kronos_accepts_market_closure_but_rejects_bad_gap():
     # Friday -> Sunday style closure is valid when actual timestamps are used.
-    friday = 4 * 86400
-    assert acceptable_gap(friday, friday + 2 * 86400)
+    friday = int(datetime(2026, 10, 9, 21, 45, tzinfo=timezone.utc).timestamp())
+    sunday = int(datetime(2026, 10, 11, 22, 0, tzinfo=timezone.utc).timestamp())
+    assert acceptable_gap(friday, sunday)
 
     # A long mid-week hole is treated as missing/corrupt history.
-    wednesday = 2 * 86400
+    wednesday = int(datetime(2026, 10, 7, 10, 0, tzinfo=timezone.utc).timestamp())
     assert not acceptable_gap(wednesday, wednesday + 10 * 3600)
 
     bars=[(i*900,100,101,99,100) for i in range(30)]
