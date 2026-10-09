@@ -1,5 +1,5 @@
 """Unit tests for offline shadow dataset boundaries and decisions."""
-from ramon.kronos_direction_shadow import direction, pairs, summarize
+from ramon.kronos_direction_shadow import acceptable_gap, direction, pairs, summarize
 from ramon.xgboost_timing_shadow import build_examples
 
 def test_direction_abstains_in_neutral_band():
@@ -7,12 +7,17 @@ def test_direction_abstains_in_neutral_band():
     assert direction(101, 100, 0.1) == "BUY"
     assert direction(99, 100, 0.1) == "SELL"
 
-def test_kronos_skips_weekend_gap():
+def test_kronos_accepts_market_closure_but_rejects_bad_gap():
+    # Friday -> Sunday style closure is valid when actual timestamps are used.
+    friday = 4 * 86400
+    assert acceptable_gap(friday, friday + 2 * 86400)
+
+    # A long mid-week hole is treated as missing/corrupt history.
+    wednesday = 2 * 86400
+    assert not acceptable_gap(wednesday, wednesday + 10 * 3600)
+
     bars=[(i*900,100,101,99,100) for i in range(30)]
-    bars[10]=(bars[10][0]+172800,100,101,99,100)
-    indices=list(pairs(bars,lookback=8,horizon=3,stride=1))
-    assert indices
-    assert all(not (i-8 <= 10 < i+3) for i in indices)
+    assert list(pairs(bars,lookback=8,horizon=3,stride=1))
     assert summarize([])["status"]=="insufficient_contiguous_bars"
 
 def test_timing_uses_only_prior_features_and_future_labels():
