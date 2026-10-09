@@ -29,3 +29,11 @@ def test_timing_rejects_gapped_input():
     bars[30]=(bars[30][0]+86400,100,101,99,100)
     examples=build_examples(bars,horizon=5,stride=5)
     assert all(not (10*60 <= t <= 35*60) for t,_,_ in examples)
+
+def test_timing_supports_5_minute_candles():
+    bars=[]
+    for i in range(90):
+        p=100+i*0.1
+        bars.append((i*300,p,p+0.5,p-0.5,p+0.1))
+    assert build_examples(bars,horizon=3,stride=5,bar_seconds=300)
+    assert not build_examples(bars,horizon=3,stride=5,bar_seconds=60)
