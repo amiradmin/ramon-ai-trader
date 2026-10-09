@@ -1329,6 +1329,30 @@ def save_control(diagnostic, value):
 
 
 
+def read_automatic_robot_position(diagnostic):
+    """Return fresh MT5 proof of an automatic Ramon-managed position."""
+    if diagnostic is None:
+        return {"open": False, "direction": None, "ticket": None}
+    diag, error = read_diagnostic(diagnostic)
+    if error or not diag:
+        return {"open": False, "direction": None, "ticket": None}
+    stamp = number(diag.get("captured_epoch"))
+    if stamp is None or not -5 <= time.time() - stamp <= 90:
+        return {"open": False, "direction": None, "ticket": None}
+    raw = str(diag.get("Managed automatic position") or "").strip()
+    if not raw or raw.upper().startswith("NONE"):
+        return {"open": False, "direction": None, "ticket": None}
+    match_row = re.match(r"^(BUY|SELL)\s+#(\d+)", raw)
+    if not match_row:
+        return {"open": False, "direction": None, "ticket": None}
+    return {
+        "open": True,
+        "direction": match_row.group(1),
+        "ticket": match_row.group(2),
+        "raw": raw,
+    }
+
+
 def read_open_dashboard_positions(diagnostic):
     if diagnostic is None:
         return {}
@@ -1617,6 +1641,10 @@ def opportunities_with_execution_state(db, diagnostic, symbol, health_url=None):
     data["manual_entry_compatibility"] = dashboard_entry_compatibility(diagnostic)
     data["auto_close_compatibility"] = dashboard_auto_close_compatibility(diagnostic)
     opened = read_open_dashboard_positions(diagnostic)
+    robot_position = read_automatic_robot_position(diagnostic)
+    data["robot_position_open"] = bool(robot_position.get("open"))
+    data["robot_position_direction"] = robot_position.get("direction")
+    data["robot_position_ticket"] = robot_position.get("ticket")
     queue_path = Path(diagnostic).with_name("Ramon_ManualEntries.txt") if diagnostic else None
     queued = set()
     try:
