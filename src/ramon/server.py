@@ -29,6 +29,7 @@ from .market_state import POLICY_VERSION, assess_market, apply_market_policy
 from .reversal_strategy import apply_reversal
 from .trade_selector import apply_live_selector
 from .ai_decision_engine import apply_ai_decision_engine
+from .ai_decision_engine_v3 import apply_ai_engine_v3_shadow
 
 
 
@@ -281,6 +282,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
     ai_engine_v2_conservative_policy = os.getenv("RAMON_AI_ENGINE_V2_CONSERVATIVE_POLICY", "0").strip().lower() in {"1","true","yes","on"}
     ai_engine_v2_minimum_score = float(os.getenv("RAMON_AI_ENGINE_V2_MIN_SCORE", "0.56"))
     ai_engine_v2_minimum_margin = float(os.getenv("RAMON_AI_ENGINE_V2_MIN_MARGIN", "0.03"))
+    ai_engine_v3_shadow_enabled = os.getenv("RAMON_AI_ENGINE_V3_SHADOW_ENABLED", "1").strip().lower() in {"1","true","yes","on"}
+    ai_engine_v3_max_forecast_distance_atr = float(os.getenv("RAMON_AI_ENGINE_V3_MAX_FORECAST_DISTANCE_ATR", "0.80"))
     model_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ramon-model")
     # Warm heavyweight external models in the background so /health becomes
     # available immediately after Chronos is ready.
@@ -345,6 +348,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
             "market_state_handler": POLICY_VERSION,
             "target_model_handler": "Ramon/TargetStructure",
             "decision_engine_handler": "Ramon/AIEngineV2",
+            "decision_engine_shadow_handler": "Ramon/AIEngineV3Shadow",
         }
     last_persisted_bar: dict[str, int] = {}
     history_status: dict[str, object] = {
@@ -420,6 +424,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     "ai_engine_v2_enabled": int(ai_engine_v2_enabled),
                     "ai_engine_v2_minimum_score": ai_engine_v2_minimum_score,
                     "ai_engine_v2_minimum_quality_margin": ai_engine_v2_minimum_margin,
+                    "ai_engine_v3_shadow_enabled": int(ai_engine_v3_shadow_enabled),
+                    "ai_engine_v3_max_forecast_distance_atr": ai_engine_v3_max_forecast_distance_atr,
                 },
             )
 
@@ -932,6 +938,15 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     not bool(response.get("range_execution"))
                     and not reversal_selected
                 ):
+                    apply_ai_engine_v3_shadow(
+                        response,
+                        market_assessment,
+                        feature_snapshot.get("entry", {}),
+                        enabled=ai_engine_v3_shadow_enabled,
+                        minimum_direction_quality=selector_minimum_quality,
+                        minimum_quality_margin=selector_minimum_margin,
+                        maximum_forecast_distance_atr=ai_engine_v3_max_forecast_distance_atr,
+                    )
                     ai_engine_authoritative = apply_ai_decision_engine(
                         response,
                         result,
@@ -1160,6 +1175,15 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                                               "ai_engine_v2_entry_probability": response.get("ai_engine_v2_entry_probability", -1.0),
                                               "ai_engine_v2_full_sl_probability": response.get("ai_engine_v2_full_sl_probability", -1.0),
                                               "ai_engine_v2_anomaly_penalty": response.get("ai_engine_v2_anomaly_penalty", 0.0),
+                                              "ai_engine_v3_shadow_enabled": response.get("ai_engine_v3_shadow_enabled", 0),
+                                              "ai_engine_v3_shadow_decision": response.get("ai_engine_v3_shadow_decision"),
+                                              "ai_engine_v3_shadow_reason": response.get("ai_engine_v3_shadow_reason"),
+                                              "ai_engine_v3_shadow_block": response.get("ai_engine_v3_shadow_block"),
+                                              "ai_engine_v3_shadow_candidate_direction": response.get("ai_engine_v3_shadow_candidate_direction"),
+                                              "ai_engine_v3_shadow_direction_quality": response.get("ai_engine_v3_shadow_direction_quality", -1.0),
+                                              "ai_engine_v3_shadow_quality_margin": response.get("ai_engine_v3_shadow_quality_margin", -1.0),
+                                              "ai_engine_v3_shadow_forecast_distance_atr": response.get("ai_engine_v3_shadow_forecast_distance_atr"),
+                                              "ai_engine_v3_shadow_authoritative": response.get("ai_engine_v3_shadow_authoritative", 0),
                                               "manual_overrides_active": sorted(active_overrides),
                                               "manual_override_rows": list(active_override_rows.values()),
                                               "manual_execution_override": response.get("manual_execution_override", 0)},
