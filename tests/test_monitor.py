@@ -11,13 +11,13 @@ from urllib.request import Request, urlopen
 
 import pytest
 
-from ramon.monitor import build_snapshot, dollar_readiness, freshness, handler_for, income_roadmap, read_diagnostic, read_history, read_open_dashboard_positions, dashboard_entry_compatibility
+from ramon.monitor import build_snapshot, dollar_readiness, freshness, handler_for, income_roadmap, read_automatic_robot_position, read_diagnostic, read_history, read_open_dashboard_positions, dashboard_entry_compatibility
 
 
 NOW = 1_800_000_000
 
 
-def diagnostic(path, *, sample="sample-1", now=NOW, status="insufficient_model_strength", position="NONE", role="PRIMARY", encoding="utf-8"):
+def diagnostic(path, *, sample="sample-1", now=NOW, status="insufficient_model_strength", position="NONE", automatic_position="NONE", role="PRIMARY", encoding="utf-8"):
     captured = datetime.fromtimestamp(now, timezone.utc).strftime("%Y.%m.%d %H:%M:%S UTC")
     path.write_text(f"""=== RAMON DIAGNOSTIC ===
 EA version: 0.54.8
@@ -31,6 +31,7 @@ Live: ARMED  AccountLock: OK
 Trade permissions: terminal=YES ea=YES account=YES
 Status: {status}
 Managed position: {position}
+Managed automatic position: {automatic_position}
 RiskGate: WOULD ALLOW MIN LOT: override <= $0.35
 """, encoding=encoding)
 
@@ -513,6 +514,25 @@ def test_open_position_snapshot_requires_fresh_mt5_confirmation(tmp_path, monkey
     os.utime(opened, (stamp, stamp))
     diagnostic(diag, now=stamp - 180, position="BUY #50379117083")
     assert read_open_dashboard_positions(diag) == {}
+
+
+def test_automatic_robot_position_requires_fresh_explicit_ea_proof(tmp_path, monkeypatch):
+    from ramon import monitor
+    stamp = 1_800_000_000
+    monkeypatch.setattr(monitor.time, "time", lambda: stamp)
+    diag = tmp_path / "Ramon_Diagnostic.txt"
+
+    diagnostic(diag, now=stamp, position="BUY #123", automatic_position="BUY #123 vol=0.01")
+    state = read_automatic_robot_position(diag)
+    assert state["open"] is True
+    assert state["direction"] == "BUY"
+    assert state["ticket"] == "123"
+
+    diagnostic(diag, now=stamp, position="BUY #123", automatic_position="NONE")
+    assert read_automatic_robot_position(diag)["open"] is False
+
+    diagnostic(diag, now=stamp - 180, position="BUY #123", automatic_position="BUY #123 vol=0.01")
+    assert read_automatic_robot_position(diag)["open"] is False
 
 
 def test_dashboard_manual_entry_requires_ea_version_that_consumes_queue(tmp_path, monkeypatch):
