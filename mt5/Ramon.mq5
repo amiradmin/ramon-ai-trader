@@ -1,6 +1,6 @@
 #property strict
-#property version "1.593"
-#define RAMON_EA_VERSION "0.59.3"
+#property version "1.594"
+#define RAMON_EA_VERSION "0.59.4"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -412,6 +412,16 @@ bool ManagedPosition(ulong &ticket,datetime &opened)
    return false;
 }
 
+string ManagedPositionSource(const ulong ticket)
+{
+   if(ticket==0 || !PositionSelectByTicket(ticket))
+      return "NONE";
+   string comment=PositionGetString(POSITION_COMMENT);
+   if(StringFind(comment,":M")>=0)
+      return "HUMAN_ASSISTED";
+   return "ROBOT";
+}
+
 bool ManagedAutomaticPosition(ulong &ticket,datetime &opened)
 {
    ticket=0;
@@ -632,6 +642,7 @@ string BuildDiagnosticText()
    ulong ticket=0;
    datetime opened=0;
    bool managed=ManagedPosition(ticket,opened);
+   string position_source=(managed ? ManagedPositionSource(ticket) : "NONE");
    string position_line="NONE";
    if(managed && PositionSelectByTicket(ticket))
    {
@@ -813,6 +824,7 @@ string BuildDiagnosticText()
       +" account="+BoolText((bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED))+"\n"
       +"Status: "+StatusLine+"\n"
       +"Managed position: "+position_line+"\n"
+      +"Position source: "+position_source+"\n"
       +"Managed automatic position: "+automatic_position_line+"\n"
       +"MarketClosedExitPause: "+BoolText(MarketClosedExitPause)
       +"  PauseTicket: "+IntegerToString((long)MarketClosedExitPauseTicket)
@@ -1344,6 +1356,7 @@ void DrawDashboard()
    ulong managed_ticket=0;
    datetime managed_opened=0;
    bool has_managed_position=ManagedPosition(managed_ticket,managed_opened);
+   string managed_position_source=(has_managed_position ? ManagedPositionSource(managed_ticket) : "NONE");
    double live_profit_units=0.0;
    double live_profit_usd=0.0;
    if(has_managed_position && PositionSelectByTicket(managed_ticket))
@@ -1445,9 +1458,9 @@ void DrawDashboard()
 
    UiLabel("LIVE_PNL",
       has_managed_position
-         ? "LIVE P/L: "+pnl_units+" units   ~= "+pnl_usd
+         ? "LIVE P/L: "+pnl_units+" units   ~= "+pnl_usd+"   | SOURCE: "+managed_position_source
          : "LIVE P/L: --   (no Ramon position)",
-      28,266,clrWhite,10);
+      28,266,(managed_position_source=="HUMAN_ASSISTED" ? clrLime : clrWhite),10);
 
    UiLabel("SIZING","Sizing: "+LastSizingSide
       +"   Vol: "+DoubleToString(LastPlannedVolume,2)
