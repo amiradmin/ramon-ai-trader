@@ -136,7 +136,24 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
                 news=audit.get('news_snapshot',{}) if isinstance(audit.get('news_snapshot'),dict) else {}
                 if not base.get('forecast_median',0)>0:continue
                 side,probability,buy_probability,sell_probability=_live_direction(audit)
-                if side not in {'BUY','SELL'} or not row['quote_time']:
+                direction_source='LIVE_DIRECTION_QUALITY'
+                if side not in {'BUY','SELL'}:
+                    # Historical compatibility: older saved decisions/tests predate
+                    # direction-quality probabilities. Keep those rows auditable
+                    # without pretending the fallback is the current live selector.
+                    stored=str(row['final_decision'] or '').upper()
+                    buy_edge=float(base.get('buy_edge') or 0.0)
+                    sell_edge=float(base.get('sell_edge') or 0.0)
+                    if stored in {'BUY','SELL'}:
+                        side=stored
+                        direction_source='LEGACY_FINAL_DECISION'
+                    elif max(buy_edge,sell_edge)>0:
+                        side='BUY' if buy_edge>sell_edge else 'SELL'
+                        direction_source='LEGACY_POSITIVE_EDGE'
+                    else:
+                        continue
+                    probability=None
+                if not row['quote_time']:
                     continue
                 edge=base['buy_edge'] if side=='BUY' else base['sell_edge']
                 # Direction quality is authoritative for table direction.
@@ -158,7 +175,7 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
                     'success_probability':probability,
                     'buy_success_probability':buy_probability,
                     'sell_success_probability':sell_probability,
-                    'direction_source':'LIVE_DIRECTION_QUALITY',
+                    'direction_source':direction_source,
                     'ai_score':final.get('ai_engine_v2_score'),
                     'v2_decision': final.get('decision'),
                     'v2_reason': final.get('reason'),
