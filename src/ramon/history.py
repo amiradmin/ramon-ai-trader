@@ -510,7 +510,7 @@ def validate_trade_telemetry(payload: dict[str, object], net: float) -> dict[str
             value = str(payload[name])
             if len(value) > 128 or any(ord(c) < 32 for c in value):
                 raise ValueError("invalid trade telemetry text")
-            if name == "entry_source" and value not in {"AUTO_RAMON", "RANGE_AUTO", "SMALL_AUTO", "DASHBOARD_OPPORTUNITY"}:
+            if name == "entry_source" and value not in {"AUTO_RAMON", "RANGE_AUTO", "SMALL_AUTO", "DASHBOARD_OPPORTUNITY", "HUMAN_ASSISTED"}:
                 raise ValueError("invalid entry_source")
             extra[name] = value
 
