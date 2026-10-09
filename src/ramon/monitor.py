@@ -845,7 +845,13 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
          source="ea", values={"ورودهای امروز": diag.get("Trades today"), "قفل زیان حساب": diag.get("AccountLossLimits"), "وقفهٔ رنج": "۵ دقیقه پس از بسته‌شدن",
                                "نتیجهٔ اجرای گیت": "ثبت نشده" if not cooldown_block else ea_status})
     risk = diag.get("RiskGate", "")
-    node("risk", "حجم، ریسک و مارجین", "blocked" if "BLOCK" in risk or any(x in ea_status for x in ("risk >", "hard risk cap", "Insufficient margin", "SL risk >", "TP not inside", "reward/risk <")) else "pass" if risk else "unknown",
+    risk_blocked = "BLOCK" in risk or any(
+        x in ea_status
+        for x in ("risk >", "hard risk cap", "Insufficient margin", "SL risk >", "TP not inside", "reward/risk <")
+    )
+    risk_preview = risk.startswith("WOULD ")
+    risk_state = "blocked" if risk_blocked else "observed" if risk_preview else "pass" if risk else "unknown"
+    node("risk", "حجم، ریسک و مارجین", risk_state,
          f"Full-SL Risk AI {pct(full_sl_p)} · ریسک اجرایی MT5 جداگانه کنترل می‌شود", source="ea",
          score=probability_badge(final.get("full_sl_probability", final.get("shadow_full_sl_probability")), "Full-SL"),
          metrics=f"Full-SL Risk {pct(full_sl_p)}",
