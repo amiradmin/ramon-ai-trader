@@ -566,3 +566,43 @@
   color:#d1d5db;
   background:#26303e;
 }
+
+
+/* Open Human-assisted position: only management controls, no new-entry clutter. */
+.simple-trade-table .open-position-actions{
+  display:flex;
+  flex-direction:row;
+  align-items:center;
+  gap:4px;
+  width:100%;
+  min-width:0;
+}
+.simple-trade-table .open-position-actions .opportunity-entry{
+  flex:1 1 0;
+  min-width:0;
+  width:auto;
+  height:34px;
+  max-height:34px;
+  padding:3px 4px;
+  font-size:8px;
+  line-height:1.1;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.simple-trade-table .open-position-actions .opportunity-entry.close{
+  border-color:#d9534f;
+  background:#5a2024;
+  color:#ffd7d7;
+  font-weight:900;
+}
+.simple-trade-table .open-position-actions .opportunity-entry.auto-close{
+  border-color:#3f6685;
+  background:#142735;
+  color:#9bd9ff;
+}
+.simple-trade-table .open-position-actions .opportunity-entry.auto-close.armed{
+  border-color:#3f7565;
+  background:#173a32;
+  color:var(--green);
+}
