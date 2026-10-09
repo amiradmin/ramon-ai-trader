@@ -170,10 +170,9 @@ function renderSaharOpportunities(data){
     tr.className=p===null?"":p>=.70?"opportunity-confidence-high":p>=.55?"opportunity-confidence-medium":p>=.45?"opportunity-confidence-neutral":"opportunity-confidence-low";
     const disposition=row.position_open?"پوزیشن باز است"+(row.position_ticket?" · #"+row.position_ticket:""):row.entry_queued?"در صف اجرا":row.executed?"معامله ثبت شده":row.model_approved?"سیگنال مدل":"مسدود";
     const cells=[fullFmt.format(new Date(row.captured*1000)),row.strategy+" / "+row.direction,
-      fmt(row.entry)+" / "+fmt(row.stop)+" / "+fmt(row.target),fmt(row.edge)+" / "+fmt(row.minimum_edge),
-      fmt(row.strength),pct(row.success_probability),disposition+" · "+txt(row.last_reason),
+      fmt(row.edge)+" / "+fmt(row.minimum_edge),fmt(row.strength),pct(row.success_probability),disposition+" · "+txt(row.last_reason),
       (labels[row.outcome]||row.outcome)+(row.net_r!==null&&row.outcome!=="DATA_GAP"?" · "+fmt(row.net_r)+"R":"")];
-    cells.forEach((text,index)=>{const td=document.createElement("td");td.textContent=text;if([2,3,4,5].includes(index))td.dir="ltr";tr.append(td);});
+    cells.forEach((text,index)=>{const td=document.createElement("td");td.textContent=text;if([2,3,4].includes(index))td.dir="ltr";tr.append(td);});
     const action=document.createElement("td"),button=document.createElement("button");
     button.type="button";button.className="opportunity-entry "+(row.direction==="BUY"?"buy":"sell");
     if(row.position_open){
