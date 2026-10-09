@@ -258,12 +258,12 @@
   padding-bottom:8px;
 }
 .simple-trade-table{
-  width:max-content;
-  min-width:1650px;
+  width:100%;
+  min-width:0;
   border-collapse:separate;
   border-spacing:0;
   table-layout:fixed;
-  font-size:13px;
+  font-size:12px;
 }
 .simple-trade-table th,
 .simple-trade-table td{
@@ -287,23 +287,21 @@
   overflow-wrap:break-word;
 }
 .simple-trade-table th:nth-child(1),
-.simple-trade-table td:nth-child(1){width:170px}
+.simple-trade-table td:nth-child(1){width:12%}
 .simple-trade-table th:nth-child(2),
-.simple-trade-table td:nth-child(2){width:150px}
+.simple-trade-table td:nth-child(2){width:8%}
 .simple-trade-table th:nth-child(3),
-.simple-trade-table td:nth-child(3){width:110px}
+.simple-trade-table td:nth-child(3){width:9%}
 .simple-trade-table th:nth-child(4),
-.simple-trade-table td:nth-child(4){width:180px}
+.simple-trade-table td:nth-child(4){width:13%}
 .simple-trade-table th:nth-child(5),
-.simple-trade-table td:nth-child(5){width:180px}
+.simple-trade-table td:nth-child(5){width:13%}
 .simple-trade-table th:nth-child(6),
-.simple-trade-table td:nth-child(6){width:220px}
+.simple-trade-table td:nth-child(6){width:22%}
 .simple-trade-table th:nth-child(7),
-.simple-trade-table td:nth-child(7){width:280px}
+.simple-trade-table td:nth-child(7){width:10%}
 .simple-trade-table th:nth-child(8),
-.simple-trade-table td:nth-child(8){width:170px}
-.simple-trade-table th:nth-child(9),
-.simple-trade-table td:nth-child(9){width:300px}
+.simple-trade-table td:nth-child(8){width:13%}
 
 .trade-recommendation{
   font-weight:900;
@@ -440,8 +438,8 @@
 }
 
 @media(max-width:900px){
-  .simple-trade-table{min-width:1450px}
-  .simple-trade-table th,.simple-trade-table td{padding:11px 9px}
+  .simple-trade-table{font-size:10px}
+  .simple-trade-table th,.simple-trade-table td{padding:8px 5px}
 }
 
 /* Fit the opportunity ledger in one desktop viewport after removing SL/TP. */
@@ -449,3 +447,9 @@
 .opportunity-table th{white-space:normal;line-height:1.5}
 .opportunity-table .opportunity-entry{min-width:0;width:100%;padding:6px 4px;font-size:9px}
 @media(max-width:1100px){.opportunity-table{font-size:10px}.opportunity-table th,.opportunity-table td{padding:8px 5px}}
+
+/* Main Ramon decision table: keep all eight columns visible in the desktop viewport. */
+.simple-trade-table th{white-space:normal;line-height:1.45}
+.simple-trade-table td{overflow-wrap:anywhere}
+.simple-trade-table .trade-recommendation{font-size:13px;white-space:normal}
+.simple-trade-table .trade-entry-price,.simple-trade-table .trade-exit-advice{font-size:11px}
