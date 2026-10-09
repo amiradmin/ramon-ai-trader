@@ -204,6 +204,22 @@ async function manualOpportunity(row,button,recheck=false,manualUnlocked=false,d
     setTimeout(()=>void refreshOpportunities(),1500);
   }catch(err){button.textContent="رد شد";opportunitySet("opportunity-status","ورود دستی انجام نشد: "+err.message);setTimeout(()=>{button.disabled=!row.actionable;button.textContent=old;},1800);}
 }
+async function humanSkipOpportunity(row,button){
+  if(button.disabled)return;
+  button.disabled=true;const old=button.textContent;button.textContent="در حال ثبت…";
+  try{
+    const response=await fetch("/api/human-skip",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sample_key:row.sample_key,signal_bar_time:row.signal_bar_time})});
+    let data={};try{data=await response.json();}catch{}
+    if(!response.ok||!data.saved)throw new Error(data.error||("HTTP "+response.status));
+    button.textContent="SKIP ثبت شد";
+    opportunitySet("opportunity-status","تصمیم انسانی SKIP برای این snapshot ثبت شد و بعداً در مقایسه Human-assisted استفاده می‌شود.");
+    setTimeout(()=>void refreshOpportunities(),900);
+  }catch(err){
+    button.textContent="خطا";
+    opportunitySet("opportunity-status","ثبت SKIP انجام نشد: "+err.message);
+    setTimeout(()=>{button.disabled=false;button.textContent=old;},1600);
+  }
+}
 async function manualCloseOpportunity(row,button){
   if(button.disabled)return;
   button.disabled=true;const old=button.textContent;button.textContent="در حال بستن…";
@@ -430,7 +446,9 @@ function renderOpportunities(data){
     tech.textContent=[
       "زمان: "+opportunityDate.format(new Date(row.captured*1000)),
       "BUY: "+percent(buyP)+" · SELL: "+percent(sellP)+" · اختلاف: "+percent(margin),
+      "V2: "+(row.v2_decision||"—")+" · V3 Shadow: "+(row.v3_shadow_decision||"—")+" · V3 Block: "+(row.v3_shadow_block||"—"),
       "AI Score: "+percent(row.ai_score)+" · Entry: "+percent(row.entry_probability)+" · Full-SL: "+percent(row.full_sl_probability),
+      "Forecast distance/ATR: "+format(row.forecast_distance_atr),
       "بازار: "+(marketStates[row.market_state]||row.market_state||"نامشخص")+" · MktDir: "+(row.market_direction||"—"),
       "Intrabar: "+(row.intrabar_confirmed===1?"تأیید":"عدم تأیید")+" "+(row.intrabar_direction||"—"),
       "Trend: "+(row.ai_trend_confirmed===1?"تأیید":"عدم تأیید")+" "+(row.ai_trend_direction||"—"),
@@ -440,8 +458,17 @@ function renderOpportunities(data){
     ].join("\n");
     technical.append(summary,tech);
 
+    const engineAdvice=document.createElement("div");engineAdvice.className="engine-advice";
+    const v2=document.createElement("span");v2.className="engine-advice-line v2";v2.textContent="V2: "+(row.v2_decision||"—");
+    const v3=document.createElement("span");v3.className="engine-advice-line v3";v3.textContent="V3: "+(row.v3_shadow_decision||"—");
+    engineAdvice.append(v2,v3);
+    if(row.v3_shadow_block){
+      const why=document.createElement("small");why.className="engine-advice-block";why.textContent=row.v3_shadow_block;
+      engineAdvice.append(why);
+    }
+
     const simpleCells=[
-      {text:recommendation,cls:"trade-recommendation "+recClass},
+      {text:recommendation,cls:"trade-recommendation "+recClass,extra:engineAdvice},
       {text:directionFa,cls:"trade-direction "+(row.direction==="BUY"?"buy":"sell"),dir:"ltr"},
       {text:confidenceText,cls:"trade-confidence",dir:"ltr"},
       {text:entryAdvice,cls:"trade-entry-price",dir:"ltr"},
@@ -518,36 +545,29 @@ function renderOpportunities(data){
       continue;
     }
 
-    const scenarioWrap=document.createElement("div");scenarioWrap.className="manual-scenario-list";
-    for(const scenario of (row.trade_scenarios||[])){
-      const scenarioBtn=document.createElement("button");
-      scenarioBtn.type="button";
-      scenarioBtn.className="scenario-entry "+(scenario.direction==="BUY"?"buy":"sell")+(scenario.risk==="high"||scenario.risk==="very_high"?" high-risk":"");
-      const p=typeof scenario.probability==="number"?" · "+Math.round(scenario.probability*100)+"٪":"";
-      scenarioBtn.textContent=scenario.label+" · "+scenario.direction+p;
-      scenarioBtn.title=scenario.setup+(scenario.risk==="very_high"?" · ریسک بسیار بالا":scenario.risk==="high"?" · ریسک بالا":"");
-      scenarioBtn.disabled=!compatibility.supported||row.entry_queued;
-      if(!scenarioBtn.disabled){
-        scenarioBtn.addEventListener("click",()=>manualOpportunity(row,scenarioBtn,true,true,scenario.direction));
-      }
-      scenarioWrap.append(scenarioBtn);
-    }
+    const scenarioWrap=document.createElement("div");scenarioWrap.className="human-action-list";
+    const buyBtn=document.createElement("button");
+    buyBtn.type="button";buyBtn.className="scenario-entry buy";
+    buyBtn.textContent="BUY MANUAL";
+    buyBtn.title="تصمیم انسانی BUY؛ snapshot تازه می‌شود و کنترل‌های سخت حساب/ریسک/قیمت همچنان برقرارند";
+    buyBtn.disabled=!compatibility.supported||row.entry_queued;
+    if(!buyBtn.disabled)buyBtn.addEventListener("click",()=>manualOpportunity(row,buyBtn,true,true,"BUY"));
 
-    if(!(row.trade_scenarios||[]).length){
-      const fallback=document.createElement("button");
-      fallback.type="button";
-      fallback.className="opportunity-entry "+(row.direction==="BUY"?"buy":"sell");
-      fallback.textContent=!compatibility.supported?"EA نیاز به به‌روزرسانی دارد":"ورود دستی "+row.direction;
-      fallback.disabled=!compatibility.supported||row.entry_queued;
-      fallback.title=compatibility.supported
-        ?"انتخاب جهت با شماست؛ قفل‌های تحلیلی Ramon دخالت نمی‌کنند"
-        :compatibility.reason;
-      if(!fallback.disabled){
-        fallback.addEventListener("click",()=>manualOpportunity(row,fallback,true,true,row.direction));
-      }
-      scenarioWrap.append(fallback);
-    }
+    const sellBtn=document.createElement("button");
+    sellBtn.type="button";sellBtn.className="scenario-entry sell";
+    sellBtn.textContent="SELL MANUAL";
+    sellBtn.title="تصمیم انسانی SELL؛ snapshot تازه می‌شود و کنترل‌های سخت حساب/ریسک/قیمت همچنان برقرارند";
+    sellBtn.disabled=!compatibility.supported||row.entry_queued;
+    if(!sellBtn.disabled)sellBtn.addEventListener("click",()=>manualOpportunity(row,sellBtn,true,true,"SELL"));
 
+    const skipBtn=document.createElement("button");
+    skipBtn.type="button";skipBtn.className="scenario-entry skip";
+    skipBtn.textContent="SKIP";
+    skipBtn.title="معامله نمی‌گیرم؛ فقط تصمیم انسانی برای پژوهش ثبت می‌شود";
+    skipBtn.disabled=row.entry_queued;
+    if(!skipBtn.disabled)skipBtn.addEventListener("click",()=>humanSkipOpportunity(row,skipBtn));
+
+    scenarioWrap.append(buyBtn,sellBtn,skipBtn);
     action.append(scenarioWrap);
     tr.append(action);body.append(tr);
   }
