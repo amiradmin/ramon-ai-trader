@@ -99,12 +99,16 @@
 .today-profit-summary .profit-positive{color:var(--green);border-color:#3f7565}
 .today-profit-summary .profit-negative{color:var(--red);border-color:#75434a}
 .today-profit-summary .profit-flat{color:var(--muted)}
-.opportunity-scroll{overflow-x:auto}.opportunity-table{width:100%;border-collapse:collapse;font-size:12px;min-width:1780px}.opportunity-table th,.opportunity-table td{padding:12px 10px;text-align:right;border-bottom:1px solid #29364a;vertical-align:top}.opportunity-table th{color:#a7b8ce}.opportunity-table td{font-variant-numeric:tabular-nums}.opportunity-table tbody tr:hover{background:#172336}
+.opportunity-scroll{overflow-x:hidden}.opportunity-table{width:100%;border-collapse:collapse;font-size:11px;min-width:0;table-layout:fixed}.opportunity-table th,.opportunity-table td{padding:10px 7px;text-align:right;border-bottom:1px solid #29364a;vertical-align:top}.opportunity-table th{color:#a7b8ce}.opportunity-table td{font-variant-numeric:tabular-nums}.opportunity-table tbody tr:hover{background:#172336}
 .opportunity-table td{line-height:1.7;max-width:260px;overflow-wrap:anywhere}
-.opportunity-table th:nth-child(2),.opportunity-table td:nth-child(2){min-width:230px}
-.opportunity-table th:nth-child(3),.opportunity-table td:nth-child(3){min-width:260px}
-.opportunity-table th:nth-child(4),.opportunity-table td:nth-child(4){min-width:300px}
-.opportunity-table th:nth-child(8),.opportunity-table td:nth-child(8){min-width:240px}
+.opportunity-table th:nth-child(1),.opportunity-table td:nth-child(1){width:11%}
+.opportunity-table th:nth-child(2),.opportunity-table td:nth-child(2){width:13%}
+.opportunity-table th:nth-child(3),.opportunity-table td:nth-child(3){width:12%}
+.opportunity-table th:nth-child(4),.opportunity-table td:nth-child(4){width:8%}
+.opportunity-table th:nth-child(5),.opportunity-table td:nth-child(5){width:12%}
+.opportunity-table th:nth-child(6),.opportunity-table td:nth-child(6){width:23%}
+.opportunity-table th:nth-child(7),.opportunity-table td:nth-child(7){width:13%}
+.opportunity-table th:nth-child(8),.opportunity-table td:nth-child(8){width:8%}
 .decision-verdict{font-weight:700;border-right:3px solid transparent}
 .decision-verdict.pass{color:var(--green);border-right-color:var(--green);background:#173a3226}
 .decision-verdict.blocked{color:var(--red);border-right-color:var(--red);background:#3e272e26}
@@ -249,7 +253,8 @@
 
 /* Trade decision table layout stabilization */
 .opportunity-scroll{
-  overflow:auto;
+  overflow-y:auto;
+  overflow-x:hidden;
   padding-bottom:8px;
 }
 .simple-trade-table{
@@ -438,3 +443,9 @@
   .simple-trade-table{min-width:1450px}
   .simple-trade-table th,.simple-trade-table td{padding:11px 9px}
 }
+
+/* Fit the opportunity ledger in one desktop viewport after removing SL/TP. */
+.opportunity-table th,.opportunity-table td{word-break:break-word;overflow-wrap:anywhere}
+.opportunity-table th{white-space:normal;line-height:1.5}
+.opportunity-table .opportunity-entry{min-width:0;width:100%;padding:6px 4px;font-size:9px}
+@media(max-width:1100px){.opportunity-table{font-size:10px}.opportunity-table th,.opportunity-table td{padding:8px 5px}}
