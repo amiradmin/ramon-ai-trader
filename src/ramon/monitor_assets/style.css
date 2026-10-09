@@ -453,3 +453,8 @@
 .simple-trade-table td{overflow-wrap:anywhere}
 .simple-trade-table .trade-recommendation{font-size:13px;white-space:normal}
 .simple-trade-table .trade-entry-price,.simple-trade-table .trade-exit-advice{font-size:11px}
+
+
+/* Compact main monitor trade table rows. */
+.simple-trade-table tbody tr{height:45px}
+.simple-trade-table tbody td{height:45px;padding-top:4px;padding-bottom:4px;vertical-align:middle}
