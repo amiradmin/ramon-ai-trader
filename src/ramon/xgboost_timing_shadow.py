@@ -9,20 +9,20 @@ import json
 import sqlite3
 from pathlib import Path
 
-def load(db, symbol, limit):
+def load(db, symbol, limit, timeframe="M1"):
     with sqlite3.connect(Path(db).resolve().as_uri()+"?mode=ro", uri=True) as con:
         return list(reversed(con.execute(
             "SELECT time,open,high,low,close FROM history_bars "
-            "WHERE symbol=? AND timeframe='M1' ORDER BY time DESC LIMIT ?",
-            (symbol,limit)).fetchall()))
+            "WHERE symbol=? AND timeframe=? ORDER BY time DESC LIMIT ?",
+            (symbol,timeframe,limit)).fetchall()))
 
-def build_examples(bars, *, horizon=15, stride=5, stop=2.0, target=2.0, spread=0.42):
+def build_examples(bars, *, horizon=15, stride=5, stop=2.0, target=2.0, spread=0.42, bar_seconds=60):
     """Resolve same-bar TP/SL collision as loss; no favorable lookahead."""
     import numpy as np
     data=[]
     for i in range(30,len(bars)-horizon,stride):
         segment=bars[i-20:i+horizon]
-        if any(b[0]-a[0]!=60 for a,b in zip(segment,segment[1:])):
+        if any(b[0]-a[0]!=bar_seconds for a,b in zip(segment,segment[1:])):
             continue
         past=bars[i-20:i]
         closes=np.array([r[4] for r in past],dtype=float)
@@ -99,14 +99,21 @@ def main():
     p.add_argument("--db",required=True)
     p.add_argument("--symbol",default="XAUUSD_l")
     p.add_argument("--bars",type=int,default=100000)
+    p.add_argument("--timeframe",choices=("M1","M5"),default="M1")
+    p.add_argument("--horizon-minutes",type=int,default=15)
     p.add_argument("--workers",type=int,default=2)
     p.add_argument("--output",default="data/xgboost_timing_shadow.json")
     args=p.parse_args()
     if args.workers<1:p.error("workers must be positive")
-    bars=load(args.db,args.symbol,args.bars)
-    examples=build_examples(bars)
+    if args.horizon_minutes<5 or args.horizon_minutes%int(args.timeframe[1:]):
+        p.error("--horizon-minutes must be >=5 and divisible by timeframe minutes")
+    minutes=int(args.timeframe[1:])
+    bars=load(args.db,args.symbol,args.bars,timeframe=args.timeframe)
+    examples=build_examples(bars,horizon=args.horizon_minutes//minutes,
+                            bar_seconds=minutes*60)
     result=experiment(examples,workers=args.workers)
     result.update(mode="OFFLINE_SHADOW_ONLY",symbol=args.symbol,
+                  timeframe=args.timeframe,horizon_minutes=args.horizon_minutes,
                   rows=len(bars),examples=len(examples))
     target=Path(args.output);target.parent.mkdir(parents=True,exist_ok=True)
     target.write_text(json.dumps(result,indent=2)+"\\n")
