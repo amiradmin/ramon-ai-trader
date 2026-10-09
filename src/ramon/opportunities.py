@@ -165,9 +165,19 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
                 # Use MAIN geometry, never substitute a range decision's levels.
                 stop=base.get('stop_distance');target=base.get('target_distance')
                 if not stop or not target:continue
-                first_reason = grouped[key]['first_reason'] if key in grouped else final.get('reason')
-                prior_executed = grouped[key]['executed'] if key in grouped else False
-                prior_approved = grouped[key]['model_approved'] if key in grouped else False
+                if key in grouped:
+                    # Later snapshots from the same M15 signal bar are observation
+                    # updates, not new candidates. Preserve the original entry
+                    # geometry/sample identity and only enrich its latest evidence.
+                    item = grouped[key]
+                    item['latest_captured'] = row['captured']
+                    item['last_reason'] = final.get('reason')
+                    item['model_approved'] = bool(item.get('model_approved') or row['final_decision'] == item['direction'])
+                    item['executed'] = bool(item.get('executed') or row['sample_key'] in traded)
+                    continue
+                first_reason = final.get('reason')
+                prior_executed = False
+                prior_approved = False
                 grouped[key]={'captured':row['captured'],'latest_captured':row['captured'],'sample_key':row['sample_key'],
                     'signal_bar_time':row['signal_bar_time'],'quote_time':row['quote_time'],
                     'direction':side,'strategy':'برگشت تأییدشده' if base.get('trend_conflict_active')==1 and base.get('intrabar_confirmed')==1 and base.get('ai_trend_confirmed')==1 else 'پیش‌بینی مدل',
