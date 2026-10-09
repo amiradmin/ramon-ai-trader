@@ -1374,6 +1374,7 @@ def read_open_dashboard_positions(diagnostic):
             return result
         for raw in path.read_text(encoding="ascii", errors="ignore").splitlines():
             parts = raw.strip().split("|")
+            legacy_key = False
             if len(parts) == 10:
                 sample_key, execution_sample_key, direction, ticket, opened, profit, volume, open_price, current_price, auto_close_target = parts
             elif len(parts) == 9:
@@ -1392,6 +1393,7 @@ def read_open_dashboard_positions(diagnostic):
                 open_price = None
                 current_price = None
                 auto_close_target = None
+                legacy_key = True
             else:
                 continue
             if (
@@ -1400,7 +1402,7 @@ def read_open_dashboard_positions(diagnostic):
                 or direction not in {"BUY", "SELL"}
             ):
                 continue
-            result[ticket] = {
+            result[sample_key if legacy_key else ticket] = {
                 "sample_key": sample_key,
                 "execution_sample_key": execution_sample_key,
                 "direction": direction,
@@ -1611,7 +1613,7 @@ def dashboard_entry_compatibility(diagnostic):
         return {"supported": False, "reason": f"نسخه EA قابل تشخیص نیست: {raw or 'نامشخص'}"}
     version = tuple(int(part) for part in match.groups())
     if version < MIN_DASHBOARD_ENTRY_EA_VERSION:
-        return {"supported": False, "reason": f"نسخه نصب‌شده Ramon {raw} از فرمان ورود دستی داشبورد پشتیبانی تأییدشده ندارد؛ نسخه 0.58.7 یا جدیدتر را کامپایل و روی چارت بارگذاری کن."}
+        return {"supported": False, "reason": f"نسخه نصب‌شده Ramon {raw} از فرمان ورود دستی داشبورد پشتیبانی تأییدشده ندارد؛ نسخه 0.59.1 یا جدیدتر را کامپایل و روی چارت بارگذاری کن."}
     stamp = float(diag.get("captured_epoch") or 0)
     if not -5 <= time.time() - stamp <= 90:
         return {"supported": False, "reason": "وضعیت EA تازه نیست؛ دریافت فرمان قابل تأیید نیست"}
