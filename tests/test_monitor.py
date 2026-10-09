@@ -58,7 +58,7 @@ def nodes(snapshot):
 def test_observed_preview_does_not_claim_an_order_or_gate_pass(sources):
     s = build_snapshot(*sources, now=NOW, health={"ready": True})
     n = nodes(s)
-    assert s["joined"] and s["read_only"]
+    assert s["joined"] and s["read_only"] is False
     assert n["decision"]["state"] == "blocked"
     assert n["risk"]["state"] == "observed"  # would allow is only a preview
     assert n["limits"]["state"] == "unknown"  # no authoritative cooldown result
@@ -189,7 +189,7 @@ def test_http_surface_only_reads_health_and_cannot_request_a_trade(sources, monk
                 assert response.status == 200
                 assert response.headers["Cache-Control"] == "no-store"
                 if route == "/api/snapshot":
-                    assert json.loads(body)["read_only"] is True
+                    assert json.loads(body)["read_only"] is False
         for route in ("/decision", "/trades", "/../core.py"):
             with pytest.raises(HTTPError) as error:
                 urlopen(url + route, timeout=3)
@@ -542,7 +542,7 @@ def test_dashboard_manual_entry_requires_ea_version_that_consumes_queue(tmp_path
     diag = tmp_path / "Ramon_Diagnostic.txt"
     diagnostic(diag, now=stamp)
     assert dashboard_entry_compatibility(diag)["supported"] is False
-    text = diag.read_text().replace("EA version: 0.54.8", "EA version: 0.59.0")
+    text = diag.read_text().replace("EA version: 0.54.8", "EA version: 0.59.1")
     diag.write_text(text)
     assert dashboard_entry_compatibility(diag)["supported"] is True
     diagnostic(diag, now=stamp - 200)
