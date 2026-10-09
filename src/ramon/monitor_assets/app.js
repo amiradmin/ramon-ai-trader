@@ -437,7 +437,7 @@ function renderOpportunities(data){
     const confidence=(typeof row.success_probability==="number"?Math.round(row.success_probability*100):null);
     const confidenceText=confidence===null?"—":confidence+"٪";
     const positionText=row.position_open
-      ?"باز"+(row.position_ticket?" #"+row.position_ticket:"")+(typeof row.live_profit_units==="number"?" · "+pnlText(row.live_profit_units):"")
+      ?"باز · HUMAN"+(row.position_ticket?" #"+row.position_ticket:"")+(typeof row.live_profit_units==="number"?" · "+pnlText(row.live_profit_units):"")
       :row.entry_queued?"در صف اجرا":row.executed?"بسته شده":"بدون پوزیشن";
 
     const technical=document.createElement("details");technical.className="trade-tech-details";
@@ -486,11 +486,11 @@ function renderOpportunities(data){
     });
     const action=document.createElement("td");
     if(row.position_open){
-      const actions=document.createElement("div");actions.className="opportunity-actions";
+      const actions=document.createElement("div");actions.className="opportunity-actions open-position-actions";
       const closeNow=document.createElement("button");
-      closeNow.type="button";closeNow.textContent="بستن فوری";
+      closeNow.type="button";closeNow.textContent="CLOSE POSITION";
       closeNow.className="opportunity-entry close";
-      closeNow.title="بستن فوری فقط همین پوزیشن · Ticket "+row.position_ticket;
+      closeNow.title="بستن فوری همین پوزیشن Human-assisted · Ticket "+row.position_ticket;
       closeNow.addEventListener("click",()=>manualCloseOpportunity(row,closeNow));
       actions.append(closeNow);
 
@@ -498,12 +498,12 @@ function renderOpportunities(data){
       autoClose.type="button";
       autoClose.className="opportunity-entry auto-close"+(row.auto_close_armed?" armed":"");
       if(row.auto_close_armed&&typeof row.auto_close_target==="number"){
-        autoClose.textContent="خروج خودکار @ "+format(row.auto_close_target);
+        autoClose.textContent="AUTO EXIT @ "+format(row.auto_close_target);
         autoClose.disabled=true;
         autoClose.title="خروج خودکار برای همین Ticket فعال است";
       }else{
         const hasTarget=["TARGET","RECOVERY_EXIT"].includes(row.chronos_exit_action)&&typeof row.chronos_exit_price==="number";
-        autoClose.textContent=hasTarget?"خروج خودکار @ "+format(row.chronos_exit_price):"خروج خودکار";
+        autoClose.textContent=hasTarget?"AUTO EXIT @ "+format(row.chronos_exit_price):"AUTO EXIT";
         autoClose.disabled=!autoCloseCompatibility.supported||!hasTarget;
         autoClose.title=!autoCloseCompatibility.supported
           ?autoCloseCompatibility.reason
@@ -513,22 +513,6 @@ function renderOpportunities(data){
         if(!autoClose.disabled)autoClose.addEventListener("click",()=>predictedAutoCloseOpportunity(row,autoClose));
       }
       actions.append(autoClose);
-
-      const extra=document.createElement("div");extra.className="manual-scenario-list compact";
-      for(const scenario of (row.trade_scenarios||[])){
-        const scenarioBtn=document.createElement("button");
-        scenarioBtn.type="button";
-        scenarioBtn.className="scenario-entry "+(scenario.direction==="BUY"?"buy":"sell")+(scenario.risk==="high"||scenario.risk==="very_high"?" high-risk":"");
-        const p=typeof scenario.probability==="number"?" · "+Math.round(scenario.probability*100)+"٪":"";
-        scenarioBtn.textContent="ورود جدید: "+scenario.label+" · "+scenario.direction+p;
-        scenarioBtn.title=scenario.setup+" · ورود دستی مستقل از پوزیشن فعلی";
-        scenarioBtn.disabled=!compatibility.supported||row.entry_queued;
-        if(!scenarioBtn.disabled){
-          scenarioBtn.addEventListener("click",()=>manualOpportunity(row,scenarioBtn,true,true,scenario.direction));
-        }
-        extra.append(scenarioBtn);
-      }
-      actions.append(extra);
       action.append(actions);
       tr.append(action);body.append(tr);
       continue;
