@@ -24,12 +24,27 @@ def fetch_bars(db, symbol, limit):
     return list(reversed(rows))
 
 
+def acceptable_gap(a_time, b_time):
+    """Allow normal M15 spacing plus ordinary gold-market closures."""
+    a_time, b_time = int(a_time), int(b_time)
+    delta = b_time - a_time
+    if delta == 900:
+        return True
+    # Daily rollover / broker maintenance gaps.
+    if 900 < delta <= 4 * 3600:
+        return True
+    # Weekend closure. Keep longer mid-week holes rejected as data gaps.
+    a = datetime.fromtimestamp(a_time, tz=timezone.utc)
+    b = datetime.fromtimestamp(b_time, tz=timezone.utc)
+    if delta <= 3 * 86400 and (a.weekday() == 4 or b.weekday() in (6, 0)):
+        return True
+    return False
+
+
 def pairs(rows, lookback, horizon, stride):
-    for i in range(lookback, len(rows) - horizon, stride):
-        # Reject sessions with gaps. Weekend gaps must not be silently
-        # interpreted as continuous 15-minute future bars.
+    for i in range(lookback, len(rows) - horizon + 1, stride):
         frame = rows[i-lookback:i+horizon]
-        if any(int(b[0])-int(a[0]) != 900 for a,b in zip(frame, frame[1:])):
+        if any(not acceptable_gap(a[0], b[0]) for a,b in zip(frame, frame[1:])):
             continue
         yield i
 
@@ -54,15 +69,15 @@ def evaluate(rows, predictor, *, lookback=256, horizon=4, stride=16,
             columns=["open","high","low","close"],
         )
         x_times = pd.Series(pd.to_datetime([r[0] for r in history], unit="s", utc=True).tz_localize(None))
-        future = [t0+900*j for j in range(1,horizon+1)]
-        y_times = pd.Series(pd.to_datetime(future, unit="s", utc=True).tz_localize(None))
+        future_rows = rows[i:i+horizon]
+        y_times = pd.Series(pd.to_datetime([r[0] for r in future_rows], unit="s", utc=True).tz_localize(None))
         predicted = predictor.predict(
             df=x_df, x_timestamp=x_times, y_timestamp=y_times,
             pred_len=horizon, T=1.0, top_p=0.9, sample_count=1, verbose=False,
         )
         predicted_close = float(predicted["close"].iloc[-1])
         prior_close = float(history[-1][4])
-        actual_close = float(rows[i+horizon-1][4])
+        actual_close = float(future_rows[-1][4])
         forecast_side = direction(predicted_close, prior_close, min_change)
         actual_side = direction(actual_close, prior_close, min_change)
         output.append({
