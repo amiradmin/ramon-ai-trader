@@ -1,0 +1,30 @@
+# Isolated research observer. Start with docker compose -f compose.foundation-forward.yaml up -d.
+services:
+  foundation-forward:
+    image: ramon-ai-trader-advisors:local
+    container_name: ramon-foundation-forward
+    init: true
+    restart: unless-stopped
+    cpus: 2.0
+    mem_limit: 4g
+    read_only: true
+    network_mode: none
+    tmpfs:
+      - /tmp:size=128m
+    environment:
+      PYTHONPATH: /experiment/runtime
+      PYTHONDONTWRITEBYTECODE: '1'
+      OMP_NUM_THREADS: '2'
+      OPENBLAS_NUM_THREADS: '2'
+      HF_HUB_OFFLINE: '1'
+    entrypoint: [python]
+    command: [-m, ramon.foundation_forward, --history, /history/ramon_history.sqlite3, --output, /results/forward.sqlite3]
+    volumes:
+      - ./data:/history:ro
+      - ./data/research/foundation_forward_v1/runtime:/experiment/runtime:ro
+      - ./data/research/foundation_forward_v1:/results
+      - chronos_cache:/home/ramon/.cache/huggingface:ro
+volumes:
+  chronos_cache:
+    external: true
+    name: ramon-ai-trader_chronos_cache
