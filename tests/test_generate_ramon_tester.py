@@ -25,6 +25,11 @@ def test_generator_removes_dll_and_preserves_risk_guard():
     assert "bool V2Preflight(" in output
     assert output.count("V2Preflight(") == source.count("V2Preflight(")
     assert "Trade.Buy(" in output and "Trade.Sell(" in output
+    assert "input bool TesterRunRiskHarness = false;" in output
+    assert "TesterRiskScenario();" in output
+    assert "RAMON_TEST_RISK PASS" in output
+    assert "TesterInjectedRiskUnits" in output
+    assert "MQLInfoInteger(MQL_TESTER)" in output
 
 
 def test_unknown_code_layout_fails_closed():
