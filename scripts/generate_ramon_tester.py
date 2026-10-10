@@ -130,8 +130,9 @@ def create_tester_source(source: str) -> str:
       direction_risk+=TesterInjectedRiskUnits;
    }
 """, 1)
-    text = text.replace("void OnTick()\\n{", "void OnTick()\\n{\\n   TesterRiskScenario();", 1)
-    text += "\\n" + HARNESS
+    text = text.replace("void OnTick()\n{", "void OnTick()\n{\n   TesterRiskScenario();", 1)
+    text = text.replace("int OnInit()\n{", "int OnInit()\n{\n   if(!(bool)MQLInfoInteger(MQL_TESTER)) { Print(\"RamonTester forbidden outside Strategy Tester\"); return INIT_FAILED; }", 1)
+    text += "\n" + HARNESS
     # A tester harness must never arm the production EA.
     text = text.replace(
         '#property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."',
