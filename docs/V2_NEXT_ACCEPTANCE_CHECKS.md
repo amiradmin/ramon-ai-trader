@@ -18,7 +18,9 @@ The single-run tester checks below have already been observed; do not rerun
 them as evidence of restart persistence. Follow
 `docs/V2_STOPOUT_RESTART_ACCEPTANCE_FA.md` and generate the isolated order-free
 script with `python3 scripts/generate_stopout_restart_probe.py`.
-Real restart, MQL compilation and downtime history recovery remain unverified.
+MQL compilation completed with 0 errors / 0 warnings (see the compile evidence
+manifest). Real restart and downtime history recovery remain unverified;
+the isolated demo terminal still needs a verified authenticated demo session.
 
 ## Existing terminal-global Stop Out latch check (tester only)
 
