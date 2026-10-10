@@ -28,6 +28,8 @@ def test_generator_removes_dll_and_preserves_risk_guard():
     assert "input bool TesterRunRiskHarness = false;" in output
     assert "TesterRiskScenario();" in output
     assert "RAMON_TEST_RISK PASS" in output
+    assert "RAMON_TEST_GUARDIAN PASS" in output
+    assert "RAMON_TEST_LOCK PASS" in output
     assert "TesterInjectedRiskUnits" in output
     assert "MQLInfoInteger(MQL_TESTER)" in output
 
