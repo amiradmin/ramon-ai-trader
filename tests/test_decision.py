@@ -358,6 +358,8 @@ class DecisionTests(unittest.TestCase):
         self.assertEqual(base.calls, 2)
 
     def test_http_round_trip_and_model_failure(self) -> None:
+        from unittest.mock import patch
+        self.enterContext(patch.dict("os.environ", {"RAMON_AI_ENGINE_V2_ENABLED": "0"}))
         with socket.socket() as temporary:
             temporary.bind(("127.0.0.1", 0))
             port = temporary.getsockname()[1]

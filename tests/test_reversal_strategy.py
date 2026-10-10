@@ -63,6 +63,8 @@ def test_default_and_manual_pass_cannot_activate_reversal():
 @pytest.mark.parametrize('enabled,cent,expected', [(False,False,'WAIT'),(True,False,'BUY'),(True,True,'WAIT')])
 def test_http_route_remains_gated_and_never_submits_an_order(tmp_path,monkeypatch,enabled,cent,expected):
     import ramon.server as server
+    monkeypatch.setenv("RAMON_AI_ENGINE_V2_ENABLED", "0")
+    monkeypatch.setenv("RAMON_ROLE_MODE", "live")
     market,model,base,quote=setup()
     for name in ['RAMON_MOMENT_SHADOW_ENABLED','RAMON_FINBERT_SHADOW_ENABLED','RAMON_TIMESFM3_SHADOW_ENABLED','RAMON_NEWS_ENABLED','RAMON_RANGE_LIVE_ENABLED']:
         monkeypatch.setenv(name,'0')

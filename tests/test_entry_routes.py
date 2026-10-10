@@ -9,7 +9,7 @@ import pytest
 def test_all_entry_routes_obey_execution_gates_and_range_protocol(tmp_path):
     source = Path('mt5/Ramon.mq5').read_text()
     timer = source.split('void OnTimer()', 1)[1]
-    news = timer[timer.index('   if(NewsGuardEntryBlocked())'):timer.index('   // Automatic Ramon entries')]
+    news = timer[timer.index('   if(!dashboard_manual_entry && NewsGuardEntryBlocked())'):timer.index('   // Automatic Ramon entries')]
     limits = timer[timer.index('   string account_loss_reason="";'):timer.index('   if(stop_distance<=0.0')]
     reason = source[source.index('bool RangeMainReasonValid('):source.index('bool RangeMainRewardRiskValid(')]
     # Return statements in OnTimer stop execution; adapt them to a result for the harness.
@@ -25,6 +25,7 @@ int today_count=0,spread=42,MaxTradesPerDay=400,MaxSpreadPoints=50;
 long now=1000,quote_at=1000;
 const int SYMBOL_SPREAD=1;
 void ShowStatus(){}
+void Print(string,string){}
 bool NewsGuardEntryBlocked(){return news;}
 bool AccountLossLimitsBlocked(string &why){why="account loss";return loss;}
 bool LocalLossCooldownBlocked(string,string &why){why="loss cooldown";return cooldown;}
@@ -36,16 +37,17 @@ long SymbolInfoInteger(string,int){return spread;}
     cases = r'''
 void reset(){news=loss=cooldown=false;quote_ok=true;today_count=0;spread=42;now=quote_at=1000;StatusLine="";}
 int main(){
- // Route 0 is automatic, 1 is manual analytical pass, 2 is dashboard selection.
+ // Dashboard selection intentionally bypasses analytical/news/cooldown/daily-count
+ // gates; account loss, quote freshness and spread remain mandatory on all routes.
  for(int route=0;route<3;route++) {
   bool dashboard=route==2;
   reset();assert(allowed(dashboard,false,"BUY"));assert(allowed(dashboard,false,"SELL"));
-  news=true;assert(!allowed(dashboard,false,"BUY"));reset();
+  news=true;assert(allowed(dashboard,false,"BUY")==dashboard);reset();
   loss=true;assert(!allowed(dashboard,false,"BUY"));reset();
-  cooldown=true;assert(!allowed(dashboard,false,"SELL"));reset();
+  cooldown=true;assert(allowed(dashboard,false,"SELL")==dashboard);reset();
   today_count=399;assert(allowed(dashboard,false,"BUY"));
-  today_count=400;assert(!allowed(dashboard,false,"BUY"));
-  today_count=-1;assert(!allowed(dashboard,false,"BUY"));reset();
+  today_count=400;assert(allowed(dashboard,false,"BUY")==dashboard);
+  today_count=-1;assert(allowed(dashboard,false,"BUY")==dashboard);reset();
   spread=51;assert(!allowed(dashboard,false,"BUY"));reset();
   quote_ok=false;assert(!allowed(dashboard,false,"BUY"));reset();
   quote_at=969;assert(!allowed(dashboard,false,"BUY"));

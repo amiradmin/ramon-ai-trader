@@ -116,6 +116,7 @@ def test_default_service_policy_is_final_authority_and_is_persisted(tmp_path,mon
     from http.server import HTTPServer
     from urllib.request import Request,urlopen
     import ramon.server as service
+    monkeypatch.setenv("RAMON_AI_ENGINE_V2_ENABLED", "0")
     from ramon.core import Forecast,Settings
     monkeypatch.setenv('RAMON_NEWS_ENABLED','0')
     monkeypatch.setenv('RAMON_HISTORY_DB',str(tmp_path/'history.db'))

@@ -30,6 +30,12 @@ input bool EnableRangeMain = true; // Explicit cent-account range-reversal trial
 const double RangeMainTargetUnits = 5.0; // Quick RANGE take-profit: USD 0.05 on 100 units/USD.
 const double RangeMainMaxLossUnits = 5.0; // RANGE entries must keep broker SL risk <= USD 0.05.
 input bool EnableLiveTrading = false;
+input bool EnableV2AccountRiskGuard = true; // Reject new entries without an account-wide risk preflight.
+input double V2MaxPortfolioRiskUSD = 0.35;
+input double V2MaxSymbolRiskUSD = 0.35;
+input double V2MaxDirectionRiskUSD = 0.35;
+input double V2MinimumMarginLevelPercent = 300.0;
+
 input bool SmallOnlyMode = false; // Attach second EA instance on another M15 chart for parallel SMALL trades.
 const ulong PrimaryMagicNumber = 26092212;
 const ulong SmallProfitMagicNumber = 26092213;
@@ -4939,6 +4945,12 @@ bool ProcessGuardianReversals()
          || NewsGuardEntryBlocked() || LocalLossCooldownBlocked(direction,why)
          || !GuardianGeometry(direction,original_volume,volume,stop,target))
       { StatusLine="GUARDIAN CLOSED: reverse preflight blocked"; Print(StatusLine); return true; }
+      string guard_reason="";
+      ENUM_ORDER_TYPE recovery_side=(direction=="BUY" ? ORDER_TYPE_BUY : ORDER_TYPE_SELL);
+      double recovery_quote=(direction=="BUY" ? SymbolInfoDouble(_Symbol,SYMBOL_ASK)
+         : SymbolInfoDouble(_Symbol,SYMBOL_BID));
+      if(!V2Preflight(recovery_side,recovery_quote,stop,volume,guard_reason))
+      { StatusLine="GUARDIAN CLOSED: V2 "+guard_reason; Print(StatusLine); return true; }
       string recovery_sample=StringFormat("%08x%08x",(uint)ticket,(uint)now);
       StageEntrySizing(recovery_sample,direction=="BUY" ? ORDER_TYPE_BUY : ORDER_TYPE_SELL,
          direction=="BUY" ? SymbolInfoDouble(_Symbol,SYMBOL_ASK) : SymbolInfoDouble(_Symbol,SYMBOL_BID),stop,volume);
@@ -5589,6 +5601,10 @@ void OnTimer()
       || margin>AccountInfoDouble(ACCOUNT_MARGIN_FREE)*0.8)
    { StatusLine="Insufficient margin"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
 
+   string guard_reason="";
+   if(!V2Preflight(side,entry,stop,volume,guard_reason))
+   { StatusLine="V2 ENTRY BLOCKED: "+guard_reason; Print(StatusLine); ShowStatus(); return; }
+
    // Telemetry/management staging must never block an otherwise valid entry.
    StageEntrySizing(LastSampleKey,side,entry,stop,volume);
    if(!small_profit && !range_trade && !dashboard_manual_entry)
@@ -5623,6 +5639,193 @@ void OnTimer()
 }
 
 
+// V2 account-level entry guard: ALL symbols, ALL magic numbers, pending orders included.
+string V2StopoutKey() { return "RAMON_V2_STOP_OUT_"+IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN)); }
+
+// These helpers never clear a lock or approve a review. A review marker is
+// operator-owned, scoped to exact account/server/deal and its millisecond time.
+bool V2StopoutHistoryHealthy=false;
+bool V2StopoutFaultLatched=false;
+
+string V2StopoutScope()
+{
+   long login=AccountInfoInteger(ACCOUNT_LOGIN);
+   string server=AccountInfoString(ACCOUNT_SERVER);
+   if(login<=0 || server=="") return "";
+   uchar data[],key[],digest[];
+   string identity=IntegerToString(login)+"|"+server;
+   int size=StringToCharArray(identity,data,0,WHOLE_ARRAY,CP_UTF8);
+   if(size<=1) return "";
+   ArrayResize(data,size-1);
+   if(CryptEncode(CRYPT_HASH_SHA256,data,key,digest)!=32) return "";
+   string scope="";
+   for(int i=0;i<16;i++) scope+=StringFormat("%02x",(uint)digest[i]);
+   return scope;
+}
+
+string V2StopoutReviewKey(string scope,ulong ticket)
+{
+   return "R2SO_ACK_"+scope+"_"+StringFormat("%I64u",ticket);
+}
+
+bool V2StopoutReviewed(string scope,ulong ticket,long deal_msc,bool &reviewed)
+{
+   reviewed=false;
+   if(scope=="" || ticket==0 || deal_msc<=0 || deal_msc>9007199254740991)
+      return false;
+   string name=V2StopoutReviewKey(scope,ticket);
+   if(!GlobalVariableCheck(name)) return true; // Missing approval is unreviewed.
+   double value=0.0;
+   if(!GlobalVariableGet(name,value)) return false;
+   reviewed=MathIsValidNumber(value) && value==(double)deal_msc;
+   return true;
+}
+
+bool V2PersistStopout(ulong ticket,long deal_msc)
+{
+   // Preserve the legacy lock and its value, including an operator's test lock.
+   if(GlobalVariableCheck(V2StopoutKey())) return true;
+   double value=(double)(deal_msc/1000);
+   if(GlobalVariableSet(V2StopoutKey(),value)==0)
+   { V2StopoutFaultLatched=true; V2StopoutHistoryHealthy=false; return false; }
+   GlobalVariablesFlush();
+   double stored=0.0;
+   if(!GlobalVariableGet(V2StopoutKey(),stored) || stored!=value)
+   { V2StopoutFaultLatched=true; V2StopoutHistoryHealthy=false; return false; }
+   PrintFormat("V2 STOP OUT: history/event deal=%I64u new entries locked pending operator review",ticket);
+   return true;
+}
+
+bool V2RecoverStopoutHistory(string &reason)
+{
+   V2StopoutHistoryHealthy=false;
+   reason="";
+   if(V2StopoutFaultLatched)
+   { reason="stop-out storage/event fault"; return false; }
+   if(!TerminalInfoInteger(TERMINAL_CONNECTED))
+   { reason="terminal disconnected"; return false; }
+   long login=AccountInfoInteger(ACCOUNT_LOGIN);
+   string server=AccountInfoString(ACCOUNT_SERVER);
+   string scope=V2StopoutScope();
+   datetime now=TimeCurrent();
+   if(scope=="" || now<=0 || !HistorySelect(0,now))
+   { reason="stop-out history unavailable"; return false; }
+   int count=HistoryDealsTotal();
+   // A previously observed longer history must not silently become a clean
+   // empty/truncated account. Broker archival requires explicit investigation.
+   string count_key="R2SO_N_"+scope;
+   double prior=0.0;
+   if(GlobalVariableCheck(count_key) &&
+      (!GlobalVariableGet(count_key,prior) || !MathIsValidNumber(prior) ||
+       prior<0.0 || prior!=MathFloor(prior) || (double)count<prior))
+   { reason="stop-out history shortened/invalid"; return false; }
+   for(int i=0;i<count;i++)
+   {
+      ulong ticket=HistoryDealGetTicket(i);
+      long why=0,deal_msc=0;
+      if(ticket==0 || !HistoryDealGetInteger(ticket,DEAL_REASON,why))
+      { reason="stop-out history deal unreadable"; return false; }
+      if(why!=DEAL_REASON_SO) continue;
+      if(!HistoryDealGetInteger(ticket,DEAL_TIME_MSC,deal_msc))
+      { reason="stop-out history time unreadable"; return false; }
+      bool reviewed=false;
+      if(!V2StopoutReviewed(scope,ticket,deal_msc,reviewed))
+      { reason="stop-out review unreadable"; return false; }
+      if(!reviewed && !V2PersistStopout(ticket,deal_msc))
+      { reason="stop-out lock persistence failed"; return false; }
+   }
+   if(!TerminalInfoInteger(TERMINAL_CONNECTED) || login!=AccountInfoInteger(ACCOUNT_LOGIN) ||
+      server!=AccountInfoString(ACCOUNT_SERVER))
+   { reason="stop-out history account changed"; return false; }
+   if((double)count>prior || !GlobalVariableCheck(count_key))
+   {
+      if(GlobalVariableSet(count_key,(double)count)==0)
+      { V2StopoutFaultLatched=true; reason="stop-out history checkpoint failed"; return false; }
+      GlobalVariablesFlush();
+      double saved=0.0;
+      if(!GlobalVariableGet(count_key,saved) || saved!=(double)count)
+      { V2StopoutFaultLatched=true; reason="stop-out history checkpoint failed"; return false; }
+   }
+   V2StopoutHistoryHealthy=true;
+   return true;
+}
+
+bool V2Preflight(ENUM_ORDER_TYPE side,double entry,double stop,double volume,string &reason)
+{
+   reason="";
+   // Stop Out is mandatory even when the optional exposure guard is disabled.
+   if(GlobalVariableCheck(V2StopoutKey()))
+   { reason="stop-out lock"; return false; }
+   if(!V2RecoverStopoutHistory(reason)) return false;
+   if(GlobalVariableCheck(V2StopoutKey()))
+   { reason="stop-out lock"; return false; }
+   if(!EnableV2AccountRiskGuard) return true;
+   if(V2MaxPortfolioRiskUSD<=0.0 || V2MaxSymbolRiskUSD<=0.0 ||
+      V2MaxDirectionRiskUSD<=0.0 || V2MinimumMarginLevelPercent<=0.0 || MoneyUnitsPerUSD<=0.0)
+   { reason="invalid guard parameters"; return false; }
+   if(!TerminalInfoInteger(TERMINAL_CONNECTED))
+   { reason="terminal disconnected"; return false; }
+   double pnl=0.0;
+   if(stop<=0.0 || volume<=0.0 || !OrderCalcProfit(side,_Symbol,volume,entry,stop,pnl) || pnl>=0.0)
+   { reason="candidate risk unknown"; return false; }
+   double total=-pnl,symbol_risk=-pnl,direction_risk=-pnl;
+   for(int i=0;i<PositionsTotal();i++)
+   {
+      ulong ticket=PositionGetTicket(i);
+      if(ticket==0 || !PositionSelectByTicket(ticket))
+      { reason="position snapshot missing"; return false; }
+      string sym=PositionGetString(POSITION_SYMBOL);
+      ENUM_ORDER_TYPE position_side=PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+      double sl=PositionGetDouble(POSITION_SL);
+      double lots=PositionGetDouble(POSITION_VOLUME);
+      double open_price=PositionGetDouble(POSITION_PRICE_OPEN);
+      double risk_pnl=0.0;
+      if(sl<=0.0 || lots<=0.0 || !OrderCalcProfit(position_side,sym,lots,open_price,sl,risk_pnl))
+      { reason="position SL missing"; return false; }
+      double risk=MathMax(0.0,-risk_pnl);
+      total+=risk;
+      if(sym==_Symbol) { symbol_risk+=risk; if(position_side==side) direction_risk+=risk; }
+   }
+   for(int i=0;i<OrdersTotal();i++)
+   {
+      ulong ticket=OrderGetTicket(i);
+      if(ticket==0 || !OrderSelect(ticket))
+      { reason="pending order snapshot missing"; return false; }
+      ENUM_ORDER_TYPE kind=(ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+      if(kind!=ORDER_TYPE_BUY_LIMIT && kind!=ORDER_TYPE_BUY_STOP && kind!=ORDER_TYPE_BUY_STOP_LIMIT &&
+         kind!=ORDER_TYPE_SELL_LIMIT && kind!=ORDER_TYPE_SELL_STOP && kind!=ORDER_TYPE_SELL_STOP_LIMIT) continue;
+      ENUM_ORDER_TYPE pending_side=(kind==ORDER_TYPE_BUY_LIMIT || kind==ORDER_TYPE_BUY_STOP ||
+         kind==ORDER_TYPE_BUY_STOP_LIMIT ? ORDER_TYPE_BUY : ORDER_TYPE_SELL);
+      string sym=OrderGetString(ORDER_SYMBOL);
+      double sl=OrderGetDouble(ORDER_SL);
+      double lots=OrderGetDouble(ORDER_VOLUME_CURRENT);
+      double open_price=OrderGetDouble(ORDER_PRICE_OPEN);
+      double risk_pnl=0.0;
+      if(sl<=0.0 || lots<=0.0 || !OrderCalcProfit(pending_side,sym,lots,open_price,sl,risk_pnl))
+      { reason="pending order SL missing"; return false; }
+      double risk=MathMax(0.0,-risk_pnl);
+      total+=risk;
+      if(sym==_Symbol) { symbol_risk+=risk; if(pending_side==side) direction_risk+=risk; }
+   }
+   const double unit=MoneyUnitsPerUSD;
+   if(total>V2MaxPortfolioRiskUSD*unit+0.00001)
+   { reason="portfolio risk cap"; return false; }
+   if(symbol_risk>V2MaxSymbolRiskUSD*unit+0.00001)
+   { reason="symbol risk cap"; return false; }
+   if(direction_risk>V2MaxDirectionRiskUSD*unit+0.00001)
+   { reason="direction risk cap"; return false; }
+   double extra_margin=0.0;
+   if(!OrderCalcMargin(side,_Symbol,volume,entry,extra_margin) || extra_margin<0.0)
+   { reason="margin calculation failed"; return false; }
+   double equity=AccountInfoDouble(ACCOUNT_EQUITY);
+   double margin=AccountInfoDouble(ACCOUNT_MARGIN);
+   double free_margin=AccountInfoDouble(ACCOUNT_MARGIN_FREE);
+   if(equity<=0.0 || extra_margin>=free_margin ||
+      equity/(margin+extra_margin)*100.0<V2MinimumMarginLevelPercent)
+   { reason="margin floor breached"; return false; }
+   return true;
+}
+
 void OnTradeTransaction(
    const MqlTradeTransaction &trans,
    const MqlTradeRequest &request,
@@ -5631,6 +5834,17 @@ void OnTradeTransaction(
 {
    if(trans.type==TRADE_TRANSACTION_DEAL_ADD && trans.deal>0)
    {
+      long deal_reason=0,deal_msc=0;
+      if(!HistoryDealSelect(trans.deal) || !HistoryDealGetInteger(trans.deal,DEAL_REASON,deal_reason))
+      { V2StopoutFaultLatched=true; V2StopoutHistoryHealthy=false; }
+      else if(deal_reason==DEAL_REASON_SO)
+      {
+         bool reviewed=false;
+         if(!HistoryDealGetInteger(trans.deal,DEAL_TIME_MSC,deal_msc) ||
+            !V2StopoutReviewed(V2StopoutScope(),trans.deal,deal_msc,reviewed) ||
+            (!reviewed && !V2PersistStopout(trans.deal,deal_msc)))
+         { V2StopoutFaultLatched=true; V2StopoutHistoryHealthy=false; }
+      }
       RecordDealTelemetry(trans.deal);
       AppendTradeCsv(trans.deal);
       WriteOpenDashboardPositions();
@@ -5791,6 +6005,11 @@ int OnInit()
    Trade.SetExpertMagicNumber(MagicNumber);
    Trade.SetDeviationInPoints(MaxDeviationPoints);
    Trade.SetTypeFillingBySymbol(_Symbol);
+   // Do not abort initialization: protective exits must remain available when
+   // history is unavailable. Every entry rechecks this scan in V2Preflight.
+   string stopout_reason="";
+   if(!V2RecoverStopoutHistory(stopout_reason))
+      Print("V2 STOP OUT: startup entries blocked: ",stopout_reason);
    EventSetTimer(1); // Separate network scheduling from five-second position management.
    // Stagger the second chart's WebRequest cadence from the primary chart.
    if(SmallOnlyMode)

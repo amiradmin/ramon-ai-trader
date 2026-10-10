@@ -2,7 +2,7 @@ from dataclasses import replace
 
 import pytest
 
-from ramon.timesfm_shadow import TimesFM3Shadow
+from ramon.timesfm_experimental import TimesFM3Experimental
 from test_ensemble import _decision, _market
 
 
@@ -26,30 +26,30 @@ class BrokenForecaster:
         raise RuntimeError("boom")
 
 
-def test_disabled_timesfm_shadow_is_unavailable_and_harmless():
-    shadow = TimesFM3Shadow(enabled=False)
+def test_disabled_timesfm_experimental_is_unavailable_and_harmless():
+    shadow = TimesFM3Experimental(enabled=False)
     payload = shadow.assess(_market(), _decision())
-    assert payload["timesfm3_shadow_ready"] == 0
-    assert payload["timesfm3_shadow_direction"] == "UNAVAILABLE"
-    assert payload["timesfm3_shadow_effect"] == "NONE"
+    assert payload["timesfm3_experimental_ready"] == 0
+    assert payload["timesfm3_experimental_direction"] == "UNAVAILABLE"
+    assert payload["timesfm3_experimental_effect"] == "NONE"
 
 
-def test_ready_timesfm_shadow_reports_forecast_only():
-    shadow = TimesFM3Shadow(enabled=True, forecaster=FakeForecaster())
+def test_ready_timesfm_experimental_reports_forecast_only():
+    shadow = TimesFM3Experimental(enabled=True, forecaster=FakeForecaster())
     decision = replace(_decision(), decision="SELL")
     payload = shadow.assess(_market(), decision)
-    assert payload["timesfm3_shadow_ready"] == 1
-    assert payload["timesfm3_shadow_direction"] == "BUY"
-    assert payload["timesfm3_shadow_median"] == pytest.approx(104.0)
-    assert payload["timesfm3_shadow_low"] == pytest.approx(102.0)
-    assert payload["timesfm3_shadow_high"] == pytest.approx(105.0)
-    assert payload["timesfm3_shadow_effect"] == "NONE"
+    assert payload["timesfm3_experimental_ready"] == 1
+    assert payload["timesfm3_experimental_direction"] == "BUY"
+    assert payload["timesfm3_experimental_median"] == pytest.approx(104.0)
+    assert payload["timesfm3_experimental_low"] == pytest.approx(102.0)
+    assert payload["timesfm3_experimental_high"] == pytest.approx(105.0)
+    assert payload["timesfm3_experimental_effect"] == "NONE"
 
 
 def test_timesfm_failure_stays_display_only():
-    shadow = TimesFM3Shadow(enabled=True, forecaster=BrokenForecaster())
+    shadow = TimesFM3Experimental(enabled=True, forecaster=BrokenForecaster())
     payload = shadow.assess(_market(), _decision())
-    assert payload["timesfm3_shadow_ready"] == 0
-    assert payload["timesfm3_shadow_direction"] == "UNAVAILABLE"
-    assert "RuntimeError" in payload["timesfm3_shadow_error"]
-    assert payload["timesfm3_shadow_effect"] == "NONE"
+    assert payload["timesfm3_experimental_ready"] == 0
+    assert payload["timesfm3_experimental_direction"] == "UNAVAILABLE"
+    assert "RuntimeError" in payload["timesfm3_experimental_error"]
+    assert payload["timesfm3_experimental_effect"] == "NONE"

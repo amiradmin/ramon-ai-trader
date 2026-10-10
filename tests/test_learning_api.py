@@ -18,6 +18,7 @@ from test_decision import FixedModel, bars
 @pytest.fixture
 def learning_server(tmp_path, monkeypatch):
     import ramon.server as service
+    monkeypatch.setenv("RAMON_AI_ENGINE_V2_ENABLED", "0")
     db = tmp_path / "history.sqlite3"
     monkeypatch.setenv("RAMON_HISTORY_DB", str(db))
     monkeypatch.setenv("RAMON_ENSEMBLE_DIR", str(tmp_path / "roles"))
@@ -110,7 +111,7 @@ def test_decision_metadata_and_enriched_outcome_round_trip(learning_server):
     with sqlite3.connect(db) as con:
         model_id, raw = con.execute('SELECT chronos_model,model_metadata FROM decision_samples').fetchone()
         assert model_id == 'test/fake'
-        assert json.loads(raw)['ensemble_mode'] == 'shadow'
+        assert json.loads(raw)['ensemble_mode'] == 'direction_live'
         audit = json.loads(raw)['decision_audit']
         assert audit['base']['reason'] == decision['base_reason']
         assert audit['final']['reason'] == decision['reason']

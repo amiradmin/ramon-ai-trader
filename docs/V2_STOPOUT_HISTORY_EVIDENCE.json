@@ -1,0 +1,30 @@
+{
+  "recorded_at_utc": "2026-10-10T13:31:07.376224+00:00",
+  "validation_type": "native compilation and Python/source regression; MQL fixture execution pending",
+  "python_related_tests_passed": 29,
+  "production_deployed": false,
+  "broker_stopout_recovery_acceptance": "UNVERIFIED",
+  "mql_fixture_cases_prepared": 18,
+  "mql_fixture_cases_executed": 0,
+  "compile": {
+    "candidate": "Result: 0 errors, 0 warnings, 16561 ms elapsed, cpu='X64 Regular'",
+    "harness": "Result: 0 errors, 0 warnings, 725 ms elapsed, cpu='X64 Regular'",
+    "tester": "Result: 0 errors, 0 warnings, 16224 ms elapsed, cpu='X64 Regular'"
+  },
+  "files": {
+    "build/mt5-history-harness/tester-compile.log": "23a9ade5ffa48e89cc79e70dc2cb085974e09258a752ee3929b07ba4f3d421e7",
+    "build/mt5-history-harness/RamonCandidate.ex5": "a476ec8b84cf44bf76f4842c8a6325164b44c9e938db067f8e6d5a65c7d31bfc",
+    "build/mt5-history-harness/candidate-compile.log": "85514d934ec4be0e3eb47127297d7ff8ce8c0b8f22ae55523dcf84dfaa937183",
+    "build/mt5-history-harness/RamonTesterHistory.mq5": "25dfb92229742b65027635f49aa38ebd55db5818edd613162db84df36fdda3cf",
+    "build/mt5-history-harness/RamonStopoutHistoryHarness.mq5": "ddbb9162a43221421b23998b49b387bf0829f3046aa46b7e29fe7080f4ee8c85",
+    "build/mt5-history-harness/RamonCandidate.mq5": "4fdb88889902844eaff97ee3efe77b93e242218f580f0a5f133400ff4c6139ff",
+    "build/mt5-history-harness/RamonTesterHistory.ex5": "fe1797419bde20e9d2e98b03cf6a5186f570f481ca92eae82a243e4a4165b51c",
+    "build/mt5-history-harness/harness-compile.log": "791c3a80f59a87faf22a6f0464fe4f50abb0e671aae8060bd650f6b1601fe4cb",
+    "build/mt5-history-harness/RamonStopoutHistoryHarness.ex5": "a2062edb25da9410377c4570d4bcd7b9f91c00df12a6f1ce180ee6dfd711e9b0"
+  },
+  "installed_ea_unchanged": {
+    "/home/amir/.mt5/drive_c/Program Files/MetaTrader 5/MQL5/Experts/Ramon/Ramon.mq5": true,
+    "/home/amir/.mt5/drive_c/Program Files/MetaTrader 5/MQL5/Experts/Ramon/Ramon.ex5": true
+  },
+  "execution_blocker": "Account-free fixture script loaded but did not begin execution; live credential reuse runner was rejected by automatic approval review. Copied temporary account registry removed; live runner was not launched."
+}

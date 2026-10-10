@@ -1,0 +1,15 @@
+{
+  "recorded_at_utc": "2026-10-10T13:13:18.085474+00:00",
+  "compile_result": "Result: 0 errors, 0 warnings, 548 ms elapsed, cpu='X64 Regular'",
+  "files": {
+    "RamonStopoutRestartProbe.mq5": "7d0d2218a69b37ac92826eb657889b404be35b3d09cb1ede1b0861958b7847b3",
+    "RamonStopoutRestartProbe.ex5": "a12949a1549183438df07a5a7dfc31a1b648e7480be345ea5ca33c6b621ec2f0",
+    "compile.log": "599f08551e04be55fc527e64ede96f3ca5139825828ab0335995e605ffe0a6e8"
+  },
+  "restart_verified": false,
+  "history_recovery_verified": false,
+  "orders_submitted": false,
+  "demo_login_observed_in_historical_logs": 91422263,
+  "demo_server": "LiteFinance-MT5-Demo",
+  "demo_authentication_currently_verified": false
+}
