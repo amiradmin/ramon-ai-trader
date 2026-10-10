@@ -54,7 +54,7 @@ def create_tester_source(source: str) -> str:
     # Tester agents may reject FILE_COMMON diagnostic writes (err=5004).
     # Disable only diagnostic file output in the isolated tester build.
     text, diagnostic_flags = re.subn(
-        r'(?m)^input bool WriteDiagnosticFile\\s*=\\s*true\\s*;',
+        r'(?m)^input bool WriteDiagnosticFile\s*=\s*true\s*;',
         "input bool WriteDiagnosticFile = false;",
         text,
     )
