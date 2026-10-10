@@ -1,0 +1,27 @@
+{
+  "base_commit": "97affdd",
+  "scope": "offline translated Stop Out prefix; mocked APIs; no exposure/margin validation",
+  "related_tests_passed": 34,
+  "cpp_cases_passed": 18,
+  "native_mql_fixture_execution": "UNVERIFIED",
+  "broker_downtime_recovery": "UNVERIFIED",
+  "concurrency_fix_implemented": false,
+  "production_deployed": false,
+  "hashes": {
+    "mt5/Ramon.mq5": "4fdb88889902844eaff97ee3efe77b93e242218f580f0a5f133400ff4c6139ff",
+    "scripts/generate_stopout_history_cpp_adapter.py": "5d7675b4eaa7e08f374d09fb042b370ab1a87f7a59735b804cd8d37b2f6b1e2d",
+    "scripts/generate_stopout_history_harness.py": "7b7c0860fbf897171b3108937ff497cb8860977597af2604f709a014d8608b51",
+    "tests/test_stopout_history_cpp_adapter.py": "7a1268008f1e6f7588668ac4f294860368dabe19bf9687898e86ad41033b0a66",
+    "tests/test_v2_concurrency_boundary.py": "563fefe2d7257e75f051142fd2ad6d28eee7a784b312a97cfd888bad1a39067d",
+    "build/overnight-validation/stopout-cpp.log": "ce7ca1edec8a0aca75a752bc2e7174ff3574e723cd504e424a9b63623f368e7b"
+  },
+  "cpp_output": "RAMON_HISTORY_FIXTURE PASS disconnected blocks entry\nRAMON_HISTORY_FIXTURE PASS history failure blocks entry\nRAMON_HISTORY_FIXTURE PASS empty new fixture scans without inventing Stop Out\nV2 STOP OUT: history/event deal=10 new entries locked pending operator review\nRAMON_HISTORY_FIXTURE PASS offline Stop Out recovers durable lock\nRAMON_HISTORY_FIXTURE PASS exact reviewed event does not recreate absent lock\nV2 STOP OUT: history/event deal=11 new entries locked pending operator review\nRAMON_HISTORY_FIXTURE PASS new ticket at reviewed time still locks\nV2 STOP OUT: history/event deal=10 new entries locked pending operator review\nRAMON_HISTORY_FIXTURE PASS incorrect review timestamp does not waive Stop Out\nV2 STOP OUT: history/event deal=10 new entries locked pending operator review\nRAMON_HISTORY_FIXTURE PASS review cannot cross server\nV2 STOP OUT: history/event deal=10 new entries locked pending operator review\nRAMON_HISTORY_FIXTURE PASS review cannot cross login\nRAMON_HISTORY_FIXTURE PASS unreadable deal blocks entry\nRAMON_HISTORY_FIXTURE PASS write failure blocks entry\nRAMON_HISTORY_FIXTURE PASS write fault remains latched for session\nRAMON_HISTORY_FIXTURE PASS checkpoint failure blocks entry\nRAMON_HISTORY_FIXTURE PASS account switch during scan blocks entry\nRAMON_HISTORY_FIXTURE PASS existing legacy/test lock is preserved\nRAMON_HISTORY_FIXTURE PASS non Stop Out deal does not lock\nRAMON_HISTORY_FIXTURE PASS truncated history blocks entry\nRAMON_HISTORY_FIXTURE PASS ulong tickets remain exact in bounded review keys\nRAMON_HISTORY_FIXTURE SUMMARY cases=18 failures=0\n",
+  "full_suite": {
+    "passed": 552,
+    "failed": 0,
+    "errors": 0,
+    "duration_seconds": 48.47,
+    "environment": "approved local socket access; PYTEST_DISABLE_PLUGIN_AUTOLOAD=1; PYTHONPATH unset",
+    "log_sha256": "5c052d017d86748f59e6a5a74cee871cbfb62519fcf7960b40b09d7af8a899ef"
+  }
+}
