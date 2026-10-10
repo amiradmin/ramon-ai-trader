@@ -30,6 +30,12 @@ input bool EnableRangeMain = true; // Explicit cent-account range-reversal trial
 const double RangeMainTargetUnits = 5.0; // Quick RANGE take-profit: USD 0.05 on 100 units/USD.
 const double RangeMainMaxLossUnits = 5.0; // RANGE entries must keep broker SL risk <= USD 0.05.
 input bool EnableLiveTrading = false;
+input bool EnableV2AccountRiskGuard = true; // Reject new entries without an account-wide risk preflight.
+input double V2MaxPortfolioRiskUSD = 0.35;
+input double V2MaxSymbolRiskUSD = 0.35;
+input double V2MaxDirectionRiskUSD = 0.35;
+input double V2MinimumMarginLevelPercent = 300.0;
+
 input bool SmallOnlyMode = false; // Attach second EA instance on another M15 chart for parallel SMALL trades.
 const ulong PrimaryMagicNumber = 26092212;
 const ulong SmallProfitMagicNumber = 26092213;
@@ -4939,6 +4945,12 @@ bool ProcessGuardianReversals()
          || NewsGuardEntryBlocked() || LocalLossCooldownBlocked(direction,why)
          || !GuardianGeometry(direction,original_volume,volume,stop,target))
       { StatusLine="GUARDIAN CLOSED: reverse preflight blocked"; Print(StatusLine); return true; }
+      string guard_reason="";
+      ENUM_ORDER_TYPE recovery_side=(direction=="BUY" ? ORDER_TYPE_BUY : ORDER_TYPE_SELL);
+      double recovery_quote=(direction=="BUY" ? SymbolInfoDouble(_Symbol,SYMBOL_ASK)
+         : SymbolInfoDouble(_Symbol,SYMBOL_BID));
+      if(!V2Preflight(recovery_side,recovery_quote,stop,volume,guard_reason))
+      { StatusLine="GUARDIAN CLOSED: V2 "+guard_reason; Print(StatusLine); return true; }
       string recovery_sample=StringFormat("%08x%08x",(uint)ticket,(uint)now);
       StageEntrySizing(recovery_sample,direction=="BUY" ? ORDER_TYPE_BUY : ORDER_TYPE_SELL,
          direction=="BUY" ? SymbolInfoDouble(_Symbol,SYMBOL_ASK) : SymbolInfoDouble(_Symbol,SYMBOL_BID),stop,volume);
@@ -5589,6 +5601,10 @@ void OnTimer()
       || margin>AccountInfoDouble(ACCOUNT_MARGIN_FREE)*0.8)
    { StatusLine="Insufficient margin"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
 
+   string guard_reason="";
+   if(!V2Preflight(side,entry,stop,volume,guard_reason))
+   { StatusLine="V2 ENTRY BLOCKED: "+guard_reason; Print(StatusLine); ShowStatus(); return; }
+
    // Telemetry/management staging must never block an otherwise valid entry.
    StageEntrySizing(LastSampleKey,side,entry,stop,volume);
    if(!small_profit && !range_trade && !dashboard_manual_entry)
@@ -5623,6 +5639,81 @@ void OnTimer()
 }
 
 
+// V2 account-level entry guard: ALL symbols, ALL magic numbers, pending orders included.
+string V2StopoutKey() { return "RAMON_V2_STOP_OUT_"+IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN)); }
+
+bool V2Preflight(ENUM_ORDER_TYPE side,double entry,double stop,double volume,string &reason)
+{
+   reason="";
+   if(!EnableV2AccountRiskGuard) return true;
+   if(V2MaxPortfolioRiskUSD<=0.0 || V2MaxSymbolRiskUSD<=0.0 ||
+      V2MaxDirectionRiskUSD<=0.0 || V2MinimumMarginLevelPercent<=0.0 || MoneyUnitsPerUSD<=0.0)
+   { reason="invalid guard parameters"; return false; }
+   if(GlobalVariableCheck(V2StopoutKey()))
+   { reason="stop-out lock"; return false; }
+   if(!TerminalInfoInteger(TERMINAL_CONNECTED))
+   { reason="terminal disconnected"; return false; }
+   double pnl=0.0;
+   if(stop<=0.0 || volume<=0.0 || !OrderCalcProfit(side,_Symbol,volume,entry,stop,pnl) || pnl>=0.0)
+   { reason="candidate risk unknown"; return false; }
+   double total=-pnl,symbol_risk=-pnl,direction_risk=-pnl;
+   for(int i=0;i<PositionsTotal();i++)
+   {
+      ulong ticket=PositionGetTicket(i);
+      if(ticket==0 || !PositionSelectByTicket(ticket))
+      { reason="position snapshot missing"; return false; }
+      string sym=PositionGetString(POSITION_SYMBOL);
+      ENUM_ORDER_TYPE position_side=PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+      double sl=PositionGetDouble(POSITION_SL);
+      double lots=PositionGetDouble(POSITION_VOLUME);
+      double open_price=PositionGetDouble(POSITION_PRICE_OPEN);
+      double risk_pnl=0.0;
+      if(sl<=0.0 || lots<=0.0 || !OrderCalcProfit(position_side,sym,lots,open_price,sl,risk_pnl))
+      { reason="position SL missing"; return false; }
+      double risk=MathMax(0.0,-risk_pnl);
+      total+=risk;
+      if(sym==_Symbol) { symbol_risk+=risk; if(position_side==side) direction_risk+=risk; }
+   }
+   for(int i=0;i<OrdersTotal();i++)
+   {
+      ulong ticket=OrderGetTicket(i);
+      if(ticket==0 || !OrderSelect(ticket))
+      { reason="pending order snapshot missing"; return false; }
+      ENUM_ORDER_TYPE kind=(ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+      if(kind!=ORDER_TYPE_BUY_LIMIT && kind!=ORDER_TYPE_BUY_STOP && kind!=ORDER_TYPE_BUY_STOP_LIMIT &&
+         kind!=ORDER_TYPE_SELL_LIMIT && kind!=ORDER_TYPE_SELL_STOP && kind!=ORDER_TYPE_SELL_STOP_LIMIT) continue;
+      ENUM_ORDER_TYPE pending_side=(kind==ORDER_TYPE_BUY_LIMIT || kind==ORDER_TYPE_BUY_STOP ||
+         kind==ORDER_TYPE_BUY_STOP_LIMIT ? ORDER_TYPE_BUY : ORDER_TYPE_SELL);
+      string sym=OrderGetString(ORDER_SYMBOL);
+      double sl=OrderGetDouble(ORDER_SL);
+      double lots=OrderGetDouble(ORDER_VOLUME_CURRENT);
+      double open_price=OrderGetDouble(ORDER_PRICE_OPEN);
+      double risk_pnl=0.0;
+      if(sl<=0.0 || lots<=0.0 || !OrderCalcProfit(pending_side,sym,lots,open_price,sl,risk_pnl))
+      { reason="pending order SL missing"; return false; }
+      double risk=MathMax(0.0,-risk_pnl);
+      total+=risk;
+      if(sym==_Symbol) { symbol_risk+=risk; if(pending_side==side) direction_risk+=risk; }
+   }
+   const double unit=MoneyUnitsPerUSD;
+   if(total>V2MaxPortfolioRiskUSD*unit+0.00001)
+   { reason="portfolio risk cap"; return false; }
+   if(symbol_risk>V2MaxSymbolRiskUSD*unit+0.00001)
+   { reason="symbol risk cap"; return false; }
+   if(direction_risk>V2MaxDirectionRiskUSD*unit+0.00001)
+   { reason="direction risk cap"; return false; }
+   double extra_margin=0.0;
+   if(!OrderCalcMargin(side,_Symbol,volume,entry,extra_margin) || extra_margin<0.0)
+   { reason="margin calculation failed"; return false; }
+   double equity=AccountInfoDouble(ACCOUNT_EQUITY);
+   double margin=AccountInfoDouble(ACCOUNT_MARGIN);
+   double free_margin=AccountInfoDouble(ACCOUNT_MARGIN_FREE);
+   if(equity<=0.0 || extra_margin>=free_margin ||
+      equity/(margin+extra_margin)*100.0<V2MinimumMarginLevelPercent)
+   { reason="margin floor breached"; return false; }
+   return true;
+}
+
 void OnTradeTransaction(
    const MqlTradeTransaction &trans,
    const MqlTradeRequest &request,
@@ -5631,6 +5722,12 @@ void OnTradeTransaction(
 {
    if(trans.type==TRADE_TRANSACTION_DEAL_ADD && trans.deal>0)
    {
+      if(HistoryDealSelect(trans.deal) && HistoryDealGetInteger(trans.deal,DEAL_REASON)==DEAL_REASON_SO)
+      {
+         GlobalVariableSet(V2StopoutKey(),(double)TimeCurrent());
+         GlobalVariablesFlush();
+         Print("V2 STOP OUT: new entries locked pending operator review");
+      }
       RecordDealTelemetry(trans.deal);
       AppendTradeCsv(trans.deal);
       WriteOpenDashboardPositions();
