@@ -12,7 +12,15 @@ DASHBOARD_OPPORTUNITY rows into an AI-only supervised outcome evaluation
 without independent entry-intent evidence. All their open positions and pending
 orders **still count** toward live broker account risk.
 
-## Immediate next test: terminal-global Stop Out latch (tester only)
+## Immediate next test: true terminal restart (demo, no orders)
+
+The single-run tester checks below have already been observed; do not rerun
+them as evidence of restart persistence. Follow
+`docs/V2_STOPOUT_RESTART_ACCEPTANCE_FA.md` and generate the isolated order-free
+script with `python3 scripts/generate_stopout_restart_probe.py`.
+Real restart, MQL compilation and downtime history recovery remain unverified.
+
+## Existing terminal-global Stop Out latch check (tester only)
 
 1. Run `git pull --ff-only`.
 2. Run `PYTHONPATH=src .venv/bin/python -m pytest -q tests/test_generate_ramon_tester.py tests/test_v2_guardian_stopout_wiring.py tests/test_v2_manual_exposure_audit.py`.
