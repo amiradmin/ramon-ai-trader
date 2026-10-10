@@ -10,9 +10,10 @@ and `Ramon.ex5` are not modified.
   287.82 account units, representing one of the 8 October trades.
 - It calls the actual `V2Preflight()` from the EA with a broker-derived
   minimum-lot SELL candidate, generated SL geometry, and injected prior
-  risk. The candidate is **not** forced to be the historical 292.50
-  account-unit second order: the log prints both the historical target
-  and the *actual candidate* computed by `OrderCalcProfit`.
+  risk. The tester uses `OrderCalcProfit` to scale the test-only SELL SL so
+  that its candidate risk is within 1 account unit of the historical
+  292.50-unit second order; otherwise it reports INCONCLUSIVE. The log
+  prints the actual computed loss.
 - With a test-only account cap of **3.00 USD** and configured conversion
   **100 account units/USD**, it should reject the new risk by the
   `portfolio risk cap` branch.
@@ -20,8 +21,9 @@ and `Ramon.ex5` are not modified.
   for reviewer inspection. **No orders are placed by the harness.**
 - The harness runs once in `OnTick`, only when `MQL_TESTER` is true,
   `EnableLiveTrading=false` and `TesterRunRiskHarness=true`.
-- The hook is off by default, and generator validation refuses an
-  unexpected production source layout.
+- The hook is off by default. **The generated RamonTester OnInit explicitly
+  refuses initialization outside Strategy Tester**, including on a
+  live-account chart. Generator validation refuses an unexpected source layout.
 
 ## Rebuild and run on HP-Mini
 
