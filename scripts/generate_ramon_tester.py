@@ -89,6 +89,28 @@ void TesterRiskScenario()
        TesterHistoricalFirstSellRiskUnits,TesterHistoricalSecondSellRiskUnits,
        TesterHistoricalFirstSellRiskUnits+TesterHistoricalSecondSellRiskUnits,
        cap_units,-broker_pnl,allowed?"TRUE":"FALSE",reason);
+   // Second, independently verify stop-out latch blocks even a cheap entry.
+   // Uses MT5 Terminal GlobalVariables; this is test-agent scope only.
+   if((bool)MQLInfoInteger(MQL_TESTER))
+   {
+      string lock_name=V2StopoutKey();
+      bool existed=GlobalVariableCheck(lock_name);
+      double old_value=(existed ? GlobalVariableGet(lock_name) : 0.0);
+      if(GlobalVariableSet(lock_name,(double)TimeCurrent())>0)
+      {
+         GlobalVariablesFlush();
+         string lock_reason="";
+         bool lock_allowed=V2Preflight(ORDER_TYPE_SELL,price,stop,min_volume,lock_reason);
+         if(!lock_allowed && lock_reason=="stop-out lock" && GlobalVariableCheck(lock_name))
+            Print("RAMON_TEST_LOCK PASS persistent stop-out global blocks entry");
+         else
+            PrintFormat("RAMON_TEST_LOCK FAIL allowed=%s reason=%s",lock_allowed?"TRUE":"FALSE",lock_reason);
+         if(existed) GlobalVariableSet(lock_name,old_value);
+         else GlobalVariableDel(lock_name);
+         GlobalVariablesFlush();
+      }
+      else Print("RAMON_TEST_LOCK INCONCLUSIVE cannot create terminal global");
+   }
    if(TesterHistoricalFirstSellRiskUnits+TesterHistoricalSecondSellRiskUnits>cap_units &&
       cap_units<=TesterHistoricalPortfolioCapUnits &&
       !allowed && reason=="portfolio risk cap")
