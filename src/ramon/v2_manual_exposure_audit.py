@@ -32,20 +32,29 @@ def audit(db_path, *, symbol="XAUUSD_l", limit=100000):
         con.close()
 
     def classify(row):
-        src=str(row["entry_source"] or "").upper()
-        magic=row["entry_magic"]
-        if src in {"MANUAL", "CLIENT", "MOBILE", "WEB", "MANUAL_MT5"} or magic == 0:
-            return "MANUAL"
-        if src in {"EA", "EXPERT", "RAMON", "AUTOMATED"} or magic in (26092212,26092213):
-            return "RAMON_EA"
-        return "UNKNOWN"
+        # An EA Magic number identifies order routing, NOT whether a human
+        # clicked a dashboard button. Never turn missing provenance into AUTO.
+        src = str(row["entry_source"] or "").strip().upper()
+        if src in {"AUTO_RAMON", "RANGE_AUTO", "EA", "AUTOMATED"}:
+            return "AUTOMATED"
+        if src in {"DASHBOARD_OPPORTUNITY", "MANUAL", "CLIENT", "MOBILE",
+                   "WEB", "MANUAL_MT5", "HUMAN_ASSISTED"}:
+            return "HUMAN_INITIATED_OR_ASSISTED"
+        if not src:
+            return "UNKNOWN_SOURCE"
+        return "OTHER_SOURCE"
 
     events=[]
     categories=Counter()
     net_by_source=Counter()
+    raw_sources=Counter()
+    raw_nets=Counter()
     for row in rows:
         group=classify(row)
         categories[group]+=1
+        raw=str(row["entry_source"] or "NULL")
+        raw_sources[raw]+=1
+        raw_nets[raw]+=float(row["net_units"] or 0)
         net_by_source[group]+=float(row["net_units"] or 0)
         opened,closed=int(row["opened"]),int(row["closed"])
         if closed>opened:
@@ -59,19 +68,21 @@ def audit(db_path, *, symbol="XAUUSD_l", limit=100000):
         counts[group]+=sign
         total=sum(counts.values())
         max_open=max(max_open,total)
-        if counts["MANUAL"]>0 and counts["RAMON_EA"]>0:
+        if counts["HUMAN_INITIATED_OR_ASSISTED"]>0 and counts["AUTOMATED"]>0:
             max_mixed=max(max_mixed,total)
     return {
         "source": "historical_closed_trades_only",
         "symbol": symbol,
         "trades": len(rows),
         "classification": dict(categories),
+        "entry_source_counts": dict(raw_sources),
+        "net_units_by_entry_source": {key:round(value,2) for key,value in raw_nets.items()},
         "net_units_by_source": {key:round(value,2) for key,value in net_by_source.items()},
         "max_concurrent_closed_trade_records": max_open,
         "max_mixed_manual_and_ea_concurrent": max_mixed,
         "live_positions_included": False,
         "pending_orders_included": False,
-        "note": "Historical entry provenance may be incomplete; never exclude manual trades from live MT5 account-level risk.",
+        "note": "Magic is not proof of automated entry. DASHBOARD_OPPORTUNITY is dashboard-origin, not necessarily a direct MT5 manual click. NULL is unknown. All exposure counts toward live account risk.",
     }
 
 
