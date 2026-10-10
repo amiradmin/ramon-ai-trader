@@ -111,6 +111,20 @@ void TesterRiskScenario()
       }
       else Print("RAMON_TEST_LOCK INCONCLUSIVE cannot create terminal global");
    }
+   // Guardian reversal dry-run: account-level exposure must veto the
+   // reversal even when the hypothetical original parent has been closed.
+   // No Trade.PositionClose, Trade.Buy or Trade.Sell is ever invoked here.
+   // This validates only the post-close V2Preflight rejection branch.
+   TesterInjectedRiskUnits=TesterHistoricalFirstSellRiskUnits;
+   string guardian_reason="";
+   bool guardian_allowed=V2Preflight(ORDER_TYPE_SELL,price,stop,min_volume,guardian_reason);
+   TesterInjectedRiskUnits=0.0;
+   if(TesterHistoricalFirstSellRiskUnits+(-broker_pnl)>cap_units &&
+      !guardian_allowed && guardian_reason=="portfolio risk cap")
+      Print("RAMON_TEST_GUARDIAN PASS simulated reversal vetoed before order submission");
+   else
+      PrintFormat("RAMON_TEST_GUARDIAN FAIL allowed=%s reason=%s",
+         guardian_allowed?"TRUE":"FALSE",guardian_reason);
    if(TesterHistoricalFirstSellRiskUnits+TesterHistoricalSecondSellRiskUnits>cap_units &&
       cap_units<=TesterHistoricalPortfolioCapUnits &&
       !allowed && reason=="portfolio risk cap")
