@@ -23,8 +23,8 @@ orders **still count** toward live broker account risk.
    `EnableV2AccountRiskGuard=true`, three `V2Max*RiskUSD=3.0`,
    `MoneyUnitsPerUSD=100`, `WriteDiagnosticFile=false`.
 7. After completion review **Experts** and **Journal** logs for
-   `RAMON_TEST_RISK` and `RAMON_TEST_LOCK`.
-8. Expected: both are `PASS`; any missing/FAIL/INCONCLUSIVE is a blocker.
+   `RAMON_TEST_RISK`, `RAMON_TEST_LOCK` and `RAMON_TEST_GUARDIAN`.
+8. Expected: all three are `PASS`; any missing/FAIL/INCONCLUSIVE is a blocker.\n   `RAMON_TEST_GUARDIAN` is a **dry-run risk veto** on hypothetical\n   post-close exposure, not a broker-side parent-close/reverse-fill test.
 
 The `RAMON_TEST_LOCK` harness creates, checks and restores a terminal global
 *in one tester execution*. It is NOT a restart-persistence test. A real
