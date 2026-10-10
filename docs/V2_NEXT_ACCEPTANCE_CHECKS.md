@@ -14,6 +14,11 @@ orders **still count** toward live broker account risk.
 
 ## Clean restart result and remaining acceptance
 
+History recovery is now implemented in the candidate source (not deployed).
+See `docs/V2_STOPOUT_HISTORY_RECOVERY_FA.md`: native compilation and 29
+Python/source checks passed; the 18-case MQL fixture has not executed and
+broker-side downtime recovery is still unverified. No locks were cleared.
+
 Update after explicit user authorization to use the live Cent account for the
 order-free lock test: clean restart persistence and production-preflight veto
 were verified. See `docs/V2_CENT_RESTART_RESULT_FA.md` and the evidence manifest.

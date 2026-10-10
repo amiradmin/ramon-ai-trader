@@ -32,7 +32,24 @@ def test_risk_preflight_does_not_filter_by_magic():
 def test_stopout_callback_flushes_terminal_lock():
     code=SOURCE.read_text(encoding="utf-8-sig")
     start=code.index("void OnTradeTransaction(")
-    segment=code[start:start+1100]
+    segment=code[start:code.index("bool CloseManagedPositionFromDashboard()",start)]
     assert "DEAL_REASON_SO" in segment
-    assert "GlobalVariableSet(V2StopoutKey()" in segment
-    assert "GlobalVariablesFlush()" in segment
+    assert "V2PersistStopout(trans.deal,deal_msc)" in segment
+    assert "V2StopoutReviewed(" in segment
+    helper=code[code.index("bool V2PersistStopout("):code.index("bool V2RecoverStopoutHistory(")]
+    assert "GlobalVariableSet(V2StopoutKey()" in helper
+    assert "GlobalVariablesFlush()" in helper
+    assert "V2StopoutFaultLatched=true" in helper
+
+
+def test_stopout_history_is_scanned_at_startup_and_before_optional_risk_guard():
+    code=SOURCE.read_text(encoding="utf-8-sig")
+    init=code[code.index("int OnInit()"):]
+    assert init.index("LockedAccountLogin=current_login") < init.index("V2RecoverStopoutHistory(stopout_reason)")
+    preflight=code[code.index("bool V2Preflight("):code.index("void OnTradeTransaction(")]
+    assert preflight.index("V2RecoverStopoutHistory(reason)") < preflight.index("if(!EnableV2AccountRiskGuard)")
+    history=code[code.index("bool V2RecoverStopoutHistory("):code.index("bool V2Preflight(")]
+    assert "HistorySelect(0,now)" in history
+    assert "DEAL_REASON_SO" in history and "DEAL_TIME_MSC" in history
+    assert "DEAL_MAGIC" not in history and "DEAL_SYMBOL" not in history
+    assert "GlobalVariableDel" not in history

@@ -5642,15 +5642,127 @@ void OnTimer()
 // V2 account-level entry guard: ALL symbols, ALL magic numbers, pending orders included.
 string V2StopoutKey() { return "RAMON_V2_STOP_OUT_"+IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN)); }
 
+// These helpers never clear a lock or approve a review. A review marker is
+// operator-owned, scoped to exact account/server/deal and its millisecond time.
+bool V2StopoutHistoryHealthy=false;
+bool V2StopoutFaultLatched=false;
+
+string V2StopoutScope()
+{
+   long login=AccountInfoInteger(ACCOUNT_LOGIN);
+   string server=AccountInfoString(ACCOUNT_SERVER);
+   if(login<=0 || server=="") return "";
+   uchar data[],key[],digest[];
+   string identity=IntegerToString(login)+"|"+server;
+   int size=StringToCharArray(identity,data,0,WHOLE_ARRAY,CP_UTF8);
+   if(size<=1) return "";
+   ArrayResize(data,size-1);
+   if(CryptEncode(CRYPT_HASH_SHA256,data,key,digest)!=32) return "";
+   string scope="";
+   for(int i=0;i<16;i++) scope+=StringFormat("%02x",(uint)digest[i]);
+   return scope;
+}
+
+string V2StopoutReviewKey(string scope,ulong ticket)
+{
+   return "R2SO_ACK_"+scope+"_"+StringFormat("%I64u",ticket);
+}
+
+bool V2StopoutReviewed(string scope,ulong ticket,long deal_msc,bool &reviewed)
+{
+   reviewed=false;
+   if(scope=="" || ticket==0 || deal_msc<=0 || deal_msc>9007199254740991)
+      return false;
+   string name=V2StopoutReviewKey(scope,ticket);
+   if(!GlobalVariableCheck(name)) return true; // Missing approval is unreviewed.
+   double value=0.0;
+   if(!GlobalVariableGet(name,value)) return false;
+   reviewed=MathIsValidNumber(value) && value==(double)deal_msc;
+   return true;
+}
+
+bool V2PersistStopout(ulong ticket,long deal_msc)
+{
+   // Preserve the legacy lock and its value, including an operator's test lock.
+   if(GlobalVariableCheck(V2StopoutKey())) return true;
+   double value=(double)(deal_msc/1000);
+   if(GlobalVariableSet(V2StopoutKey(),value)==0)
+   { V2StopoutFaultLatched=true; V2StopoutHistoryHealthy=false; return false; }
+   GlobalVariablesFlush();
+   double stored=0.0;
+   if(!GlobalVariableGet(V2StopoutKey(),stored) || stored!=value)
+   { V2StopoutFaultLatched=true; V2StopoutHistoryHealthy=false; return false; }
+   PrintFormat("V2 STOP OUT: history/event deal=%I64u new entries locked pending operator review",ticket);
+   return true;
+}
+
+bool V2RecoverStopoutHistory(string &reason)
+{
+   V2StopoutHistoryHealthy=false;
+   reason="";
+   if(V2StopoutFaultLatched)
+   { reason="stop-out storage/event fault"; return false; }
+   if(!TerminalInfoInteger(TERMINAL_CONNECTED))
+   { reason="terminal disconnected"; return false; }
+   long login=AccountInfoInteger(ACCOUNT_LOGIN);
+   string server=AccountInfoString(ACCOUNT_SERVER);
+   string scope=V2StopoutScope();
+   datetime now=TimeCurrent();
+   if(scope=="" || now<=0 || !HistorySelect(0,now))
+   { reason="stop-out history unavailable"; return false; }
+   int count=HistoryDealsTotal();
+   // A previously observed longer history must not silently become a clean
+   // empty/truncated account. Broker archival requires explicit investigation.
+   string count_key="R2SO_N_"+scope;
+   double prior=0.0;
+   if(GlobalVariableCheck(count_key) &&
+      (!GlobalVariableGet(count_key,prior) || !MathIsValidNumber(prior) ||
+       prior<0.0 || prior!=MathFloor(prior) || (double)count<prior))
+   { reason="stop-out history shortened/invalid"; return false; }
+   for(int i=0;i<count;i++)
+   {
+      ulong ticket=HistoryDealGetTicket(i);
+      long why=0,deal_msc=0;
+      if(ticket==0 || !HistoryDealGetInteger(ticket,DEAL_REASON,why))
+      { reason="stop-out history deal unreadable"; return false; }
+      if(why!=DEAL_REASON_SO) continue;
+      if(!HistoryDealGetInteger(ticket,DEAL_TIME_MSC,deal_msc))
+      { reason="stop-out history time unreadable"; return false; }
+      bool reviewed=false;
+      if(!V2StopoutReviewed(scope,ticket,deal_msc,reviewed))
+      { reason="stop-out review unreadable"; return false; }
+      if(!reviewed && !V2PersistStopout(ticket,deal_msc))
+      { reason="stop-out lock persistence failed"; return false; }
+   }
+   if(!TerminalInfoInteger(TERMINAL_CONNECTED) || login!=AccountInfoInteger(ACCOUNT_LOGIN) ||
+      server!=AccountInfoString(ACCOUNT_SERVER))
+   { reason="stop-out history account changed"; return false; }
+   if((double)count>prior || !GlobalVariableCheck(count_key))
+   {
+      if(GlobalVariableSet(count_key,(double)count)==0)
+      { V2StopoutFaultLatched=true; reason="stop-out history checkpoint failed"; return false; }
+      GlobalVariablesFlush();
+      double saved=0.0;
+      if(!GlobalVariableGet(count_key,saved) || saved!=(double)count)
+      { V2StopoutFaultLatched=true; reason="stop-out history checkpoint failed"; return false; }
+   }
+   V2StopoutHistoryHealthy=true;
+   return true;
+}
+
 bool V2Preflight(ENUM_ORDER_TYPE side,double entry,double stop,double volume,string &reason)
 {
    reason="";
+   // Stop Out is mandatory even when the optional exposure guard is disabled.
+   if(GlobalVariableCheck(V2StopoutKey()))
+   { reason="stop-out lock"; return false; }
+   if(!V2RecoverStopoutHistory(reason)) return false;
+   if(GlobalVariableCheck(V2StopoutKey()))
+   { reason="stop-out lock"; return false; }
    if(!EnableV2AccountRiskGuard) return true;
    if(V2MaxPortfolioRiskUSD<=0.0 || V2MaxSymbolRiskUSD<=0.0 ||
       V2MaxDirectionRiskUSD<=0.0 || V2MinimumMarginLevelPercent<=0.0 || MoneyUnitsPerUSD<=0.0)
    { reason="invalid guard parameters"; return false; }
-   if(GlobalVariableCheck(V2StopoutKey()))
-   { reason="stop-out lock"; return false; }
    if(!TerminalInfoInteger(TERMINAL_CONNECTED))
    { reason="terminal disconnected"; return false; }
    double pnl=0.0;
@@ -5722,11 +5834,16 @@ void OnTradeTransaction(
 {
    if(trans.type==TRADE_TRANSACTION_DEAL_ADD && trans.deal>0)
    {
-      if(HistoryDealSelect(trans.deal) && HistoryDealGetInteger(trans.deal,DEAL_REASON)==DEAL_REASON_SO)
+      long deal_reason=0,deal_msc=0;
+      if(!HistoryDealSelect(trans.deal) || !HistoryDealGetInteger(trans.deal,DEAL_REASON,deal_reason))
+      { V2StopoutFaultLatched=true; V2StopoutHistoryHealthy=false; }
+      else if(deal_reason==DEAL_REASON_SO)
       {
-         GlobalVariableSet(V2StopoutKey(),(double)TimeCurrent());
-         GlobalVariablesFlush();
-         Print("V2 STOP OUT: new entries locked pending operator review");
+         bool reviewed=false;
+         if(!HistoryDealGetInteger(trans.deal,DEAL_TIME_MSC,deal_msc) ||
+            !V2StopoutReviewed(V2StopoutScope(),trans.deal,deal_msc,reviewed) ||
+            (!reviewed && !V2PersistStopout(trans.deal,deal_msc)))
+         { V2StopoutFaultLatched=true; V2StopoutHistoryHealthy=false; }
       }
       RecordDealTelemetry(trans.deal);
       AppendTradeCsv(trans.deal);
@@ -5888,6 +6005,11 @@ int OnInit()
    Trade.SetExpertMagicNumber(MagicNumber);
    Trade.SetDeviationInPoints(MaxDeviationPoints);
    Trade.SetTypeFillingBySymbol(_Symbol);
+   // Do not abort initialization: protective exits must remain available when
+   // history is unavailable. Every entry rechecks this scan in V2Preflight.
+   string stopout_reason="";
+   if(!V2RecoverStopoutHistory(stopout_reason))
+      Print("V2 STOP OUT: startup entries blocked: ",stopout_reason);
    EventSetTimer(1); // Separate network scheduling from five-second position management.
    // Stagger the second chart's WebRequest cadence from the primary chart.
    if(SmallOnlyMode)
