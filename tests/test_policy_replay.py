@@ -95,7 +95,7 @@ def test_exact_inputs_are_deduplicated_and_read_only_analysis_preserves_db(tmp_p
         assert con.execute('select count(*) from inference_audit').fetchone()[0]==2
         raw=con.execute('select provenance_json from inference_audit limit 1').fetchone()[0]
         assert json.loads(raw)['request']['micro_bars'][0]['time']==micro[0].time
-        assert set(json.loads(raw)['request'])=={'symbol','timeframe','bid','ask','point','quote_time','micro_bars'}
+        assert set(json.loads(raw)['request'])=={'symbol','timeframe','bid','ask','point','quote_time','micro_bars','broker_utc_offset_seconds'}
     before=hashlib.sha256(db.read_bytes()).hexdigest()
     r=analyze(db)
     assert r['rows']==2 and r['unique_signal_bars']==1

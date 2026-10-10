@@ -13,8 +13,8 @@ def source() -> str:
 
 def test_current_ea_keeps_sizing_telemetry_observational():
     text = source()
-    assert '#property version "1.591"' in text
-    assert '#define RAMON_EA_VERSION "0.59.1"' in text
+    assert '#property version "1.595"' in text
+    assert '#define RAMON_EA_VERSION "0.59.5"' in text
     assert '+"EA version: "+RAMON_EA_VERSION+' in text
     assert '"RAMON AI TRADER  v"+RAMON_EA_VERSION+' in text
     assert 'version=RAMON_EA_VERSION;' in text
@@ -22,7 +22,7 @@ def test_current_ea_keeps_sizing_telemetry_observational():
     assert 'if(!StageEntrySizing' not in text
     assert re.search(
         r'StageEntrySizing\(LastSampleKey,side,entry,stop,volume\);\s*'
-        r'if\(!small_profit && !range_trade\)\s*'
+        r'if\(!small_profit && !range_trade && !dashboard_manual_entry\)\s*'
         r'PersistTPPlan\(LastSampleKey,decision,entry,stop,\s*'
         r'LastTargetTP1,LastTargetTP2,LastTargetTP3\);\s*'
         r'// The broker owns SL/TP immediately',
@@ -57,13 +57,13 @@ def test_ea_execution_invariants_remain_model_and_hard_cap_guarded():
     text = source()
     assert 'if(decision=="WAIT" && !small_profit)' in text
     assert 'if(!EnableLiveTrading)' in text
-    assert 'else if(LastEntrySignalBar==bar_time)' in text
-    assert 'if(!SmallOnlyMode && (today<0 || today>=MaxTradesPerDay))' in text
+    assert 'else if(!dashboard_manual_entry && LastEntrySignalBar==bar_time)' in text
+    assert 'if(!dashboard_manual_entry && !SmallOnlyMode && (today<0 || today>=MaxTradesPerDay))' in text
     assert 'if(volume<=0.0)' in text
     assert 'TRADE BLOCKED: min lot > hard risk cap' in text
     assert 'if(!AllowMinLotRiskOverride || MaxExecutableRiskUSD<EffectiveRiskPerTradeUSD()' in text
     assert '|| -money>hard_cap+0.00001)' in text
-    assert 'double budget=EffectiveRiskPerTradeUSD()*MoneyUnitsPerUSD;' in text
+    assert 'double budget=MathMin(EffectiveRiskPerTradeUSD(),MaxExecutableRiskUSD)*MoneyUnitsPerUSD;' in text
     assert 'risk_multiplier<0.50 || risk_multiplier>1.50' in text
     assert 'ManagedPosition(ticket,opened)' in text
     assert 'OtherPositionOnSymbol()' in text
@@ -90,16 +90,16 @@ def test_news_guard_applies_to_normal_and_range_positions_before_entry():
     text = source()
     manager = text.split('void ManageOpenPosition()', 1)[1].split('void OnTimer()', 1)[0]
     assert manager.index('ManageNewsGuard(ticket)') < manager.index('ManageRangeMainPosition(ticket,opened)')
-    assert 'delta<=before_minutes*60 && delta>=-15*60' in text
-    assert 'NewsGuardWindow(15)' in text
-    assert 'NewsGuardWindow(5)' in text
+    assert 'delta<=before_minutes*60 && delta>=-after_minutes*60' in text
+    assert 'NewsGuardWindow(30,30)' in text
+    assert 'NewsGuardWindow(5,15)' in text
     assert '"news_guard_exit"' in text
     assert 'news_high_event_time' in text
 
 
 def test_ea_defends_normal_entry_against_older_server_response():
     text=source()
-    guard=text.split('bool range_trade=(range_execution>=0.5);',1)[1].split('if(range_trade)',1)[0]
+    guard=text.split('bool range_trade=(range_execution>=0.5 && !dashboard_manual_entry);',1)[1].split('if(range_trade)',1)[0]
     assert '!range_trade' in guard
     assert 'intrabar_confirmed<0.5 || ai_trend_confirmed<0.5' in guard
     assert 'intrabar_direction!=decision || ai_trend_direction!=decision' in guard
