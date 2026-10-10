@@ -68,7 +68,18 @@ void TesterRiskScenario()
    {
       Print("RAMON_TEST_RISK INCONCLUSIVE broker candidate geometry invalid"); return;
    }
-   // Set only the synthetic historical first position's risk.
+   // Scale broker-native geometry to historical second SELL loss.
+   // Never send an order; OrderCalcProfit is a read-only estimate.
+   double approximate_loss=-broker_pnl;
+   if(approximate_loss<=0.0 || TesterHistoricalSecondSellRiskUnits<=0.0)
+   { Print("RAMON_TEST_RISK INCONCLUSIVE invalid target risk"); return; }
+   double desired_stop=price+(stop-price)*TesterHistoricalSecondSellRiskUnits/approximate_loss;
+   desired_stop=NormalizeDouble(desired_stop,(int)SymbolInfoInteger(_Symbol,SYMBOL_DIGITS));
+   if(desired_stop<=price || !OrderCalcProfit(ORDER_TYPE_SELL,_Symbol,min_volume,price,desired_stop,broker_pnl) || broker_pnl>=0.0)
+   { Print("RAMON_TEST_RISK INCONCLUSIVE historical candidate calculation failed"); return; }
+   if(MathAbs(-broker_pnl-TesterHistoricalSecondSellRiskUnits)>1.0)
+   { PrintFormat("RAMON_TEST_RISK INCONCLUSIVE candidate risk %.2f differs from historical %.2f",-broker_pnl,TesterHistoricalSecondSellRiskUnits); return; }
+   stop=desired_stop;
    TesterInjectedRiskUnits=TesterHistoricalFirstSellRiskUnits;
    double cap_units=V2MaxPortfolioRiskUSD*MoneyUnitsPerUSD;
    string reason="";
@@ -130,9 +141,8 @@ def create_tester_source(source: str) -> str:
       direction_risk+=TesterInjectedRiskUnits;
    }
 """, 1)
-    text = text.replace("void OnTick()\n{", "void OnTick()\n{\n   TesterRiskScenario();", 1)
+    text = text.replace("void OnTick()\n{", HARNESS + "\nvoid OnTick()\n{\n   TesterRiskScenario();", 1)
     text = text.replace("int OnInit()\n{", "int OnInit()\n{\n   if(!(bool)MQLInfoInteger(MQL_TESTER)) { Print(\"RamonTester forbidden outside Strategy Tester\"); return INIT_FAILED; }", 1)
-    text += "\n" + HARNESS
     # A tester harness must never arm the production EA.
     text = text.replace(
         '#property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."',
