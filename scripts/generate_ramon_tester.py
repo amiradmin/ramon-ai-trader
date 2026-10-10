@@ -51,6 +51,15 @@ def create_tester_source(source: str) -> str:
     )
     if gates != 1 or "bool V2Preflight(" not in text:
         raise ValueError("Live-disarmed default or V2 risk preflight is missing")
+    # Tester agents may reject FILE_COMMON diagnostic writes (err=5004).
+    # Disable only diagnostic file output in the isolated tester build.
+    text, diagnostic_flags = re.subn(
+        r'(?m)^input bool WriteDiagnosticFile\\s*=\\s*true\\s*;',
+        "input bool WriteDiagnosticFile = false;",
+        text,
+    )
+    if diagnostic_flags != 1:
+        raise ValueError("Tester diagnostic input not found")
     text = text.replace(
         '#property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."',
         '#property description "Ramon Tester ONLY: no Win32 DLL; never attach to live account."',
