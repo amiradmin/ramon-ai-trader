@@ -1,6 +1,6 @@
 # Ramon V2 — eight-capability operational redesign (design + initial safety kernel)
 
-**Status: architecture and isolated Python policy implemented; EA integration NOT live.**
+**Status: account guard now wired into both EA order-entry paths in source; MetaEditor compilation, MT5 tester and live broker verification are STILL REQUIRED. The other seven capabilities are not all operational.**
 This work branches from PR #69, keeping PR #70 out of scope.
 The current EA remains the only authority capable of transmitting orders.
 
@@ -120,3 +120,56 @@ PYTHONPATH=src uv run --extra dev pytest -q \
 The tests are committed but have **not** been executed on the user's MT5
 terminal by the assistant. No Docker worker or EA binary needs restarting
 to inspect this redesign.
+
+
+## EA implementation update
+
+The EA source `mt5/Ramon.mq5` now contains an account-wide entry
+preflight **default enabled** and called from both standard and Guardian
+recovery order-send paths. It sums risk from all positions and pending
+orders across all symbols/magic numbers using `OrderCalcProfit`,
+applies portfolio/symbol/directional caps, and rejects insufficient
+projected margin. Broker stop-out deals seen by `OnTradeTransaction`
+latch a persistent MT5 terminal GlobalVariable.
+
+**Important limitations and hazards before enabling real-money entries:**
+
+- The default **account portfolio** cap is USD 0.35 (with the explicitly
+  configured `MoneyUnitsPerUSD` conversion), regardless of higher
+  per-trade limits; this can intentionally block new entries.
+- This uses `OrderCalcMargin` plus account margin/equity, **not yet a
+  full MT5 `OrderCheck` response**, and it is not atomic against
+  concurrent external terminal orders.
+- The stop-out latch only observes broker events while this EA is
+  running. Recovery after downtime must reconcile account deal history.
+- Open positions and pending orders lacking usable SL block new entries.
+  Risk from a gap, slippage, commission and swap may exceed SL estimates.
+- GlobalVariable lock has **no automatic reset**. Manual review and
+  documented explicit reset procedure are required; do not delete it
+  while the account is under margin distress.
+- We have **not compiled this changed MQL5 source in MetaEditor** or run
+  Strategy Tester, so this branch should not yet be merged/deployed to
+  an active live-trading terminal.
+- Existing position management remains unchanged. An EA cannot ensure
+  every external/manual order uses the same guard; a separate account-
+  level arbiter is required for cross-terminal strong consistency.
+
+On the MT5 host, after backing up the existing compiled EA and .set,
+compile `mt5/Ramon.mq5` in MetaEditor with **zero errors and warnings**,
+perform tester replay including a pair of overlapping 0.39 lot SELLs,
+and verify they cannot coexist when aggregate SL risk exceeds the cap.
+Then verify correct behavior of opposite-direction positions, missing
+SL on unrelated symbols, pending entries, Stop Out latch after restart,
+manual close, Guardian reverse entry and broker margin changes.
+
+## Merge safety gate
+
+Do **not** merge to main on code review alone. Required evidence:
+1. All Python tests passing.
+2. MetaEditor build zero errors/warnings on the actual terminal.
+3. Replay/real-tick MT5 tester for both entry routes.
+4. Shadow or demo forward run showing no unexpected blocks or bypass.
+5. Operator confirmation of portfolio caps in the *actual account units*.
+6. Separate acceptance per MCP / ONNX / Strategy Tester / Python
+   / calendar / optimization / BLAS integration; detection flags are
+   not sufficient.
