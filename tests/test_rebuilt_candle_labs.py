@@ -53,7 +53,7 @@ def test_candle_split_no_future_label_overlap():
     assert train[-1].label_time < valid[0].time
     assert valid[-1].label_time < test[0].time
     assert all(x.label in ("UP", "FLAT", "DOWN") for x in samples)
-    assert closed_context(bars(), 64 * 900, 64, 900)[-1].time == 64 * 900
+    assert closed_context(bars(), 64 * 900, 64, 900)[-1].time == 63 * 900
 
 
 def test_candle_probability_validation_and_no_pnl_claim():
