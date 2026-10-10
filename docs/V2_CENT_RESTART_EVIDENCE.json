@@ -1,0 +1,41 @@
+{
+  "recorded_at_utc": "2026-10-10T13:19:48.728915+00:00",
+  "authorization": "User explicitly requested this order-free test on the live Cent account after the demo-only workflow.",
+  "account_login": 89166482,
+  "server": "LiteFinance-MT5-Live",
+  "reported_account_currency": "USD",
+  "currency_note": "Currency label does not verify Cent scaling; no monetary sizing was used or changed.",
+  "lock_key": "RAMON_V2_STOP_OUT_89166482",
+  "synthetic_lock_value": 1791648001,
+  "clean_restart_lock_persistence": "PASS",
+  "production_preflight_lock_veto_before_and_after": "PASS",
+  "real_stopout_event_tested": false,
+  "downtime_history_recovery_tested": false,
+  "guardian_broker_execution_tested": false,
+  "positions_and_orders_before_each_exit": 0,
+  "algo_trading_allowed_in_both_probes": false,
+  "order_submission_apis_in_probe": false,
+  "trade_request_lines_in_test_journal": 0,
+  "lock_retained": true,
+  "tested_terminal_final_state": "cleanly closed",
+  "original_files_unchanged": {
+    "/home/amir/.mt5/drive_c/Program Files/MetaTrader 5/Config/common.ini": true,
+    "/home/amir/.mt5/drive_c/Program Files/MetaTrader 5/MQL5/Experts/Ramon/Ramon.mq5": true,
+    "/home/amir/.mt5/drive_c/Program Files/MetaTrader 5/MQL5/Experts/Ramon/Ramon.ex5": true
+  },
+  "files": {
+    "build/mt5-cent-probe/MQL5-logs-before.log": "22b0258313b8c73a7a1145b8f8f1e559cf59c00951a2e0a34df5aa0cffa7eec1",
+    "build/mt5-cent-probe/RamonCentLockSeed.ex5": "26182d339f2eb97e4daeab2a942fbd734d9cf20ba37df920ecec54eaf936875c",
+    "build/mt5-cent-probe/RamonCentLockSeed.mq5": "86ee8c5a6aa23bee2f7653cbb4d6bad77fdeefdd9ac87c72c28f31ee3768fc74",
+    "build/mt5-cent-probe/RamonCentLockVerify.ex5": "ddd26bdbfb43fe8d413023913fff3bbb2359f0d5d340d6ae201f4b8363bddba5",
+    "build/mt5-cent-probe/RamonCentLockVerify.mq5": "ba3e659e264bd7cf38180e6eacf802ac40d622f52cc7d5da0274a6a207daf688",
+    "build/mt5-cent-probe/before-sha.json": "4c99668f1c5acab37fd5c358c3fdd9ab73218173f66ff431508d1d6eb41ca7d1",
+    "build/mt5-cent-probe/logs-before.log": "4e8e5bb702d572ef750e7cfc97bc3140437cd60cc87941dd80eccc8c1c2ad5d0",
+    "build/mt5-cent-probe/probe-execution.log": "fdb4e83a784d2220fa47196ab39272c8601199c6b05ca52fb92a66e53d9d7652",
+    "build/mt5-cent-probe/seed-compile.log": "180fe3363f161910c54cda5ecd7d9dce201e851388718e1f27967d2a543511db",
+    "build/mt5-cent-probe/seed-safe.ini": "3ba12395b452cee534806ad5e8fc7970cbe9767974d389d3be45730b6395f83c",
+    "build/mt5-cent-probe/terminal-execution.log": "953aacdf4eb85df5a263018df45dcabcd68bb70131591f505641e8c66438e3ca",
+    "build/mt5-cent-probe/verify-compile.log": "49b86e0fc42a9a21cbe091ad2539466c194c16b2741281f92969ec282725a225",
+    "build/mt5-cent-probe/verify-safe.ini": "10c0341cd2bb58b3dc75f373c2ae9dc460d12e33fbcb8d3e684c61b13ff83617"
+  }
+}

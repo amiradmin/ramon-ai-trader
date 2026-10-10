@@ -12,15 +12,22 @@ DASHBOARD_OPPORTUNITY rows into an AI-only supervised outcome evaluation
 without independent entry-intent evidence. All their open positions and pending
 orders **still count** toward live broker account risk.
 
-## Immediate next test: true terminal restart (demo, no orders)
+## Clean restart result and remaining acceptance
+
+Update after explicit user authorization to use the live Cent account for the
+order-free lock test: clean restart persistence and production-preflight veto
+were verified. See `docs/V2_CENT_RESTART_RESULT_FA.md` and the evidence manifest.
+This does not authorize Guardian trading or deliberate Stop Out on live.
+Downtime history reconstruction, crash behavior and operator unlock remain open.
 
 The single-run tester checks below have already been observed; do not rerun
-them as evidence of restart persistence. Follow
+them as evidence of restart persistence. The original demo-only procedure is in
 `docs/V2_STOPOUT_RESTART_ACCEPTANCE_FA.md` and generate the isolated order-free
 script with `python3 scripts/generate_stopout_restart_probe.py`.
 MQL compilation completed with 0 errors / 0 warnings (see the compile evidence
-manifest). Real restart and downtime history recovery remain unverified;
-the isolated demo terminal still needs a verified authenticated demo session.
+manifest). The subsequent authorized Cent test verified clean restart; downtime
+history recovery remains unverified. The separate demo terminal still needs an
+authenticated demo session for future broker-side Guardian acceptance.
 
 ## Existing terminal-global Stop Out latch check (tester only)
 
