@@ -21,6 +21,7 @@ def test_generator_removes_dll_and_preserves_risk_guard():
     assert "OpenClipboard(" not in output
     assert "CopyDiagnosticToClipboard()" in output
     assert 'input bool EnableLiveTrading = false;' in output
+    assert "input bool WriteDiagnosticFile = false;" in output
     assert "bool V2Preflight(" in output
     assert output.count("V2Preflight(") == source.count("V2Preflight(")
     assert "Trade.Buy(" in output and "Trade.Sell(" in output
