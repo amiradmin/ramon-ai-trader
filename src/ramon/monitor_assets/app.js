@@ -481,10 +481,24 @@ function renderOpportunities(data){
     const risk=typeof row.risk_distance==="number"?format(row.risk_distance):"—";
     const reward=typeof row.entry==="number"&&typeof row.target==="number"&&typeof row.risk_distance==="number"&&row.risk_distance>0?Math.abs(row.target-row.entry)/row.risk_distance:null;
     const scalpGo=Boolean(row.actionable&&fresh&&compatibility.supported&&row.entry_timing_ready===1&&row.entry_timing_direction===row.direction);
-    const scalp=document.createElement("div");scalp.className="scalp-check "+(scalpGo?"go":"no-go");
+    const exitSuggested=Boolean(row.position_open&&["EXIT_NOW","LOSS_EXIT_NOW"].includes(row.chronos_exit_action));
+    const scalp=document.createElement(scalpGo||exitSuggested?"button":"div");
+    scalp.className="scalp-check "+(exitSuggested?"exit-action":scalpGo?"go":"no-go");
+    if(scalpGo||exitSuggested){
+      scalp.type="button";
+      scalp.title=exitSuggested?"بستن این پوزیشن پس از تأیید شما؛ EA مالکیت و مجوز را دوباره کنترل می‌کند":"ارسال ورود "+row.direction+" پس از تأیید شما؛ EA همهٔ کنترل‌های سخت را دوباره بررسی می‌کند";
+      scalp.addEventListener("click",()=>{
+        const message=exitSuggested
+          ?"پوزیشن #"+row.position_ticket+" بسته شود؟ EA پیش از اجرا مالکیت پوزیشن و مجوز معامله را دوباره بررسی می‌کند."
+          :"درخواست ورود "+row.direction+" برای همین GO ارسال شود؟ EA پیش از اجرا قیمت، ریسک و مجوزها را دوباره بررسی می‌کند.";
+        if(!window.confirm(message))return;
+        if(exitSuggested)void manualCloseOpportunity(row,scalp);
+        else void manualOpportunity(row,scalp,true,false,row.direction);
+      });
+    }
     const m1=row.intrabar_confirmed===1&&row.intrabar_direction===row.direction?"تأیید":"عدم تأیید";
     const m5=row.m5_context_state==="READY"?"آماده":row.m5_context_state==="STALE"?"قدیمی":"ثبت نشده";
-    scalp.append(el("strong",null,scalpGo?"GO — بازبینی نهایی":"NO-GO"),el("small",null,"Snapshot: "+(fresh?"تازه":"قدیمی")),el("small",null,"Spread: "+spread),el("small",null,"M1: "+m1+" · M5: "+m5),el("small",null,"SL risk: "+risk+" · R/R: "+(reward===null?"—":reward.toFixed(2))));
+    scalp.append(el("strong",null,exitSuggested?"EXIT — بستن پوزیشن":scalpGo?"GO — ورود "+row.direction:"NO-GO"),el("small",null,exitSuggested?"پیشنهاد خروج مدل؛ کلیک برای تأیید":("Snapshot: "+(fresh?"تازه":"قدیمی"))),el("small",null,"Spread: "+spread),el("small",null,"M1: "+m1+" · M5: "+m5),el("small",null,"SL risk: "+risk+" · R/R: "+(reward===null?"—":reward.toFixed(2))));
     const simpleCells=[
       {text:"",cls:"scalp-cell",extra:scalp},
       {text:recommendation,cls:"trade-recommendation "+recClass,extra:engineAdvice},
