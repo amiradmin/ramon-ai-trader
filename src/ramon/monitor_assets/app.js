@@ -346,7 +346,16 @@ function renderOpportunities(data){
     if(p>=0.55)return 20;
     return 10;
   };
+  const scalpDecisionRank=row=>{
+    const fresh=typeof row.age_seconds==="number"&&row.age_seconds<=45;
+    const confirmed=Boolean(row.entry_timing_ready===1&&row.entry_timing_direction===row.direction);
+    if(row.actionable&&fresh&&compatibility.supported&&confirmed)return 3; // GO: ready for final human review
+    if(row.actionable&&fresh)return 2; // current candidate, waiting on an execution confirmation
+    return 1; // stale, blocked, or informational only
+  };
   const sortedOpportunities=[...(data.opportunities||[])].sort((a,b)=>{
+    const scalpRank=scalpDecisionRank(b)-scalpDecisionRank(a);
+    if(scalpRank!==0)return scalpRank;
     const priority=tradePriority(b)-tradePriority(a);
     if(priority!==0)return priority;
     const ap=typeof a.success_probability==="number"&&Number.isFinite(a.success_probability)?a.success_probability:-1;
