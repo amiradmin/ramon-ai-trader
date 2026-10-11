@@ -100,6 +100,24 @@ data/research/mt5-trace-intake/<STAMP>/XAUUSD_l_M5_20260923_20261010.csv
    sidecar، `trade_rejection_audit` و `executed_trade_dataset_builder` دوباره
    فقط روی آن sidecar اجرا شوند.
 
+### ساخت sidecar بدون تغییر SQLite اصلی
+
+پس از دریافت export معتبر، ابزار زیر فقط timestampهای گزارش‌شدهٔ مفقود را از
+CSV انتخاب می‌کند و یک CSV پژوهشی مستقل می‌سازد. candle تکراری با OHLC متفاوت
+به‌عنوان conflict ثبت می‌شود و هیچ timestamp حل‌نشده‌ای ساخته نمی‌شود:
+
+```bash
+.venv/bin/python -m ramon.m5_recovery_sidecar \
+  --missing-report data/research/trade_rejection_quality.json \
+  --candidate-csv data/research/mt5-trace-intake/<STAMP>/XAUUSD_l_M5_20260923_20261010.csv \
+  --output data/research/m5-recovery-sidecar.csv \
+  --report data/research/m5-recovery-sidecar-quality.json
+```
+
+گزارش، SHA-256 فایل ورودی، تعداد candleهای انتخاب‌شده، timestampهای conflict و
+تعداد موارد حل‌نشده را ثبت می‌کند. انتخاب candle به معنای اثبات broker-authentic
+بودن export نیست؛ provenance فایل و بازبینی انسانی همچنان لازم است.
+
 هیچ candle ساختگی، forward fill، interpolation یا انتقال دادهٔ آینده مجاز نیست.
 تا رسیدن export معتبر، تعداد 82 `COMPLETE_CONTEXT` تغییر نمی‌کند و 70 تعارض
 برای ارزیابی مدل واجد شرایط نیستند.
