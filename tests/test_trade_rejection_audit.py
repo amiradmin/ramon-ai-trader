@@ -30,9 +30,12 @@ def test_reports_accepted_and_independent_causal_rejection_codes():
               trade("missing", "T4")]
     details, report = inspect_trades(
         decisions, trades, candles(), broker_utc_offset_seconds=10800)
-    assert [d["reason"] for d in details] == [
-        "COMPLETE_CONTEXT", "TRADE_OPEN_BEFORE_DECISION",
-        "DIRECTION_MISMATCH", "UNMATCHED_DECISION"]
+    assert {d["trade_key"]: d["reason"] for d in details} == {
+        "T1": "COMPLETE_CONTEXT",
+        "T2": "TRADE_OPEN_BEFORE_DECISION",
+        "T3": "DIRECTION_MISMATCH",
+        "T4": "UNMATCHED_DECISION",
+    }
     assert report["trades_scanned"] == 4
 
 
