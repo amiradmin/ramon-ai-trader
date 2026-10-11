@@ -36,3 +36,18 @@ sudo systemctl enable --now ramon-ai-trader.service
 ```
 
 در این محیط Docker daemon و بوت اوبونتو در دسترس نبود؛ ساختار Compose و واحد systemd با وابستگی آزمایشی بررسی شده‌اند. تأیید نهایی بوت روی کامپیوتر کاربر انجام می‌شود.
+
+## پیش از روشن‌کردن معامله‌گری در شروع بازار
+
+پس از بازشدن بازار و پیش از هر تغییر در `EnableLiveTrading`، فقط این preflight
+فقط‌خواندنی را اجرا کنید:
+
+```bash
+scripts/preflight_live_start.sh
+```
+
+این فرمان هیچ container، MT5 یا سفارشی را start نمی‌کند. تنها وقتی exit code صفر
+داد، diagnostic تازهٔ EA، اتصال terminal، مجوزهای trading، account lock، تأیید
+واحد پول، مدل آماده، tick تازه، risk gate و `/health` مدل همگی سبز هستند. هر
+وضعیت قرمز باید ابتدا رفع و preflight دوباره اجرا شود؛ خروجی قرمز مجوز روشن
+کردن معامله‌گری نیست.
