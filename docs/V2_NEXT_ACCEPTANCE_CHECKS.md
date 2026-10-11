@@ -90,3 +90,12 @@ read-only investigation of the 155 dashboard-origin outcomes.
 The latest consolidated validation and remaining release gates are in
 `V2_OVERNIGHT_REVIEW_FA.md`. No live deployment or trading is authorized
 by these offline results.
+
+## Candidate coordinator implementation (2026-10-11)
+
+Both entry routes now acquire an exclusive account/server journal lease and
+persist a single outstanding intent before broker actions. See
+`V2_EXECUTION_COORDINATOR_FA.md` for first-use provisioning, offline evidence
+and open native/Wine/demo acceptance gates. The older design-only description
+above refers to the earlier baseline; candidate implementation is now present.
+No deployment or live arming was performed.

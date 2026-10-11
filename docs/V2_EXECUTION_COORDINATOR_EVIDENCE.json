@@ -1,0 +1,59 @@
+{
+  "client_date": "2026-10-11",
+  "base_commit": "d59842b",
+  "validation_scope": "Native compilation plus translated production coordinator, real Linux file locks and fsync, synthetic broker/account/history APIs",
+  "new_coordinator_tests_passed": 29,
+  "related_tests_passed": 37,
+  "related_tests_log_sha256": "e115d35f5835e66637363b0949c5e06c44a1d62ae85d1b42ea7601283c09f181",
+  "native_compilation": {
+    "candidate": {
+      "result": "Result: 0 errors, 0 warnings, 20825 ms elapsed, cpu='X64 Regular'",
+      "source": "build/v2-execution-journal/RamonCandidate.mq5",
+      "source_sha256": "868c4e61fe93a0f39dbc0e4298a9e9945e1d3ea7d9c1a39a301fb2182b815278",
+      "ex5_sha256": "1f581de10a9360b1e3539a65230732da12c8f6202e3abacdab223d44a55e64f0",
+      "log_sha256": "e071b441be13b9c556a8a82db3d9a2ad31a6d239e726daac5bd540b43329df92"
+    },
+    "tester": {
+      "result": "Result: 0 errors, 0 warnings, 19511 ms elapsed, cpu='X64 Regular'",
+      "source": "build/v2-execution-journal/RamonTester.mq5",
+      "source_sha256": "448d6be06015dd107ac0286e84dccb0212502f523e9689bde2264b4f38fcfbe4",
+      "ex5_sha256": "1acc9894c221265238e3fa84b0eeb50a04ea0fc4d374b63ee185fb3b40294fb3",
+      "log_sha256": "fb084abb8159e310f9fcb68277e02e7be026022cf8cfac1bc833c9f45c2871eb"
+    },
+    "provisioner": {
+      "result": "Result: 0 errors, 0 warnings, 583 ms elapsed, cpu='X64 Regular'",
+      "source": "build/v2-execution-journal/RamonExecutionProvision.mq5",
+      "source_sha256": "2a2f4b5ee4da0338358a953018e66f5e1adbfb0012011c72d0ca931de3befe92",
+      "ex5_sha256": "88fdbb93514df4bc778654e4b6256ec38c5cad9db1745de74c793e982c71b1cd",
+      "log_sha256": "b0c9764987bf804ae65848e1038d3938d4758c94d16c8c8783c8ba0fe427dfb1"
+    }
+  },
+  "source_sha256": {
+    "mt5/Ramon.mq5": "868c4e61fe93a0f39dbc0e4298a9e9945e1d3ea7d9c1a39a301fb2182b815278",
+    "scripts/generate_execution_journal_adapter.py": "6f5ff8208d66697177cb8a87dd44858382419565f39461e04fc63e082d989a8e",
+    "scripts/generate_execution_journal_provisioner.py": "a7b261f01c9b816a9b1974d206bf9ed2e87a32402b45606c09786652515199f1",
+    "tests/test_v2_execution_journal.py": "93e5443cab172a0b7c218cb801f829cb03f4f72d290c4818666680f33c284a09"
+  },
+  "installed_ea_unchanged_from_previous_verified_baseline": {
+    "/home/amir/.mt5/drive_c/Program Files/MetaTrader 5/MQL5/Experts/Ramon/Ramon.mq5": true,
+    "/home/amir/.mt5/drive_c/Program Files/MetaTrader 5/MQL5/Experts/Ramon/Ramon.ex5": true
+  },
+  "native_two_chart_wine_lock_acceptance": "UNVERIFIED",
+  "power_loss_durability": "UNVERIFIED",
+  "guardian_broker_close_and_reverse": "UNVERIFIED",
+  "production_deployed": false,
+  "journal_provisioned_on_account": false,
+  "orders_submitted": false,
+  "risk_settings_changed": false,
+  "live_readiness": "NO_GO",
+  "full_suite": {
+    "passed": 581,
+    "failed": 0,
+    "errors": 0,
+    "warnings": 0,
+    "duration_seconds": 76.87,
+    "log_sha256": "011df867c4f51ac5bcc4f638f591e3514dc41a9a68daa2e31653ca8f1121148e",
+    "command": "env -u PYTHONPATH PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q",
+    "environment": "approved temporary local HTTP test servers; no broker access"
+  }
+}
