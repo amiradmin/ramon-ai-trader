@@ -9,7 +9,7 @@ def make_db(path):
             symbol TEXT, timeframe TEXT, time INTEGER,
             open REAL, high REAL, low REAL, close REAL)""")
         for tf, secs in TIMEFRAME_SECONDS.items():
-            for start in (0, secs, 2 * secs, 3 * secs):
+            for start in range(0, 4 * 3600, secs):
                 db.execute("INSERT INTO history_bars VALUES (?,?,?,?,?,?,?)",
                            ("XAUUSD_l", tf, start, 10, 12, 9, 11))
 
