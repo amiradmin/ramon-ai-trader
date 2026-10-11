@@ -19,7 +19,7 @@ from .multitimeframe_h1_overlay import load_research_h1
 
 STEPS = {"M5": 300, "M15": 900, "H1": 3600}
 FIELDS = [
-    "sample_key", "signal_bar_time", "decision_utc", "direction", "base_decision",
+    "sample_key", "signal_bar_time", "signal_bar_utc", "decision_utc", "direction", "base_decision",
     "outcome_status", "net_r", "net_units", "label_end_utc",
     *[f"{tf.lower()}_{name}" for tf in STEPS
       for name in ("last_close", "return_2bars", "last_range", "last_body")],
@@ -51,7 +51,12 @@ def _closed_features(series, decision_utc, seconds):
             float(b[2]) - float(b[3]), float(b[4]) - float(b[1]))
 
 
-def build_dataset(decisions, outcomes, candles):
+def build_dataset(decisions, outcomes, candles, *, broker_utc_offset_seconds=0):
+    # Offset must be supplied from independently documented broker-clock
+    # provenance; NEVER inferred from future outcomes or optimal coverage.
+    offset = int(broker_utc_offset_seconds)
+    if abs(offset) > 14 * 3600 or offset % 60:
+        raise ValueError('broker UTC offset must be whole minutes within +/-14h')
     selected = {}
     counters = Counter()
     # Select one earliest captured candidate per signal bar FIRST, before
@@ -62,14 +67,15 @@ def build_dataset(decisions, outcomes, candles):
             counters["missing_decision_identity"] += 1
             continue
         bar = int(bar)
-        if bar in selected:
+        bar_utc = bar - offset
+        if bar_utc in selected:
             counters["duplicate_snapshots_excluded"] += 1
             continue
         captured = int(row["captured"])
-        if bar <= 0 or captured < bar:
+        if bar_utc <= 0 or captured < bar_utc:
             counters["invalid_signal_bar_time"] += 1
             continue
-        selected[bar] = row
+        selected[bar_utc] = row
     by_key = defaultdict(list)
     for row in outcomes:
         by_key[(row["symbol"], row["sample_key"])].append(row)
@@ -115,8 +121,8 @@ def build_dataset(decisions, outcomes, candles):
             else:
                 counters["unlabeled_decisions"] += 1
             result.append({
-                "sample_key": d["sample_key"], "signal_bar_time": bar,
-                "decision_utc": when, "direction": d["direction"] or "",
+                "sample_key": d["sample_key"], "signal_bar_time": int(d["signal_bar_time"]),
+                "signal_bar_utc": bar, "decision_utc": when, "direction": d["direction"] or "",
                 "base_decision": d["base_decision"] or "",
                 "outcome_status": status, "net_r": outcome_r,
                 "net_units": outcome_units, "label_end_utc": ended, **values,
@@ -165,12 +171,17 @@ def read_inputs(db, h1_csv, symbol):
     return decisions, outcomes, candles
 
 
-def export_dataset(db, h1_csv, *, symbol, output, report):
+def export_dataset(db, h1_csv, *, symbol, output, report,
+                   broker_utc_offset_seconds=0):
     if output.resolve() == report.resolve():
         raise ValueError("output and report must differ")
     decisions, outcomes, candles = read_inputs(db, h1_csv, symbol)
-    rows, summary = build_dataset(decisions, outcomes, candles)
+    rows, summary = build_dataset(
+        decisions, outcomes, candles,
+        broker_utc_offset_seconds=broker_utc_offset_seconds)
     summary["symbol"] = symbol
+    summary["broker_utc_offset_seconds"] = int(broker_utc_offset_seconds)
+    summary["time_basis"] = "captured=UTC; signal_bar_time=broker; signal_bar_utc=broker-offset"
     summary["total_decision_snapshots"] = len(decisions)
     summary["total_trade_outcomes"] = len(outcomes)
     summary["output"] = str(output)
@@ -190,11 +201,14 @@ def main():
     parser.add_argument("--db", type=Path, required=True)
     parser.add_argument("--h1-csv", type=Path, required=True)
     parser.add_argument("--symbol", default="XAUUSD_l")
+    parser.add_argument("--broker-utc-offset-seconds", type=int, default=0,
+                        help="Explicit verified broker clock offset from UTC; e.g. 10800 for UTC+3")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
     print(json.dumps(export_dataset(args.db, args.h1_csv, symbol=args.symbol,
-                                    output=args.output, report=args.report),
+                                    output=args.output, report=args.report,
+                                    broker_utc_offset_seconds=args.broker_utc_offset_seconds),
                      ensure_ascii=False))
 
 
