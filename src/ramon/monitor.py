@@ -1215,6 +1215,21 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
     if model_time["state"] == "clock_error" or ea_time["state"] == "clock_error":
         warnings.append("زمان منبع در آینده است؛ ساعت نیاز به بررسی دارد")
     active_manual = final.get("manual_overrides_active") if isinstance(final.get("manual_overrides_active"), list) else []
+    quality_reasons = final.get("data_quality_shadow_reasons") if isinstance(final.get("data_quality_shadow_reasons"), list) else []
+    no_trade_reasons = final.get("no_trade_shadow_reasons") if isinstance(final.get("no_trade_shadow_reasons"), list) else []
+    operator_status = {
+        "mode": "فقط نظارتی" if model_time["state"] != "fresh" or ea_time["state"] != "fresh" else "آمادهٔ ارزیابی",
+        "state": "stale" if model_time["state"] != "fresh" or ea_time["state"] != "fresh" else "shadow",
+        "reason": "دادهٔ تازهٔ مدل یا اکسپرت در دسترس نیست" if model_time["state"] != "fresh" or ea_time["state"] != "fresh" else "کنترل‌های Shadow فقط مشاهده می‌شوند؛ مجوز سفارش نیستند",
+        "data_quality_ready": final.get("data_quality_shadow_ready"),
+        "data_quality_reasons": quality_reasons,
+        "no_trade_recommendation": final.get("no_trade_shadow_recommendation"),
+        "no_trade_reasons": no_trade_reasons,
+        "buy_quality": buy_quality_p,
+        "sell_quality": sell_quality_p,
+        "entry_timing_ready": final.get("entry_timing_ready"),
+        "memory_status": "در حال جمع‌آوری دادهٔ معتبر؛ هنوز فیلتر زنده نیست",
+    }
     for item in nodes:
         if item["id"] in active_manual:
             effective_manual = item["id"] != "range" or range_execution
@@ -1235,7 +1250,7 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
             "timeline": timeline, "trades": outcomes, "model_handler_map": model_handler_map,
             "recent_market": recent_market,
             "dollar_readiness": readiness, "dashboard_opportunity_performance": dashboard_performance,
-            "income_roadmap": roadmap, "warnings": warnings}
+            "income_roadmap": roadmap, "operator_status": operator_status, "warnings": warnings}
 
 
 def analysis_bundle(snapshot: dict, selected_stage: str = "") -> str:

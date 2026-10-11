@@ -68,6 +68,23 @@ def test_observed_preview_does_not_claim_an_order_or_gate_pass(sources):
     assert n["models"]["state"] == "pass"
 
 
+def test_operator_summary_keeps_shadow_controls_non_authoritative(sources):
+    db, diag = sources
+    with sqlite3.connect(db) as con:
+        metadata = json.loads(con.execute("SELECT model_metadata FROM decision_samples").fetchone()[0])
+        metadata["decision_audit"]["final"].update({
+            "data_quality_shadow_ready": 0,
+            "data_quality_shadow_reasons": ["micro_context_missing"],
+            "no_trade_shadow_recommendation": "WAIT",
+            "no_trade_shadow_reasons": ["data_quality"],
+        })
+        con.execute("UPDATE decision_samples SET model_metadata=?", (json.dumps(metadata),))
+    status = build_snapshot(db, diag, now=NOW)["operator_status"]
+    assert status["data_quality_ready"] == 0
+    assert status["no_trade_recommendation"] == "WAIT"
+    assert "micro_context_missing" in status["data_quality_reasons"]
+
+
 @pytest.mark.parametrize("detected,ready,state,signal_ready", [
     ("SELL", 1, "idle", "خیر"),
     ("NEUTRAL", 0, "idle", "خیر"),
