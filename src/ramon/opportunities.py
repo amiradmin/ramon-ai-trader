@@ -121,6 +121,11 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
     con=sqlite3.connect(f'file:{path.resolve()}?mode=ro',uri=True,timeout=.5)
     con.row_factory=sqlite3.Row
     try:
+        tables={row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        m5_latest=None
+        if "history_bars" in tables:
+            row=con.execute("SELECT max(time) FROM history_bars WHERE symbol=? AND timeframe='M5'",(symbol,)).fetchone()
+            m5_latest=int(row[0]) if row and row[0] is not None else None
         latest=con.execute('SELECT max(captured) FROM decision_samples WHERE symbol=?',(symbol,)).fetchone()[0]
         if latest is None:return {'opportunities':[], 'scope':'positive_model_edge'}
         rows=list(con.execute('''SELECT captured,signal_bar_time,sample_key,quote_time,mid,spread,
@@ -213,6 +218,7 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
                     'intrabar_confirmed':base.get('intrabar_confirmed'),
                     'intrabar_direction':base.get('intrabar_direction'),
                     'intrabar_move_atr':base.get('intrabar_move_atr'),
+                    'm5_latest_bar_time':m5_latest,
                     'ai_trend_confirmed':base.get('ai_trend_confirmed'),
                     'ai_trend_direction':base.get('ai_trend_direction'),
                     'ai_trend_score':base.get('ai_trend_score'),
@@ -222,7 +228,7 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
                     'finbert_score':finbert.get('finbert_directional_score'),
                     'news_title':news.get('news_event_title'),
                     'news_impact':news.get('news_event_impact'),
-                    'entry':entry,'stop':entry-sign*stop,'target':entry+sign*target,
+                    'entry':entry,'stop':entry-sign*stop,'target':entry+sign*target,'spread':row['spread'],
                     'risk_distance':stop,'first_reason':first_reason,'last_reason':final.get('reason'),
                     'model_approved':prior_approved or row['final_decision']==side,
                     'executed':prior_executed or row['sample_key'] in traded,
@@ -251,6 +257,11 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
                 item['outcome']=='OPEN' and not item['executed']
                 and item['age_seconds']<=ACTIONABLE_SECONDS
                 and item['edge']>0
+            )
+            quote=int(item['quote_time'])
+            item['m5_context_state']=(
+                'READY' if m5_latest is not None and 0 <= quote-m5_latest <= 600
+                else 'STALE' if m5_latest is not None else 'MISSING'
             )
         return {'opportunities':sorted(grouped.values(),key=lambda x:x['captured'],reverse=True)[:max(1,min(limit,200))],
                 'as_of':latest,'actionable_seconds':ACTIONABLE_SECONDS,
