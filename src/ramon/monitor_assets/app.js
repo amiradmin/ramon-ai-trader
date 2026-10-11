@@ -467,7 +467,17 @@ function renderOpportunities(data){
       engineAdvice.append(why);
     }
 
+    const fresh=typeof row.age_seconds==="number"&&row.age_seconds<=45;
+    const spread=typeof row.spread==="number"?format(row.spread):"—";
+    const risk=typeof row.risk_distance==="number"?format(row.risk_distance):"—";
+    const reward=typeof row.entry==="number"&&typeof row.target==="number"&&typeof row.risk_distance==="number"&&row.risk_distance>0?Math.abs(row.target-row.entry)/row.risk_distance:null;
+    const scalpGo=Boolean(row.actionable&&fresh&&compatibility.supported&&row.entry_timing_ready===1&&row.entry_timing_direction===row.direction);
+    const scalp=document.createElement("div");scalp.className="scalp-check "+(scalpGo?"go":"no-go");
+    const m1=row.intrabar_confirmed===1&&row.intrabar_direction===row.direction?"تأیید":"عدم تأیید";
+    const m5=row.m5_context_state==="READY"?"آماده":row.m5_context_state==="STALE"?"قدیمی":"ثبت نشده";
+    scalp.append(el("strong",null,scalpGo?"GO — بازبینی نهایی":"NO-GO"),el("small",null,"Snapshot: "+(fresh?"تازه":"قدیمی")),el("small",null,"Spread: "+spread),el("small",null,"M1: "+m1+" · M5: "+m5),el("small",null,"SL risk: "+risk+" · R/R: "+(reward===null?"—":reward.toFixed(2))));
     const simpleCells=[
+      {text:"",cls:"scalp-cell",extra:scalp},
       {text:recommendation,cls:"trade-recommendation "+recClass,extra:engineAdvice},
       {text:directionFa,cls:"trade-direction "+(row.direction==="BUY"?"buy":"sell"),dir:"ltr"},
       {text:confidenceText,cls:"trade-confidence",dir:"ltr"},
