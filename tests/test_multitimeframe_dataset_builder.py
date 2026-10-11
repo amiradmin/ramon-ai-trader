@@ -46,7 +46,7 @@ def test_earliest_snapshot_chosen_without_outcome_leakage():
 def test_future_bars_missing_context_and_noncausal_labels():
     bars = candles()
     decisions = [
-        decision(1, 0, 100, "too_early"),
+        decision(1, 60, 100, "too_early"),
         decision(2, 6300, 7200, "bad_trade"),
     ]
     rows, summary = build_dataset(
