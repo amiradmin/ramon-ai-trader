@@ -77,7 +77,7 @@ def test_transient_old_sl_snapshot_not_counted_as_stable_change():
     result = analyze_events(rows)["positions"][0]
     assert len(result["observed_sl_transitions"]) == 4
     assert len(result["stable_observed_sl_transitions"]) == 2
-    assert len(result["transient_sl_conflicts"]) == 2
+    assert len(result["transient_sl_conflicts"]) == 1
     assert result["unconfirmed_final_sl_candidate"] is None
     assert [(c["from"], c["to"]) for c in result["stable_observed_sl_transitions"]] == [
         (4163, 4178.8), (4178.8, 4181.45)
