@@ -6,7 +6,8 @@ from ramon.live_start_preflight import evaluate_diagnostic, run
 READY = """Market: OPEN/FULL  TerminalConnected: YES
 Trade permissions: terminal=YES ea=YES account=YES
 Live: ARMED  AccountLock: OK
-AccountType: CENT  MoneyUnitsConfirmed: YES
+AccountType: CENT
+MoneyUnitsConfirmed: YES
 News: CLEAR  SourceReady: YES  ModelReady: YES
 Status: Waiting
 RiskGate: PASS: preferred risk budget

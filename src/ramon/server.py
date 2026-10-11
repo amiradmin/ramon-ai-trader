@@ -30,6 +30,7 @@ from .reversal_strategy import apply_reversal
 from .trade_selector import apply_live_selector
 from .ai_decision_engine import apply_ai_decision_engine
 from .ai_decision_engine_v3 import apply_ai_engine_v3_shadow
+from .decision_safety_shadow import assess_data_quality, no_trade_recommendation
 
 
 
@@ -929,6 +930,15 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                                       "direction": range_setup["direction"],
                                       "legacy_target": range_setup["target"]}
                 market_assessment = assess_market(market, max_spread_points=settings.max_spread_points)
+                # v1 records input-quality and no-trade evidence only. It cannot
+                # alter an EA decision while its precision/recall is unproven.
+                data_quality_shadow = assess_data_quality(
+                    market,
+                    quote_time=quote_time,
+                    max_spread_points=settings.max_spread_points,
+                )
+                response.update(data_quality_shadow)
+                no_trade_recommendation(response, data_quality_shadow, market_assessment)
                 reversal_selected = apply_reversal(
                     response, result, request_settings, market_assessment,
                     enabled=reversal_live_enabled, manual_overrides=active_overrides,
