@@ -107,3 +107,47 @@ def test_sqlite_read_only_and_output_csv(tmp_path):
     assert len(recs) == 1
     assert set(recs[0]) == set(FIELDS)
     assert recs[0]["net_r"] == "-0.5"
+
+
+def test_broker_utc_plus_three_hours_normalizes_before_grouping():
+    # Example: recorded 13:30 broker represents 10:30 UTC.
+    # Decision capture 10:49 UTC is after the true signal bar,
+    # despite preceding the raw broker timestamp.
+    offset = 10800
+    decision_utc = 7200
+    bar_utc = 6300
+    d = decision(1, bar_utc + offset, decision_utc, "broker")
+    rows, summary = build_dataset([d], [], candles(),
+                                  broker_utc_offset_seconds=offset)
+    assert summary["unique_signal_bars_selected"] == 1
+    assert len(rows) == 1
+    assert rows[0]["signal_bar_time"] == bar_utc + offset
+    assert rows[0]["signal_bar_utc"] == bar_utc
+    assert rows[0]["decision_utc"] == decision_utc
+    assert rows[0]["outcome_status"] == "UNTRADED_OR_UNKNOWN"
+
+
+def test_no_future_signal_after_normalization():
+    offset = 10800
+    d = decision(1, 9000 + offset, 7200, "future")
+    rows, summary = build_dataset([d], [], candles(),
+                                  broker_utc_offset_seconds=offset)
+    assert rows == []
+    assert summary["counts"]["invalid_signal_bar_time"] == 1
+
+
+def test_two_clock_forms_of_same_signal_bar_deduplicated():
+    offset = 10800
+    d1 = decision(1, 6300 + offset, 7200, "first")
+    d2 = decision(2, 6300 + offset, 7240, "second")
+    rows, summary = build_dataset([d2, d1], [], candles(),
+                                  broker_utc_offset_seconds=offset)
+    assert len(rows) == 1
+    assert rows[0]["sample_key"] == "first"
+    assert summary["counts"]["duplicate_snapshots_excluded"] == 1
+
+
+def test_unverified_or_invalid_offset_rejected():
+    import pytest
+    with pytest.raises(ValueError):
+        build_dataset([], [], candles(), broker_utc_offset_seconds=123)
