@@ -22,7 +22,7 @@ def evaluate_diagnostic(text: str) -> dict:
         "terminal_connected": "TerminalConnected: YES" in _line(text, "Market"),
         "trade_permissions": "terminal=YES ea=YES account=YES" in _line(text, "Trade permissions"),
         "account_lock": _line(text, "Live").startswith("ARMED") and "AccountLock: OK" in _line(text, "Live"),
-        "money_units_confirmed": _line(text, "MoneyUnitsConfirmed") == "YES",
+        "money_units_confirmed": _line(text, "MoneyUnitsConfirmed").split(maxsplit=1)[0:1] == ["YES"],
         "model_ready": "ModelReady: YES" in _line(text, "News"),
         "fresh_tick": _line(text, "Status") != "Stale tick",
         "risk_gate": _line(text, "RiskGate").startswith("PASS"),

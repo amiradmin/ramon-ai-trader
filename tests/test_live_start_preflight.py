@@ -21,6 +21,11 @@ def test_diagnostic_requires_every_execution_precondition():
     assert checks["terminal_connected"] is False
 
 
+def test_money_units_confirmation_accepts_the_ea_detail_suffix():
+    checks = evaluate_diagnostic(READY.replace("MoneyUnitsConfirmed: YES", "MoneyUnitsConfirmed: YES  MoneyUnitsPerUSD: 100.00"))
+    assert checks["money_units_confirmed"] is True
+
+
 def test_missing_diagnostic_fails_closed(tmp_path: Path):
     result = run(tmp_path / "absent.txt", model_health_url="http://127.0.0.1:1/health", max_age_seconds=60)
     assert result["ready"] is False
