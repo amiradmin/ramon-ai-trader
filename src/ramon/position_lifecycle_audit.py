@@ -45,16 +45,18 @@ def analyze_events(rows: list[dict]) -> dict:
         # Position IDs are account-scoped, not globally unique.
         key = (str(row.get("account_key") or ""), position)
         events[key].append((float(row["received_utc"]), str(row["event_id"]),
-                            kind, data, row.get("sample_key")))
+                            kind, data, row.get("sample_key"),
+                            int(row.get("broker_time_msc") or 0)))
     positions = []
     for (account, position), history in sorted(events.items()):
-        history.sort(key=lambda e: (e[0], e[1]))
+        history.sort(key=lambda e: (e[5], int(e[1].rsplit(":", 1)[-1])
+                                        if e[1].rsplit(":", 1)[-1].isdigit() else 0, e[0]))
         baseline = None
         sl_changes = []
         stage_changes = []
         last_stage = None
         observed_quotes = 0
-        for when, event_id, kind, data, sample_key in history:
+        for when, event_id, kind, data, sample_key, broker_time in history:
             # 'position_change' is a snapshot event; compare to preceding
             # observed snapshot only, not an assumed order modification.
             if kind == "position_quote":
@@ -91,7 +93,7 @@ def analyze_events(rows: list[dict]) -> dict:
         "limitations": [
             "Observed SL transitions are snapshots, not broker-confirmed SL modify events.",
             "Position snapshots can miss intermediate changes and are sensitive to telemetry gaps.",
-            "received_utc can be batch reception time: do not use as proven broker event chronology.",
+            "Ordering uses broker_time_msc and within-run event sequence; broker clock normalization and continuity are not independently verified.",
             "No automatic causal attribution of profit protection or position exits.",
         ],
     }
@@ -106,7 +108,7 @@ def audit_database(db: Path, symbol: str = "XAUUSD_l") -> dict:
             """SELECT event_id, account_key, position_id, sample_key, kind,
                       received_utc, broker_time_msc, body_json
                FROM research_events WHERE symbol=?
-               ORDER BY received_utc, event_id""", (symbol,)
+               ORDER BY broker_time_msc, event_id""", (symbol,)
         )]
     return analyze_events(rows)
 
