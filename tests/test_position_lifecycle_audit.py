@@ -61,3 +61,24 @@ def test_reads_database_without_writing(tmp_path):
     result = audit_database(db)
     assert result["positions_with_events"] == 1
     assert db.read_bytes() == before
+
+
+def test_transient_old_sl_snapshot_not_counted_as_stable_change():
+    rows = [
+        event(1, "position_quote", sl=4163, broker_time=1000),
+        event(2, "position_quote", sl=4163, broker_time=2000),
+        event(3, "position_change", sl=4178.8, broker_time=3000),
+        event(4, "position_quote", sl=4163, broker_time=3400),
+        event(5, "position_change", sl=4178.8, broker_time=5000),
+        event(6, "position_quote", sl=4178.8, broker_time=5000),
+        event(7, "position_change", sl=4181.45, broker_time=7000),
+        event(8, "position_quote", sl=4181.45, broker_time=8000),
+    ]
+    result = analyze_events(rows)["positions"][0]
+    assert len(result["observed_sl_transitions"]) == 4
+    assert len(result["stable_observed_sl_transitions"]) == 2
+    assert len(result["transient_sl_conflicts"]) == 2
+    assert result["unconfirmed_final_sl_candidate"] is None
+    assert [(c["from"], c["to"]) for c in result["stable_observed_sl_transitions"]] == [
+        (4163, 4178.8), (4178.8, 4181.45)
+    ]
