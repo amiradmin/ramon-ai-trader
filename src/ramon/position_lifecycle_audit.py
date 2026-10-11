@@ -54,6 +54,10 @@ def analyze_events(rows: list[dict]) -> dict:
         baseline = None
         sl_changes = []
         stage_changes = []
+        stable_sl_changes = []
+        transient_sl_conflicts = []
+        pending_sl = None
+        stable_sl = None
         last_stage = None
         observed_quotes = 0
         for when, event_id, kind, data, sample_key, broker_time in history:
@@ -64,6 +68,29 @@ def analyze_events(rows: list[dict]) -> dict:
             if kind not in ("position_quote", "position_change"):
                 continue
             sl = _number(data.get("sl"))
+            # A single changed snapshot is provisional. Confirm only when a
+            # subsequent snapshot repeats the candidate; a return to the
+            # last confirmed level is an unresolved transient contradiction.
+            if sl is not None:
+                if stable_sl is None:
+                    stable_sl = sl
+                elif abs(sl - stable_sl) <= 1e-8:
+                    if pending_sl is not None:
+                        transient_sl_conflicts.append({"from": stable_sl, "provisional_to": pending_sl["to"],
+                                                       "observed_broker_time_msc": pending_sl["broker_time_msc"]})
+                        pending_sl = None
+                elif pending_sl is not None and abs(sl - pending_sl["to"]) <= 1e-8:
+                    stable_sl_changes.append({"from": stable_sl, "to": sl,
+                                              "first_seen_broker_time_msc": pending_sl["broker_time_msc"],
+                                              "confirmed_broker_time_msc": broker_time,
+                                              "confirmation": "REPEATED_SNAPSHOT_ONLY"})
+                    stable_sl = sl
+                    pending_sl = None
+                else:
+                    if pending_sl is not None:
+                        transient_sl_conflicts.append({"from": stable_sl, "provisional_to": pending_sl["to"],
+                                                       "observed_broker_time_msc": pending_sl["broker_time_msc"]})
+                    pending_sl = {"to": sl, "broker_time_msc": broker_time}
             if sl is not None:
                 if baseline is not None and abs(sl - baseline) > 1e-8:
                     sl_changes.append({"observed_utc": when, "from": baseline, "to": sl,
@@ -80,6 +107,9 @@ def analyze_events(rows: list[dict]) -> dict:
             "events": len(history),
             "position_quote_events": observed_quotes,
             "observed_sl_transitions": sl_changes,
+            "stable_observed_sl_transitions": stable_sl_changes,
+            "transient_sl_conflicts": transient_sl_conflicts,
+            "unconfirmed_final_sl_candidate": pending_sl,
             "observed_tp_stage_transitions": stage_changes,
             "has_position_change": any(e[2] == "position_change" for e in history),
         })
@@ -91,7 +121,8 @@ def analyze_events(rows: list[dict]) -> dict:
         "positions_with_events": len(positions),
         "positions": positions,
         "limitations": [
-            "Observed SL transitions are snapshots, not broker-confirmed SL modify events.",
+            "Stable means two successive matching snapshots, not broker-confirmed modification.",
+            "Provisional and transient readings may reflect stale or delayed telemetry; do not call them broker rollbacks.",
             "Position snapshots can miss intermediate changes and are sensitive to telemetry gaps.",
             "Ordering uses broker_time_msc and within-run event sequence; broker clock normalization and continuity are not independently verified.",
             "No automatic causal attribution of profit protection or position exits.",
