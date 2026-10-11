@@ -4,6 +4,24 @@ This tool creates a **research-only** CSV from historical decision snapshots
 and exact linked closed trade outcomes. It does not train a model, infer a
 counterfactual P/L, modify production SQLite, or change live trading policy.
 
+## Clock provenance (important)
+
+`decision_samples.captured` is stored in UTC. The local operator inspection
+found `signal_bar_time` about 152–164 minutes **ahead** of `captured`;
+an example has `captured=2026-09-22 10:49:07 UTC` and raw
+`signal_bar_time=2026-09-22 13:30:00`. This is **consistent with**
+broker server time UTC+03:00, with the broker M15 bar beginning at
+10:30 UTC. The offset must be verified from the active MT5 broker time
+configuration before relying on production research results; do not infer it
+from labels or optimize it for coverage. Specify
+`--broker-utc-offset-seconds 10800` only for the documented UTC+3 period.
+The command defaults to 0 (UTC), and does **not** silently guess.
+
+`signal_bar_time` is preserved raw and `signal_bar_utc` is separately
+exported after subtraction of the configured offset. Eligibility is checked
+against `captured` in UTC. If the configured offset or historical broker
+clock changes, split datasets by verified offset period first.
+
 Data contract:
 - For each recorded M15 signal bar select the **earliest** eligible
   `decision_samples` snapshot by `(captured, id)`. Do not select by
@@ -31,6 +49,7 @@ uv run --no-sync python -m ramon.multitimeframe_dataset_builder \
   --db data/ramon_history.sqlite3 \
   --h1-csv data/research/constructed_h1.csv \
   --symbol XAUUSD_l \
+  --broker-utc-offset-seconds 10800 \
   --output data/research/multitimeframe_decisions.csv \
   --report data/research/multitimeframe_dataset_quality.json
 
