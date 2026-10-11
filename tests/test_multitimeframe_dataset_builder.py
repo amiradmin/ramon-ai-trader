@@ -10,7 +10,7 @@ def candles():
     def series(interval):
         return {
             t: (t, 10.0, 11.0, 9.0, 10.5)
-            for t in range(0, 7200, interval)
+            for t in range(0, 10800, interval)
         }
     return {"M5": series(300), "M15": series(900), "H1": series(3600)}
 
@@ -21,16 +21,16 @@ def decision(id_, bar, captured, sample):
                 direction="BUY", base_decision="BUY")
 
 
-def trade(sample, opened=3700, closed=4000, net_r=-0.5):
+def trade(sample, opened=7300, closed=7400, net_r=-0.5):
     return dict(symbol="XAUUSD_l", sample_key=sample,
                 opened=opened, closed=closed, net_r=net_r, net_units=-5)
 
 
 def test_earliest_snapshot_chosen_without_outcome_leakage():
     decisions = [
-        decision(2, 2700, 3650, "late"),
-        decision(1, 2700, 3600, "first"),
-        decision(3, 3600, 4500, "untraded"),
+        decision(2, 6300, 7250, "late"),
+        decision(1, 6300, 7200, "first"),
+        decision(3, 7200, 8100, "untraded"),
     ]
     rows, summary = build_dataset(decisions, [trade("late"), trade("first")], candles())
     assert summary["unique_signal_bars_selected"] == 2
@@ -47,10 +47,10 @@ def test_future_bars_missing_context_and_noncausal_labels():
     bars = candles()
     decisions = [
         decision(1, 0, 100, "too_early"),
-        decision(2, 2700, 3600, "bad_trade"),
+        decision(2, 6300, 7200, "bad_trade"),
     ]
     rows, summary = build_dataset(
-        decisions, [trade("bad_trade", opened=3500)], bars)
+        decisions, [trade("bad_trade", opened=7100)], bars)
     assert len(rows) == 1
     assert rows[0]["outcome_status"] == "INCOMPLETE_OR_NONCAUSAL_TRADE"
     assert rows[0]["net_r"] == ""
@@ -59,7 +59,7 @@ def test_future_bars_missing_context_and_noncausal_labels():
 
 def test_ambiguous_trade_not_labeled():
     rows, summary = build_dataset(
-        [decision(1, 2700, 3600, "a")],
+        [decision(1, 6300, 7200, "a")],
         [trade("a"), trade("a")], candles())
     assert rows[0]["outcome_status"] == "AMBIGUOUS_MULTIPLE_TRADES"
     assert rows[0]["net_r"] == ""
@@ -83,7 +83,7 @@ def test_sqlite_read_only_and_output_csv(tmp_path):
                 continue
             con.executemany("INSERT INTO history_bars VALUES(?,?,?,?,?,?,?)",
                             [("XAUUSD_l", tf, *bar) for bar in series.values()])
-        d = decision(1, 2700, 3600, "s1")
+        d = decision(1, 6300, 7200, "s1")
         con.execute("INSERT INTO decision_samples VALUES(?,?,?,?,?,?,?)",
                     tuple(d[k] for k in ("id","sample_key","symbol","signal_bar_time",
                                          "captured","direction","base_decision")))
