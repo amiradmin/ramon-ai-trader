@@ -101,7 +101,7 @@
 .today-profit-summary .profit-positive{color:var(--green);border-color:#3f7565}
 .today-profit-summary .profit-negative{color:var(--red);border-color:#75434a}
 .today-profit-summary .profit-flat{color:var(--muted)}
-.opportunity-scroll{overflow-x:hidden}.opportunity-table{width:100%;border-collapse:collapse;font-size:11px;min-width:0;table-layout:fixed}.opportunity-table th,.opportunity-table td{padding:10px 7px;text-align:right;border-bottom:1px solid #29364a;vertical-align:top}.opportunity-table th{color:#a7b8ce}.opportunity-table td{font-variant-numeric:tabular-nums}.opportunity-table tbody tr:hover{background:#172336}
+.opportunity-scroll{overflow-x:auto}.opportunity-table{width:100%;border-collapse:collapse;font-size:11px;min-width:1180px;table-layout:fixed}.opportunity-table th,.opportunity-table td{padding:10px 7px;text-align:right;border-bottom:1px solid #29364a;vertical-align:top}.opportunity-table th{color:#a7b8ce}.opportunity-table td{font-variant-numeric:tabular-nums}.opportunity-table tbody tr:hover{background:#172336}
 .opportunity-table td{line-height:1.7;max-width:260px;overflow-wrap:anywhere}
 .opportunity-table th:nth-child(1),.opportunity-table td:nth-child(1){width:11%}
 .opportunity-table th:nth-child(2),.opportunity-table td:nth-child(2){width:13%}
@@ -111,6 +111,7 @@
 .opportunity-table th:nth-child(6),.opportunity-table td:nth-child(6){width:23%}
 .opportunity-table th:nth-child(7),.opportunity-table td:nth-child(7){width:13%}
 .opportunity-table th:nth-child(8),.opportunity-table td:nth-child(8){width:8%}
+.opportunity-table th:nth-child(9),.opportunity-table td:nth-child(9){width:142px}
 .decision-verdict{font-weight:700;border-right:3px solid transparent}
 .decision-verdict.pass{color:var(--green);border-right-color:var(--green);background:#173a3226}
 .decision-verdict.blocked{color:var(--red);border-right-color:var(--red);background:#3e272e26}
@@ -124,7 +125,9 @@
 .opportunity-entry.auto-close{border-color:#3f6685;color:#9bd9ff;background:#142735}
 .opportunity-entry.auto-close.armed{border-color:#3f7565;color:var(--green);background:#173a32}
 .opportunity-entry:disabled{opacity:.38;cursor:not-allowed;filter:grayscale(.4)}
-.opportunity-table th:last-child,.opportunity-table td:last-child{text-align:center;white-space:nowrap}
+.opportunity-table th:last-child,.opportunity-table td:last-child{position:sticky;left:0;text-align:center;white-space:nowrap;min-width:142px;width:142px;background:#111925;box-shadow:-8px 0 12px rgba(5,11,20,.55)}
+.opportunity-table th:last-child{top:0;z-index:4;background:#101925}
+.opportunity-table td:last-child{z-index:2}
 
 .opportunity-table tbody tr.opportunity-confidence-high{background:rgba(30,110,75,.28)}
 .opportunity-table tbody tr.opportunity-confidence-medium{background:rgba(118,104,35,.24)}
