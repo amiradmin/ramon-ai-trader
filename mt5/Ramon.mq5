@@ -1,4 +1,4 @@
-#property strict
+﻿#property strict
 #property version "1.595"
 #define RAMON_EA_VERSION "0.59.5"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
@@ -640,6 +640,24 @@ string RiskGateText()
       : "TRADE BLOCKED: preferred budget exceeded; min lot override OFF");
 }
 
+// Observational V2 telemetry only; never evaluates or bypasses a trading gate.
+string V2MonitorRiskState="UNKNOWN",V2MonitorRiskReason="",V2MonitorRiskSample="";
+string V2MonitorRiskRoute="",V2MonitorGuardianStage="UNKNOWN";
+datetime V2MonitorRiskAt=0,V2MonitorGuardianAt=0,V2MonitorExecAt=0;
+long V2MonitorLogin=0;
+string V2MonitorServer="";
+void V2MonitorRiskStart(string route)
+{
+   V2MonitorLogin=AccountInfoInteger(ACCOUNT_LOGIN); V2MonitorServer=AccountInfoString(ACCOUNT_SERVER);
+   V2MonitorRiskState="CHECKING"; V2MonitorRiskReason="";
+   V2MonitorRiskSample=LastSampleKey; V2MonitorRiskRoute=route; V2MonitorRiskAt=TimeGMT();
+}
+void V2MonitorGuardian(string stage)
+{
+   V2MonitorGuardianStage=stage; V2MonitorGuardianAt=TimeGMT();
+   V2MonitorLogin=AccountInfoInteger(ACCOUNT_LOGIN); V2MonitorServer=AccountInfoString(ACCOUNT_SERVER);
+}
+
 string BuildDiagnosticText()
 {
    MqlTick tick;
@@ -913,6 +931,7 @@ string BuildDiagnosticText()
       +"MinLotSLAccountUnits: "+DoubleToString(LastMinimumLotStopLossUnits,2)
       +"  MinExecutableRiskUSD: "+DoubleToString(AccountUnitsToUSD(LastMinimumLotStopLossUnits),4)+"\n"
       +"RiskGate: "+RiskGateText()+"\n"
+      +V2MonitorText()
       +"MaxSpreadPoints: "+IntegerToString(MaxSpreadPoints)
       +"  CSV: "+(WriteCsvLogs ? "ON" : "OFF")+"\n";
 
@@ -4895,6 +4914,305 @@ bool GuardianGeometry(const string direction,const double original_volume,
       && margin<=AccountInfoDouble(ACCOUNT_MARGIN_FREE)*0.8;
 }
 
+// BEGIN V2 EXECUTION JOURNAL CORE
+// Account/server scoped, exclusive FILE_COMMON handle. Never delete/expire intents.
+int V2ExecHandle=INVALID_HANDLE;
+string V2ExecScope="",V2ExecPending="",V2ExecLastPhase="";
+string V2ExecSymbol="",V2ExecSide="",V2ExecParent="",V2ExecOrder="",V2ExecDeal="";
+double V2ExecVolume=0.0,V2ExecStop=0.0,V2ExecRisk=0.0;
+bool V2ExecFault=false,V2ExecDuplicate=false;
+
+string V2ExecHash(string text)
+{
+   uchar data[],key[],digest[];
+   int size=StringToCharArray(text,data,0,WHOLE_ARRAY,CP_UTF8);
+   if(size<=1) return "";
+   ArrayResize(data,size-1);
+   if(CryptEncode(CRYPT_HASH_SHA256,data,key,digest)!=32) return "";
+   string result="";
+   for(int i=0;i<32;i++) result+=StringFormat("%02x",(uint)digest[i]);
+   return result;
+}
+
+string V2ExecPath(string scope) { return "RamonV2Execution_"+scope+".journal"; }
+
+bool V2ExecIdentity()
+{
+   return V2ExecHandle!=INVALID_HANDLE && !V2ExecFault && AccountLockHealthy()
+      && TerminalInfoInteger(TERMINAL_CONNECTED) && V2StopoutScope()==V2ExecScope;
+}
+
+void V2ExecRelease()
+{
+   if(V2ExecHandle!=INVALID_HANDLE) FileClose(V2ExecHandle);
+   V2ExecHandle=INVALID_HANDLE;
+   V2ExecScope="";
+}
+
+class V2ExecutionLease
+{
+public:
+   ~V2ExecutionLease() { V2ExecRelease(); }
+};
+
+bool V2ExecToken(string text)
+{
+   if(StringLen(text)<1 || StringLen(text)>96) return false;
+   for(int i=0;i<StringLen(text);i++)
+   {
+      ushort c=StringGetCharacter(text,i);
+      if(!((c>='a' && c<='z') || (c>='A' && c<='Z') ||
+         (c>='0' && c<='9') || c=='_' || c=='.' || c=='-' || c==':')) return false;
+   }
+   return true;
+}
+
+bool V2ExecUnsigned(string text)
+{
+   long value=StringToInteger(text);
+   // Broker IDs outside signed 64-bit range require review, never truncate.
+   return value>=0 && IntegerToString(value)==text;
+}
+
+bool V2ExecAppend(string payload)
+{
+   if(!V2ExecIdentity()) { V2ExecFault=true; return false; }
+   string digest=V2ExecHash(payload);
+   if(digest=="") { V2ExecFault=true; return false; }
+   string line=payload+"|"+digest;
+   ResetLastError();
+   FileFlush(V2ExecHandle); // Required when switching a mixed read/write file to writing.
+   if(GetLastError()!=0) { V2ExecFault=true; return false; }
+   if(!FileSeek(V2ExecHandle,0,SEEK_END)) { V2ExecFault=true; return false; }
+   ulong offset=FileTell(V2ExecHandle);
+   uint written=FileWriteString(V2ExecHandle,line+"\r\n");
+   FileFlush(V2ExecHandle);
+   if(written!=(uint)(StringLen(line)+2) || GetLastError()!=0 ||
+      !FileSeek(V2ExecHandle,(long)offset,SEEK_SET))
+   { V2ExecFault=true; return false; }
+   string stored=FileReadString(V2ExecHandle);
+   if(stored!=line || GetLastError()!=0 || !V2ExecIdentity())
+   { V2ExecFault=true; return false; }
+   return true;
+}
+
+string V2ExecPayload(string phase,ulong order,ulong deal)
+{
+   return "E1|"+V2ExecScope+"|"+V2ExecPending+"|"+phase+"|"+V2ExecSymbol+"|"+V2ExecSide
+      +"|"+DoubleToString(V2ExecVolume,8)+"|"+DoubleToString(V2ExecStop,10)
+      +"|"+DoubleToString(V2ExecRisk,8)+"|"+V2ExecParent
+      +"|"+StringFormat("%I64u",order)+"|"+StringFormat("%I64u",deal)
+      +"|"+IntegerToString((long)TimeCurrent());
+}
+
+bool V2ExecRead(string candidate,string &reason)
+{
+   V2ExecPending=""; V2ExecLastPhase=""; V2ExecDuplicate=false;
+   if(!FileSeek(V2ExecHandle,0,SEEK_SET)) { reason="journal seek failed"; return false; }
+   string header=FileReadString(V2ExecHandle);
+   string expected="RAMON_EXEC_V1|"+V2ExecScope;
+   if(header!=expected+"|"+V2ExecHash(expected))
+   { reason="execution journal missing/corrupt header; provision explicitly"; return false; }
+   int records=0;
+   while(!FileIsEnding(V2ExecHandle))
+   {
+      if(++records>100000) { reason="execution journal review limit"; return false; }
+      ResetLastError();
+      string line=FileReadString(V2ExecHandle);
+      string fields[];
+      if(GetLastError()!=0 || StringSplit(line,'|',fields)!=14)
+      { reason="execution journal torn/unreadable record"; return false; }
+      string payload=StringSubstr(line,0,StringLen(line)-65);
+      if(fields[0]!="E1" || fields[1]!=V2ExecScope || fields[13]!=V2ExecHash(payload)
+         || !V2ExecToken(fields[2]) || !V2ExecToken(fields[4])
+         || (fields[5]!="BUY" && fields[5]!="SELL")
+         || !V2ExecUnsigned(fields[9]) || !V2ExecUnsigned(fields[10])
+         || !V2ExecUnsigned(fields[11]) || !V2ExecUnsigned(fields[12])
+         || StringToInteger(fields[12])<=0)
+      { reason="execution journal invalid identity/checksum"; return false; }
+      double volume=StringToDouble(fields[6]),stop=StringToDouble(fields[7]),risk=StringToDouble(fields[8]);
+      if(!MathIsValidNumber(volume) || !MathIsValidNumber(stop) || !MathIsValidNumber(risk)
+         || volume<=0.0 || stop<=0.0 || risk<=0.0)
+      { reason="execution journal invalid risk"; return false; }
+      string phase=fields[3];
+      if(fields[2]==candidate) V2ExecDuplicate=true;
+      if(phase=="PREPARED")
+      {
+         if(V2ExecPending!="" || fields[10]!="0" || fields[11]!="0")
+         { reason="execution journal overlapping preparation"; return false; }
+      }
+      else if(V2ExecPending!=fields[2] || V2ExecSymbol!=fields[4] || V2ExecSide!=fields[5]
+         || V2ExecParent!=fields[9])
+      { reason="execution journal invalid transition"; return false; }
+      else if(phase!="AMENDED" && phase!="RECEIPT" && phase!="UNCERTAIN" && phase!="VISIBLE" && phase!="REJECTED" && phase!="CANCELLED")
+      { reason="execution journal unknown phase"; return false; }
+      else if((phase=="AMENDED" && V2ExecLastPhase!="PREPARED") ||
+         ((phase=="RECEIPT" || phase=="UNCERTAIN") && V2ExecLastPhase!="PREPARED" && V2ExecLastPhase!="AMENDED") ||
+         (phase=="VISIBLE" && (V2ExecLastPhase!="RECEIPT" || fields[10]=="0" || fields[11]=="0")) ||
+         ((phase=="CANCELLED" || phase=="REJECTED") &&
+            (fields[10]!="0" || fields[11]!="0" ||
+             (V2ExecLastPhase!="PREPARED" && V2ExecLastPhase!="AMENDED"))) ||
+         (phase!="AMENDED" && (volume!=V2ExecVolume || stop!=V2ExecStop || risk!=V2ExecRisk)) ||
+         (phase=="VISIBLE" && (fields[10]!=V2ExecOrder || (V2ExecDeal!="0" && fields[11]!=V2ExecDeal))))
+      { reason="execution journal unsafe transition"; return false; }
+      V2ExecPending=fields[2]; V2ExecLastPhase=phase;
+      V2ExecSymbol=fields[4]; V2ExecSide=fields[5]; V2ExecParent=fields[9];
+      V2ExecVolume=volume; V2ExecStop=stop; V2ExecRisk=risk;
+      V2ExecOrder=fields[10]; V2ExecDeal=fields[11];
+      if(phase=="VISIBLE" || phase=="REJECTED" || phase=="CANCELLED") V2ExecPending="";
+   }
+   if(!V2ExecIdentity()) { reason="execution account changed/disconnected"; return false; }
+   return true;
+}
+
+bool V2ExecAcquire(string candidate,string &reason)
+{
+   reason="";
+   if(V2ExecHandle!=INVALID_HANDLE || V2ExecFault || !V2ExecToken(candidate) ||
+      !AccountLockHealthy() || !TerminalInfoInteger(TERMINAL_CONNECTED))
+   { reason="execution unavailable/account disconnected"; return false; }
+   string scope=V2StopoutScope();
+   if(scope=="" || !FileIsExist(V2ExecPath(scope),FILE_COMMON))
+   { reason="execution journal absent; explicit provisioning required"; return false; }
+   // No FILE_SHARE_READ/WRITE: OS owns release on crash; journal owns uncertainty.
+   V2ExecHandle=FileOpen(V2ExecPath(scope),FILE_READ|FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON,0,CP_UTF8);
+   if(V2ExecHandle==INVALID_HANDLE) { reason="execution busy/storage unavailable"; return false; }
+   V2ExecScope=scope;
+   if(!V2ExecRead(candidate,reason)) { V2ExecRelease(); return false; }
+   return true;
+}
+
+bool V2ExecPrepare(string id,string symbol,string side,double volume,double stop,double risk,ulong parent)
+{
+   if(!V2ExecIdentity() || V2ExecPending!="" || V2ExecDuplicate || !V2ExecToken(id)
+      || !V2ExecToken(symbol) || (side!="BUY" && side!="SELL")
+      || !MathIsValidNumber(volume) || !MathIsValidNumber(stop) || !MathIsValidNumber(risk)
+      || volume<=0 || stop<=0 || risk<=0 || TimeCurrent()<=0) return false;
+   V2ExecPending=id; V2ExecSymbol=symbol; V2ExecSide=side;
+   V2ExecVolume=volume; V2ExecStop=stop; V2ExecRisk=risk;
+   V2ExecParent=StringFormat("%I64u",parent); V2ExecOrder="0"; V2ExecDeal="0";
+   if(!V2ExecUnsigned(V2ExecParent)) return false;
+   if(!V2ExecAppend(V2ExecPayload("PREPARED",0,0))) return false;
+   V2ExecLastPhase="PREPARED";
+   return true;
+}
+
+bool V2ExecFinish(string phase,ulong order,ulong deal)
+{
+   if(!V2ExecIdentity() || V2ExecPending=="" ||
+      !V2ExecUnsigned(StringFormat("%I64u",order)) || !V2ExecUnsigned(StringFormat("%I64u",deal))) return false;
+   bool before_send=V2ExecLastPhase=="PREPARED" || V2ExecLastPhase=="AMENDED";
+   if((phase=="AMENDED" && V2ExecLastPhase!="PREPARED") ||
+      ((phase=="CANCELLED" || phase=="REJECTED") && (!before_send || order!=0 || deal!=0)) ||
+      ((phase=="RECEIPT" || phase=="UNCERTAIN") && !before_send) ||
+      (phase=="VISIBLE" && (V2ExecLastPhase!="RECEIPT" || order==0 || deal==0 ||
+         StringFormat("%I64u",order)!=V2ExecOrder ||
+         (V2ExecDeal!="0" && StringFormat("%I64u",deal)!=V2ExecDeal))) ||
+      (phase!="AMENDED" && phase!="CANCELLED" && phase!="REJECTED" && phase!="RECEIPT" && phase!="UNCERTAIN" && phase!="VISIBLE")) return false;
+   if(!V2ExecAppend(V2ExecPayload(phase,order,deal))) return false;
+   V2ExecLastPhase=phase;
+   V2ExecOrder=StringFormat("%I64u",order); V2ExecDeal=StringFormat("%I64u",deal);
+   if(phase=="VISIBLE" || phase=="REJECTED" || phase=="CANCELLED") V2ExecPending="";
+   return true;
+}
+// END V2 EXECUTION JOURNAL CORE
+
+// BEGIN V2 EXECUTION BROKER RECONCILIATION
+bool V2ExecReconcile()
+{
+   if(V2ExecPending=="") return true;
+   // PREPARED without a receipt includes crash-before/after-send: NEVER retry.
+   if(!V2ExecIdentity() || V2ExecLastPhase!="RECEIPT" || V2ExecOrder=="0") return false;
+   ulong order=(ulong)StringToInteger(V2ExecOrder),deal=(ulong)StringToInteger(V2ExecDeal);
+   if(!HistorySelect(0,TimeCurrent()) || !HistoryOrderSelect(order)) return false;
+   if((ulong)HistoryOrderGetInteger(order,ORDER_TICKET)!=order
+      || HistoryOrderGetInteger(order,ORDER_STATE)!=ORDER_STATE_FILLED
+      || HistoryOrderGetString(order,ORDER_SYMBOL)!=V2ExecSymbol
+      || HistoryOrderGetDouble(order,ORDER_VOLUME_CURRENT)!=0.0
+      || MathAbs(HistoryOrderGetDouble(order,ORDER_VOLUME_INITIAL)-V2ExecVolume)>0.00000001) return false;
+   // Select() resets history lists: refresh before enumerating exact-order fills.
+   if(!HistorySelect(0,TimeCurrent())) return false;
+   double filled=0.0; ulong position=0,observed_deal=0; bool receipt_found=deal==0;
+   int count=HistoryDealsTotal();
+   for(int i=0;i<count;i++)
+   {
+      ulong ticket=HistoryDealGetTicket(i);
+      if(ticket==0) return false;
+      if((ulong)HistoryDealGetInteger(ticket,DEAL_ORDER)!=order) continue;
+      if(HistoryDealGetString(ticket,DEAL_SYMBOL)!=V2ExecSymbol
+         || HistoryDealGetInteger(ticket,DEAL_ENTRY)!=DEAL_ENTRY_IN
+         || HistoryDealGetInteger(ticket,DEAL_TYPE)!=(V2ExecSide=="BUY" ? DEAL_TYPE_BUY : DEAL_TYPE_SELL)) return false;
+      ulong pid=(ulong)HistoryDealGetInteger(ticket,DEAL_POSITION_ID);
+      double lots=HistoryDealGetDouble(ticket,DEAL_VOLUME);
+      if(pid==0 || (position!=0 && position!=pid) || !MathIsValidNumber(lots) || lots<=0) return false;
+      position=pid; filled+=lots; observed_deal=ticket;
+      if(ticket==deal) receipt_found=true;
+   }
+   if(!receipt_found || observed_deal==0 || MathAbs(filled-V2ExecVolume)>0.00000001) return false;
+   // Only transfer reservation to a fully visible, protected broker position.
+   for(int i=0;i<PositionsTotal();i++)
+   {
+      ulong ticket=PositionGetTicket(i);
+      if(ticket==0 || !PositionSelectByTicket(ticket)) return false;
+      if((ulong)PositionGetInteger(POSITION_IDENTIFIER)!=position) continue;
+      double sl=PositionGetDouble(POSITION_SL),pnl=0.0;
+      ENUM_ORDER_TYPE side=V2ExecSide=="BUY" ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+      if(PositionGetString(POSITION_SYMBOL)!=V2ExecSymbol || PositionGetDouble(POSITION_VOLUME)<filled-0.00000001
+         || PositionGetInteger(POSITION_TYPE)!=(V2ExecSide=="BUY" ? POSITION_TYPE_BUY : POSITION_TYPE_SELL)
+         || sl<=0 || !OrderCalcProfit(side,V2ExecSymbol,PositionGetDouble(POSITION_VOLUME),
+            PositionGetDouble(POSITION_PRICE_OPEN),sl,pnl) || !MathIsValidNumber(pnl)) return false;
+      return V2ExecFinish("VISIBLE",order,deal==0 ? observed_deal : deal);
+   }
+   return false;
+}
+
+bool V2ExecBegin(string id,string &reason)
+{
+   if(!V2ExecAcquire(id,reason)) return false;
+   if(!V2ExecReconcile()) { reason="unresolved execution intent; reconcile before new entry"; return false; }
+   if(V2ExecDuplicate) { reason="execution intent already recorded; no retry"; return false; }
+   return V2ExecIdentity();
+}
+
+bool V2ExecReserve(string id,ENUM_ORDER_TYPE side,double entry,double stop,double volume,ulong parent)
+{
+   double pnl=0.0;
+   if(!V2ExecIdentity() || !OrderCalcProfit(side,_Symbol,volume,entry,stop,pnl)
+      || !MathIsValidNumber(pnl) || pnl>=0.0) return false;
+   return V2ExecPrepare(id,_Symbol,side==ORDER_TYPE_BUY ? "BUY" : "SELL",volume,stop,-pnl,parent);
+}
+
+bool V2ExecAmend(ENUM_ORDER_TYPE side,double entry,double stop,double volume)
+{
+   double pnl=0.0;
+   if(V2ExecLastPhase!="PREPARED" || !V2ExecIdentity()
+      || !OrderCalcProfit(side,_Symbol,volume,entry,stop,pnl) || !MathIsValidNumber(pnl) || pnl>=0.0) return false;
+   V2ExecVolume=volume; V2ExecStop=stop; V2ExecRisk=-pnl;
+   return V2ExecFinish("AMENDED",0,0);
+}
+
+void V2ExecRecordResult(uint code,ulong order,ulong deal)
+{
+   // Only explicit broker rejection with zero broker identifiers releases risk.
+   bool definite=code==TRADE_RETCODE_REJECT || code==TRADE_RETCODE_INVALID
+      || code==TRADE_RETCODE_INVALID_VOLUME || code==TRADE_RETCODE_INVALID_PRICE
+      || code==TRADE_RETCODE_INVALID_STOPS || code==TRADE_RETCODE_TRADE_DISABLED
+      || code==TRADE_RETCODE_MARKET_CLOSED || code==TRADE_RETCODE_NO_MONEY;
+   if(definite && order==0 && deal==0 && V2ExecIdentity()) V2ExecFinish("REJECTED",0,0);
+   else
+   {
+      bool accepted=code==TRADE_RETCODE_DONE || code==TRADE_RETCODE_DONE_PARTIAL || code==TRADE_RETCODE_PLACED;
+      // Unknown retcodes may retain stale CTrade identifiers on an early exit.
+      // Preserve them for review, but never use them as evidence of this entry.
+      if(V2ExecFinish(accepted ? "RECEIPT" : "UNCERTAIN",order,deal) && accepted) V2ExecReconcile();
+   }
+   if(V2ExecFault || V2ExecPending!="")
+      Print("V2 EXECUTION: unresolved intent=",V2ExecPending," retcode=",code,
+         " order=",order," deal=",deal,"; further entries blocked pending reconciliation");
+   // TIMEOUT/CONNECTION/PLACED/partial fill and unknown responses stay reserved.
+}
+// END V2 EXECUTION BROKER RECONCILIATION
+
 bool ProcessGuardianReversals()
 {
    if(SmallOnlyMode || !GuardianPermissions()) return false;
@@ -4931,37 +5249,69 @@ bool ProcessGuardianReversals()
       if(!GuardianGeometry(direction,original_volume,volume,stop,target))
       { StatusLine="GUARDIAN WAIT: reverse risk/spread/margin blocked"; continue; }
       string origin=DashboardOriginSample(StringSubstr(comment,6,16));
+      V2ExecutionLease execution_lease;
+      string execution_id="G:"+StringFormat("%I64u",ticket);
+      V2MonitorExecAt=TimeGMT();
+      if(!V2ExecBegin(execution_id,why))
+      { StatusLine="GUARDIAN WAIT: "+why; continue; }
+      // Reconciliation can change the selected position and take time: re-read
+      // Parent and execution gates under the same lease before any close.
+      if(!PositionSelectByTicket(ticket) || PositionGetString(POSITION_COMMENT)!=comment ||
+         !GuardianPermissions() || !V2RecoverStopoutHistory(why) || GlobalVariableCheck(V2StopoutKey()) ||
+         AccountLossLimitsBlocked(why) || NewsGuardEntryBlocked() || LocalLossCooldownBlocked(direction,why))
+      { StatusLine="GUARDIAN WAIT: coordinated permissions/history changed "+why; continue; }
+      original_volume=PositionGetDouble(POSITION_VOLUME);
+      if(!GuardianGeometry(direction,original_volume,volume,stop,target))
+      { StatusLine="GUARDIAN WAIT: coordinated geometry changed"; continue; }
+      ENUM_ORDER_TYPE reserved_side=direction=="BUY" ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+      double reserved_quote=SymbolInfoDouble(_Symbol,direction=="BUY" ? SYMBOL_ASK : SYMBOL_BID);
+      if(!V2ExecReserve(execution_id,reserved_side,reserved_quote,stop,volume,ticket))
+      { StatusLine="GUARDIAN WAIT: durable preparation failed"; continue; }
       // Durable one-shot before any broker action; a crash cannot trigger another reversal.
-      if(!GlobalVariableSetOnCondition(GuardianKey(ticket,"used"),1.0,0.0)) continue;
+      if(!GlobalVariableSetOnCondition(GuardianKey(ticket,"used"),1.0,0.0))
+      { V2ExecFinish("CANCELLED",0,0); continue; }
       GlobalVariableDel(GuardianKey(ticket,"armed")); GlobalVariablesFlush();
+      if(!V2ExecIdentity()) return true;
+      V2MonitorGuardian("CLOSING_PARENT");
       bool closed=Trade.PositionClose(ticket,MaxDeviationPoints);
       uint close_code=Trade.ResultRetcode();
       RecordDealTelemetry(Trade.ResultDeal(),"guardian_original_close");
       if(!closed || close_code!=TRADE_RETCODE_DONE || PositionSelectByTicket(ticket))
-      { StatusLine="GUARDIAN STOP: original close unconfirmed; no reverse"; Print(StatusLine); return true; }
+      { V2MonitorGuardian("CLOSE_UNCONFIRMED"); StatusLine="GUARDIAN STOP: original close unconfirmed; no reverse"; Print(StatusLine); return true; }
+      V2MonitorGuardian("PARENT_CLOSED");
       ClearDashboardAutoCloseTarget(ticket);
       // Reprice after the confirmed close; failure leaves us flat, without a retry.
       if(!GuardianPermissions() || AccountLossLimitsBlocked(why)
          || NewsGuardEntryBlocked() || LocalLossCooldownBlocked(direction,why)
          || !GuardianGeometry(direction,original_volume,volume,stop,target))
-      { StatusLine="GUARDIAN CLOSED: reverse preflight blocked"; Print(StatusLine); return true; }
+      { V2ExecFinish("CANCELLED",0,0); StatusLine="GUARDIAN CLOSED: reverse preflight blocked"; Print(StatusLine); return true; }
       string guard_reason="";
       ENUM_ORDER_TYPE recovery_side=(direction=="BUY" ? ORDER_TYPE_BUY : ORDER_TYPE_SELL);
       double recovery_quote=(direction=="BUY" ? SymbolInfoDouble(_Symbol,SYMBOL_ASK)
          : SymbolInfoDouble(_Symbol,SYMBOL_BID));
+      V2MonitorGuardian("POST_CLOSE_PREFLIGHT");
+      V2MonitorRiskStart("GUARDIAN");
       if(!V2Preflight(recovery_side,recovery_quote,stop,volume,guard_reason))
-      { StatusLine="GUARDIAN CLOSED: V2 "+guard_reason; Print(StatusLine); return true; }
+      { V2MonitorRiskState="BLOCKED"; V2MonitorRiskReason=guard_reason; V2ExecFinish("CANCELLED",0,0); StatusLine="GUARDIAN CLOSED: V2 "+guard_reason; Print(StatusLine); return true; }
+      V2MonitorRiskState="PASS";
+      if(!V2ExecAmend(recovery_side,recovery_quote,stop,volume))
+      { StatusLine="GUARDIAN CLOSED: durable repricing failed"; Print(StatusLine); return true; }
       string recovery_sample=StringFormat("%08x%08x",(uint)ticket,(uint)now);
       StageEntrySizing(recovery_sample,direction=="BUY" ? ORDER_TYPE_BUY : ORDER_TYPE_SELL,
          direction=="BUY" ? SymbolInfoDouble(_Symbol,SYMBOL_ASK) : SymbolInfoDouble(_Symbol,SYMBOL_BID),stop,volume);
       SaveDashboardAlias(recovery_sample,origin);
       string recovery_comment="Ramon:"+recovery_sample+":MG";
+      if(!V2ExecIdentity()) return true;
+      V2MonitorGuardian("REVERSE_SUBMITTING");
       bool submitted=direction=="BUY" ? Trade.Buy(volume,_Symbol,0.0,stop,target,recovery_comment)
          : Trade.Sell(volume,_Symbol,0.0,stop,target,recovery_comment);
       uint code=Trade.ResultRetcode();
+      V2ExecRecordResult(code,Trade.ResultOrder(),Trade.ResultDeal());
       RecordDealTelemetry(Trade.ResultDeal(),"guardian_recovery_entry");
+      V2MonitorGuardian(V2ExecPending!="" || V2ExecFault ? "REVERSE_UNRESOLVED" : "REVERSE_RESULT");
       if(!submitted || (code!=TRADE_RETCODE_DONE && code!=TRADE_RETCODE_DONE_PARTIAL && code!=TRADE_RETCODE_PLACED))
-      { ClearPendingSizing(); StatusLine="GUARDIAN CLOSED: reverse rejected"; }
+      { ClearPendingSizing(); StatusLine=(V2ExecPending!="" || V2ExecFault)
+         ? "GUARDIAN CLOSED: reverse outcome unresolved; entries blocked" : "GUARDIAN CLOSED: reverse rejected"; }
       else { LastEntrySignalBar=LastSignalBarTime; StatusLine="GUARDIAN REVERSE "+direction; }
       Print("Ramon guardian: original #",ticket," ",StatusLine," volume=",volume," SL=",stop," TP=",target);
       WriteOpenDashboardPositions();
@@ -5601,9 +5951,51 @@ void OnTimer()
       || margin>AccountInfoDouble(ACCOUNT_MARGIN_FREE)*0.8)
    { StatusLine="Insufficient margin"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
 
+   V2ExecutionLease execution_lease;
    string guard_reason="";
+   string execution_id=LastSampleKey+(small_profit ? ":S" : (range_trade ? ":R" : (dashboard_manual_entry ? ":M" : ":A")));
+   V2MonitorExecAt=TimeGMT();
+   if(!V2ExecBegin(execution_id,guard_reason))
+   { StatusLine="V2 EXECUTION BLOCKED: "+guard_reason; Print(StatusLine); ShowStatus(); return; }
+   // Re-read mutable account/quote gates AFTER taking the account lease.
+   bool coordinated_open=ManagedPosition(ticket,opened);
+   if((!dashboard_manual_entry && (coordinated_open || OtherPositionOnSymbol())) ||
+      (dashboard_manual_entry && (DashboardOpportunityPositionCount()>=MaxDashboardOpportunityPositions ||
+         (coordinated_open && AccountInfoInteger(ACCOUNT_MARGIN_MODE)!=ACCOUNT_MARGIN_MODE_RETAIL_HEDGING))))
+   { StatusLine="V2 EXECUTION BLOCKED: position state changed"; Print(StatusLine); ShowStatus(); return; }
+   if(!LiveExecutionReady(guard_reason) || AccountLossLimitsBlocked(guard_reason) ||
+      !(bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) || !(bool)MQLInfoInteger(MQL_TRADE_ALLOWED) ||
+      !(bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED) ||
+      SymbolInfoInteger(_Symbol,SYMBOL_TRADE_MODE)!=SYMBOL_TRADE_MODE_FULL ||
+      !SymbolInfoTick(_Symbol,tick) || TimeCurrent()-tick.time>30 || tick.time>TimeCurrent() ||
+      tick.ask<=0 || tick.bid<=0 || (int)SymbolInfoInteger(_Symbol,SYMBOL_SPREAD)>MaxSpreadPoints)
+   { StatusLine="V2 EXECUTION BLOCKED: permissions/account/quote changed "+guard_reason; Print(StatusLine); ShowStatus(); return; }
+   if(!dashboard_manual_entry && !SmallOnlyMode)
+   {
+      today=TradesToday();
+      if(today<0 || today>=MaxTradesPerDay)
+      { StatusLine="V2 EXECUTION BLOCKED: daily limit changed"; Print(StatusLine); ShowStatus(); return; }
+   }
+   if(SmallOnlyMode)
+   {
+      small_entries_on_bar=SmallEntriesThisSignalBar(bar_time);
+      int coordinated_losses=SmallLossClosedThisSignalBar(bar_time);
+      if(small_entries_on_bar<0 || small_entries_on_bar>=SmallProfitMaxEntriesPerSignalBar || coordinated_losses<0 || coordinated_losses>0)
+      { StatusLine="V2 EXECUTION BLOCKED: SMALL history/limit changed"; Print(StatusLine); ShowStatus(); return; }
+   }
+   entry=side==ORDER_TYPE_BUY ? tick.ask : tick.bid;
+   double coordinated_cap=small_profit ? SmallProfitRiskCapUnits() : (range_trade ? RangeMainMaxLossUnits : MaxExecutableRiskUnits());
+   double coordinated_pnl=0.0;
+   if(coordinated_cap<=0 || !OrderCalcProfit(side,_Symbol,volume,entry,stop,coordinated_pnl) ||
+      !MathIsValidNumber(coordinated_pnl) || coordinated_pnl>=0 || -coordinated_pnl>coordinated_cap+0.00001)
+   { StatusLine="V2 EXECUTION BLOCKED: refreshed per-trade risk"; Print(StatusLine); ShowStatus(); return; }
+   V2MonitorRiskStart("ENTRY");
    if(!V2Preflight(side,entry,stop,volume,guard_reason))
-   { StatusLine="V2 ENTRY BLOCKED: "+guard_reason; Print(StatusLine); ShowStatus(); return; }
+   { V2MonitorRiskState="BLOCKED"; V2MonitorRiskReason=guard_reason; StatusLine="V2 ENTRY BLOCKED: "+guard_reason; Print(StatusLine); ShowStatus(); return; }
+   V2MonitorRiskState="PASS";
+
+   if(!V2ExecReserve(execution_id,side,entry,stop,volume,0))
+   { StatusLine="V2 EXECUTION BLOCKED: durable preparation failed"; Print(StatusLine); ShowStatus(); return; }
 
    // Telemetry/management staging must never block an otherwise valid entry.
    StageEntrySizing(LastSampleKey,side,entry,stop,volume);
@@ -5615,23 +6007,27 @@ void OnTimer()
    if(dashboard_manual_entry)
       SaveDashboardAlias(LastSampleKey,
          ValidSampleKey(dashboard_origin_sample_key) ? dashboard_origin_sample_key : LastSampleKey);
+   if(!V2ExecIdentity())
+   { StatusLine="V2 EXECUTION BLOCKED: account changed after preparation"; Print(StatusLine); ShowStatus(); return; }
    bool submitted=(
       decision=="BUY"
       ? Trade.Buy(volume,_Symbol,0.0,stop,target,trade_comment)
       : Trade.Sell(volume,_Symbol,0.0,stop,target,trade_comment)
    );
    uint retcode=Trade.ResultRetcode();
-   if(!submitted || (retcode!=TRADE_RETCODE_DONE && retcode!=TRADE_RETCODE_PLACED))
+   V2ExecRecordResult(retcode,Trade.ResultOrder(),Trade.ResultDeal());
+   if(!submitted || (retcode!=TRADE_RETCODE_DONE && retcode!=TRADE_RETCODE_DONE_PARTIAL && retcode!=TRADE_RETCODE_PLACED))
    {
       ClearPendingSizing();
-      StatusLine="Order rejected "+IntegerToString((int)retcode)+" "+Trade.ResultRetcodeDescription();
+      StatusLine=(V2ExecPending!="" || V2ExecFault ? "Order outcome unresolved; V2 entries blocked " : "Order rejected ")
+         +IntegerToString((int)retcode)+" "+Trade.ResultRetcodeDescription();
    }
    else
    {
       LastEntrySignalBar=bar_time;
       if(SmallOnlyMode)
          LastSmallEntriesOnSignalBar=small_entries_on_bar+1;
-      StatusLine="Order sent "+(small_profit ? "SMALL 2c " : "")
+      StatusLine=(V2ExecPending!="" || V2ExecFault ? "Order acknowledged; V2 reconciliation pending " : "Order sent ")+(small_profit ? "SMALL 2c " : "")
          +decision+" "+DoubleToString(volume,2);
    }
    Print("Ramon execution: ",StatusLine);
@@ -5826,6 +6222,7 @@ bool V2Preflight(ENUM_ORDER_TYPE side,double entry,double stop,double volume,str
    return true;
 }
 
+
 void OnTradeTransaction(
    const MqlTradeTransaction &trans,
    const MqlTradeRequest &request,
@@ -6002,6 +6399,7 @@ int OnInit()
       Print("Ramon live BLOCKED: ConfirmMoneyUnitsPerUSD is false");
    if(EnableLiveTrading && !AccountLockHealthy())
       Print("Ramon live BLOCKED: account/server lock mismatch");
+   Trade.SetAsyncMode(false); // Exclusive execution lease covers synchronous broker response.
    Trade.SetExpertMagicNumber(MagicNumber);
    Trade.SetDeviationInPoints(MaxDeviationPoints);
    Trade.SetTypeFillingBySymbol(_Symbol);
@@ -6031,4 +6429,27 @@ void OnDeinit(const int reason)
       RamonEyeResourceReady=false;
    }
    Comment("");
+}
+
+// Last local observations, not a claim that the shared account is safe now.
+string V2MonitorText()
+{
+   bool identity=V2MonitorLogin==AccountInfoInteger(ACCOUNT_LOGIN)
+      && V2MonitorServer==AccountInfoString(ACCOUNT_SERVER);
+   string stopout=GlobalVariableCheck(V2StopoutKey()) ? "LOCKED" :
+      V2StopoutFaultLatched ? "FAULT" : V2StopoutHistoryHealthy ? "SCANNED" : "UNKNOWN";
+   return "V2StopOut: "+stopout+"\n"
+      +"V2AccountRisk: "+(identity ? V2MonitorRiskState : "UNKNOWN")+"\n"
+      +"V2RiskReason: "+V2MonitorRiskReason+"\n"
+      +"V2RiskSample: "+V2MonitorRiskSample+"\n"
+      +"V2RiskRoute: "+V2MonitorRiskRoute+"\n"
+      +"V2RiskAt: "+IntegerToString((long)V2MonitorRiskAt)+"\n"
+      +"V2RiskCapsUSD: portfolio="+DoubleToString(V2MaxPortfolioRiskUSD,4)
+      +" symbol="+DoubleToString(V2MaxSymbolRiskUSD,4)+" direction="+DoubleToString(V2MaxDirectionRiskUSD,4)+"\n"
+      +"V2GuardEnabled: "+BoolText(EnableV2AccountRiskGuard)+"\n"
+      +"V2Execution: "+(!identity || V2MonitorExecAt==0 ? "UNKNOWN" : V2ExecFault || V2ExecPending!="" ? "BLOCKED" : "OBSERVED")+"\n"
+      +"V2ExecutionPhase: "+V2ExecLastPhase+"\n"
+      +"V2ExecutionAt: "+IntegerToString((long)V2MonitorExecAt)+"\n"
+      +"V2Guardian: "+(identity ? V2MonitorGuardianStage : "UNKNOWN")+"\n"
+      +"V2GuardianAt: "+IntegerToString((long)V2MonitorGuardianAt)+"\n";
 }

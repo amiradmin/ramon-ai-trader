@@ -1,0 +1,28 @@
+{
+  "date": "2026-10-11",
+  "authorization": "User explicitly approved real Cent Guardian test, USD 0.35 total loss stop threshold, and proceeding with prerequisite lock review.",
+  "account": 89166482,
+  "server": "LiteFinance-MT5-Live",
+  "loss_stop_threshold_usd": 0.35,
+  "broker_guardian_test": "NOT_RUN",
+  "reason": "Historical broker Stop Out exists; stop-out recovery/review must remain fail-closed. Quotes are over 31 hours old and broker reports no Sunday trading sessions for XAUUSD_l. No order submitted or candidate installed.",
+  "probe_lines": [
+    "IQ\t0\t07:50:06.753\tRamonCentLockVerify (XAUUSD_l,M15)\tRAMON_CENT_LOCK START no-order probe",
+    "KH\t0\t07:50:07.254\tRamonCentLockVerify (XAUUSD_l,M15)\tRAMON_CENT_LOCK CONTEXT login=89166482 server=LiteFinance-MT5-Live currency=USD path=C:\\Program Files\\MetaTrader 5 positions=0 orders=0 algo=false",
+    "GP\t0\t07:50:07.255\tRamonCentLockVerify (XAUUSD_l,M15)\tRAMON_CENT_LOCK CHECK phase=VERIFY key=RAMON_V2_STOP_OUT_89166482 value=1791648001 reason=stop-out lock",
+    "OI\t0\t07:50:07.255\tRamonCentLockVerify (XAUUSD_l,M15)\tRAMON_CENT_LOCK requesting clean terminal exit; lock retained"
+  ],
+  "artifact_sha256": "97b3ba706ae2b0b457855b63c3c1e358d2f869fde1dd96ca0ee319e3c0a77c52",
+  "readiness_probe": "build/mt5-cent-acceptance/readiness.log",
+  "readiness_probe_sha256": "826e693cb1d51d09cb2284ca0ffbc5ba58f3e210e9ffcad7ac63e486a4bc34a3",
+  "connected_flat_account_verified": true,
+  "algo_trading_enabled": false,
+  "history_deals": 930,
+  "historical_real_stopout_deals": 1,
+  "latest_stopout_deal_time": 1791431330,
+  "quote_time": 1791590339,
+  "server_time": 1791703297,
+  "quote_age_seconds": 112958,
+  "sunday_trade_sessions_reported": 0,
+  "lock_retained": true
+}

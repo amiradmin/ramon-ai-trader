@@ -55,6 +55,41 @@ def nodes(snapshot):
     return {n["id"]: n for n in snapshot["nodes"]}
 
 
+def test_v2_stages_require_explicit_ea_evidence(sources):
+    result = nodes(build_snapshot(*sources, now=NOW))
+    for key in ("stopout", "account_risk", "execution", "guardian"):
+        assert result[key]["state"] == "unknown"
+        assert not result[key]["manual_override_supported"]
+
+
+def test_v2_local_pass_is_observed_and_unresolved_execution_blocks(sources):
+    db, diag = sources
+    with diag.open("a") as f:
+        f.write(f"V2StopOut: SCANNED\nV2AccountRisk: PASS\nV2RiskSample: sample-1\nV2RiskAt: {NOW}\n"
+                f"V2Execution: BLOCKED\nV2ExecutionPhase: UNCERTAIN\nV2ExecutionAt: {NOW}\n"
+                f"V2Guardian: CLOSE_UNCONFIRMED\nV2GuardianAt: {NOW}\n")
+    snapshot = build_snapshot(db, diag, now=NOW)
+    result = nodes(snapshot)
+    assert result["stopout"]["state"] == "observed"
+    assert result["account_risk"]["state"] == "observed"
+    assert result["execution"]["state"] == "blocked"
+    assert result["guardian"]["state"] == "blocked"
+    edges = {(e["from"], e["to"]) for e in snapshot["edges"]}
+    assert ("execution", "stopout") in edges
+    assert ("account_risk", "order") in edges
+    assert ("risk", "order") not in edges
+
+
+@pytest.mark.parametrize("event_at,sample", [(NOW-60, "sample-1"), (NOW+60, "sample-1"), (NOW, "other")])
+def test_v2_risk_never_reuses_stale_future_or_other_decision_evidence(sources, event_at, sample):
+    db, diag = sources
+    with diag.open("a") as f:
+        f.write(f"V2AccountRisk: PASS\nV2RiskSample: {sample}\nV2RiskAt: {event_at}\nV2StopOut: LOCKED\n")
+    result = nodes(build_snapshot(db, diag, now=NOW))
+    assert result["account_risk"]["state"] == "unknown"
+    assert result["stopout"]["state"] == "blocked"
+
+
 def test_observed_preview_does_not_claim_an_order_or_gate_pass(sources):
     s = build_snapshot(*sources, now=NOW, health={"ready": True})
     n = nodes(s)
@@ -104,7 +139,8 @@ def test_healthy_service_never_refreshes_old_forecast_or_position(sources):
     assert nodes(s)["forecast"]["state"] == "stale"
     assert nodes(s)["position"]["state"] == "stale"
     assert nodes(s)["position"]["observed_state"] == "active"
-    assert len(s["warnings"]) == 2
+    assert len(s["warnings"]) == 3
+    assert any("کنترل‌های جدید V2" in warning for warning in s["warnings"])
 
 
 def test_file_rewrite_cannot_freshen_recorded_decision(sources):

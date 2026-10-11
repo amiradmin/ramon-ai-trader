@@ -16,7 +16,9 @@ orders **still count** toward live broker account risk.
 
 History recovery is now implemented in the candidate source (not deployed).
 See `docs/V2_STOPOUT_HISTORY_RECOVERY_FA.md`: native compilation and 29
-Python/source checks passed; the 18-case MQL fixture has not executed and
+Python/source checks passed; the 18-case translated C++ fixture now passes
+with in-memory mocks (see `V2_OVERNIGHT_REVIEW_FA.md`). The native MQL
+fixture has not executed and
 broker-side downtime recovery is still unverified. No locks were cleared.
 
 Update after explicit user authorization to use the live Cent account for the
@@ -77,3 +79,23 @@ attempt this test on LiteFinance live.
 **Risk caution**: the live EA has not been recompiled from further MQL5
 changes in this step; the real account must remain disarmed until demo
 acceptance, persistent stop-out recovery and operator review are complete.
+
+## Offline concurrency and provenance review (2026-10-10)
+
+The interleaving tests demonstrate the existing race; they do not fix it.
+See `V2_ACCOUNT_CONCURRENCY_DESIGN_FA.md` for the proposed durable intent
+coordination contract, and `V2_DASHBOARD_PROVENANCE_AUDIT_FA.md` for the
+read-only investigation of the 155 dashboard-origin outcomes.
+
+The latest consolidated validation and remaining release gates are in
+`V2_OVERNIGHT_REVIEW_FA.md`. No live deployment or trading is authorized
+by these offline results.
+
+## Candidate coordinator implementation (2026-10-11)
+
+Both entry routes now acquire an exclusive account/server journal lease and
+persist a single outstanding intent before broker actions. See
+`V2_EXECUTION_COORDINATOR_FA.md` for first-use provisioning, offline evidence
+and open native/Wine/demo acceptance gates. The older design-only description
+above refers to the earlier baseline; candidate implementation is now present.
+No deployment or live arming was performed.

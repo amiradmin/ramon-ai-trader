@@ -894,6 +894,45 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
          "مدیریت رنج: TP سریع، SL مرزی و ۳۰ دقیقه؛ MAIN: مراحل TP و خروج زودهنگام زیان",
          source="ea", values={"پوزیشن": position or None, "مرحلهٔ TP": diag.get("TPStage"), "قفل سود": diag.get("TPStageLock"),
                               "خروج زیان": diag.get("EarlyAdverseExit"), "توقف خروج بازار بسته": diag.get("MarketClosedExitPause")})
+    # V2 stages require explicit EA evidence. Older installed EAs stay UNKNOWN.
+    stopout = diag.get("V2StopOut", "UNKNOWN")
+    node("stopout", "قفل Stop Out و تاریخچه", "blocked" if stopout in {"LOCKED", "FAULT"} else "observed" if stopout == "SCANNED" else "unknown",
+         "قفل پایدار و بازیابی تاریخچه قبل از ورود؛ نبود قفل به‌تنهایی مجوز معامله نیست",
+         source="ea", values={"وضعیت ثبت‌شده": stopout})
+    def event_state(key, at_key, mapping):
+        observed = diag.get(key, "UNKNOWN")
+        stamp = number(diag.get(at_key))
+        if stamp is None or now - stamp > 30 or stamp > now + 5:
+            return "unknown"
+        return mapping.get(observed, "unknown")
+
+    risk_state_v2 = event_state("V2AccountRisk", "V2RiskAt", {"PASS": "observed", "BLOCKED": "blocked", "CHECKING": "active"})
+    # A pass is a past local check, not an atomic broker/account guarantee.
+    if diag.get("V2RiskSample") != sample.get("sample_key"):
+        risk_state_v2 = "unknown"
+    node("account_risk", "ریسک کل حساب، نماد و جهت", risk_state_v2,
+         "تمام پوزیشن‌ها و سفارش‌ها، شامل دستی و سایر ربات‌ها؛ ریسک نامعلوم مانع ورود است",
+         source="ea", values={"نتیجهٔ آخرین بررسی": diag.get("V2AccountRisk"), "دلیل": diag.get("V2RiskReason"),
+                             "سقف‌ها به دلار": diag.get("V2RiskCapsUSD"), "کنترل فعال": diag.get("V2GuardEnabled"),
+                             "مسیر بررسی": diag.get("V2RiskRoute"), "شناسهٔ بررسی": diag.get("V2RiskSample")})
+    execution_state = event_state("V2Execution", "V2ExecutionAt", {"BLOCKED": "blocked", "OBSERVED": "observed"})
+    if "V2 EXECUTION BLOCKED" in ea_status or "outcome unresolved" in ea_status or "reconciliation pending" in ea_status:
+        execution_state = "blocked"
+    node("execution", "هماهنگی ورود و دفتر پایدار", execution_state,
+         "قفل انحصاری → ثبت درخواست → ارسال → تطبیق با بروکر؛ درخواست نامطمئن ورود بعدی را مسدود می‌کند",
+         source="ea", values={"وضعیت آخرین مشاهدهٔ محلی": diag.get("V2Execution"), "مرحلهٔ دفتر": diag.get("V2ExecutionPhase"),
+                             "محدوده": "EAهای سازگار در یک پوشهٔ مشترک؛ ورود دستی تحت قفل نیست"})
+    guardian_stage = diag.get("V2Guardian", "UNKNOWN")
+    guardian_state = event_state("V2Guardian", "V2GuardianAt", {
+        "CLOSE_UNCONFIRMED": "blocked", "REVERSE_UNRESOLVED": "blocked",
+        "CLOSING_PARENT": "active", "PARENT_CLOSED": "observed", "POST_CLOSE_PREFLIGHT": "active",
+        "REVERSE_SUBMITTING": "active", "REVERSE_RESULT": "observed"})
+    if ea_status.startswith(("GUARDIAN STOP", "GUARDIAN WAIT", "GUARDIAN CLOSED")):
+        guardian_state = "blocked"
+    node("guardian", "Guardian؛ خروج و ورود معکوس", guardian_state,
+         "رزرو پایدار پیش از خروج → تأیید بسته‌شدن والد → ریسک و قیمت تازه → یک ورود معکوس؛ بدون افزایش حجم",
+         source="ea", values={"مرحلهٔ ثبت‌شده": guardian_stage, "وضعیت اجرا": ea_status,
+                             "نوع مسیر": "مسیر جایگزین؛ بعد از ورود عادی اجرا نمی‌شود"})
     edges = [
         ("market", "service", "داده"), ("service", "forecast", "آماده"),
         ("forecast", "timing", "قفل"), ("timing", "extension", "امتداد"), ("extension", "edge", "مزیت"), ("edge", "strength", "قدرت"),
@@ -903,7 +942,9 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
         ("base", "range", "WAIT"), ("range", "decision", "برگشت رنج"),
         ("decision", "news", "سیگنال"), ("news", "account", "مجوز"),
         ("account", "limits", "سقف"), ("limits", "risk", "حجم"),
-        ("risk", "order", "سفارش"), ("order", "position", "پوزیشن"),
+        ("risk", "execution", "قفل ورود"), ("execution", "stopout", "تاریخچه"),
+        ("stopout", "account_risk", "ریسک حساب"), ("account_risk", "order", "رزرو و ارسال"),
+        ("order", "position", "پوزیشن"), ("position", "guardian", "در صورت فعال‌بودن محافظ"),
     ]
     timeline = []
     for row in recent:
@@ -1205,6 +1246,8 @@ def build_snapshot(db, diagnostic=None, *, symbol="XAUUSD_l", now=None, health=N
         signal_bar_time=base.get("signal_bar_time"), quote_time=sample.get("quote_time")
     )
     warnings = [x for x in (diag_error, db_error) if x]
+    if diag and "V2StopOut" not in diag:
+        warnings.append("اکسپرت نصب‌شده اطلاعات کنترل‌های جدید V2 را گزارش نمی‌کند؛ وضعیت این مراحل قابل تأیید نیست")
     warnings.extend(recent_market.get("warnings", []))
     if model_time["state"] != "fresh":
         warnings.append("تصمیم مدل تازه نیست؛ آخرین تصمیم ثبت‌شده نمایش داده می‌شود")

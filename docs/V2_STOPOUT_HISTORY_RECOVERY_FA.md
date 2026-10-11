@@ -101,3 +101,13 @@ Journal موجود باشند. fixture باید در ترمینال مستقل �
 مراجع API: [HistorySelect](https://www.mql5.com/en/docs/trading/historyselect)،
 [خواندن Deal با بررسی خطا](https://www.mql5.com/en/docs/trading/historydealgetinteger)،
 [خواندن متغیر ترمینال](https://www.mql5.com/en/docs/globals/globalvariableget).
+
+## تکمیل آفلاین در ۲۰۲۶-۱۰-۱۰
+
+اسکریپت generate_stopout_history_cpp_adapter.py بخش Stop Out سورس واقعی را
+استخراج و با تبدیل محدود declaration آرایه، روی C++ اجرا می‌کند. تمام ۱۸ مورد
+با پیام SUMMARY cases=18 failures=0 موفق شدند. نام‌فضای SHA256 نیز با خروجی
+مرجع Python مقایسه می‌شود. حساب، تاریخچه و globals در حافظهٔ مصنوعی هستند؛
+بخش اکسپوژر و margin عمداً از آداپتور حذف شده است. این نتیجهٔ تازهٔ آفلاین،
+وضعیت اجرای **بومی MQL5** یا بازیابی بروکر هنگام خاموشی را به PASS تبدیل نمی‌کند.
+اجرای fixture بومی همچنان باز است. هیچ روش ردشدهٔ قبلی تکرار نشد.

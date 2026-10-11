@@ -6,8 +6,8 @@ const fullFmt=new Intl.DateTimeFormat("fa-IR",{timeZone:"Asia/Tehran",month:"sho
 const updateFmt=new Intl.DateTimeFormat("fa-IR-u-ca-persian",{timeZone:"Asia/Tehran",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false});
 const num=v=>typeof v==="number"&&Number.isFinite(v)?v:null;
 const saharFlowLabels={pass:"شرط برقرار",blocked:"شرط ردشده",active:"پوزیشن باز",shadow:"فقط ناظر",stale:"دادهٔ قدیمی",unknown:"نامشخص",observed:"مشاهده‌شده",idle:"انتظار"};
-const saharFlowCoords={market:[35,28],service:[280,28],forecast:[525,28],shadow:[280,218],timing:[770,28],extension:[770,218],edge:[770,408],strength:[525,408],market_direction:[280,408],entry_timing:[35,408],base:[280,598],range:[35,598],decision:[525,598],news:[770,598],account:[770,798],limits:[525,798],risk:[280,798],order:[35,798],position:[35,1018]};
-const saharFlowNames={market:"01 · آقای احمدی",service:"02 · آقای محمدی",forecast:"03 · خانم حسینی",timing:"04 · آقای رضایی",extension:"05 · آقای کریمی",edge:"06 · خانم مرادی",strength:"07 · آقای جعفری",market_direction:"08 · خانم محمودی",entry_timing:"09 · آقای کاظمی",base:"10 · آقای رحیمی",range:"R1",shadow:"S1",decision:"11 · خانم اکبری",news:"12 · آقای صادقی",account:"13 · خانم قاسمی",limits:"14 · آقای یوسفی",risk:"15 · خانم نادری",order:"16 · آقای شریفی",position:"17 · آقای حیدری"};
+const saharFlowCoords={market:[35,28],service:[280,28],forecast:[525,28],shadow:[280,218],timing:[770,28],extension:[770,218],edge:[770,408],strength:[525,408],market_direction:[280,408],entry_timing:[35,408],base:[280,598],range:[35,598],decision:[525,598],news:[770,598],account:[770,798],limits:[525,798],risk:[280,798],execution:[35,798],stopout:[35,1018],account_risk:[280,1018],order:[525,1018],position:[770,1018],guardian:[770,1238]};
+const saharFlowNames={market:"01 · آقای احمدی",service:"02 · آقای محمدی",forecast:"03 · خانم حسینی",timing:"04 · آقای رضایی",extension:"05 · آقای کریمی",edge:"06 · خانم مرادی",strength:"07 · آقای جعفری",market_direction:"08 · خانم محمودی",entry_timing:"09 · آقای کاظمی",base:"10 · آقای رحیمی",range:"R1",shadow:"S1",decision:"11 · خانم اکبری",news:"12 · آقای صادقی",account:"13 · خانم قاسمی",limits:"14 · آقای یوسفی",risk:"15 · خانم نادری",execution:"V2 · هماهنگی",stopout:"V2 · Stop Out",account_risk:"V2 · ریسک حساب",order:"16 · آقای شریفی",position:"17 · آقای حیدری",guardian:"V2 · Guardian"};
 let saharFlowSelected="decision",saharFlowZoomed=false;
 function node(id){return snapshot&&snapshot.nodes?snapshot.nodes.find(x=>x.id===id):null;}
 function handler(name){return snapshot&&snapshot.model_handler_map?snapshot.model_handler_map.find(x=>x.name===name):null;}
@@ -78,7 +78,7 @@ function resizeSaharFlow(){
   const scale=saharFlowZoomed?1:Math.min(1,Math.max(.45,viewport.clientWidth/1020));
   $("sahar-flow-canvas").style.transform="scale("+scale+")";
   $("sahar-flow-space").style.width=(1020*scale)+"px";
-  $("sahar-flow-space").style.height=(1190*scale)+"px";
+  $("sahar-flow-space").style.height=(1450*scale)+"px";
 }
 function renderKpis(){
   const market=node("market"),forecast=node("forecast"),strength=node("strength"),edge=node("edge");
