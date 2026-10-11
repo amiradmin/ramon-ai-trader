@@ -42,7 +42,7 @@ def memory_snapshot(db: str | Path, *, as_of: int, symbol: str = "XAUUSD_l",
             SELECT t.trade_key, t.sample_key, t.opened, t.closed, t.net_r,
                    t.net_units, t.direction, t.training_status,
                    d.captured, d.final_decision, d.base_decision,
-                   d.bundle_id, d.entry_ea_version
+                   d.bundle_id, t.entry_ea_version
             FROM trade_outcomes AS t
             INNER JOIN decision_samples AS d ON d.sample_key = t.sample_key
             WHERE t.symbol = ? AND d.symbol = ?
