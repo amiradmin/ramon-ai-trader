@@ -632,6 +632,38 @@ function renderOpportunities(data){
     "هنوز کاندیدی با مزیت مثبت ثبت نشده · دریافت موفق: "+refreshedAt+compatibilityWarning+perfText);
 }
 let opportunityInFlight=false;
+async function refreshReversalReport(){
+  const status=$("reversal-report-status");
+  if(!status)return;
+  try{
+    const response=await fetch("/api/reversal-report",{cache:"no-store"});
+    if(!response.ok)throw new Error("HTTP "+response.status);
+    const r=await response.json();
+    if(!r.available){status.textContent="گزارش موجود نیست";$("reversal-report-time").textContent="منتظر خروجی سرویس reversal-daily-report";return;}
+    status.textContent=r.report_stale?"گزارش قدیمی":r.status==="INSUFFICIENT_INDEPENDENT_DAYS"?"روزهای داده ناکافی":r.status==="RESEARCH_ONLY"?"فقط پژوهشی":String(r.status);
+    for(const tf of ["M1","M5"]){
+      const q=r.data_quality?.[tf]||{};
+      const name=tf.toLowerCase();
+      $(`reversal-${name}`).textContent=q.status||"نامشخص";
+      $(`reversal-${name}-detail`).textContent=`${q.bars??0} کندل · ${q.age_seconds==null?"زمان نامشخص":Math.round(q.age_seconds/60)+" دقیقه در زمان تهیه گزارش"}`;
+    }
+    $("reversal-days").textContent=`${r.independent_utc_days??"—"} / ${r.required_independent_days??5}`;
+    const overall=r.overall||{};
+    $("reversal-overall").textContent=typeof overall.mean_net_price_move==="number"?overall.mean_net_price_move.toFixed(3):"—";
+    $("reversal-overall-detail").textContent=`${overall.trades??0} معامله آزمایشی · نرخ برد ${typeof overall.win_rate==="number"?(overall.win_rate*100).toFixed(1)+"٪":"—"}`;
+    $("reversal-report-time").textContent=`آخرین گزارش: ${formattedTime(r.generated_utc,true)} · ${r.report_stale?"نیازمند به‌روزرسانی":"صرفاً تحقیق؛ مجوز معامله ندارد"}`;
+    const holder=$("reversal-folds");holder.replaceChildren();
+    for(const row of r.folds||[]){
+      const x=row.stats||{};
+      const card=el("div","reversal-fold");
+      card.append(el("strong",null,`Fold ${row.fold}`),el("span",null,`${x.trades??0} معامله`),el("span",null,`برد: ${typeof x.win_rate==="number"?(x.win_rate*100).toFixed(1)+"٪":"—"}`),el("span",null,`میانگین: ${typeof x.mean_net_price_move==="number"?x.mean_net_price_move.toFixed(3):"—"}`));
+      holder.append(card);
+    }
+  }catch(e){
+    status.textContent="عدم دسترسی به گزارش";
+    $("reversal-report-time").textContent=String(e?.message||"خطای ارتباط");
+  }
+}
 async function refreshOpportunities(){
   if(opportunityInFlight)return;
   opportunityInFlight=true;
@@ -672,4 +704,6 @@ selectedNode?JSON.stringify(selectedNode,null,2):"NONE",
 "=== ALL DECISION / EXECUTION STEPS ==="
 ];for(const n of snapshot.nodes||[]){out.push(`[${nodeNumbers[n.id]||n.id}] ${n.title} | state=${n.state} observed=${n.observed_state} manual=${!!n.manual_override} engine=${n.engine||"Logic"}`);out.push(`detail: ${n.detail||"—"}`);out.push(`values: ${JSON.stringify(n.values||{})}`);}out.push("","=== RECENT DECISIONS ===");for(const x of snapshot.timeline||[])out.push(`${x.at||"—"} | ${x.decision} | ${x.reason} | ${x.strategy} | ${x.sample_key}`);out.push("",...candleLines(snapshot.recent_market?.m15,"M15"),"",...candleLines(snapshot.recent_market?.m1,"M1"),"","=== MODEL / HANDLER MAP ===");for(const row of snapshot.model_handler_map||[])out.push(`${row.name} | ${row.handler} | status=${row.status} | condition=${row.condition_state||"—"} | values=${JSON.stringify(row.values||{})}`);out.push("","=== WARNINGS ===",...(snapshot.warnings?.length?snapshot.warnings:["NONE"]));return out.join("\n");}
 async function copyAnalysis(){const btn=$("copy-analysis");const old=btn.textContent;btn.disabled=true;btn.textContent="COPYING...";let text="";try{const response=await fetch(`/api/analysis?stage=${encodeURIComponent(selected||"")}`,{cache:"no-store"});if(!response.ok)throw new Error(`HTTP ${response.status}`);text=await response.text();}catch{text=buildAnalysisBundle();}let copied=false;try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text);copied=true;}}catch{}if(!copied){const ta=document.createElement("textarea");ta.value=text;ta.setAttribute("readonly","");ta.style.position="absolute";ta.style.left="-9999px";document.body.append(ta);ta.select();try{copied=document.execCommand("copy");}catch{}ta.remove();}btn.textContent=copied?"COPIED ✓":"COPY FAILED";setTimeout(()=>{btn.disabled=false;btn.textContent=old;},1400);}
-$("copy-analysis").addEventListener("click",copyAnalysis);$("reset-overrides").addEventListener("click",resetOverrides);$("zoom").addEventListener("click",()=>{zoomed=!zoomed;$("zoom").textContent=zoomed?"−":"＋";$("zoom").setAttribute("aria-label",zoomed?"نمای کلی فلوچارت":"بزرگ‌نمایی فلوچارت");resize();});$("refresh").addEventListener("click",refresh);new ResizeObserver(resize).observe($("viewport"));document.addEventListener("visibilitychange",()=>{if(!document.hidden){void refresh();void refreshOpportunities();}});setInterval(()=>{if(!document.hidden)void refreshOpportunities();},5000);void refresh();void refreshOpportunities();
+$("copy-analysis").addEventListener("click",copyAnalysis);$("reset-overrides").addEventListener("click",resetOverrides);$("zoom").addEventListener("click",()=>{zoomed=!zoomed;$("zoom").textContent=zoomed?"−":"＋";$("zoom").setAttribute("aria-label",zoomed?"نمای کلی فلوچارت":"بزرگ‌نمایی فلوچارت");resize();});$("refresh").addEventListener("click",refresh);new ResizeObserver(resize).observe($("viewport"));document.addEventListener("visibilitychange",()=>{if(!document.hidden){void refresh();void refreshOpportunities();void refreshReversalReport();}});setInterval(()=>{if(!document.hidden)void refreshOpportunities();},5000);void refresh();void refreshOpportunities();
+
+setInterval(()=>{if(!document.hidden)void refreshReversalReport();},60000);
