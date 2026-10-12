@@ -627,3 +627,14 @@
 .simple-trade-table .scalp-check.go.sell strong{color:var(--red)}
 .simple-trade-table .scalp-check.go.buy{border-color:#3f7565;background:#173a32}
 .simple-trade-table .scalp-check.go.buy strong{color:var(--green)}
+
+/* Per-row fast scalp decision support; advisory only, not order authorization. */
+.simple-trade-table .fast-scalp-quality{margin-top:7px;padding:6px;border:1px solid #586477;border-radius:6px;background:#13202b;line-height:1.55}
+.simple-trade-table .fast-scalp-quality strong{font-size:11px;color:var(--text)}
+.simple-trade-table .fast-scalp-quality small{display:block;font-size:9px;white-space:normal;color:var(--muted)}
+.simple-trade-table .fast-scalp-quality.favorable{border-color:#3f7565}
+.simple-trade-table .fast-scalp-quality.favorable strong{color:var(--green)}
+.simple-trade-table .fast-scalp-quality.caution{border-color:#9c7b46}
+.simple-trade-table .fast-scalp-quality.caution strong{color:#efc780}
+.simple-trade-table .fast-scalp-quality.weak{border-color:#75434a}
+.simple-trade-table .fast-scalp-quality.weak strong{color:var(--red)}
