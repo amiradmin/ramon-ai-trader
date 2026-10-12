@@ -639,7 +639,8 @@ async function refreshReversalReport(){
     const response=await fetch("/api/reversal-report",{cache:"no-store"});
     if(!response.ok)throw new Error("HTTP "+response.status);
     const r=await response.json();
-    if(!r.available){status.textContent="گزارش موجود نیست";$("reversal-report-time").textContent="منتظر خروجی سرویس reversal-daily-report";return;}
+    if(!r.available){$("reversal-report-heading-time").textContent="گزارش موجود نیست";status.textContent="گزارش موجود نیست";$("reversal-report-time").textContent="منتظر خروجی سرویس reversal-daily-report";return;}
+    $("reversal-report-heading-time").textContent=`آخرین گزارش: ${formattedTime(r.generated_utc,true)} (تهران)${r.report_stale?" · قدیمی":""}`;
     status.textContent=r.report_stale?"گزارش قدیمی":r.status==="INSUFFICIENT_INDEPENDENT_DAYS"?"روزهای داده ناکافی":r.status==="RESEARCH_ONLY"?"فقط پژوهشی":String(r.status);
     for(const tf of ["M1","M5"]){
       const q=r.data_quality?.[tf]||{};
@@ -650,16 +651,21 @@ async function refreshReversalReport(){
     $("reversal-days").textContent=`${r.independent_utc_days??"—"} / ${r.required_independent_days??5}`;
     const overall=r.overall||{};
     $("reversal-overall").textContent=typeof overall.mean_net_price_move==="number"?overall.mean_net_price_move.toFixed(3):"—";
+    $("reversal-overall").classList.toggle("reversal-negative",typeof overall.mean_net_price_move==="number"&&overall.mean_net_price_move<0);
+    $("reversal-overall").classList.toggle("reversal-positive",typeof overall.mean_net_price_move==="number"&&overall.mean_net_price_move>0);
     $("reversal-overall-detail").textContent=`${overall.trades??0} معامله آزمایشی · نرخ برد ${typeof overall.win_rate==="number"?(overall.win_rate*100).toFixed(1)+"٪":"—"}`;
     $("reversal-report-time").textContent=`آخرین گزارش: ${formattedTime(r.generated_utc,true)} · ${r.report_stale?"نیازمند به‌روزرسانی":"صرفاً تحقیق؛ مجوز معامله ندارد"}`;
     const holder=$("reversal-folds");holder.replaceChildren();
     for(const row of r.folds||[]){
       const x=row.stats||{};
       const card=el("div","reversal-fold");
-      card.append(el("strong",null,`Fold ${row.fold}`),el("span",null,`${x.trades??0} معامله`),el("span",null,`برد: ${typeof x.win_rate==="number"?(x.win_rate*100).toFixed(1)+"٪":"—"}`),el("span",null,`میانگین: ${typeof x.mean_net_price_move==="number"?x.mean_net_price_move.toFixed(3):"—"}`));
+      const mean=el("span",null,`میانگین: ${typeof x.mean_net_price_move==="number"?x.mean_net_price_move.toFixed(3):"—"}`);
+      if(typeof x.mean_net_price_move==="number")mean.classList.add(x.mean_net_price_move<0?"reversal-negative":x.mean_net_price_move>0?"reversal-positive":"reversal-neutral");
+      card.append(el("strong",null,`Fold ${row.fold}`),el("span",null,`${x.trades??0} معامله`),el("span",null,`برد: ${typeof x.win_rate==="number"?(x.win_rate*100).toFixed(1)+"٪":"—"}`),mean);
       holder.append(card);
     }
   }catch(e){
+    $("reversal-report-heading-time").textContent="زمان گزارش نامشخص";
     status.textContent="عدم دسترسی به گزارش";
     $("reversal-report-time").textContent=String(e?.message||"خطای ارتباط");
   }
