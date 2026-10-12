@@ -504,15 +504,23 @@ function renderOpportunities(data){
       :"M1/M5 تأیید مستقل ندارد";
     const scalpGo=scalpBlockers.length===0;
     const exitSuggested=Boolean(row.position_open&&["EXIT_NOW","LOSS_EXIT_NOW"].includes(row.chronos_exit_action));
-    const scalp=document.createElement(scalpGo||exitSuggested?"button":"div");
-    scalp.className="scalp-check "+(exitSuggested?"exit-action":scalpGo?"go":"no-go");
-    if(scalpGo||exitSuggested){
+    // A historical row must never be traded at its old price.  When a row is
+    // stale or its timing has changed, let the operator request a recheck of
+    // the same direction instead.  The server then anchors the command to a
+    // fresh snapshot; it rejects the request if fresh data or the direction
+    // is no longer available.
+    const scalpRecheck=!exitSuggested&&!scalpGo&&compatibility.supported&&!row.entry_queued;
+    const scalp=document.createElement(scalpGo||exitSuggested||scalpRecheck?"button":"div");
+    scalp.className="scalp-check "+(exitSuggested?"exit-action":(scalpGo||scalpRecheck)?"go":"no-go");
+    if(scalpGo||exitSuggested||scalpRecheck){
       scalp.type="button";
-      scalp.title=exitSuggested?"بستن این پوزیشن پس از تأیید شما؛ EA مالکیت و مجوز را دوباره کنترل می‌کند":"ارسال ورود "+row.direction+" پس از تأیید شما؛ EA همهٔ کنترل‌های سخت را دوباره بررسی می‌کند";
+      scalp.title=exitSuggested?"بستن این پوزیشن پس از تأیید شما؛ EA مالکیت و مجوز را دوباره کنترل می‌کند":scalpGo?"ارسال ورود "+row.direction+" پس از تأیید شما؛ EA همهٔ کنترل‌های سخت را دوباره بررسی می‌کند":"بازبینی snapshot تازه برای ورود "+row.direction+"؛ بدون snapshot تازه یا هم‌جهت، سفارشی ارسال نمی‌شود";
       scalp.addEventListener("click",()=>{
         const message=exitSuggested
           ?"پوزیشن #"+row.position_ticket+" بسته شود؟ EA پیش از اجرا مالکیت پوزیشن و مجوز معامله را دوباره بررسی می‌کند."
-          :"درخواست ورود "+row.direction+" برای همین GO ارسال شود؟ EA پیش از اجرا قیمت، ریسک و مجوزها را دوباره بررسی می‌کند.";
+          :scalpGo
+            ?"درخواست ورود "+row.direction+" برای همین GO ارسال شود؟ EA پیش از اجرا قیمت، ریسک و مجوزها را دوباره بررسی می‌کند."
+            :"snapshot تازه برای ورود "+row.direction+" بازبینی و در صورت هم‌جهت‌بودن ارسال شود؟ دادهٔ قدیمی هرگز معامله نمی‌شود.";
         if(!window.confirm(message))return;
         if(exitSuggested)void manualCloseOpportunity(row,scalp);
         else void manualOpportunity(row,scalp,true,false,row.direction);
@@ -521,7 +529,7 @@ function renderOpportunities(data){
     const m1=row.intrabar_confirmed===1&&row.intrabar_direction===row.direction?"جهت تأیید":"جهت تأیید نشده";
     const m1Data=contextText(row.m1_context_state,row.m1_context_age_seconds);
     const m5=contextText(row.m5_context_state,row.m5_context_age_seconds);
-    scalp.append(el("strong",null,exitSuggested?"EXIT — بستن پوزیشن":scalpGo?"GO — ورود "+row.direction:"NO-GO"),el("small",null,exitSuggested?"پیشنهاد خروج مدل؛ کلیک برای تأیید":("Snapshot: "+(fresh?"تازه":"قدیمی"))),el("small",null,"Spread (price): "+spread),el("small",null,"M1: "+m1Data+" / "+m1+" · M5: "+m5),el("small",null,"تحلیل مستقل: "+liveTimingText),el("small",null,"مقایسه Entry Timing (فقط مشاهده): "+({"BOTH_CONFIRM":"هر دو تأیید","MTF_ONLY":"فقط M1/M5","ENGINE_ONLY":"فقط موتور اصلی","NEITHER":"هیچ‌کدام"}[row.mtf_shadow_entry_timing?.comparison]||"نامشخص")),el("small",null,"SL distance (price): "+risk+" · R/R: "+(reward===null?"—":reward.toFixed(2))),el("small",null,exitSuggested?"":scalpGo?"تأیید اولیه؛ اجرای نهایی با EA":"علت NO-GO: "+scalpBlockers.join("؛ ")+ (contextWarnings.length?" | وضعیت داده: "+contextWarnings.join("؛ "):"")));
+    scalp.append(el("strong",null,exitSuggested?"EXIT — بستن پوزیشن":scalpGo?"GO — ورود "+row.direction:scalpRecheck?"RECHECK — بازبینی "+row.direction:"NO-GO"),el("small",null,exitSuggested?"پیشنهاد خروج مدل؛ کلیک برای تأیید":("Snapshot: "+(fresh?"تازه":"قدیمی"))),el("small",null,"Spread (price): "+spread),el("small",null,"M1: "+m1Data+" / "+m1+" · M5: "+m5),el("small",null,"تحلیل مستقل: "+liveTimingText),el("small",null,"مقایسه Entry Timing (فقط مشاهده): "+({"BOTH_CONFIRM":"هر دو تأیید","MTF_ONLY":"فقط M1/M5","ENGINE_ONLY":"فقط موتور اصلی","NEITHER":"هیچ‌کدام"}[row.mtf_shadow_entry_timing?.comparison]||"نامشخص")),el("small",null,"SL distance (price): "+risk+" · R/R: "+(reward===null?"—":reward.toFixed(2))),el("small",null,exitSuggested?"":scalpGo?"تأیید اولیه؛ اجرای نهایی با EA":scalpRecheck?"برای ورود، snapshot تازه و هم‌جهت را بازبینی کن؛ اجرای نهایی با EA":"علت NO-GO: "+scalpBlockers.join("؛ ")+ (contextWarnings.length?" | وضعیت داده: "+contextWarnings.join("؛ "):"")));
     const simpleCells=[
       {text:"",cls:"scalp-cell",extra:scalp},
       {text:recommendation,cls:"trade-recommendation "+recClass,extra:engineAdvice},
