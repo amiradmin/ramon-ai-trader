@@ -526,7 +526,7 @@ function renderOpportunities(data){
     // is no longer available.
     const scalpRecheck=!row.position_open&&!row.executed&&!exitSuggested&&!scalpGo&&compatibility.supported&&!row.entry_queued;
     const scalp=document.createElement((!row.entry_queued&&(exitSuggested||(!row.position_open&&!row.executed&&scalpGo)||scalpRecheck))?"button":"div");
-    scalp.className="scalp-check "+(exitSuggested?"exit-action":((scalpGo&&!row.position_open&&!row.executed&&!row.entry_queued)||scalpRecheck)?"go":"no-go");
+    scalp.className="scalp-check "+(exitSuggested?"exit-action":((scalpGo&&!row.position_open&&!row.executed&&!row.entry_queued)||scalpRecheck)?"go":"no-go")+" "+(row.direction==="SELL"?"sell":"buy");
     if(!row.entry_queued&&(exitSuggested||(!row.position_open&&!row.executed&&scalpGo)||scalpRecheck)){
       scalp.type="button";
       scalp.title=exitSuggested?"بستن این پوزیشن با کلیک؛ EA مالکیت و مجوز را دوباره کنترل می‌کند":"FAST SCALP "+row.direction+": با یک کلیک snapshot تازه کنترل و فقط در صورت تأیید همان جهت فرمان ارسال می‌شود؛ قیمت، مارجین و ریسک همچنان توسط EA کنترل می‌شوند";
