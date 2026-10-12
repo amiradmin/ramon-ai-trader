@@ -615,3 +615,8 @@
 /* Daily read-only research summary */
 .reversal-fold{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;border:1px solid var(--border);border-radius:9px;padding:10px 12px;background:#121d2b;font-size:12px}
 .reversal-fold span{font-variant-numeric:tabular-nums}
+
+/* Reversal report: signed price-move results and local report timestamp */
+#reversal-report-panel .reversal-negative{color:var(--red,#f87171)!important;font-weight:800}
+#reversal-report-panel .reversal-positive{color:var(--green,#34d399)!important;font-weight:800}
+#reversal-report-panel .reversal-heading-time{display:inline-block;margin-inline-start:12px;color:var(--muted,#9ca3af);font-size:12px;font-weight:500;white-space:normal;vertical-align:middle}
