@@ -389,15 +389,21 @@ function renderOpportunities(data){
           :"فعلاً صبر")
       :"فعلاً صبر";
 
+    // Display an estimated profit in cent-account units instead of a raw gold price.
+    // Keep the price fallback when the position P/L data cannot support an estimate.
+    const exitTargetUnits=estimatedPnlAt(row,row.chronos_exit_price);
+    const exitTargetLabel=exitTargetUnits!==null&&Number.isFinite(exitTargetUnits)
+      ?("حدود "+Math.abs(exitTargetUnits).toFixed(1)+" سنت "+(exitTargetUnits>=0?"سود":"ضرر"))
+      :("قیمت "+format(row.chronos_exit_price));
     const exitAdvice=row.position_open
       ?(row.chronos_exit_action==="EXIT_NOW"
         ?"الان خارج شو"
         :row.chronos_exit_action==="LOSS_EXIT_NOW"
           ?"الان خارج شو و ضرر را محدود کن"
           :row.chronos_exit_action==="RECOVERY_EXIT"&&typeof row.chronos_exit_price==="number"
-            ?"نگه دار تا "+format(row.chronos_exit_price)+" سپس خارج شو"
+            ?"نگه دار تا "+exitTargetLabel+" سپس خارج شو"
             :row.chronos_exit_action==="TARGET"&&typeof row.chronos_exit_price==="number"
-              ?"نگه دار تا "+format(row.chronos_exit_price)
+              ?"نگه دار تا "+exitTargetLabel
               :row.chronos_exit_action==="NO_PROFIT_TARGET"
                 ?"هدف مطمئن ندارد؛ آماده خروج باش"
                 :"در حال محاسبه")
