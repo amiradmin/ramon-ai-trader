@@ -645,3 +645,9 @@
 .training-health-item{display:flex;flex-direction:column;gap:5px;padding:11px;background:#182739;border:1px solid #344458;border-radius:8px}
 .training-health-item span{font-size:11px;color:var(--muted)}
 .training-health-item strong{font-size:18px;color:var(--text);font-variant-numeric:tabular-nums}
+
+/* Distinguish low evidence coverage from a genuinely low entry score. */
+.simple-trade-table .fast-scalp-quality.partial{border-color:#80838e;background:#202733}
+.simple-trade-table .fast-scalp-quality.partial strong{color:#e5d1a0}
+.simple-trade-table .fast-scalp-quality-breakdown{display:grid;gap:2px;margin-top:5px;padding-top:4px;border-top:1px dashed #455268}
+.simple-trade-table .fast-scalp-quality-breakdown small{font-size:9px;line-height:1.4;white-space:normal}
