@@ -6094,7 +6094,15 @@ bool V2ReleaseKnownTestLock(string &reason)
       if(deal==0 || !HistoryDealGetInteger(deal,DEAL_REASON,deal_reason))
       { reason="stop-out history deal unreadable"; return false; }
       if(deal_reason==DEAL_REASON_SO)
-      { reason="broker stop-out exists"; return false; }
+      {
+         datetime deal_time=(datetime)HistoryDealGetInteger(deal,DEAL_TIME);
+         PrintFormat("V2 STOP OUT: broker stop-out requires operator review deal=%I64u time=%s symbol=%s position=%I64u; entry lock preserved",
+            deal,TimeToString(deal_time,TIME_DATE|TIME_SECONDS),
+            HistoryDealGetString(deal,DEAL_SYMBOL),
+            (ulong)HistoryDealGetInteger(deal,DEAL_POSITION_ID));
+         reason="broker stop-out exists (deal="+StringFormat("%I64u",deal)+")";
+         return false;
+      }
    }
    if(!GlobalVariableDel(key))
    { reason="test-lock deletion failed"; return false; }
