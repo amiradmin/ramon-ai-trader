@@ -6173,6 +6173,64 @@ bool V2RecoverStopoutHistory(string &reason)
    return true;
 }
 
+// Reconcile a previously persisted stop-out latch only after every exact broker
+// stop-out has a matching operator review marker. Never synthesize approvals.
+bool V2ReleaseReviewedStopoutLock(string &reason)
+{
+   reason="";
+   string key=V2StopoutKey();
+   if(!GlobalVariableCheck(key)) return true;
+   if(!AccountLockHealthy() || !TerminalInfoInteger(TERMINAL_CONNECTED))
+   { reason="account identity or connection unavailable"; return false; }
+   if(PositionsTotal()!=0 || OrdersTotal()!=0)
+   { reason="open positions or orders"; return false; }
+   double equity=AccountInfoDouble(ACCOUNT_EQUITY);
+   double margin=AccountInfoDouble(ACCOUNT_MARGIN);
+   double free_margin=AccountInfoDouble(ACCOUNT_MARGIN_FREE);
+   if(equity<=0.0 || free_margin<=0.0 || (margin>0.0 &&
+      equity/margin*100.0<V2MinimumMarginLevelPercent))
+   { reason="account margin health not recovered"; return false; }
+   string scope=V2StopoutScope();
+   datetime now=TimeCurrent();
+   if(scope=="" || now<=0 || !HistorySelect(0,now))
+   { reason="stop-out history unavailable"; return false; }
+   int count=HistoryDealsTotal();
+   string count_key="R2SO_N_"+scope;
+   double prior=0.0;
+   if(!GlobalVariableCheck(count_key) ||
+      !GlobalVariableGet(count_key,prior) || !MathIsValidNumber(prior) ||
+      prior<0.0 || prior!=MathFloor(prior) || count<prior)
+   { reason="history checkpoint missing or shortened"; return false; }
+   int reviewed_count=0;
+   for(int i=0;i<count;i++)
+   {
+      ulong ticket=HistoryDealGetTicket(i);
+      long why=0,deal_msc=0;
+      if(ticket==0 || !HistoryDealGetInteger(ticket,DEAL_REASON,why))
+      { reason="history deal unreadable"; return false; }
+      if(why!=DEAL_REASON_SO) continue;
+      bool reviewed=false;
+      if(!HistoryDealGetInteger(ticket,DEAL_TIME_MSC,deal_msc) ||
+         !V2StopoutReviewed(scope,ticket,deal_msc,reviewed))
+      { reason="stop-out review unreadable"; return false; }
+      if(!reviewed)
+      { reason="unreviewed broker stop-out"; return false; }
+      reviewed_count++;
+   }
+   if(reviewed_count==0)
+   { reason="no reviewed broker stop-out found"; return false; }
+   if(!AccountLockHealthy() || !TerminalInfoInteger(TERMINAL_CONNECTED) ||
+      PositionsTotal()!=0 || OrdersTotal()!=0)
+   { reason="account or exposure changed during review"; return false; }
+   if(!GlobalVariableDel(key))
+   { reason="reviewed lock deletion failed"; return false; }
+   GlobalVariablesFlush();
+   if(GlobalVariableCheck(key))
+   { reason="reviewed lock still present"; return false; }
+   PrintFormat("V2 STOP OUT: released reviewed lock after %d broker stop-out reviews and flat healthy account",reviewed_count);
+   return true;
+}
+
 bool V2Preflight(ENUM_ORDER_TYPE side,double entry,double stop,double volume,string &reason)
 {
    reason="";
@@ -6194,7 +6252,11 @@ bool V2Preflight(ENUM_ORDER_TYPE side,double entry,double stop,double volume,str
    }
    if(!V2RecoverStopoutHistory(reason)) return false;
    if(GlobalVariableCheck(V2StopoutKey()))
-   { reason="stop-out lock"; return false; }
+   {
+      string review_reason="";
+      if(!V2ReleaseReviewedStopoutLock(review_reason))
+      { reason="stop-out lock ("+review_reason+")"; return false; }
+   }
    if(!EnableV2AccountRiskGuard) return true;
    if(V2MaxPortfolioRiskUSD<=0.0 || V2MaxSymbolRiskUSD<=0.0 ||
       V2MaxDirectionRiskUSD<=0.0 || V2MinimumMarginLevelPercent<=0.0 || MoneyUnitsPerUSD<=0.0)
