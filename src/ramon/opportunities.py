@@ -126,9 +126,11 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
         # historical signal quote. An old M5 bar must not appear LIVE merely
         # because it was current when a historical opportunity was captured.
         latest_context={}
-        if "history_bars" in tables:
+        # Live scalp freshness must use normalized UTC observations, never
+        # legacy history_bars with broker-local future-dated timestamps.
+        if "mtf_utc_bars" in tables:
             for timeframe in ("M1", "M5"):
-                row=con.execute("SELECT max(time) FROM history_bars WHERE symbol=? AND timeframe=?",(symbol,timeframe)).fetchone()
+                row=con.execute("SELECT max(time) FROM mtf_utc_bars WHERE symbol=? AND timeframe=?",(symbol,timeframe)).fetchone()
                 latest_context[timeframe]=int(row[0]) if row and row[0] is not None else None
         latest=con.execute('SELECT max(captured) FROM decision_samples WHERE symbol=?',(symbol,)).fetchone()[0]
         if latest is None:return {'opportunities':[], 'scope':'positive_model_edge'}
