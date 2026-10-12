@@ -63,7 +63,6 @@ def evaluate(db, *, symbol="XAUUSD_l", horizon_minutes=5, folds=4,
         return {"mode":"OFFLINE_OBSERVE_ONLY", "status":"INSUFFICIENT_HISTORY",
                 "m1_rows":len(m1), "m5_rows":len(m5), "folds":[],
                 "promotion_ready":False}
-    all_tests = {name: [] for name in STRATEGIES}
     fold_rows = []
     for fold in range(folds):
         cut = min_train + fold*test_block
@@ -97,8 +96,6 @@ def evaluate(db, *, symbol="XAUUSD_l", horizon_minutes=5, folds=4,
         eligible = [name for name in STRATEGIES if sample[name]["train"]["trades"] >= 20]
         selected = (max(eligible,key=lambda s:sample[s]["train"]["mean_net_price_move"])
                     if eligible else None)
-        if selected:
-            all_tests[selected].extend(sample[selected]["test"].get("trades",[]) * [])  # counts reported below
         fold_rows.append({"fold":fold+1,"train_until_utc":border,
                           "test_from_utc":border,"test_until_utc":times[end-1],
                           "selected_from_train":selected, "strategies":sample,
