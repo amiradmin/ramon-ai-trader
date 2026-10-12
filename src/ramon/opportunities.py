@@ -122,10 +122,14 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
     con.row_factory=sqlite3.Row
     try:
         tables={row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        m5_latest=None
+        # Context freshness is measured against wall-clock time, not the
+        # historical signal quote. An old M5 bar must not appear LIVE merely
+        # because it was current when a historical opportunity was captured.
+        latest_context={}
         if "history_bars" in tables:
-            row=con.execute("SELECT max(time) FROM history_bars WHERE symbol=? AND timeframe='M5'",(symbol,)).fetchone()
-            m5_latest=int(row[0]) if row and row[0] is not None else None
+            for timeframe in ("M1", "M5"):
+                row=con.execute("SELECT max(time) FROM history_bars WHERE symbol=? AND timeframe=?",(symbol,timeframe)).fetchone()
+                latest_context[timeframe]=int(row[0]) if row and row[0] is not None else None
         latest=con.execute('SELECT max(captured) FROM decision_samples WHERE symbol=?',(symbol,)).fetchone()[0]
         if latest is None:return {'opportunities':[], 'scope':'positive_model_edge'}
         rows=list(con.execute('''SELECT captured,signal_bar_time,sample_key,quote_time,mid,spread,
@@ -258,11 +262,17 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
                 and item['age_seconds']<=ACTIONABLE_SECONDS
                 and item['edge']>0
             )
-            quote=int(item['quote_time'])
-            item['m5_context_state']=(
-                'READY' if m5_latest is not None and 0 <= quote-m5_latest <= 600
-                else 'STALE' if m5_latest is not None else 'MISSING'
-            )
+            # Broker bar open times: allow two expected bars plus a short
+            # transport allowance. Future timestamps are never considered ready.
+            for timeframe, max_age in (("M1", 180), ("M5", 900)):
+                latest_bar=latest_context.get(timeframe)
+                age=None if latest_bar is None else now-latest_bar
+                state=("MISSING" if latest_bar is None else
+                       "CLOCK_SKEW" if age < -30 else
+                       "READY" if age <= max_age else "STALE")
+                item[timeframe.lower()+"_context_state"]=state
+                item[timeframe.lower()+"_context_age_seconds"]=age
+                item[timeframe.lower()+"_latest_bar_time"]=latest_bar
         return {'opportunities':sorted(grouped.values(),key=lambda x:x['captured'],reverse=True)[:max(1,min(limit,200))],
                 'as_of':latest,'actionable_seconds':ACTIONABLE_SECONDS,
                 'scope':'Decision desk shows all practical market-state scenarios. Manual table execution may override analytical Ramon gates, while hard broker/account/risk/quote safety remains active.'}
