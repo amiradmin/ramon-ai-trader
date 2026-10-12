@@ -6078,8 +6078,10 @@ bool V2ReleaseKnownTestLock(string &reason)
    string key=V2StopoutKey();
    if(!GlobalVariableCheck(key)) return true;
    double stored=0.0;
-   if(!GlobalVariableGet(key,stored) || stored!=expected_value)
-   { reason="test-lock marker changed"; return false; }
+   if(!GlobalVariableGet(key,stored))
+   { reason="stop-out lock unreadable"; return false; }
+   if(stored!=expected_value)
+      return true; // Not the one known test marker; review the real lock below.
    if(!TerminalInfoInteger(TERMINAL_CONNECTED))
    { reason="terminal disconnected"; return false; }
    if(PositionsTotal()!=0 || OrdersTotal()!=0)
