@@ -6095,6 +6095,12 @@ bool V2ReleaseKnownTestLock(string &reason)
       { reason="stop-out history deal unreadable"; return false; }
       if(deal_reason==DEAL_REASON_SO)
       {
+         long deal_msc=0;
+         bool reviewed=false;
+         if(!HistoryDealGetInteger(deal,DEAL_TIME_MSC,deal_msc) ||
+            !V2StopoutReviewed(V2StopoutScope(),deal,deal_msc,reviewed))
+         { reason="stop-out review unreadable"; return false; }
+         if(reviewed) continue; // Explicitly reviewed exact deal; other stop-outs still block.
          datetime deal_time=(datetime)HistoryDealGetInteger(deal,DEAL_TIME);
          PrintFormat("V2 STOP OUT: broker stop-out requires operator review deal=%I64u time=%s symbol=%s position=%I64u; entry lock preserved",
             deal,TimeToString(deal_time,TIME_DATE|TIME_SECONDS),
