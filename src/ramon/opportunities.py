@@ -4,6 +4,7 @@ import sqlite3
 import time
 from pathlib import Path
 from .manual_advisors import snapshot_advisors, kronos_advisor
+from .scalp_timing import scalp_timing
 
 
 ACTIONABLE_SECONDS = 90
@@ -132,6 +133,14 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
             for timeframe in ("M1", "M5"):
                 row=con.execute("SELECT max(time) FROM mtf_utc_bars WHERE symbol=? AND timeframe=?",(symbol,timeframe)).fetchone()
                 latest_context[timeframe]=int(row[0]) if row and row[0] is not None else None
+        # Separate market-data diagnostic. Never overwrite stored EA/AI timing.
+        try:
+            live_mtf_timing = scalp_timing(con, symbol) if "mtf_utc_bars" in tables else {
+                "status": "INSUFFICIENT_DATA", "direction": "WAIT",
+                "reason": "Canonical M1/M5 data unavailable"}
+        except sqlite3.Error:
+            live_mtf_timing = {"status": "INSUFFICIENT_DATA", "direction": "WAIT",
+                               "reason": "Canonical M1/M5 query failed"}
         latest=con.execute('SELECT max(captured) FROM decision_samples WHERE symbol=?',(symbol,)).fetchone()[0]
         if latest is None:return {'opportunities':[], 'scope':'positive_model_edge'}
         rows=list(con.execute('''SELECT captured,signal_bar_time,sample_key,quote_time,mid,spread,
@@ -242,6 +251,7 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
             except (ValueError,TypeError,KeyError):continue
         now=int(time.time())
         for item in grouped.values():
+            item['live_mtf_timing'] = live_mtf_timing.copy()
             for advisor in item['model_advisors']:
                 if advisor['status']=='READY' and not 0 <= now-advisor['captured'] <= ACTIONABLE_SECONDS:
                     advisor['status']='HISTORICAL'
