@@ -28,8 +28,8 @@ python3 - <<'PY'
 import sqlite3
 from datetime import datetime, timezone
 c=sqlite3.connect('file:data/ramon_history.sqlite3?mode=ro',uri=True)
-for tf in ('M1','M5','M15'):
-    n,t=c.execute("select count(*),max(time) from history_bars where symbol=? and timeframe=?",('XAUUSD_l',tf)).fetchone()
+for tf in ('M1','M5'):
+    n,t=c.execute("select count(*),max(time) from mtf_utc_bars where symbol=? and timeframe=?",('XAUUSD_l',tf)).fetchone()
     print(tf,n,datetime.fromtimestamp(t,timezone.utc).isoformat() if t else None)
 PY
 ```
@@ -45,3 +45,7 @@ Run tests after updating the repo:
 ```bash
 uv run pytest -q tests/test_mtf_collector.py
 ```
+
+The scalping dashboard's M1/M5 freshness uses only `mtf_utc_bars`.
+This is a data-quality change, **not** permission to execute scalps. No
+trade logic or risk gates have been relaxed. Run tests before enabling.
