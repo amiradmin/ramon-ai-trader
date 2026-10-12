@@ -50,6 +50,9 @@ double MaxExecutableRiskUSD = 0.35; // Default; updated by the Control dashboard
 input int MaxSpreadPoints = 50;
 input int MaxTradesPerDay = 400;
 input int MaxDashboardOpportunityPositions = 20; // Hedging accounts only; manual opportunity positions with broker SL/TP.
+input bool EnableDashboardManualScalpManagement = true; // Manage only dashboard :M positions; broker SL/TP always remains.
+input int DashboardManualScalpReviewSeconds = 300; // Recheck signal after five minutes.
+input double DashboardManualScalpProfitUnits = 5.0; // Five cent-account units (USD 0.05 if 100 units/USD).
 input double GuardianMaxRiskUSD = 0.06; // Additional one-shot reversal SL budget; no minimum-lot override.
 const int GuardianArmSeconds = 1800;
 const int GuardianRecoverySeconds = 900;
@@ -4331,6 +4334,73 @@ bool ProcessDashboardPredictedAutoCloseCrossings()
    return false;
 }
 
+// Dashboard-originated positions use their own short-horizon management.
+// Never modify MAIN, SMALL, RANGE or unrelated manual broker positions.
+bool ManageDashboardManualScalp()
+{
+   if(SmallOnlyMode || !EnableDashboardManualScalpManagement)
+      return false;
+   datetime now=TimeCurrent();
+   for(int i=PositionsTotal()-1;i>=0;i--)
+   {
+      ulong ticket=PositionGetTicket(i);
+      if(ticket==0 || !PositionSelectByTicket(ticket))
+         continue;
+      if(PositionGetString(POSITION_SYMBOL)!=_Symbol
+         || (ulong)PositionGetInteger(POSITION_MAGIC)!=MagicNumber)
+         continue;
+      string comment=PositionGetString(POSITION_COMMENT);
+      if(StringFind(comment,"Ramon:")!=0 || StringFind(comment,":M")<0)
+         continue;
+
+      datetime opened=(datetime)PositionGetInteger(POSITION_TIME);
+      string direction=(PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY ? "BUY" : "SELL");
+      double profit=PositionGetDouble(POSITION_PROFIT)+PositionGetDouble(POSITION_SWAP);
+      bool cent_target=(AccountIsCent && MathAbs(MoneyUnitsPerUSD-100.0)<0.00001
+         && DashboardManualScalpProfitUnits>0.0);
+      bool target_reached=(cent_target && profit>=DashboardManualScalpProfitUnits);
+      if(!target_reached && (now-opened<DashboardManualScalpReviewSeconds
+         || DashboardManualScalpReviewSeconds<=0))
+         continue;
+
+      // Do not interpret a stale/unavailable forecast as a weak signal.
+      bool fresh=(LastModelSnapshotTime>opened && LastModelSnapshotTime<=now
+         && now-LastModelSnapshotTime<=ExitModelFreshnessSeconds);
+      bool weak=(fresh && LastModelDecision!=direction);
+      if(!target_reached && !weak)
+         continue;
+
+      if(!AccountLockHealthy()
+         || !(bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED)
+         || !(bool)MQLInfoInteger(MQL_TRADE_ALLOWED)
+         || !(bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED))
+      {
+         StatusLine="MANUAL SCALP EXIT PENDING: trade permissions unavailable";
+         return false;
+      }
+      if(ManagedExitPausedForMarketClosed(ticket))
+      {
+         StatusLine="MANUAL SCALP EXIT PAUSED: market closed";
+         return false;
+      }
+      if(Trade.PositionClose(ticket,MaxDeviationPoints))
+      {
+         RecordDealTelemetry(Trade.ResultDeal(),
+            target_reached ? "manual_scalp_five_cent_target" : "manual_scalp_five_min_weak_signal");
+         ClearDashboardAutoCloseTarget(ticket);
+         StatusLine="MANUAL SCALP EXIT #"+IntegerToString((long)ticket)
+            +(target_reached ? " profit target" : " weak fresh signal after 5min")
+            +" P/L "+DoubleToString(profit,2);
+         Print("Ramon execution: ",StatusLine);
+         WriteOpenDashboardPositions();
+         return true;
+      }
+      HandleManagedExitFailure(ticket,"MANUAL SCALP EXIT");
+      return false;
+   }
+   return false;
+}
+
 void OnTick()
 {
    ProcessGuardianRecoveryExits();
@@ -5335,6 +5405,7 @@ void OnTimer()
    ProcessGuardianRecoveryExits();
    if(ProcessGuardianReversals()) { ShowStatus(); return; }
    ProcessDashboardPredictedAutoCloseCrossings();
+   ManageDashboardManualScalp();
    WriteOpenDashboardPositions();
    datetime now=TimeCurrent();
    bool management_due=(LastPositionManagementTime==0 || now-LastPositionManagementTime>=5);
