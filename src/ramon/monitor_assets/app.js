@@ -496,6 +496,12 @@ function renderOpportunities(data){
     if(row.m5_context_state!=="READY")contextWarnings.push("M5: "+contextText(row.m5_context_state,row.m5_context_age_seconds));
     if(row.entry_timing_ready!==1||row.entry_timing_direction!==row.direction)
       scalpBlockers.push("زمان ورود در جهت اسکالپ تأیید نشده");
+    // Independent M1/M5 diagnostic; never used to authorize execution.
+    const liveTiming=row.live_mtf_timing||{};
+    const liveTimingText=liveTiming.status==="AGREE"
+      ?"M1/M5 هم‌جهت: "+liveTiming.direction
+      :liveTiming.status==="CONFLICT"?"M1/M5 متعارض"
+      :"M1/M5 تأیید مستقل ندارد";
     const scalpGo=scalpBlockers.length===0;
     const exitSuggested=Boolean(row.position_open&&["EXIT_NOW","LOSS_EXIT_NOW"].includes(row.chronos_exit_action));
     const scalp=document.createElement(scalpGo||exitSuggested?"button":"div");
@@ -515,7 +521,7 @@ function renderOpportunities(data){
     const m1=row.intrabar_confirmed===1&&row.intrabar_direction===row.direction?"جهت تأیید":"جهت تأیید نشده";
     const m1Data=contextText(row.m1_context_state,row.m1_context_age_seconds);
     const m5=contextText(row.m5_context_state,row.m5_context_age_seconds);
-    scalp.append(el("strong",null,exitSuggested?"EXIT — بستن پوزیشن":scalpGo?"GO — ورود "+row.direction:"NO-GO"),el("small",null,exitSuggested?"پیشنهاد خروج مدل؛ کلیک برای تأیید":("Snapshot: "+(fresh?"تازه":"قدیمی"))),el("small",null,"Spread (price): "+spread),el("small",null,"M1: "+m1Data+" / "+m1+" · M5: "+m5),el("small",null,"SL distance (price): "+risk+" · R/R: "+(reward===null?"—":reward.toFixed(2))),el("small",null,exitSuggested?"":scalpGo?"تأیید اولیه؛ اجرای نهایی با EA":"علت NO-GO: "+scalpBlockers.join("؛ ")+ (contextWarnings.length?" | وضعیت داده: "+contextWarnings.join("؛ "):"")));
+    scalp.append(el("strong",null,exitSuggested?"EXIT — بستن پوزیشن":scalpGo?"GO — ورود "+row.direction:"NO-GO"),el("small",null,exitSuggested?"پیشنهاد خروج مدل؛ کلیک برای تأیید":("Snapshot: "+(fresh?"تازه":"قدیمی"))),el("small",null,"Spread (price): "+spread),el("small",null,"M1: "+m1Data+" / "+m1+" · M5: "+m5),el("small",null,"تحلیل مستقل: "+liveTimingText),el("small",null,"SL distance (price): "+risk+" · R/R: "+(reward===null?"—":reward.toFixed(2))),el("small",null,exitSuggested?"":scalpGo?"تأیید اولیه؛ اجرای نهایی با EA":"علت NO-GO: "+scalpBlockers.join("؛ ")+ (contextWarnings.length?" | وضعیت داده: "+contextWarnings.join("؛ "):"")));
     const simpleCells=[
       {text:"",cls:"scalp-cell",extra:scalp},
       {text:recommendation,cls:"trade-recommendation "+recClass,extra:engineAdvice},
