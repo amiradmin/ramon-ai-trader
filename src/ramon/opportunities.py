@@ -146,6 +146,27 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
         rows=list(con.execute('''SELECT captured,signal_bar_time,sample_key,quote_time,mid,spread,
             stop_distance,target_distance,final_decision,model_metadata FROM decision_samples
             WHERE symbol=? AND captured>=? ORDER BY captured,id''',(symbol,latest-86400)))
+        # A raw spread number is difficult to judge during a fast manual
+        # decision.  Keep this descriptive only: it never changes the entry
+        # authorization path.  Percentile is calculated from the same recent
+        # decision ledger so the dashboard can say whether the current cost is
+        # ordinary or unusually expensive for this symbol.
+        recent_spreads=sorted(
+            float(row['spread']) for row in rows
+            if row['spread'] is not None and float(row['spread']) >= 0.0
+        )
+        spread_median=(recent_spreads[len(recent_spreads)//2] if recent_spreads else None)
+
+        def spread_context(value):
+            if value is None or not recent_spreads:
+                return {'sample_count':len(recent_spreads),'median':spread_median,
+                        'percentile':None,'label':'UNKNOWN'}
+            current=float(value)
+            percentile=sum(item <= current for item in recent_spreads)/len(recent_spreads)
+            label=('LOW' if percentile <= .25 else 'NORMAL' if percentile <= .75 else 'HIGH')
+            return {'sample_count':len(recent_spreads),'median':spread_median,
+                    'percentile':percentile,'label':label}
+
         traded={r[0] for r in con.execute('SELECT sample_key FROM trade_outcomes WHERE symbol=?',(symbol,))}
         grouped={}
         for row in rows:
@@ -252,6 +273,7 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
                     'news_title':news.get('news_event_title'),
                     'news_impact':news.get('news_event_impact'),
                     'entry':entry,'stop':entry-sign*stop,'target':entry+sign*target,'spread':row['spread'],
+                    'spread_context':spread_context(row['spread']),
                     'risk_distance':stop,'first_reason':first_reason,'last_reason':final.get('reason'),
                     'model_approved':prior_approved or row['final_decision']==side,
                     'executed':prior_executed or row['sample_key'] in traded,

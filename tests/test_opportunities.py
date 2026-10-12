@@ -42,3 +42,18 @@ def test_nonpositive_edges_missing_sources_and_execution_evidence(tmp_path):
     add(db,2)
     with sqlite3.connect(db) as c:c.execute('INSERT INTO trade_outcomes VALUES (?,?)',('2','XAUUSD_l'))
     assert read_opportunities(db)['opportunities'][0]['executed']
+
+
+def test_spread_context_is_read_only_and_relative_to_recent_ledger(tmp_path):
+    db=database(tmp_path)
+    add(db,1,bid=100)
+    add(db,2,bid=100.1,bar=1001)
+    with sqlite3.connect(db) as c:
+        c.execute('UPDATE decision_samples SET spread=? WHERE id=?',(.2,1))
+        c.execute('UPDATE decision_samples SET spread=? WHERE id=?',(.8,2))
+    before=db.read_bytes()
+    rows=read_opportunities(db)['opportunities']
+    assert db.read_bytes()==before
+    contexts=[row['spread_context'] for row in rows]
+    assert all(context['sample_count']==2 for context in contexts)
+    assert {context['label'] for context in contexts} <= {'LOW','NORMAL','HIGH'}

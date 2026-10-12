@@ -492,7 +492,12 @@ function renderOpportunities(data){
     }
 
     const fresh=typeof row.age_seconds==="number"&&row.age_seconds<=45;
+    const freshRemaining=typeof row.age_seconds==="number"?Math.max(0,45-Math.floor(row.age_seconds)):null;
+    const actionRemaining=typeof row.age_seconds==="number"?Math.max(0,90-Math.floor(row.age_seconds)):null;
     const spread=typeof row.spread==="number"?format(row.spread):"—";
+    const spreadContext=row.spread_context||{};
+    const spreadLabel={LOW:"کم",NORMAL:"عادی",HIGH:"زیاد",UNKNOWN:"نامشخص"}[spreadContext.label]||"نامشخص";
+    const spreadPercent=typeof spreadContext.percentile==="number"?Math.round(spreadContext.percentile*100)+"٪":"—";
     const risk=typeof row.risk_distance==="number"?format(row.risk_distance):"—";
     const reward=typeof row.entry==="number"&&typeof row.target==="number"&&typeof row.risk_distance==="number"&&row.risk_distance>0?Math.abs(row.target-row.entry)/row.risk_distance:null;
     // SCALP is advisory and does not inherit V2/V3 WAIT. The manual GO
@@ -519,17 +524,21 @@ function renderOpportunities(data){
       :"M1/M5 تأیید مستقل ندارد";
     const scalpGo=scalpBlockers.length===0;
     const exitSuggested=Boolean(row.position_open&&["EXIT_NOW","LOSS_EXIT_NOW"].includes(row.chronos_exit_action));
+    // This is an explicit human-assisted entry: the click always sends the
+    // selected side as DISCRETIONARY.  The visual checks below inform the
+    // operator but never suppress that explicit request.  The EA still owns
+    // hard quote, spread, margin, account-risk and broker validation.
+    const directOpen=!row.position_open&&!row.entry_queued&&compatibility.supported;
     // A historical row must never be traded at its old price.  When a row is
     // stale or its timing has changed, let the operator request a recheck of
     // the same direction instead.  The server then anchors the command to a
     // fresh snapshot; it rejects the request if fresh data or the direction
     // is no longer available.
-    const scalpRecheck=!row.position_open&&!row.executed&&!exitSuggested&&!scalpGo&&compatibility.supported&&!row.entry_queued;
-    const scalp=document.createElement((!row.entry_queued&&(exitSuggested||(!row.position_open&&!row.executed&&scalpGo)||scalpRecheck))?"button":"div");
-    scalp.className="scalp-check "+(exitSuggested?"exit-action":((scalpGo&&!row.position_open&&!row.executed&&!row.entry_queued)||scalpRecheck)?"go":"no-go");
-    if(!row.entry_queued&&(exitSuggested||(!row.position_open&&!row.executed&&scalpGo)||scalpRecheck)){
+    const scalp=document.createElement((!row.entry_queued&&(exitSuggested||directOpen))?"button":"div");
+    scalp.className="scalp-check "+(exitSuggested?"exit-action":directOpen?"go":"no-go");
+    if(!row.entry_queued&&(exitSuggested||directOpen)){
       scalp.type="button";
-      scalp.title=exitSuggested?"بستن این پوزیشن با کلیک؛ EA مالکیت و مجوز را دوباره کنترل می‌کند":"FAST SCALP "+row.direction+": با یک کلیک snapshot تازه کنترل و فقط در صورت تأیید همان جهت فرمان ارسال می‌شود؛ قیمت، مارجین و ریسک همچنان توسط EA کنترل می‌شوند";
+      scalp.title=exitSuggested?"بستن این پوزیشن با کلیک؛ EA مالکیت و مجوز را دوباره کنترل می‌کند":"بازکردن دستی "+row.direction+" با یک کلیک؛ کنترل‌های سخت قیمت، مارجین، ریسک و کارگزار همچنان در EA اجرا می‌شوند";
       scalp.addEventListener("click",()=>{
         if(exitSuggested)void manualCloseOpportunity(row,scalp);
         else void manualOpportunity(row,scalp,true,true,row.direction);
@@ -538,7 +547,10 @@ function renderOpportunities(data){
     const m1=row.intrabar_confirmed===1&&row.intrabar_direction===row.direction?"جهت تأیید":"جهت تأیید نشده";
     const m1Data=contextText(row.m1_context_state,row.m1_context_age_seconds);
     const m5=contextText(row.m5_context_state,row.m5_context_age_seconds);
-    scalp.append(el("strong",null,exitSuggested?"EXIT — بستن پوزیشن":row.entry_queued?"در صف اجرا":row.position_open?"پوزیشن باز":row.executed?"ثبت‌شده":scalpGo?"⚡ FAST SCALP "+row.direction:scalpRecheck?"⚡ FAST CHECK "+row.direction:"NO-GO"),el("small",null,exitSuggested?"پیشنهاد خروج مدل؛ کلیک برای ارسال درخواست":("Snapshot: "+(fresh?"تازه":"قدیمی"))),el("small",null,"Spread (price): "+spread),el("small",null,"M1: "+m1Data+" / "+m1+" · M5: "+m5),el("small",null,"تحلیل مستقل: "+liveTimingText),el("small",null,"مقایسه Entry Timing (فقط مشاهده): "+({"BOTH_CONFIRM":"هر دو تأیید","MTF_ONLY":"فقط M1/M5","ENGINE_ONLY":"فقط موتور اصلی","NEITHER":"هیچ‌کدام"}[row.mtf_shadow_entry_timing?.comparison]||"نامشخص")),el("small",null,"SL distance (price): "+risk+" · R/R: "+(reward===null?"—":reward.toFixed(2))),el("small",null,exitSuggested?"":scalpGo?"یک کلیک؛ کنترل مجدد جهت و ورود با EA · مدیریت خروج اسکالپ دستی":scalpRecheck?"یک کلیک؛ بازبینی snapshot تازه و در صورت تأیید، ارسال ورود به EA":"علت NO-GO: "+scalpBlockers.join("؛ ")+ (contextWarnings.length?" | وضعیت داده: "+contextWarnings.join("؛ "):"")));
+    const visualWarnings=[...scalpBlockers,...contextWarnings];
+    const readiness=visualWarnings.length===0?"همهٔ چک‌های تحلیلی سبز":("هشدار: "+visualWarnings.join("؛ "));
+    const ttl=freshRemaining===null?"—":freshRemaining+"ث تا بازبینی snapshot · "+actionRemaining+"ث تا انقضای فرصت";
+    scalp.append(el("strong",null,exitSuggested?"EXIT — بستن پوزیشن":row.entry_queued?"در صف اجرا":row.position_open?"پوزیشن باز":directOpen?"OPEN "+row.direction+" POSITION":"NO-GO"),el("small",null,exitSuggested?"پیشنهاد خروج مدل؛ کلیک برای ارسال درخواست":("اعتبار: "+ttl)),el("small",null,"آمادگی: "+readiness),el("small",null,"Spread: "+spread+" · نسبت به ۲۴ ساعت: "+spreadLabel+" (صدک "+spreadPercent+")"),el("small",null,"M1: "+m1Data+" / "+m1+" · M5: "+m5),el("small",null,"تحلیل مستقل: "+liveTimingText),el("small",null,"مقایسه Entry Timing (فقط مشاهده): "+({"BOTH_CONFIRM":"هر دو تأیید","MTF_ONLY":"فقط M1/M5","ENGINE_ONLY":"فقط موتور اصلی","NEITHER":"هیچ‌کدام"}[row.mtf_shadow_entry_timing?.comparison]||"نامشخص")),el("small",null,"SL distance (price): "+risk+" · R/R: "+(reward===null?"—":reward.toFixed(2))),el("small",null,exitSuggested?"":directOpen?"یک کلیک = ارسال درخواست بازکردن پوزیشن "+row.direction+"؛ چک‌های تحلیلی فقط راهنما هستند":("علت NO-GO: "+scalpBlockers.join("؛ ")+ (contextWarnings.length?" | وضعیت داده: "+contextWarnings.join("؛ "):""))));
     const simpleCells=[
       {text:"",cls:"scalp-cell",extra:scalp},
       {text:recommendation,cls:"trade-recommendation "+recClass,extra:engineAdvice},

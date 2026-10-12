@@ -7,6 +7,7 @@ from pathlib import Path
 
 EA = Path("mt5/Ramon.mq5")
 MONITOR = Path("src/ramon/monitor.py")
+APP = Path("src/ramon/monitor_assets/app.js")
 
 
 def test_dashboard_command_is_explicit_and_anchored_to_model_snapshot():
@@ -61,3 +62,10 @@ def test_manual_comment_classifier_does_not_claim_old_labels():
     source = EA.read_text(encoding="utf-8")
     assert 'StringFind(opening_comment,":M")>=0 ? "HUMAN_ASSISTED"' in source
     assert '":M" : ""' in source
+
+
+def test_fast_scalp_click_uses_explicit_discretionary_entry_not_analytical_go():
+    source = APP.read_text(encoding="utf-8")
+    assert "const directOpen=!row.position_open&&!row.entry_queued&&compatibility.supported;" in source
+    assert 'manualOpportunity(row,scalp,true,true,row.direction)' in source
+    assert '"OPEN "+row.direction+" POSITION"' in source
