@@ -97,6 +97,27 @@ services:
       start_period: 30s
       retries: 3
 
+  mtf-collector:
+    image: ramon-ai-trader:local
+    init: true
+    restart: unless-stopped
+    depends_on:
+      model:
+        condition: service_healthy
+    command:
+      - python
+      - -m
+      - ramon.mtf_collector
+      - --common-files
+      - /mt5-users/amir/AppData/Roaming/MetaQuotes/Terminal/Common/Files
+      - --db
+      - /data/ramon_history.sqlite3
+      - --interval
+      - "30"
+    volumes:
+      - ./data:/data
+      - ${HOME}/.mt5/drive_c/users:/mt5-users:ro
+
   kronos-advisor:
     profiles: ["advisors"]
     build:
