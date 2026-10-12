@@ -222,7 +222,7 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
                     'intrabar_confirmed':base.get('intrabar_confirmed'),
                     'intrabar_direction':base.get('intrabar_direction'),
                     'intrabar_move_atr':base.get('intrabar_move_atr'),
-                    'm5_latest_bar_time':m5_latest,
+                    'm5_latest_bar_time':latest_context.get("M5"),
                     'ai_trend_confirmed':base.get('ai_trend_confirmed'),
                     'ai_trend_direction':base.get('ai_trend_direction'),
                     'ai_trend_score':base.get('ai_trend_score'),
