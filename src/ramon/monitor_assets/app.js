@@ -515,12 +515,12 @@ function renderOpportunities(data){
     // the same direction instead.  The server then anchors the command to a
     // fresh snapshot; it rejects the request if fresh data or the direction
     // is no longer available.
-    const scalpRecheck=!exitSuggested&&!scalpGo&&compatibility.supported&&!row.entry_queued;
-    const scalp=document.createElement(scalpGo||exitSuggested||scalpRecheck?"button":"div");
-    scalp.className="scalp-check "+(exitSuggested?"exit-action":(scalpGo||scalpRecheck)?"go":"no-go");
-    if(scalpGo||exitSuggested||scalpRecheck){
+    const scalpRecheck=!row.position_open&&!row.executed&&!exitSuggested&&!scalpGo&&compatibility.supported&&!row.entry_queued;
+    const scalp=document.createElement((!row.entry_queued&&(exitSuggested||(!row.position_open&&!row.executed&&scalpGo)||scalpRecheck))?"button":"div");
+    scalp.className="scalp-check "+(exitSuggested?"exit-action":((scalpGo&&!row.position_open&&!row.executed&&!row.entry_queued)||scalpRecheck)?"go":"no-go");
+    if(!row.entry_queued&&(exitSuggested||(!row.position_open&&!row.executed&&scalpGo)||scalpRecheck)){
       scalp.type="button";
-      scalp.title=exitSuggested?"بستن این پوزیشن با کلیک؛ EA مالکیت و مجوز را دوباره کنترل می‌کند":scalpGo?"ارسال ورود "+row.direction+" با کلیک؛ EA همهٔ کنترل‌های سخت را دوباره بررسی می‌کند":"بازبینی snapshot تازه برای ورود "+row.direction+"؛ بدون snapshot تازه یا هم‌جهت، سفارشی ارسال نمی‌شود";
+      scalp.title=exitSuggested?"بستن این پوزیشن با کلیک؛ EA مالکیت و مجوز را دوباره کنترل می‌کند":"FAST SCALP "+row.direction+": با یک کلیک snapshot تازه کنترل و فقط در صورت تأیید همان جهت فرمان ارسال می‌شود؛ قیمت، مارجین و ریسک همچنان توسط EA کنترل می‌شوند";
       scalp.addEventListener("click",()=>{
         if(exitSuggested)void manualCloseOpportunity(row,scalp);
         else void manualOpportunity(row,scalp,true,false,row.direction);
@@ -529,7 +529,7 @@ function renderOpportunities(data){
     const m1=row.intrabar_confirmed===1&&row.intrabar_direction===row.direction?"جهت تأیید":"جهت تأیید نشده";
     const m1Data=contextText(row.m1_context_state,row.m1_context_age_seconds);
     const m5=contextText(row.m5_context_state,row.m5_context_age_seconds);
-    scalp.append(el("strong",null,exitSuggested?"EXIT — بستن پوزیشن":scalpGo?"GO — ورود "+row.direction:scalpRecheck?"RECHECK — بازبینی "+row.direction:"NO-GO"),el("small",null,exitSuggested?"پیشنهاد خروج مدل؛ کلیک برای ارسال درخواست":("Snapshot: "+(fresh?"تازه":"قدیمی"))),el("small",null,"Spread (price): "+spread),el("small",null,"M1: "+m1Data+" / "+m1+" · M5: "+m5),el("small",null,"تحلیل مستقل: "+liveTimingText),el("small",null,"مقایسه Entry Timing (فقط مشاهده): "+({"BOTH_CONFIRM":"هر دو تأیید","MTF_ONLY":"فقط M1/M5","ENGINE_ONLY":"فقط موتور اصلی","NEITHER":"هیچ‌کدام"}[row.mtf_shadow_entry_timing?.comparison]||"نامشخص")),el("small",null,"SL distance (price): "+risk+" · R/R: "+(reward===null?"—":reward.toFixed(2))),el("small",null,exitSuggested?"":scalpGo?"تأیید اولیه؛ اجرای نهایی با EA":scalpRecheck?"برای ورود، snapshot تازه و هم‌جهت را بازبینی کن؛ اجرای نهایی با EA":"علت NO-GO: "+scalpBlockers.join("؛ ")+ (contextWarnings.length?" | وضعیت داده: "+contextWarnings.join("؛ "):"")));
+    scalp.append(el("strong",null,exitSuggested?"EXIT — بستن پوزیشن":row.entry_queued?"در صف اجرا":row.position_open?"پوزیشن باز":row.executed?"ثبت‌شده":scalpGo?"⚡ FAST SCALP "+row.direction:scalpRecheck?"⚡ FAST CHECK "+row.direction:"NO-GO"),el("small",null,exitSuggested?"پیشنهاد خروج مدل؛ کلیک برای ارسال درخواست":("Snapshot: "+(fresh?"تازه":"قدیمی"))),el("small",null,"Spread (price): "+spread),el("small",null,"M1: "+m1Data+" / "+m1+" · M5: "+m5),el("small",null,"تحلیل مستقل: "+liveTimingText),el("small",null,"مقایسه Entry Timing (فقط مشاهده): "+({"BOTH_CONFIRM":"هر دو تأیید","MTF_ONLY":"فقط M1/M5","ENGINE_ONLY":"فقط موتور اصلی","NEITHER":"هیچ‌کدام"}[row.mtf_shadow_entry_timing?.comparison]||"نامشخص")),el("small",null,"SL distance (price): "+risk+" · R/R: "+(reward===null?"—":reward.toFixed(2))),el("small",null,exitSuggested?"":scalpGo?"یک کلیک؛ کنترل مجدد جهت و ورود با EA · مدیریت خروج اسکالپ دستی":scalpRecheck?"یک کلیک؛ بازبینی snapshot تازه و در صورت تأیید، ارسال ورود به EA":"علت NO-GO: "+scalpBlockers.join("؛ ")+ (contextWarnings.length?" | وضعیت داده: "+contextWarnings.join("؛ "):"")));
     const simpleCells=[
       {text:"",cls:"scalp-cell",extra:scalp},
       {text:recommendation,cls:"trade-recommendation "+recClass,extra:engineAdvice},
