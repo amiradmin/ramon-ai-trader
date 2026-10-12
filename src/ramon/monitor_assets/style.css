@@ -620,3 +620,10 @@
 #reversal-report-panel .reversal-negative{color:var(--red,#f87171)!important;font-weight:800}
 #reversal-report-panel .reversal-positive{color:var(--green,#34d399)!important;font-weight:800}
 #reversal-report-panel .reversal-heading-time{display:inline-block;margin-inline-start:12px;color:var(--muted,#9ca3af);font-size:12px;font-weight:500;white-space:normal;vertical-align:middle}
+
+/* Directional fast-scalp cards: SELL red, BUY green (matching manual buttons). */
+.simple-trade-table .scalp-check.go.sell{border-color:#75434a;background:#3e272e}
+.simple-trade-table .scalp-check.go.sell:hover{border-color:#b45d67;background:#512b34}
+.simple-trade-table .scalp-check.go.sell strong{color:var(--red)}
+.simple-trade-table .scalp-check.go.buy{border-color:#3f7565;background:#173a32}
+.simple-trade-table .scalp-check.go.buy strong{color:var(--green)}
