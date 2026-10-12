@@ -16,7 +16,13 @@ def test_utc_hour_regime_audit_remains_observe_only(tmp_path):
     with sqlite3.connect(db) as c:
         c.execute("CREATE TABLE mtf_utc_bars(symbol TEXT,timeframe TEXT,time INTEGER,close REAL,spread_points INTEGER)")
         for i in range(650):
-            price=4200+i*.03+(-1)**i*.17
+            # Nine-minute rising runs with a small one-minute pullback.
+            # The pullback reverses the latest move while the 3-bar move
+            # remains positive, producing genuine Reversal candidates.
+            minute = i % 9
+            price = 4200 + (i // 9) * 1.8 + (
+                minute * .3 if minute < 8 else 7 * .3 - .15
+            )
             c.execute("INSERT INTO mtf_utc_bars VALUES(?,?,?,?,?)",("XAUUSD_l","M1",start+i*60,price,42))
         for i in range(130):
             price=4200+i*.15
