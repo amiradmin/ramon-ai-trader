@@ -480,7 +480,16 @@ function renderOpportunities(data){
     const spread=typeof row.spread==="number"?format(row.spread):"—";
     const risk=typeof row.risk_distance==="number"?format(row.risk_distance):"—";
     const reward=typeof row.entry==="number"&&typeof row.target==="number"&&typeof row.risk_distance==="number"&&row.risk_distance>0?Math.abs(row.target-row.entry)/row.risk_distance:null;
-    const scalpGo=Boolean(row.actionable&&fresh&&compatibility.supported&&row.entry_timing_ready===1&&row.entry_timing_direction===row.direction);
+    // SCALP is advisory and does not inherit V2/V3 WAIT. The manual GO
+    // action still needs its own fresh snapshot and confirmed entry timing;
+    // all broker/account/risk gates remain authoritative in the EA.
+    const scalpBlockers=[];
+    if(!fresh)scalpBlockers.push("نمونه بیش از ۴۵ ثانیه عمر دارد");
+    if(!compatibility.supported)scalpBlockers.push("نسخه EA برای فرمان داشبورد آماده نیست");
+    if(!row.actionable)scalpBlockers.push("فرصت فعلی قابل اقدام نیست (edge/تاریخچه/سن)");
+    if(row.entry_timing_ready!==1||row.entry_timing_direction!==row.direction)
+      scalpBlockers.push("زمان ورود در جهت اسکالپ تأیید نشده");
+    const scalpGo=scalpBlockers.length===0;
     const exitSuggested=Boolean(row.position_open&&["EXIT_NOW","LOSS_EXIT_NOW"].includes(row.chronos_exit_action));
     const scalp=document.createElement(scalpGo||exitSuggested?"button":"div");
     scalp.className="scalp-check "+(exitSuggested?"exit-action":scalpGo?"go":"no-go");
@@ -498,7 +507,7 @@ function renderOpportunities(data){
     }
     const m1=row.intrabar_confirmed===1&&row.intrabar_direction===row.direction?"تأیید":"عدم تأیید";
     const m5=row.m5_context_state==="READY"?"آماده":row.m5_context_state==="STALE"?"قدیمی":"ثبت نشده";
-    scalp.append(el("strong",null,exitSuggested?"EXIT — بستن پوزیشن":scalpGo?"GO — ورود "+row.direction:"NO-GO"),el("small",null,exitSuggested?"پیشنهاد خروج مدل؛ کلیک برای تأیید":("Snapshot: "+(fresh?"تازه":"قدیمی"))),el("small",null,"Spread: "+spread),el("small",null,"M1: "+m1+" · M5: "+m5),el("small",null,"SL risk: "+risk+" · R/R: "+(reward===null?"—":reward.toFixed(2))));
+    scalp.append(el("strong",null,exitSuggested?"EXIT — بستن پوزیشن":scalpGo?"GO — ورود "+row.direction:"NO-GO"),el("small",null,exitSuggested?"پیشنهاد خروج مدل؛ کلیک برای تأیید":("Snapshot: "+(fresh?"تازه":"قدیمی"))),el("small",null,"Spread (price): "+spread),el("small",null,"M1: "+m1+" · M5: "+m5),el("small",null,"SL distance (price): "+risk+" · R/R: "+(reward===null?"—":reward.toFixed(2))),el("small",null,exitSuggested?"":scalpGo?"تأیید اولیه؛ اجرای نهایی با EA":"علت NO-GO: "+scalpBlockers.join("؛ ")));
     const simpleCells=[
       {text:"",cls:"scalp-cell",extra:scalp},
       {text:recommendation,cls:"trade-recommendation "+recClass,extra:engineAdvice},
