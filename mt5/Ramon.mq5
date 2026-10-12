@@ -1,6 +1,6 @@
 ﻿#property strict
-#property version "1.597"
-#define RAMON_EA_VERSION "0.59.7"
+#property version "1.598"
+#define RAMON_EA_VERSION "0.59.8"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -5394,6 +5394,18 @@ void ProcessGuardianRecoveryExits()
    }
 }
 
+// Diagnostic only: first observation of a (signal bar, side, gate) per EA process.
+// No trading decision, state lock, broker call or sizing value is modified.
+void TraceAutoEntryGate(datetime signal_bar,string side,string sample_key,string stage)
+{
+   static string last_key="";
+   string key=IntegerToString((long)signal_bar)+"|"+side+"|"+stage;
+   if(key==last_key) return;
+   last_key=key;
+   Print("Ramon AUTO_ENTRY_TRACE bar=",TimeToString(signal_bar,TIME_DATE|TIME_MINUTES),
+      " side=",side," sample=",sample_key," stage=",stage);
+}
+
 void OnTimer()
 {
    ReadControlRiskCap();
@@ -5803,29 +5815,29 @@ void OnTimer()
    }
 
    if(!dashboard_manual_entry && ManagedPosition(ticket,opened) && ManageNewsGuard(ticket))
-   { if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+   { if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
    // Human selection bypasses analytical vetoes, not execution safety gates.
    // Explicit dashboard orders bypass analytical/news timing vetoes.
    // Broker SL/TP, margin, permissions, account lock and risk limits remain mandatory.
    if(!dashboard_manual_entry && NewsGuardEntryBlocked())
-   { StatusLine="NEWS GUARD: entry paused (high-impact window or calendar unavailable)"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+   { StatusLine="NEWS GUARD: entry paused (high-impact window or calendar unavailable)"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
 
    // Automatic Ramon entries remain single-position. Dashboard opportunity entries
    // may coexist only on a hedging account and remain protected by broker-side SL/TP.
    bool managed_position_open=ManagedPosition(ticket,opened);
    if(managed_position_open && !dashboard_manual_entry)
-   { StatusLine=(LastSampleSaved ? "Managed position OPEN; learning snapshot saved" : "Managed position OPEN; snapshot storage failed"); if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+   { StatusLine=(LastSampleSaved ? "Managed position OPEN; learning snapshot saved" : "Managed position OPEN; snapshot storage failed"); if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
    if(dashboard_manual_entry && managed_position_open
       && AccountInfoInteger(ACCOUNT_MARGIN_MODE)!=ACCOUNT_MARGIN_MODE_RETAIL_HEDGING)
-   { StatusLine="MANUAL DASHBOARD BLOCKED: multiple positions require hedging account"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+   { StatusLine="MANUAL DASHBOARD BLOCKED: multiple positions require hedging account"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
    if(dashboard_manual_entry && DashboardOpportunityPositionCount()>=MaxDashboardOpportunityPositions)
-   { StatusLine="MANUAL DASHBOARD BLOCKED: opportunity position limit"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+   { StatusLine="MANUAL DASHBOARD BLOCKED: opportunity position limit"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
    if(!dashboard_manual_entry && OtherPositionOnSymbol())
-   { StatusLine="Another robot has a position on this symbol"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+   { StatusLine="Another robot has a position on this symbol"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
    if(decision!="BUY" && decision!="SELL" && decision!="WAIT")
-   { StatusLine="Unknown model decision"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+   { StatusLine="Unknown model decision"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
    if(SmallOnlyMode && decision!="WAIT")
-   { StatusLine="Primary signal; small EA stands aside"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+   { StatusLine="Primary signal; small EA stands aside"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
    string small_direction="",small_filter_reason="";
    // Manual dashboard direction is explicit; never reroute it into SMALL.
    bool small_profit=(!dashboard_manual_entry && SmallProfitCandidate(decision,reason,buy_edge,sell_edge,
@@ -5838,7 +5850,7 @@ void OnTimer()
       return;
    }
    if(!EnableLiveTrading)
-   { StatusLine="Live trading disabled"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+   { StatusLine="Live trading disabled"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
    if(small_profit)
       decision=small_direction;
    int small_entries_on_bar=0;
@@ -5846,45 +5858,45 @@ void OnTimer()
    {
       small_entries_on_bar=SmallEntriesThisSignalBar(bar_time);
       if(small_entries_on_bar<0)
-      { StatusLine="Small entry history unavailable"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+      { StatusLine="Small entry history unavailable"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
       if(small_entries_on_bar>0)
       {
          int small_loss_on_bar=SmallLossClosedThisSignalBar(bar_time);
          if(small_loss_on_bar<0)
-         { StatusLine="Small loss-gate history unavailable"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+         { StatusLine="Small loss-gate history unavailable"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
          if(small_loss_on_bar>0)
-         { StatusLine="Second SMALL blocked: first attempt lost this M15 bar"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+         { StatusLine="Second SMALL blocked: first attempt lost this M15 bar"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
       }
       if(small_entries_on_bar>=SmallProfitMaxEntriesPerSignalBar)
-      { StatusLine="Two small entries already used for this M15 signal bar"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+      { StatusLine="Two small entries already used for this M15 signal bar"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
    }
    else if(!dashboard_manual_entry && LastEntrySignalBar==bar_time)
-   { StatusLine="Entry already used for this M15 signal bar"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+   { StatusLine="Entry already used for this M15 signal bar"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
    string live_block_reason="";
    if(!LiveExecutionReady(live_block_reason))
-   { StatusLine=live_block_reason; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+   { StatusLine=live_block_reason; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
    if(!(bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED)
       || !(bool)MQLInfoInteger(MQL_TRADE_ALLOWED)
       || !(bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED))
-   { StatusLine="Trade permission denied"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+   { StatusLine="Trade permission denied"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
    if(SymbolInfoInteger(_Symbol,SYMBOL_TRADE_MODE)!=SYMBOL_TRADE_MODE_FULL)
-   { StatusLine="Symbol trading disabled"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+   { StatusLine="Symbol trading disabled"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
    string account_loss_reason="";
    if(AccountLossLimitsBlocked(account_loss_reason))
-   { StatusLine=account_loss_reason; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+   { StatusLine=account_loss_reason; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
    string cooldown_reason="";
    if(!dashboard_manual_entry && LocalLossCooldownBlocked(decision,cooldown_reason))
-   { StatusLine=cooldown_reason; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+   { StatusLine=cooldown_reason; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
    int today=(SmallOnlyMode || dashboard_manual_entry ? 0 : TradesToday());
    if(!dashboard_manual_entry && !SmallOnlyMode && (today<0 || today>=MaxTradesPerDay))
-   { StatusLine="Daily trade limit/history unavailable"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+   { StatusLine="Daily trade limit/history unavailable"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
    MqlTick tick;
    if(!SymbolInfoTick(_Symbol,tick) || TimeCurrent()-tick.time>30)
-   { StatusLine="Quote changed/stale"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+   { StatusLine="Quote changed/stale"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
    if((int)SymbolInfoInteger(_Symbol,SYMBOL_SPREAD)>MaxSpreadPoints)
-   { StatusLine="Quote changed/stale"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+   { StatusLine="Quote changed/stale"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
    if(stop_distance<=0.0 || target_distance<=0.0 || atr<=0.0)
-   { StatusLine="Invalid stop/target"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+   { StatusLine="Invalid stop/target"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
    double range_execution=0.0,range_stop=0.0,range_target=0.0,range_low=0.0,range_high=0.0;
    JsonNumber(reply,"range_execution",range_execution);
    bool range_trade=(range_execution>=0.5 && !dashboard_manual_entry);
@@ -5892,7 +5904,7 @@ void OnTimer()
    if(!range_trade && manual_execution_override<0.5 && !live_direction_ai
       && (intrabar_confirmed<0.5 || ai_trend_confirmed<0.5
       || intrabar_direction!=decision || ai_trend_direction!=decision))
-   { StatusLine="DIRECTION GUARD: normal entry needs aligned confirmations"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+   { StatusLine="DIRECTION GUARD: normal entry needs aligned confirmations"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
    if(!range_trade && live_direction_ai)
       Print("Ramon execution: LIVE DIRECTION AI accepted ",decision,
          " sample=",sample_key);
@@ -5908,10 +5920,10 @@ void OnTimer()
          || !JsonNumber(reply,"range_target_price",range_target)
          || !JsonNumber(reply,"range_low",range_low)
          || !JsonNumber(reply,"range_high",range_high))
-      { StatusLine="Range MAIN protocol not ready"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+      { StatusLine="Range MAIN protocol not ready"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
       int cooldown=RangeMainCooldownRemaining();
       if(cooldown!=0)
-      { StatusLine="Range MAIN cooldown/history unavailable"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+      { StatusLine="Range MAIN cooldown/history unavailable"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
    }
    ENUM_ORDER_TYPE side=(decision=="BUY" ? ORDER_TYPE_BUY : ORDER_TYPE_SELL);
    double entry=(decision=="BUY" ? tick.ask : tick.bid);
@@ -5934,7 +5946,7 @@ void OnTimer()
       if(tick.bid<range_low || tick.bid>range_high || !boundary
          || risk<min_stop+2*point || reward<min_stop+2*point
          || reward<MathMax(3*spread,1.2*risk))
-      { StatusLine="Range MAIN quote/risk changed"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+      { StatusLine="Range MAIN quote/risk changed"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
    }
 
    // MAIN three-stage plan: use TP3 as the broker-side fail-safe target whenever
@@ -5954,7 +5966,7 @@ void OnTimer()
    double volume=(small_profit ? SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN)
       : SelectVolume(side,entry,stop));
    if(volume<=0.0)
-   { StatusLine="TRADE BLOCKED: min lot > hard risk cap"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+   { StatusLine="TRADE BLOCKED: min lot > hard risk cap"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
 
    if(range_trade)
    {
@@ -5978,74 +5990,74 @@ void OnTimer()
    }
 
    if(range_trade && !RangeMainRewardRiskValid(side,entry,volume,stop,target))
-   { StatusLine="Range MAIN blocked: actual quick TP reward/risk <1.2"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+   { StatusLine="Range MAIN blocked: actual quick TP reward/risk <1.2"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
 
    if(small_profit)
    {
       // Small-profit trades never scale above the broker minimum volume.
       if(!SmallProfitStop(side,entry,stop,volume,tick,stop))
-      { StatusLine="Broker cannot place 4-cent small stop"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+      { StatusLine="Broker cannot place 4-cent small stop"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
       double stop_loss_units=0.0;
       double small_risk_cap=SmallProfitRiskCapUnits();
       if(volume<=0.0 || small_risk_cap<=0.0
          || !OrderCalcProfit(side,_Symbol,volume,entry,stop,stop_loss_units)
          || stop_loss_units>=0.0
          || -stop_loss_units>small_risk_cap+0.00001)
-      { StatusLine="Small profit risk > 4 cents"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+      { StatusLine="Small profit risk > 4 cents"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
       if(!SmallProfitTarget(side,entry,volume,tick,target))
-      { StatusLine="Broker cannot place 2-cent target"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+      { StatusLine="Broker cannot place 2-cent target"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
    }
    double executable_loss=0.0;
    if(!SmallOnlyMode && (!OrderCalcProfit(side,_Symbol,volume,entry,stop,executable_loss)
       || executable_loss>=0.0 || -executable_loss>MaxExecutableRiskUnits()+0.00001))
-   { StatusLine="Entry risk exceeds Control cap"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+   { StatusLine="Entry risk exceeds Control cap"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
    double margin=0.0;
    if(!OrderCalcMargin(side,_Symbol,volume,entry,margin)
       || margin>AccountInfoDouble(ACCOUNT_MARGIN_FREE)*0.8)
-   { StatusLine="Insufficient margin"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+   { StatusLine="Insufficient margin"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
 
    V2ExecutionLease execution_lease;
    string guard_reason="";
    string execution_id=LastSampleKey+(small_profit ? ":S" : (range_trade ? ":R" : (dashboard_manual_entry ? ":M" : ":A")));
    if(!V2ExecBegin(execution_id,guard_reason))
-   { StatusLine="V2 EXECUTION BLOCKED: "+guard_reason; Print(StatusLine); ShowStatus(); return; }
+   { StatusLine="V2 EXECUTION BLOCKED: "+guard_reason; Print(StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
    // Re-read mutable account/quote gates AFTER taking the account lease.
    bool coordinated_open=ManagedPosition(ticket,opened);
    if((!dashboard_manual_entry && (coordinated_open || OtherPositionOnSymbol())) ||
       (dashboard_manual_entry && (DashboardOpportunityPositionCount()>=MaxDashboardOpportunityPositions ||
          (coordinated_open && AccountInfoInteger(ACCOUNT_MARGIN_MODE)!=ACCOUNT_MARGIN_MODE_RETAIL_HEDGING))))
-   { StatusLine="V2 EXECUTION BLOCKED: position state changed"; Print(StatusLine); ShowStatus(); return; }
+   { StatusLine="V2 EXECUTION BLOCKED: position state changed"; Print(StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
    if(!LiveExecutionReady(guard_reason) || AccountLossLimitsBlocked(guard_reason) ||
       !(bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) || !(bool)MQLInfoInteger(MQL_TRADE_ALLOWED) ||
       !(bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED) ||
       SymbolInfoInteger(_Symbol,SYMBOL_TRADE_MODE)!=SYMBOL_TRADE_MODE_FULL ||
       !SymbolInfoTick(_Symbol,tick) || TimeCurrent()-tick.time>30 || tick.time>TimeCurrent() ||
       tick.ask<=0 || tick.bid<=0 || (int)SymbolInfoInteger(_Symbol,SYMBOL_SPREAD)>MaxSpreadPoints)
-   { StatusLine="V2 EXECUTION BLOCKED: permissions/account/quote changed "+guard_reason; Print(StatusLine); ShowStatus(); return; }
+   { StatusLine="V2 EXECUTION BLOCKED: permissions/account/quote changed "+guard_reason; Print(StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
    if(!dashboard_manual_entry && !SmallOnlyMode)
    {
       today=TradesToday();
       if(today<0 || today>=MaxTradesPerDay)
-      { StatusLine="V2 EXECUTION BLOCKED: daily limit changed"; Print(StatusLine); ShowStatus(); return; }
+      { StatusLine="V2 EXECUTION BLOCKED: daily limit changed"; Print(StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
    }
    if(SmallOnlyMode)
    {
       small_entries_on_bar=SmallEntriesThisSignalBar(bar_time);
       int coordinated_losses=SmallLossClosedThisSignalBar(bar_time);
       if(small_entries_on_bar<0 || small_entries_on_bar>=SmallProfitMaxEntriesPerSignalBar || coordinated_losses<0 || coordinated_losses>0)
-      { StatusLine="V2 EXECUTION BLOCKED: SMALL history/limit changed"; Print(StatusLine); ShowStatus(); return; }
+      { StatusLine="V2 EXECUTION BLOCKED: SMALL history/limit changed"; Print(StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
    }
    entry=side==ORDER_TYPE_BUY ? tick.ask : tick.bid;
    double coordinated_cap=small_profit ? SmallProfitRiskCapUnits() : (range_trade ? RangeMainMaxLossUnits : MaxExecutableRiskUnits());
    double coordinated_pnl=0.0;
    if(coordinated_cap<=0 || !OrderCalcProfit(side,_Symbol,volume,entry,stop,coordinated_pnl) ||
       !MathIsValidNumber(coordinated_pnl) || coordinated_pnl>=0 || -coordinated_pnl>coordinated_cap+0.00001)
-   { StatusLine="V2 EXECUTION BLOCKED: refreshed per-trade risk"; Print(StatusLine); ShowStatus(); return; }
+   { StatusLine="V2 EXECUTION BLOCKED: refreshed per-trade risk"; Print(StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
    if(!V2Preflight(side,entry,stop,volume,guard_reason))
-   { StatusLine="V2 ENTRY BLOCKED: "+guard_reason; Print(StatusLine); ShowStatus(); return; }
+   { StatusLine="V2 ENTRY BLOCKED: "+guard_reason; Print(StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
 
    if(!V2ExecReserve(execution_id,side,entry,stop,volume,0))
-   { StatusLine="V2 EXECUTION BLOCKED: durable preparation failed"; Print(StatusLine); ShowStatus(); return; }
+   { StatusLine="V2 EXECUTION BLOCKED: durable preparation failed"; Print(StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
 
    // Telemetry/management staging must never block an otherwise valid entry.
    StageEntrySizing(LastSampleKey,side,entry,stop,volume);
@@ -6058,7 +6070,8 @@ void OnTimer()
       SaveDashboardAlias(LastSampleKey,
          ValidSampleKey(dashboard_origin_sample_key) ? dashboard_origin_sample_key : LastSampleKey);
    if(!V2ExecIdentity())
-   { StatusLine="V2 EXECUTION BLOCKED: account changed after preparation"; Print(StatusLine); ShowStatus(); return; }
+   { StatusLine="V2 EXECUTION BLOCKED: account changed after preparation"; Print(StatusLine); if(!dashboard_manual_entry && (decision=="BUY" || decision=="SELL")) TraceAutoEntryGate(bar_time,decision,sample_key,StatusLine); ShowStatus(); return; }
+   if(!dashboard_manual_entry) TraceAutoEntryGate(bar_time,decision,sample_key,"ORDER_ATTEMPT");
    bool submitted=(
       decision=="BUY"
       ? Trade.Buy(volume,_Symbol,0.0,stop,target,trade_comment)
