@@ -2147,11 +2147,44 @@ def queue_predicted_auto_close(diagnostic, symbol, health_url, payload):
     }
 
 
+def daily_reversal_report(db, symbol, now=None):
+    """Read generated report only; never run backtests in a dashboard request."""
+    path = Path(db).resolve().parent / "reports" / "reversal" / "latest.json"
+    if not path.is_file():
+        return {"available": False, "reason": "REPORT_MISSING"}
+    try:
+        if path.stat().st_size > 2_000_000:
+            return {"available": False, "reason": "REPORT_TOO_LARGE"}
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or data.get("symbol") != symbol:
+            return {"available": False, "reason": "INVALID_REPORT"}
+        stamp = datetime.fromisoformat(str(data["generated_utc"]).replace("Z", "+00:00"))
+        if stamp.tzinfo is None:
+            return {"available": False, "reason": "INVALID_TIMESTAMP"}
+        age = ((now or datetime.now(timezone.utc)) - stamp).total_seconds()
+        audit = data.get("reversal_audit") or {}
+        return {"available": True, "generated_utc": data["generated_utc"],
+                "report_age_seconds": int(age), "report_stale": age < -300 or age > 93600,
+                "data_quality": data.get("data_quality") or {},
+                "status": audit.get("status", "UNKNOWN"),
+                "independent_utc_days": audit.get("independent_utc_days"),
+                "required_independent_days": audit.get("required_independent_days"),
+                "overall": audit.get("overall") or {},
+                "folds": [{"fold": x.get("fold"), "stats": x.get("stats") or {}}
+                          for x in audit.get("folds", []) if isinstance(x, dict)],
+                "promotion_ready": False, "execution_enabled": False}
+    except (OSError, ValueError, TypeError, KeyError, OverflowError):
+        return {"available": False, "reason": "REPORT_UNREADABLE"}
+
+
 def handler_for(db, diagnostic, symbol, health_url):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             route = self.path.split("?", 1)[0]
-            if route == "/api/trade-trace":
+            if route == "/api/reversal-report":
+                payload = daily_reversal_report(db, symbol)
+                self.reply(json.dumps(payload, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
+            elif route == "/api/trade-trace":
                 key = parse_qs(urlsplit(self.path).query).get("trade_key", [""])[0]
                 if not key or len(key) > 256:
                     self.send_error(400)
