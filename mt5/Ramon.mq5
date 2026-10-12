@@ -6163,8 +6163,21 @@ bool V2Preflight(ENUM_ORDER_TYPE side,double entry,double stop,double volume,str
 {
    reason="";
    // Stop Out is mandatory even when the optional exposure guard is disabled.
+   // Startup may have run before history or connectivity became available.
+   // Recheck ONLY the exact, known Cent test marker under the full history,
+   // flat-exposure and account/server checks; real stop-outs stay locked.
    if(GlobalVariableCheck(V2StopoutKey()))
-   { reason="stop-out lock"; return false; }
+   {
+      string test_lock_reason="";
+      if(!V2ReleaseKnownTestLock(test_lock_reason))
+      {
+         reason="stop-out lock";
+         if(test_lock_reason!="") reason+=" ("+test_lock_reason+")";
+         return false;
+      }
+      if(GlobalVariableCheck(V2StopoutKey()))
+      { reason="stop-out lock (not a releasable test marker)"; return false; }
+   }
    if(!V2RecoverStopoutHistory(reason)) return false;
    if(GlobalVariableCheck(V2StopoutKey()))
    { reason="stop-out lock"; return false; }
