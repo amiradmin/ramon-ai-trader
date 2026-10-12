@@ -115,7 +115,7 @@
 .decision-verdict{font-weight:700;border-right:3px solid transparent}
 .decision-verdict.pass{color:var(--green);border-right-color:var(--green);background:#173a3226}
 .decision-verdict.blocked{color:var(--red);border-right-color:var(--red);background:#3e272e26}
-.opportunity-scroll{max-height:560px;overflow:auto}.opportunity-table th{position:sticky;top:0;background:#101925;z-index:1}
+.opportunity-scroll{max-height:1120px;overflow:auto}.opportunity-table th{position:sticky;top:0;background:#101925;z-index:1}
 
 .opportunity-entry{min-width:108px;border:1px solid var(--border);border-radius:8px;padding:7px 10px;background:#172131;color:var(--text);cursor:pointer;font:700 10px monospace;white-space:nowrap}
 .opportunity-entry.buy{border-color:#3f7565;color:var(--green);background:#173a32}
@@ -611,3 +611,7 @@
   background:#173a32;
   color:var(--green);
 }
+
+/* Daily read-only research summary */
+.reversal-fold{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;border:1px solid var(--border);border-radius:9px;padding:10px 12px;background:#121d2b;font-size:12px}
+.reversal-fold span{font-variant-numeric:tabular-nums}
