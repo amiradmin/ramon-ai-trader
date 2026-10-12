@@ -194,6 +194,14 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
                     item = grouped[key]
                     item['latest_captured'] = row['captured']
                     item['last_reason'] = final.get('reason')
+                    # Refresh mutable timing evidence from the latest snapshot.
+                    # Do not change the originating signal geometry or identity.
+                    item['entry_timing_ready'] = final.get('entry_timing_ready')
+                    item['entry_timing_direction'] = final.get('entry_timing_direction')
+                    item['intrabar_confirmed'] = base.get('intrabar_confirmed')
+                    item['intrabar_direction'] = base.get('intrabar_direction')
+                    item['v2_decision'] = final.get('decision')
+                    item['v2_reason'] = final.get('reason')
                     item['model_approved'] = bool(item.get('model_approved') or row['final_decision'] == item['direction'])
                     item['executed'] = bool(item.get('executed') or row['sample_key'] in traded)
                     continue
