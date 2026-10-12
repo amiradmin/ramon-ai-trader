@@ -517,6 +517,29 @@ function renderOpportunities(data){
       ?"M1/M5 هم‌جهت: "+liveTiming.direction
       :liveTiming.status==="CONFLICT"?"M1/M5 متعارض"
       :"M1/M5 تأیید مستقل ندارد";
+    // Transparent advisory heuristic, NOT a calibrated win probability.
+    // Missing indicators reduce coverage rather than silently counting as zero.
+    const valid01=v=>typeof v==="number"&&Number.isFinite(v)&&v>=0&&v<=1;
+    const qualityInputs=[
+      {label:"جهت AI",weight:30,value:valid01(row.success_probability)?row.success_probability:null},
+      {label:"زمان ورود",weight:25,value:row.entry_timing_ready===1?(row.entry_timing_direction===row.direction?1:0):row.entry_timing_ready===0?0:null},
+      {label:"توافق M1/M5",weight:25,value:liveTiming.status==="AGREE"?(liveTiming.direction===row.direction?1:0):liveTiming.status==="CONFLICT"?0:null},
+      {label:"ریسک SL",weight:20,value:valid01(row.full_sl_probability)?1-row.full_sl_probability:null}
+    ];
+    const known=qualityInputs.filter(item=>item.value!==null);
+    const coverage=known.reduce((sum,item)=>sum+item.weight,0);
+    const entryQuality=coverage>=70?Math.round(100*known.reduce((sum,item)=>sum+item.weight*item.value,0)/coverage):null;
+    const qualityDetails=qualityInputs.map(item=>item.label+": "+(item.value===null?"داده ناکافی":Math.round(item.value*100)+"/100")).join(" · ");
+    const advisory=document.createElement("div");
+    advisory.className="fast-scalp-quality "+(entryQuality===null?"unknown":entryQuality>=75?"favorable":entryQuality>=50?"caution":"weak");
+    const qualityTitle=document.createElement("strong");
+    qualityTitle.textContent="کیفیت ورود: "+(entryQuality===null?"نامشخص":entryQuality+"/100");
+    const qualitySubtitle=document.createElement("small");
+    qualitySubtitle.textContent="M1/M5: "+(liveTiming.status==="AGREE"?(liveTiming.direction===row.direction?"هم‌جهت":"مخالف"):liveTiming.status==="CONFLICT"?"متعارض":"نامشخص")+" · پوشش داده "+coverage+"٪";
+    const qualityHistory=document.createElement("small");
+    qualityHistory.textContent="برد تاریخی: کالیبره نشده";
+    advisory.title="امتیاز ابتکاری، نه احتمال سود. "+qualityDetails+". برای معامله فقط نقش مشاور دارد.";
+    advisory.append(qualityTitle,qualitySubtitle,qualityHistory);
     const scalpGo=scalpBlockers.length===0;
     const exitSuggested=Boolean(row.position_open&&["EXIT_NOW","LOSS_EXIT_NOW"].includes(row.chronos_exit_action));
     // A historical row must never be traded at its old price.  When a row is
@@ -539,6 +562,7 @@ function renderOpportunities(data){
     const m1Data=contextText(row.m1_context_state,row.m1_context_age_seconds);
     const m5=contextText(row.m5_context_state,row.m5_context_age_seconds);
     scalp.append(el("strong",null,exitSuggested?"EXIT — بستن پوزیشن":row.entry_queued?"در صف اجرا":row.position_open?"پوزیشن باز":row.executed?"ثبت‌شده":scalpGo?"⚡ FAST SCALP "+row.direction:scalpRecheck?"⚡ FAST CHECK "+row.direction:"NO-GO"),el("small",null,exitSuggested?"پیشنهاد خروج مدل؛ کلیک برای ارسال درخواست":("Snapshot: "+(fresh?"تازه":"قدیمی"))),el("small",null,"Spread (price): "+spread),el("small",null,"M1: "+m1Data+" / "+m1+" · M5: "+m5),el("small",null,"تحلیل مستقل: "+liveTimingText),el("small",null,"مقایسه Entry Timing (فقط مشاهده): "+({"BOTH_CONFIRM":"هر دو تأیید","MTF_ONLY":"فقط M1/M5","ENGINE_ONLY":"فقط موتور اصلی","NEITHER":"هیچ‌کدام"}[row.mtf_shadow_entry_timing?.comparison]||"نامشخص")),el("small",null,"SL distance (price): "+risk+" · R/R: "+(reward===null?"—":reward.toFixed(2))),el("small",null,exitSuggested?"":scalpGo?"یک کلیک؛ کنترل مجدد جهت و ورود با EA · مدیریت خروج اسکالپ دستی":scalpRecheck?"یک کلیک؛ بازبینی snapshot تازه و در صورت تأیید، ارسال ورود به EA":"علت NO-GO: "+scalpBlockers.join("؛ ")+ (contextWarnings.length?" | وضعیت داده: "+contextWarnings.join("؛ "):"")));
+    scalp.append(advisory);
     const simpleCells=[
       {text:"",cls:"scalp-cell",extra:scalp},
       {text:recommendation,cls:"trade-recommendation "+recClass,extra:engineAdvice},
