@@ -2177,11 +2177,47 @@ def daily_reversal_report(db, symbol, now=None):
         return {"available": False, "reason": "REPORT_UNREADABLE"}
 
 
+def training_data_health(db, symbol):
+    """Read-only, low-frequency training inventory; never claims unlabeled WAITs are outcomes."""
+    path = Path(db).expanduser().resolve()
+    if not path.is_file():
+        return {"available": False, "reason": "HISTORY_DB_MISSING"}
+    result = {"available": True, "symbol": symbol, "generated_utc": int(time.time())}
+    try:
+        with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=.5) as con:
+            con.execute("PRAGMA query_only=ON")
+            tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            def stat(table, time_col, where="", args=()):
+                if table not in tables:
+                    return {"available": False}
+                count, latest = con.execute(
+                    f"SELECT COUNT(*),MAX({time_col}) FROM {table} WHERE symbol=?"
+                    + (" AND " + where if where else ""), (symbol, *args)
+                ).fetchone()
+                return {"available": True, "count": count, "last_utc": latest}
+            result["decisions"] = stat("decision_samples", "captured")
+            result["wait_decisions"] = stat("decision_samples", "captured", "final_decision='WAIT'")
+            result["trade_outcomes"] = stat("trade_outcomes", "received")
+            result["closed_trades"] = stat("trade_outcomes", "closed", "closed>0")
+            result["human_actions"] = stat("human_assisted_events", "created_utc")
+            result["human_entries"] = stat("human_assisted_events", "created_utc", "action='ENTER'")
+            result["human_skips"] = stat("human_assisted_events", "created_utc", "action='SKIP'")
+            result["auto_outcomes"] = {"available": False, "reason": "SOURCE_CLASSIFICATION_NOT_VERIFIED"}
+            result["labeled_decisions"] = {"available": False, "reason": "JOIN_COVERAGE_NOT_AUDITED"}
+            result["missing_data"] = {"available": False, "reason": "COMPLETENESS_NOT_AUDITED"}
+            result["training_readiness"] = "NOT_AUDITED"
+    except (sqlite3.Error, OSError, ValueError) as exc:
+        return {"available": False, "reason": "DATABASE_READ_FAILED", "detail": str(exc)[:160]}
+    return result
+
+
 def handler_for(db, diagnostic, symbol, health_url):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             route = self.path.split("?", 1)[0]
-            if route == "/api/reversal-report":
+            if route == "/api/training-data-health":
+                self.reply(json.dumps(training_data_health(db, symbol), ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
+            elif route == "/api/reversal-report":
                 payload = daily_reversal_report(db, symbol)
                 self.reply(json.dumps(payload, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
             elif route == "/api/trade-trace":
