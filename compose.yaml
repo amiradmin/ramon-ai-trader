@@ -114,6 +114,8 @@ services:
       - /data/ramon_history.sqlite3
       - --interval
       - "30"
+      - --broker-utc-offset-hours
+      - "${RAMON_MTF_BROKER_UTC_OFFSET_HOURS:-3}"
     volumes:
       - ./data:/data
       - ${HOME}/.mt5/drive_c/users:/mt5-users:ro
