@@ -532,7 +532,7 @@ function renderOpportunities(data){
       scalp.title=exitSuggested?"بستن این پوزیشن با کلیک؛ EA مالکیت و مجوز را دوباره کنترل می‌کند":"FAST SCALP "+row.direction+": با یک کلیک snapshot تازه کنترل و فقط در صورت تأیید همان جهت فرمان ارسال می‌شود؛ قیمت، مارجین و ریسک همچنان توسط EA کنترل می‌شوند";
       scalp.addEventListener("click",()=>{
         if(exitSuggested)void manualCloseOpportunity(row,scalp);
-        else void manualOpportunity(row,scalp,true,false,row.direction);
+        else void manualOpportunity(row,scalp,true,true,row.direction);
       });
     }
     const m1=row.intrabar_confirmed===1&&row.intrabar_direction===row.direction?"جهت تأیید":"جهت تأیید نشده";
