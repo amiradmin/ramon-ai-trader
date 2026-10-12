@@ -6247,8 +6247,8 @@ bool V2Preflight(ENUM_ORDER_TYPE side,double entry,double stop,double volume,str
          if(test_lock_reason!="") reason+=" ("+test_lock_reason+")";
          return false;
       }
-      if(GlobalVariableCheck(V2StopoutKey()))
-      { reason="stop-out lock (not a releasable test marker)"; return false; }
+      // Real stop-out latches proceed to full history reconciliation below.
+      // No order is allowed before all reviews and margin checks pass.
    }
    if(!V2RecoverStopoutHistory(reason)) return false;
    if(GlobalVariableCheck(V2StopoutKey()))
