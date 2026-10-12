@@ -1,6 +1,6 @@
 ﻿#property strict
-#property version "1.596"
-#define RAMON_EA_VERSION "0.59.6"
+#property version "1.597"
+#define RAMON_EA_VERSION "0.59.7"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -1395,6 +1395,12 @@ void DrawDashboard()
 
    UiLabel("DECISION","DECISION: "+LastModelDecision+"   "+LastModelReason,
       28,108,state_color,11);
+   ObjectSetString(0,UiPrefix+"DECISION",OBJPROP_TOOLTIP,
+      "Final: "+LastModelDecision+" | "+LastModelReason+"\\n"
+      +"Base: "+LastBaseDecision+" | "+LastBaseReason+"\\n"
+      +"Intrabar: "+(LastIntrabarConfirmed ? "CONFIRMED " : "NOT CONFIRMED ")+LastIntrabarDirection+"\\n"
+      +"AI trend: "+(LastAiTrendConfirmed ? "CONFIRMED " : "NOT CONFIRMED ")+LastAiTrendDirection+"\\n"
+      +"WAIT can be a safety decision even if forecast and entry votes agree.");
    UiLabel("ATTRIBUTION",AttributionSummary(),28,130,clrWhite,9);
 
    string compact_signal=(LastSignalBarTime>0 && LastSignalBid>0.0 && LastSignalAsk>LastSignalBid
@@ -1471,13 +1477,16 @@ void DrawDashboard()
          : "LIVE P/L: --   (no Ramon position)",
       28,266,(managed_position_source=="HUMAN_ASSISTED" ? clrLime : clrWhite),10);
 
+   // Split sizing telemetry so the executable risk cap is never clipped.
    UiLabel("SIZING","Sizing: "+LastSizingSide
-      +"   Vol: "+DoubleToString(LastPlannedVolume,2)
-      +"   Base: $"+DoubleToString(RiskPerTradeUSD,2)
+      +" | Vol: "+DoubleToString(LastPlannedVolume,2)
+      +" | Base: $"+DoubleToString(RiskPerTradeUSD,2)
       +" x"+DoubleToString(LastRiskMultiplier,2)
-      +" = $"+DoubleToString(EffectiveRiskPerTradeUSD(),3)
-      +"   Cap: $"+DoubleToString(MaxExecutableRiskUSD,2),
-      28,288,sizing_color,9);
+      +" = $"+DoubleToString(EffectiveRiskPerTradeUSD(),3),
+      28,284,sizing_color,9);
+   UiLabel("SIZING_CAP","Executable risk cap: $"+DoubleToString(MaxExecutableRiskUSD,3)
+      +" | Estimated SL: $"+DoubleToString(AccountUnitsToUSD(LastEstimatedStopLossUnits),3),
+      28,302,sizing_color,9);
 
    // Detailed min-risk/gate/money-unit values remain in Trade Check + Diagnostic.
    ObjectDelete(0,UiPrefix+"MIN_RISK");
