@@ -203,7 +203,16 @@ async function manualOpportunity(row,button,recheck=false,manualUnlocked=false,d
         ?"فرمان دستی "+selectedDirection+" ارسال شد؛ قفل‌های تحلیلی Ramon دخالت نمی‌کنند و فقط کنترل‌های سخت اجرای سفارش/ریسک باقی می‌مانند."
         :(recheck?"جهت انتخابی روی snapshot تازه بازبینی و ارسال شد؛ ":"فرمان "+selectedDirection+" ارسال شد؛ ")+"EA قبل از بازکردن پوزیشن کنترل‌های اجرایی و ریسک را دوباره بررسی می‌کند.");
     setTimeout(()=>void refreshOpportunities(),1500);
-  }catch(err){button.textContent="رد شد";opportunitySet("opportunity-status","ورود دستی انجام نشد: "+err.message);setTimeout(()=>{button.disabled=!row.actionable;button.textContent=old;},1800);}
+  }catch(err){
+    const reason=String(err?.message||"خطای نامشخص");
+    button.textContent="رد شد — جزئیات";
+    button.title="FAST SCALP رد شد: "+reason;
+    button.setAttribute("aria-label","FAST SCALP رد شد: "+reason);
+    opportunitySet("opportunity-status","ورود دستی انجام نشد: "+reason);
+    // Keep the rejection visible on this row until the table refreshes.
+    // Do not relax any entry authorization or EA safety constraints.
+    button.disabled=true;
+  }
 }
 async function humanSkipOpportunity(row,button){
   if(button.disabled)return;
