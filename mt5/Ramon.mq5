@@ -6062,6 +6062,49 @@ bool V2PersistStopout(ulong ticket,long deal_msc)
    return true;
 }
 
+// Remove only the one marker deliberately seeded for the Cent lock-persistence
+// test.  This is not a general Stop Out override: a real Stop Out, unreadable
+// history, open exposure, a different account/server, or a changed marker keeps
+// the account locked.
+bool V2ReleaseKnownTestLock(string &reason)
+{
+   reason="";
+   const long expected_login=89166482;
+   const string expected_server="LiteFinance-MT5-Live";
+   const double expected_value=1791648001.0;
+   if(AccountInfoInteger(ACCOUNT_LOGIN)!=expected_login ||
+      AccountInfoString(ACCOUNT_SERVER)!=expected_server)
+      return true; // This one-time migration never applies to another account.
+   string key=V2StopoutKey();
+   if(!GlobalVariableCheck(key)) return true;
+   double stored=0.0;
+   if(!GlobalVariableGet(key,stored) || stored!=expected_value)
+   { reason="test-lock marker changed"; return false; }
+   if(!TerminalInfoInteger(TERMINAL_CONNECTED))
+   { reason="terminal disconnected"; return false; }
+   if(PositionsTotal()!=0 || OrdersTotal()!=0)
+   { reason="open positions/orders"; return false; }
+   datetime now=TimeCurrent();
+   if(now<=0 || !HistorySelect(0,now))
+   { reason="stop-out history unavailable"; return false; }
+   for(int i=0;i<HistoryDealsTotal();i++)
+   {
+      ulong deal=HistoryDealGetTicket(i);
+      long deal_reason=0;
+      if(deal==0 || !HistoryDealGetInteger(deal,DEAL_REASON,deal_reason))
+      { reason="stop-out history deal unreadable"; return false; }
+      if(deal_reason==DEAL_REASON_SO)
+      { reason="broker stop-out exists"; return false; }
+   }
+   if(!GlobalVariableDel(key))
+   { reason="test-lock deletion failed"; return false; }
+   GlobalVariablesFlush();
+   if(GlobalVariableCheck(key))
+   { reason="test-lock remains after deletion"; return false; }
+   Print("V2 STOP OUT: known Cent test lock removed after clean history audit");
+   return true;
+}
+
 bool V2RecoverStopoutHistory(string &reason)
 {
    V2StopoutHistoryHealthy=false;
@@ -6374,6 +6417,9 @@ int OnInit()
    Trade.SetTypeFillingBySymbol(_Symbol);
    // Do not abort initialization: protective exits must remain available when
    // history is unavailable. Every entry rechecks this scan in V2Preflight.
+   string test_lock_reason="";
+   if(!V2ReleaseKnownTestLock(test_lock_reason))
+      Print("V2 STOP OUT: known test lock retained: ",test_lock_reason);
    string stopout_reason="";
    if(!V2RecoverStopoutHistory(stopout_reason))
       Print("V2 STOP OUT: startup entries blocked: ",stopout_reason);

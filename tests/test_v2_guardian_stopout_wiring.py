@@ -53,3 +53,17 @@ def test_stopout_history_is_scanned_at_startup_and_before_optional_risk_guard():
     assert "DEAL_REASON_SO" in history and "DEAL_TIME_MSC" in history
     assert "DEAL_MAGIC" not in history and "DEAL_SYMBOL" not in history
     assert "GlobalVariableDel" not in history
+
+
+def test_known_test_lock_release_is_exact_and_never_waives_a_real_stopout():
+    code=SOURCE.read_text(encoding="utf-8-sig")
+    start=code.index("bool V2ReleaseKnownTestLock(")
+    release=code[start:code.index("bool V2RecoverStopoutHistory(",start)]
+    assert "const long expected_login=89166482;" in release
+    assert 'const string expected_server="LiteFinance-MT5-Live";' in release
+    assert "const double expected_value=1791648001.0;" in release
+    delete=release.index("GlobalVariableDel(key)")
+    for guard in ["PositionsTotal()!=0 || OrdersTotal()!=0", "HistorySelect(0,now)",
+                  "deal_reason==DEAL_REASON_SO", "stored!=expected_value"]:
+        assert release.index(guard)<delete
+    assert "OrderSend(" not in release and "CTrade" not in release and "Trade." not in release
