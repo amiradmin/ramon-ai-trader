@@ -520,26 +520,39 @@ function renderOpportunities(data){
     // Transparent advisory heuristic, NOT a calibrated win probability.
     // Missing indicators reduce coverage rather than silently counting as zero.
     const valid01=v=>typeof v==="number"&&Number.isFinite(v)&&v>=0&&v<=1;
+    const timingState=row.entry_timing_ready===1
+      ?(row.entry_timing_direction===row.direction?"تأیید هم‌جهت":"تأیید جهت مخالف")
+      :row.entry_timing_ready===0?"تأیید نشده":"داده موجود نیست";
+    const mtfState=liveTiming.status==="AGREE"
+      ?(liveTiming.direction===row.direction?"هم‌جهت":"مخالف")
+      :liveTiming.status==="CONFLICT"?"متعارض":"داده کافی نیست";
     const qualityInputs=[
-      {label:"جهت AI",weight:30,value:valid01(row.success_probability)?row.success_probability:null},
-      {label:"زمان ورود",weight:25,value:row.entry_timing_ready===1?(row.entry_timing_direction===row.direction?1:0):row.entry_timing_ready===0?0:null},
-      {label:"توافق M1/M5",weight:25,value:liveTiming.status==="AGREE"?(liveTiming.direction===row.direction?1:0):liveTiming.status==="CONFLICT"?0:null},
-      {label:"ریسک SL",weight:20,value:valid01(row.full_sl_probability)?1-row.full_sl_probability:null}
+      {label:"جهت AI",weight:30,value:valid01(row.success_probability)?row.success_probability:null,status:valid01(row.success_probability)?"موجود":"داده موجود نیست"},
+      {label:"زمان ورود",weight:25,value:row.entry_timing_ready===1?(row.entry_timing_direction===row.direction?1:0):row.entry_timing_ready===0?0:null,status:timingState},
+      {label:"توافق M1/M5",weight:25,value:liveTiming.status==="AGREE"?(liveTiming.direction===row.direction?1:0):liveTiming.status==="CONFLICT"?0:null,status:mtfState},
+      {label:"ریسک SL",weight:20,value:valid01(row.full_sl_probability)?1-row.full_sl_probability:null,status:valid01(row.full_sl_probability)?"موجود":"داده موجود نیست"}
     ];
     const known=qualityInputs.filter(item=>item.value!==null);
     const coverage=known.reduce((sum,item)=>sum+item.weight,0);
-    const entryQuality=coverage>=70?Math.round(100*known.reduce((sum,item)=>sum+item.weight*item.value,0)/coverage):null;
-    const qualityDetails=qualityInputs.map(item=>item.label+": "+(item.value===null?"داده ناکافی":Math.round(item.value*100)+"/100")).join(" · ");
+    const entryQuality=coverage>0?Math.round(100*known.reduce((sum,item)=>sum+item.weight*item.value,0)/coverage):null;
+    const coverageLabel=coverage>=70?"پوشش مناسب":coverage>=40?"پوشش محدود":"پوشش بسیار کم";
     const advisory=document.createElement("div");
-    advisory.className="fast-scalp-quality "+(entryQuality===null?"unknown":entryQuality>=75?"favorable":entryQuality>=50?"caution":"weak");
+    advisory.className="fast-scalp-quality "+(entryQuality===null?"unknown":coverage<70?"partial":entryQuality>=75?"favorable":entryQuality>=50?"caution":"weak");
     const qualityTitle=document.createElement("strong");
-    qualityTitle.textContent="کیفیت ورود: "+(entryQuality===null?"نامشخص":entryQuality+"/100");
+    qualityTitle.textContent="کیفیت ورود: "+(entryQuality===null?"داده کافی نیست":entryQuality+"/100");
     const qualitySubtitle=document.createElement("small");
-    qualitySubtitle.textContent="M1/M5: "+(liveTiming.status==="AGREE"?(liveTiming.direction===row.direction?"هم‌جهت":"مخالف"):liveTiming.status==="CONFLICT"?"متعارض":"نامشخص")+" · پوشش داده "+coverage+"٪";
+    qualitySubtitle.textContent="M1/M5: "+mtfState+" · پوشش "+coverage+"٪ ("+coverageLabel+")";
     const qualityHistory=document.createElement("small");
     qualityHistory.textContent="برد تاریخی: کالیبره نشده";
-    advisory.title="امتیاز ابتکاری، نه احتمال سود. "+qualityDetails+". برای معامله فقط نقش مشاور دارد.";
-    advisory.append(qualityTitle,qualitySubtitle,qualityHistory);
+    const qualityBreakdown=document.createElement("div");
+    qualityBreakdown.className="fast-scalp-quality-breakdown";
+    for(const item of qualityInputs){
+      const detail=document.createElement("small");
+      detail.textContent=item.label+": "+(item.value===null?"ناموجود":Math.round(item.value*100)+"/100")+" — "+item.status;
+      qualityBreakdown.append(detail);
+    }
+    advisory.title="امتیاز نسبی فقط از معیارهای موجود محاسبه می‌شود؛ پوشش پایین اعتبار امتیاز را کاهش می‌دهد. احتمال برد یا توصیه قطعی معامله نیست.";
+    advisory.append(qualityTitle,qualitySubtitle,qualityHistory,qualityBreakdown);
     const scalpGo=scalpBlockers.length===0;
     const exitSuggested=Boolean(row.position_open&&["EXIT_NOW","LOSS_EXIT_NOW"].includes(row.chronos_exit_action));
     // A historical row must never be traded at its old price.  When a row is
