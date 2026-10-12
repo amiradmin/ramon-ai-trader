@@ -33,7 +33,7 @@ def inspect(con: sqlite3.Connection) -> dict:
             matches.append({"offset_seconds": offset, "joined": n, "matching_ohlc": same or 0})
         report[tf] = sorted(matches, key=lambda x: (x["matching_ohlc"], x["joined"]), reverse=True)[:3]
     report["policy"] = ("UTC Unix epoch in canonical_utc_bars; original history_bars stays immutable. "
-                        "M15 is included from its original source with explicit unverified provenance.")
+                        "M15 is converted only where a complete matching M5 UTC aggregation verifies the +3h offset; other M15 rows remain unverified.")
     return report
 
 
@@ -44,10 +44,28 @@ SELECT symbol,timeframe,time,open,high,low,close,spread_points,
        'VERIFIED_UTC' AS time_quality
 FROM mtf_utc_bars WHERE timeframe IN ('M1','M5')
 UNION ALL
-SELECT symbol,timeframe,time,open,high,low,close,spread_points,
-       NULL AS broker_time,NULL AS offset_seconds,'history_bars' AS source,
-       'UNVERIFIED_LEGACY_EPOCH' AS time_quality
-FROM history_bars WHERE timeframe NOT IN ('M1','M5')
+SELECT h.symbol,h.timeframe,
+       CASE WHEN m.bucket IS NOT NULL THEN h.time-10800 ELSE h.time END AS time,
+       h.open,h.high,h.low,h.close,h.spread_points,
+       CASE WHEN m.bucket IS NOT NULL THEN h.time ELSE NULL END AS broker_time,
+       CASE WHEN m.bucket IS NOT NULL THEN 10800 ELSE NULL END AS offset_seconds,
+       'history_bars' AS source,
+       CASE WHEN m.bucket IS NOT NULL THEN 'VERIFIED_UTC_AGGREGATED_M5'
+            ELSE 'UNVERIFIED_LEGACY_EPOCH' END AS time_quality
+FROM history_bars h
+LEFT JOIN (
+    SELECT symbol,(time/900)*900 AS bucket,
+           MIN(time) AS first_time, MAX(time) AS last_time,
+           MAX(high) AS high, MIN(low) AS low,
+           COUNT(*) AS count_bars
+    FROM mtf_utc_bars WHERE timeframe='M5'
+    GROUP BY symbol,(time/900)*900
+    HAVING count_bars=3
+) m ON h.symbol=m.symbol AND h.timeframe='M15'
+     AND h.time=m.bucket+10800
+     AND m.first_time=m.bucket AND m.last_time=m.bucket+600
+     AND ABS(h.high-m.high)<0.000001 AND ABS(h.low-m.low)<0.000001
+WHERE h.timeframe NOT IN ('M1','M5')
 """
 
 
