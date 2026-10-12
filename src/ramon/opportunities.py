@@ -260,6 +260,19 @@ def read_opportunities(db, symbol='XAUUSD_l', limit=200):
         now=int(time.time())
         for item in grouped.values():
             item['live_mtf_timing'] = live_mtf_timing.copy()
+            # Shadow comparison only: does NOT replace V2/V3 timing or grant GO.
+            mtf_agrees = (live_mtf_timing.get("status") == "AGREE"
+                          and live_mtf_timing.get("direction") == item["direction"])
+            engine_agrees = (item.get("entry_timing_ready") == 1
+                             and item.get("entry_timing_direction") == item["direction"])
+            item["mtf_shadow_entry_timing"] = {
+                "mode": "OBSERVE_ONLY",
+                "mtf_confirmed": bool(mtf_agrees),
+                "engine_confirmed": bool(engine_agrees),
+                "comparison": ("BOTH_CONFIRM" if mtf_agrees and engine_agrees else
+                               "MTF_ONLY" if mtf_agrees else
+                               "ENGINE_ONLY" if engine_agrees else "NEITHER"),
+            }
             for advisor in item['model_advisors']:
                 if advisor['status']=='READY' and not 0 <= now-advisor['captured'] <= ACTIONABLE_SECONDS:
                     advisor['status']='HISTORICAL'
