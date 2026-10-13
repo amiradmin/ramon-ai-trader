@@ -28,6 +28,9 @@ def test_read_only_auto_filter_and_wait_caveats(tmp_path):
     assert report["auto_trades"]["ready_for_training"] is False
     assert report["data_audit"]["unmatched_auto_samples"] == 1
     assert report["wait_replay"]["status"] == "NOT_EVALUATED"
+    assert report["loss_attribution"]["by_source"]["AUTO_RAMON"]["net_units"] == 5.0
+    assert report["loss_attribution"]["by_source"]["RANGE_AUTO"]["net_units"] == -3.0
+    assert report["loss_attribution"]["stop_target"]["status"] == "NOT_EVALUATED"
     with sqlite3.connect(db) as con:
         assert con.execute("SELECT count(*) FROM trade_outcomes").fetchone()[0] == 5
 

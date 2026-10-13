@@ -8,6 +8,7 @@ import argparse
 from collections import Counter
 import json
 import math
+from datetime import datetime, timezone
 from pathlib import Path
 import sqlite3
 
@@ -53,7 +54,7 @@ def evaluate(db_path, symbol="XAUUSD_l", limit=50000):
                 "ORDER BY rowid DESC LIMIT ?", (symbol, limit))]
             trade_cols = ["sample_key", "entry_source", "net_units", "net_r", "closed"]
             trade_cols += [c for c in ("trade_key", "manual_intervention", "trade_role",
-                                       "exit_detail", "opened", "direction", "entry_ea_version")
+                                       "exit_detail", "exit_reason", "opened", "direction", "entry_ea_version", "initial_risk_units")
                            if c in tc]
             trades = [dict(r) for r in db.execute(
                 "SELECT "+",".join(trade_cols)+" FROM trade_outcomes WHERE symbol=? "
@@ -65,7 +66,7 @@ def evaluate(db_path, symbol="XAUUSD_l", limit=50000):
     duplicates = sum(n-1 for n in keys.values() if n>1)
     waits = sum(str(d["final_decision"]).upper()=="WAIT" for d in decisions)
     sourced = Counter(str(t.get("entry_source") or "UNKNOWN").upper() for t in trades)
-    qualified, excluded, unmatched = [], Counter(), 0
+    qualified, attributed, excluded, unmatched = [], [], Counter(), 0
     for t in trades:
         source = str(t.get("entry_source") or "").upper()
         if source not in AUTO_SOURCES:
@@ -92,6 +93,50 @@ def evaluate(db_path, symbol="XAUUSD_l", limit=50000):
             continue
         # Absence of a recorded manual intervention is not evidence that none occurred.
         qualified.append((pnl, r, key, source))
+        attributed.append({**t, "net_units": pnl, "net_r": r, "source": source})
+    def grouped(field):
+        groups = {}
+        for t in attributed:
+            name = str(field(t) or "UNKNOWN")
+            a = groups.setdefault(name, {"trades": 0, "wins": 0, "losses": 0, "net_units": 0.0, "sum_r": 0.0, "positive": 0.0, "negative": 0.0})
+            pnl = t["net_units"]
+            a["trades"] += 1
+            a["wins"] += int(pnl > 0)
+            a["losses"] += int(pnl < 0)
+            a["net_units"] += pnl
+            a["sum_r"] += t["net_r"]
+            a["positive"] += max(0.0, pnl)
+            a["negative"] += max(0.0, -pnl)
+        return {name: {"trades": a["trades"], "wins": a["wins"], "losses": a["losses"],
+                      "net_units": round(a["net_units"], 5),
+                      "mean_r": a["sum_r"] / a["trades"],
+                      "profit_factor": a["positive"] / a["negative"] if a["negative"] else None}
+                for name, a in sorted(groups.items())}
+
+    def utc_hour(t):
+        value = _finite(t.get("opened"))
+        if value is None or value <= 0:
+            return "UNKNOWN"
+        try:
+            return f"{datetime.fromtimestamp(value, timezone.utc).hour:02d}:00 UTC"
+        except (ValueError, OverflowError, OSError):
+            return "UNKNOWN"
+
+    risk = [_finite(t.get("initial_risk_units")) for t in attributed]
+    risk = [v for v in risk if v is not None and v > 0]
+    loss_attribution = {
+        "by_exit_detail": grouped(lambda t: t.get("exit_detail")),
+        "by_exit_reason": grouped(lambda t: t.get("exit_reason")),
+        "by_source": grouped(lambda t: t["source"]),
+        "by_direction": grouped(lambda t: t.get("direction")),
+        "by_entry_hour_utc": grouped(utc_hour),
+        "by_ea_version": grouped(lambda t: t.get("entry_ea_version")),
+        "initial_risk_units": {"coverage": len(risk), "total": len(attributed),
+                               "mean": sum(risk) / len(risk) if risk else None},
+        "market_regime": {"status": "NOT_JOINED", "reason": "entry-time regime provenance not verified"},
+        "stop_target": {"status": "NOT_EVALUATED", "reason": "initial broker SL/TP and fill provenance unverified"},
+        "interpretation": "DESCRIPTIVE_ONLY_NOT_CAUSAL",
+    }
     gains = sum(p for p, *_ in qualified if p > 0)
     losses = -sum(p for p, *_ in qualified if p < 0)
     total = sum(p for p, *_ in qualified)
@@ -111,6 +156,7 @@ def evaluate(db_path, symbol="XAUUSD_l", limit=50000):
                         "provenance": "PROVISIONAL_UNVERIFIED_MANUAL_ABSENCE",
                         "ready_for_training": False,
                         "reason": "Manual intervention absence and execution completeness not independently audited"},
+        "loss_attribution": loss_attribution,
         "wait_replay": {"status": "NOT_EVALUATED", "reason":
                         "Require time-aligned M1/ticks, executable bid/ask, intrabar SL/TP priority, "
                         "account costs and independent walk-forward folds before computing counterfactual P&L"},

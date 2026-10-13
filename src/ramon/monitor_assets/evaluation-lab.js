@@ -19,7 +19,12 @@ card("کاندیداهای خودکار",auto.candidate_count,"فقط AUTO_RAMON
 card("سود خالص، واحد حساب",auto.net_units,"ارزیابی مقدماتی؛ نه دلار"),
 card("Profit Factor",auto.profit_factor===null?"نامشخص":auto.profit_factor.toFixed(3),"داده‌های منتخب"),
 card("موارد بدون تطبیق",audit.unmatched_auto_samples,"مغایرت شناسه معامله و تصمیم"),
-card("WAIT Replay",data.wait_replay.status,"سود فرضی هنوز قابل استناد نیست")
+card("WAIT Replay",data.wait_replay.status,"سود فرضی هنوز قابل استناد نیست"),
+card("زیان‌بارترین نوع خروج",(()=>{
+  const rows=Object.entries(data.loss_attribution?.by_exit_detail||{}).filter(x=>x[1].net_units<0).sort((a,b)=>a[1].net_units-b[1].net_units);
+  return rows.length?rows[0][0]:"نامشخص";
+})(),"گروه‌بندی مقدماتی؛ رابطه علّی اثبات نشده"),
+card("پوشش ریسک اولیه",(data.loss_attribution?.initial_risk_units?.coverage??0)+"/"+(data.loss_attribution?.initial_risk_units?.total??0),"برحسب واحد حساب")
 ].join("");
 note.textContent="وضعیت آموزش: تأیید نشده. نبود مداخله ثبت‌شده اثبات خودکاربودن کامل معامله نیست. داده‌ها فقط خوانده می‌شوند.";
 }catch(error){target.textContent="گزارش Evaluation Lab در دسترس نیست: "+error.message;}
