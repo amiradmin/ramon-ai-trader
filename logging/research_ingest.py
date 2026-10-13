@@ -46,12 +46,14 @@ def ingest_research(con, path):
                 break  # never advance past incomplete append
             end = stream.tell()
             try:
-                obj = json.loads(line)
+                # Recover valid JSON preceded by a zero-filled file gap.
+                clean_line = line.lstrip(b"\x00")
+                obj = json.loads(clean_line)
                 if not isinstance(obj, dict):
                     raise ValueError("non-object JSON")
                 kind = str(obj.get("kind") or "UNKNOWN")
                 data = obj.get("data") if isinstance(obj.get("data"), dict) else {}
-                uid = obj.get("event_id") or hashlib.sha256(line.rstrip(b"\r\n")).hexdigest()
+                uid = obj.get("event_id") or hashlib.sha256(clean_line.rstrip(b"\r\n")).hexdigest()
                 event_time = iso_epoch(obj.get("observed_utc"))
                 with con.transaction():
                     with con.cursor() as cur:
