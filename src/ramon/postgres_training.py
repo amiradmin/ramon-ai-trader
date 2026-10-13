@@ -61,34 +61,61 @@ def sync_training_tables(sqlite_file: Path, dsn: str, batch: int = 500) -> dict[
 
 
 def read_training_examples(dsn: str, symbol: str, chronos_model: str):
-    """Preserve the trainer's filters exactly while PostgreSQL holds the source."""
+    """Read training examples natively from PostgreSQL, without SQLite.
+
+    Filtering and ordering mirror train_roles.read_trade_examples. The
+    training label is kept separate from features to prevent target leakage.
+    """
     import psycopg
-    from .train_roles import read_trade_examples
+    from .train_roles import Example
+
+    query = """
+        SELECT s.source, t.source
+        FROM ramon_migration.training_decision_samples s
+        JOIN ramon_migration.training_trade_outcomes t
+          ON t.source->>'sample_key' = s.source->>'sample_key'
+        WHERE s.source->>'symbol' = %s
+          AND t.source->>'symbol' = s.source->>'symbol'
+          AND s.source->>'chronos_model' = %s
+          AND (s.source->>'schema_version')::integer >= 3
+          AND s.source->>'news_features' IS NOT NULL
+          AND t.source->>'direction' = s.source->>'direction'
+          AND t.source->>'training_status' = 'LEARNABLE'
+          AND (
+              s.source->>'final_decision' = t.source->>'direction'
+              OR COALESCE(t.source->>'entry_source', 'AUTO_RAMON') = 'DASHBOARD_OPPORTUNITY'
+          )
+          AND (t.source->>'opened')::bigint >= (s.source->>'quote_time')::bigint
+          AND (t.source->>'opened')::bigint <= (s.source->>'quote_time')::bigint + 90
+          AND (t.source->>'closed')::bigint >= (t.source->>'opened')::bigint
+        ORDER BY (s.source->>'quote_time')::bigint,
+                 s.source->>'sample_key',
+                 t.source->>'trade_key'
+    """
     with psycopg.connect(dsn, connect_timeout=5,
                          options="-c statement_timeout=30000") as pg:
         with pg.cursor() as cur:
-            cur.execute("SELECT source FROM ramon_migration.training_decision_samples WHERE source->>'symbol'=%s",
-                        (symbol,))
-            samples = [v[0] for v in cur.fetchall()]
-            cur.execute("SELECT source FROM ramon_migration.training_trade_outcomes WHERE source->>'symbol'=%s",
-                        (symbol,))
-            outcomes = [v[0] for v in cur.fetchall()]
-    # Minimal in-memory compatibility layer; does not access a SQLite file.
-    with sqlite3.connect(":memory:") as db:
-        numeric = {"quote_time": "INTEGER", "schema_version": "INTEGER",
-                   "opened": "INTEGER", "closed": "INTEGER", "net_r": "REAL"}
-        db.execute("CREATE TABLE decision_samples (" +
-                   ",".join(f"{name} {numeric.get(name, 'TEXT')}" for name in DECISION_COLS) + ")")
-        db.execute("CREATE TABLE trade_outcomes (" +
-                   ",".join(f"{name} {numeric.get(name, 'TEXT')}" for name in TRADE_COLS) + ")")
-        for table, columns, records in (
-            ("decision_samples", DECISION_COLS, samples),
-            ("trade_outcomes", TRADE_COLS, outcomes),
-        ):
-            stmt = f"INSERT INTO {table} VALUES (" + ",".join("?" for _ in columns) + ")"
-            db.executemany(stmt, [
-                tuple(record.get(col) if not isinstance(record.get(col), (dict,list))
-                      else json.dumps(record[col]) for col in columns)
-                for record in records
-            ])
-        return read_trade_examples(db, symbol, chronos_model)
+            cur.execute(query, (symbol, chronos_model))
+            rows = cur.fetchall()
+
+    def features(value):
+        return json.loads(value) if isinstance(value, str) else value
+
+    return [
+        Example(
+            int(s["quote_time"]),
+            int(t["closed"]),
+            {
+                "regime": features(s["regime_features"]),
+                "entry": features(s["entry_features"]),
+                "news": features(s["news_features"]),
+                "meta_base": features(s["meta_base_features"]),
+            },
+            int(float(t["net_r"]) > 0),
+            float(t["net_r"]),
+            s.get("base_decision") in {"BUY", "SELL"},
+            t["direction"],
+            t["exit_reason"],
+        )
+        for s, t in rows
+    ]
