@@ -19,6 +19,7 @@ from .ensemble import EnsembleCoordinator, dominant_direction
 from .direction_roles import DirectionCoordinator
 from .history import persist_decision_sample, persist_market, persist_trade_outcome, persist_replay_input
 from .postgres_market_shadow import mirror_market_postgres
+from .postgres_shadow_queue import submit_shadow
 from .model import ChronosForecaster, model_name
 from .news import DEFAULT_FOREX_FACTORY_JSON, ForexFactoryNewsProvider
 from .target_learning import build_target_structure
@@ -170,7 +171,9 @@ def persist_market_safely(db: str, market: Market) -> str:
     # Shadow occurs only after authoritative SQLite succeeds. Never raise
     # a PostgreSQL error into the live decision request.
     dsn = os.environ.get("RAMON_PG_MARKET_SHADOW_DSN", "")
-    if dsn and market.timeframe == "M15":
+    if dsn and market.timeframe == "M15" and os.environ.get("RAMON_PG_SHADOW_ASYNC_ENABLED") == "1":
+        submit_shadow(dsn, market)
+    elif dsn and market.timeframe == "M15":
         shadow_started = time.perf_counter()
         try:
             mirror_market_postgres(dsn, market)
