@@ -61,7 +61,7 @@ void RT_Start(const bool enabled,const int interval_ms,const ulong magic,const b
    RT_RunId=IntegerToString((long)TimeGMT())+"-"+IntegerToString((long)GetMicrosecondCount())+"-"+IntegerToString(ChartID());
    RT_Sequence=0; RT_LastTickMsc=0; RT_HadPosition=false;
    RT_Append(magic,small,"session_start",
-      "\"ea_version\":\"0.59.8\",\"source\":\"restored_observational_logger\",\"sampling_interval_ms\":"+IntegerToString(RT_IntervalMs));
+      "\"ea_version\":\"0.59.9\",\"source\":\"restored_observational_logger\",\"sampling_interval_ms\":"+IntegerToString(RT_IntervalMs));
 }
 void RT_Stop(const ulong magic,const bool small,const int reason)
 {
@@ -120,6 +120,39 @@ void RT_ObservePosition(const ulong magic,const bool small,const string sample)
       +",\"sl\":"+DoubleToString(sl,8)+",\"tp\":"+DoubleToString(tp,8)
       +",\"tp_stage\":0,\"sampling_interval_ms\":"+IntegerToString(RT_IntervalMs);
    RT_Append(magic,small,"position_quote",quote,key,pos,tick.time_msc);
+}
+// Gate snapshots are emitted when a validated model response has been accepted.
+// A gate is not an execution approval: downstream risk and account guards remain.
+void RT_Gate(const ulong magic,const bool small,const string sample,
+             const string direction,const string reason,const string status,
+             const double bid,const double ask,const double risk_budget,
+             const bool snapshot_saved)
+{
+   if(!RT_Enabled) return;
+   string data="\"model_decision\":\""+RT_JsonEscape(direction)+"\""
+      +",\"model_reason\":\""+RT_JsonEscape(reason)+"\""
+      +",\"status\":\""+RT_JsonEscape(status)+"\""
+      +",\"bid\":"+DoubleToString(bid,8)+",\"ask\":"+DoubleToString(ask,8)
+      +",\"risk_budget_units\":"+DoubleToString(risk_budget,8)
+      +",\"sample_saved\":"+(snapshot_saved?"true":"false")
+      +",\"phase\":\"model_validated_before_execution_gates\"";
+   RT_Append(magic,small,"decision_gate",data,sample);
+}
+void RT_Order(const ulong magic,const bool small,const string kind,
+              const string sample,const string action,const string actor,
+              const double volume,const double entry,const double sl,const double tp,
+              const bool accepted,const uint retcode,const ulong order,const ulong deal)
+{
+   if(!RT_Enabled) return;
+   string data="\"action\":\""+RT_JsonEscape(action)+"\",\"actor\":\""+RT_JsonEscape(actor)+"\""
+      +",\"volume\":"+DoubleToString(volume,8)
+      +",\"requested_price\":"+DoubleToString(entry,8)
+      +",\"sl\":"+DoubleToString(sl,8)+",\"tp\":"+DoubleToString(tp,8)
+      +",\"submitted\":"+(accepted?"true":"false")
+      +",\"retcode\":"+IntegerToString((long)retcode)
+      +",\"order_id\":\""+IntegerToString((long)order)+"\""
+      +",\"deal_id\":\""+IntegerToString((long)deal)+"\"";
+   RT_Append(magic,small,kind,data,sample);
 }
 void RT_Deal(const ulong magic,const bool small,const ulong deal)
 {
