@@ -61,7 +61,7 @@ void RT_Start(const bool enabled,const int interval_ms,const ulong magic,const b
    RT_RunId=IntegerToString((long)TimeGMT())+"-"+IntegerToString((long)GetMicrosecondCount())+"-"+IntegerToString(ChartID());
    RT_Sequence=0; RT_LastTickMsc=0; RT_HadPosition=false;
    RT_Append(magic,small,"session_start",
-      "\"ea_version\":\"0.59.7\",\"source\":\"restored_observational_logger\",\"sampling_interval_ms\":"+IntegerToString(RT_IntervalMs));
+      "\"ea_version\":\"0.59.8\",\"source\":\"restored_observational_logger\",\"sampling_interval_ms\":"+IntegerToString(RT_IntervalMs));
 }
 void RT_Stop(const ulong magic,const bool small,const int reason)
 {
