@@ -75,3 +75,8 @@ def persist_shadow_vote(dsn: str, values: dict[str, object]) -> bool:
     with _connect(dsn) as conn:
         with conn.cursor() as cur:
             cur.execute(DDL); cur.execute("INSERT INTO ramon.shadow_votes VALUES (%(vote_key)s,%(captured)s,%(symbol)s,%(signal_bar_time)s,%(advisor)s,%(decision)s,%(confidence)s,%(regime)s,%(metadata)s::jsonb,%(source_version)s) ON CONFLICT DO NOTHING",values); return cur.rowcount==1
+
+def persist_replay_input(dsn: str, values: dict[str, object]) -> bool:
+    with _connect(dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute(DDL); cur.execute("INSERT INTO ramon.inference_audit VALUES (%(sample_key)s,%(input_sha256)s,%(recorded_utc)s,%(response_json)s::jsonb,%(provenance_json)s::jsonb,%(input_context)s::jsonb) ON CONFLICT DO NOTHING", values); return cur.rowcount == 1

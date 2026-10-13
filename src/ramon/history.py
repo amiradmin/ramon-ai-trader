@@ -611,6 +611,13 @@ def persist_replay_input(db: str | Path, *, sample_key: str, market: Market,
                               "broker_utc_offset_seconds": broker_utc_offset_seconds,
                               "micro_bars": [asdict(b) for b in market.micro_bars]},
                   "policy_replay_scope": "price_only; no account or execution reconstruction"}
+    if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres":
+        from .postgres_operational import persist_replay_input as persist_postgres
+        return persist_postgres(os.environ.get("RAMON_PG_DSN", ""), {
+            "sample_key": sample_key, "input_sha256": digest, "recorded_utc": time.time(),
+            "response_json": json.dumps(response, allow_nan=False),
+            "provenance_json": json.dumps(provenance, allow_nan=False),
+            "input_context": json.dumps(context, allow_nan=False),})
     with sqlite3.connect(Path(db), timeout=.25) as con:
         con.execute("CREATE TABLE IF NOT EXISTS input_blobs (sha256 TEXT PRIMARY KEY, codec TEXT NOT NULL, body BLOB NOT NULL)")
         con.execute("""CREATE TABLE IF NOT EXISTS inference_audit (
