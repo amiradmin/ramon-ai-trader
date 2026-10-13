@@ -5107,22 +5107,22 @@ bool V2ExecRead(string candidate,string &reason)
       else if(V2ExecPending!=fields[2] || V2ExecSymbol!=fields[4] || V2ExecSide!=fields[5]
          || V2ExecParent!=fields[9])
       { reason="execution journal invalid transition"; return false; }
-      else if(phase!="AMENDED" && phase!="RECEIPT" && phase!="UNCERTAIN" && phase!="VISIBLE" && phase!="REJECTED" && phase!="CANCELLED")
+      else if(phase!="AMENDED" && phase!="RECEIPT" && phase!="UNCERTAIN" && phase!="VISIBLE" && phase!="CLOSED" && phase!="REJECTED" && phase!="CANCELLED")
       { reason="execution journal unknown phase"; return false; }
       else if((phase=="AMENDED" && V2ExecLastPhase!="PREPARED") ||
          ((phase=="RECEIPT" || phase=="UNCERTAIN") && V2ExecLastPhase!="PREPARED" && V2ExecLastPhase!="AMENDED") ||
-         (phase=="VISIBLE" && (V2ExecLastPhase!="RECEIPT" || fields[10]=="0" || fields[11]=="0")) ||
+         ((phase=="VISIBLE" || phase=="CLOSED") && (V2ExecLastPhase!="RECEIPT" || fields[10]=="0" || fields[11]=="0")) ||
          ((phase=="CANCELLED" || phase=="REJECTED") &&
             (fields[10]!="0" || fields[11]!="0" ||
              (V2ExecLastPhase!="PREPARED" && V2ExecLastPhase!="AMENDED"))) ||
          (phase!="AMENDED" && (volume!=V2ExecVolume || stop!=V2ExecStop || risk!=V2ExecRisk)) ||
-         (phase=="VISIBLE" && (fields[10]!=V2ExecOrder || (V2ExecDeal!="0" && fields[11]!=V2ExecDeal))))
+         ((phase=="VISIBLE" || phase=="CLOSED") && (fields[10]!=V2ExecOrder || (V2ExecDeal!="0" && fields[11]!=V2ExecDeal))))
       { reason="execution journal unsafe transition"; return false; }
       V2ExecPending=fields[2]; V2ExecLastPhase=phase;
       V2ExecSymbol=fields[4]; V2ExecSide=fields[5]; V2ExecParent=fields[9];
       V2ExecVolume=volume; V2ExecStop=stop; V2ExecRisk=risk;
       V2ExecOrder=fields[10]; V2ExecDeal=fields[11];
-      if(phase=="VISIBLE" || phase=="REJECTED" || phase=="CANCELLED") V2ExecPending="";
+      if(phase=="VISIBLE" || phase=="CLOSED" || phase=="REJECTED" || phase=="CANCELLED") V2ExecPending="";
    }
    if(!V2ExecIdentity()) { reason="execution account changed/disconnected"; return false; }
    return true;
@@ -5168,10 +5168,10 @@ bool V2ExecFinish(string phase,ulong order,ulong deal)
    if((phase=="AMENDED" && V2ExecLastPhase!="PREPARED") ||
       ((phase=="CANCELLED" || phase=="REJECTED") && (!before_send || order!=0 || deal!=0)) ||
       ((phase=="RECEIPT" || phase=="UNCERTAIN") && !before_send) ||
-      (phase=="VISIBLE" && (V2ExecLastPhase!="RECEIPT" || order==0 || deal==0 ||
+      ((phase=="VISIBLE" || phase=="CLOSED") && (V2ExecLastPhase!="RECEIPT" || order==0 || deal==0 ||
          StringFormat("%I64u",order)!=V2ExecOrder ||
          (V2ExecDeal!="0" && StringFormat("%I64u",deal)!=V2ExecDeal))) ||
-      (phase!="AMENDED" && phase!="CANCELLED" && phase!="REJECTED" && phase!="RECEIPT" && phase!="UNCERTAIN" && phase!="VISIBLE")) return false;
+      (phase!="AMENDED" && phase!="CANCELLED" && phase!="REJECTED" && phase!="RECEIPT" && phase!="UNCERTAIN" && phase!="VISIBLE" && phase!="CLOSED")) return false;
    if(!V2ExecAppend(V2ExecPayload(phase,order,deal))) return false;
    V2ExecLastPhase=phase;
    V2ExecOrder=StringFormat("%I64u",order); V2ExecDeal=StringFormat("%I64u",deal);
@@ -5226,7 +5226,53 @@ bool V2ExecReconcile()
             PositionGetDouble(POSITION_PRICE_OPEN),sl,pnl) || !MathIsValidNumber(pnl)) return false;
       return V2ExecFinish("VISIBLE",order,deal==0 ? observed_deal : deal);
    }
-   return false;
+   // No live protected position was found. A fully CLOSED historical position
+   // can settle this receipt only when every deal can be accounted for exactly.
+   // Never infer completion from retcode, JSONL, or absence of a position alone.
+   if(position==0 || !HistorySelectByPosition(position)) return false;
+   double opened_lots=0.0, closed_lots=0.0;
+   bool saw_entry=false, saw_exit=false, entry_receipt=false;
+   int deal_count=HistoryDealsTotal();
+   for(int i=0;i<deal_count;i++)
+   {
+      ulong ticket=HistoryDealGetTicket(i);
+      if(ticket==0 || (ulong)HistoryDealGetInteger(ticket,DEAL_POSITION_ID)!=position)
+         return false;
+      if(HistoryDealGetString(ticket,DEAL_SYMBOL)!=V2ExecSymbol) return false;
+      long kind=HistoryDealGetInteger(ticket,DEAL_ENTRY);
+      long deal_type=HistoryDealGetInteger(ticket,DEAL_TYPE);
+      double lots=HistoryDealGetDouble(ticket,DEAL_VOLUME);
+      if(!MathIsValidNumber(lots) || lots<=0.0) return false;
+      if(kind==DEAL_ENTRY_IN)
+      {
+         // Only the precise originating order may have opened this position.
+         if((ulong)HistoryDealGetInteger(ticket,DEAL_ORDER)!=order
+            || deal_type!=(V2ExecSide=="BUY" ? DEAL_TYPE_BUY : DEAL_TYPE_SELL))
+            return false;
+         opened_lots+=lots; saw_entry=true;
+         if(ticket==deal) entry_receipt=true;
+      }
+      else if(kind==DEAL_ENTRY_OUT || kind==DEAL_ENTRY_OUT_BY)
+      {
+         if(deal_type!=(V2ExecSide=="BUY" ? DEAL_TYPE_SELL : DEAL_TYPE_BUY))
+            return false;
+         closed_lots+=lots; saw_exit=true;
+      }
+      else return false; // INOUT / partial reversal / balance adjustments: retain lock.
+   }
+   if(!saw_entry || !saw_exit || (deal!=0 && !entry_receipt)
+      || MathAbs(opened_lots-V2ExecVolume)>0.00000001
+      || MathAbs(closed_lots-opened_lots)>0.00000001) return false;
+   // Position history could be stale. Recheck no open position still holds the ID.
+   for(int i=0;i<PositionsTotal();i++)
+   {
+      ulong ticket=PositionGetTicket(i);
+      if(ticket==0 || !PositionSelectByTicket(ticket)) return false;
+      if((ulong)PositionGetInteger(POSITION_IDENTIFIER)==position) return false;
+   }
+   Print("V2 EXECUTION: broker history confirms fully closed receipt order=",order,
+      " position=",position,"; journal CLOSED (not a new order)");
+   return V2ExecFinish("CLOSED",order,deal==0 ? observed_deal : deal);
 }
 
 bool V2ExecBegin(string id,string &reason)
