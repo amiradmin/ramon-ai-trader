@@ -156,6 +156,25 @@ def _persist_manual_override(db: str, payload: dict[str, object]) -> None:
 
 def persist_market_safely(db: str, market: Market) -> str:
     """Best-effort learning telemetry; never make a trading decision fail."""
+    # Explicit cutover mode: PostgreSQL is tried first for M15, while
+    # SQLite is still written for remaining legacy readers and rollback.
+    # Never activate on a live account before latency and parity checks.
+    if market.timeframe == "M15" and os.environ.get("RAMON_M15_WRITE_BACKEND") == "postgres":
+        dsn = os.environ.get("RAMON_PG_HISTORY_DSN", "")
+        if dsn:
+            try:
+                mirror_market_postgres(dsn, market)
+            except Exception as exc:
+                SHADOW_LOG.warning("POSTGRES_M15_PRIMARY_WRITE_FAILED type=%s",
+                                   type(exc).__name__)
+                # Continue with SQLite to keep decision processing alive.
+        else:
+            SHADOW_LOG.warning("POSTGRES_M15_PRIMARY_WRITE_FAILED type=MissingDSN")
+        try:
+            persist_market(db, market)
+            return ""
+        except Exception as exc:
+            return f"{type(exc).__name__}: {exc}"
     timing = os.environ.get("RAMON_STORAGE_TIMING_ENABLED") == "1"
     started = time.perf_counter()
     try:
