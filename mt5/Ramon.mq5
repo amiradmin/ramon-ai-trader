@@ -4,6 +4,7 @@
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
+#include "RamonResearchTelemetry.mqh"
 
 
 #define RAMON_GMEM_MOVEABLE 0x0002
@@ -115,6 +116,8 @@ input string DiagnosticFileName = "Ramon_Diagnostic.txt";
 input bool ShowDashboard = true;
 input bool ShowTPLevelsOnChart = true; // Draw active MAIN TP1/TP2/TP3 levels and stage state on the chart.
 input bool EnableClipboardButton = true;
+input bool EnableResearchTelemetry = true; // Observation only; does not affect orders.
+input int ResearchQuoteIntervalMs = 1000;
 input bool WriteCsvLogs = true;
 input string SignalCsvFileName = "Ramon_Signals.csv";
 input string TradeCsvFileName = "Ramon_Trades.csv";
@@ -4403,6 +4406,7 @@ bool ManageDashboardManualScalp()
 
 void OnTick()
 {
+   RT_ObservePosition(MagicNumber,SmallOnlyMode,LastSampleKey);
    ProcessGuardianRecoveryExits();
    // Predicted dashboard exits are exact ticket-bound price crossings and must
    // not wait for the five-second timer.
@@ -5396,6 +5400,7 @@ void ProcessGuardianRecoveryExits()
 
 void OnTimer()
 {
+   RT_ObservePosition(MagicNumber,SmallOnlyMode,LastSampleKey);
    ReadControlRiskCap();
    ReadDecisionCadence();
    WriteOpenDashboardPositions();
@@ -6426,6 +6431,7 @@ void OnTradeTransaction(
          { V2StopoutFaultLatched=true; V2StopoutHistoryHealthy=false; }
       }
       RecordDealTelemetry(trans.deal);
+      RT_Deal(MagicNumber,SmallOnlyMode,trans.deal);
       AppendTradeCsv(trans.deal);
       WriteOpenDashboardPositions();
    }
@@ -6594,6 +6600,7 @@ int OnInit()
    string stopout_reason="";
    if(!V2RecoverStopoutHistory(stopout_reason))
       Print("V2 STOP OUT: startup entries blocked: ",stopout_reason);
+   RT_Start(EnableResearchTelemetry,ResearchQuoteIntervalMs,MagicNumber,SmallOnlyMode);
    EventSetTimer(1); // Separate network scheduling from five-second position management.
    // Stagger the second chart's WebRequest cadence from the primary chart.
    if(SmallOnlyMode)
@@ -6606,6 +6613,7 @@ int OnInit()
 
 void OnDeinit(const int reason)
 {
+   RT_Stop(MagicNumber,SmallOnlyMode,reason);
    EventKillTimer();
    ObjectsDeleteAll(0,UiPrefix);
    ObjectsDeleteAll(0,TpUiPrefix);
