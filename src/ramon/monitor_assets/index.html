@@ -99,6 +99,12 @@
       <p id="opportunity-status" aria-live="polite">در حال دریافت…</p>
       <div class="opportunity-scroll"><table class="opportunity-table simple-trade-table"><thead><tr><th>چک اسکالپ</th><th>پیشنهاد Ramon</th><th>جهت</th><th>اطمینان</th><th>قیمت مناسب ورود</th><th>خروج / نگهداری</th><th>دلیل ساده</th><th>وضعیت معامله</th><th>اقدام</th></tr></thead><tbody id="opportunity-rows"></tbody></table></div>
     </section>
+    <section class="training-health-panel" aria-label="خلاصه تحلیل تصمیم‌های WAIT" id="wait-summary-panel">
+      <header class="panel-heading"><div><span class="eyebrow">WAIT ANALYSIS · READ ONLY</span><h2>تحلیل توقف ورود رامون</h2></div><a class="nav-link" href="/wait-analysis">مشاهده گزارش کامل ←</a></header>
+      <p class="opportunity-data-note">آمار مربوط به آخرین تصمیم‌های WAIT ثبت‌شده است؛ دلیل توقف لزوماً به معنی تشخیص درست یا فرصت ازدست‌رفته نیست.</p>
+      <div class="training-health-grid" id="wait-summary-grid" aria-live="polite"><p>در حال دریافت تحلیل WAIT…</p></div>
+      <p id="wait-summary-note" class="opportunity-data-note">سود و زیان فرضی معاملات ردشده هنوز ارزیابی نشده است.</p>
+    </section>
     <section class="training-health-panel" aria-label="سلامت داده‌های آموزشی رامون">
       <header class="panel-heading"><div><span class="eyebrow">TRAINING DATA HEALTH · READ ONLY</span><h2>سلامت داده‌های آموزش رامون</h2></div><span id="training-health-updated" class="muted">در حال بررسی…</span></header>
       <p class="opportunity-data-note">این آمار از پایگاه داده محلی خوانده می‌شود و روی معاملات تأثیر ندارد. تعداد رویدادها به معنی آماده‌بودن برچسب‌های آموزشی نیست.</p>
@@ -115,4 +121,5 @@
     <header class="trade-dialog-header"><div><span class="eyebrow">مسیر ثبت‌شدهٔ معامله</span><h2 id="trade-dialog-title">از تصمیم تا نتیجه</h2></div><button id="trade-dialog-close" type="button" aria-label="بستن جزئیات معامله">بستن ×</button></header>
     <div id="trade-dialog-content" aria-live="polite"></div>
   </dialog>
+<script src="/wait-summary.js" defer></script>
 </body></html>
