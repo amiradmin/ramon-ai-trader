@@ -9,6 +9,7 @@ import argparse
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import sqlite3
 from collections.abc import Callable
@@ -71,6 +72,9 @@ def load_trade_examples(db: str | Path, symbol: str, chronos_model: str) -> list
     Sample/trade ordering remains broker-event time; recorded UTC offsets are kept
     separately for audit and reporting rather than guessed for legacy events.
     """
+    if os.environ.get("RAMON_TRAINING_BACKEND") == "postgres":
+        from .postgres_training import read_training_examples
+        return read_training_examples(os.environ["RAMON_PG_TRAINING_DSN"], symbol, chronos_model)
     ensure_history_db(db)
     with sqlite3.connect(db) as conn:
         return read_trade_examples(conn, symbol, chronos_model)
