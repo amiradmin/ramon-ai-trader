@@ -65,3 +65,32 @@ typed row, but doesn't guarantee fresh data or readiness for cutover.
 
 No EA execution behavior or risk controls should change as part of storage
 migration. Keep the SQLite database and existing Compose settings intact.
+
+
+## Optional MTF collector shadow writes (disabled by default)
+
+\`ramon.mtf_collector\` now supports \`--postgres-shadow-dsn\`.
+It writes the **same validated** M1/M5 snapshots into
+\`ramon_migration.mtf_utc_bars\` after the SQLite write. A failed
+PostgreSQL attempt is logged and retried on the next poll; it is not
+allowed to change model decision logic. The flag is **not** wired
+into Compose; do not enable it on the trading service until
+the database connection and test environment are verified.
+
+Install the extra in an isolated development environment:
+
+\`\`\`bash
+uv run --extra dev --extra postgres pytest -q tests/test_mtf_postgres_shadow.py
+\`\`\`
+
+For future deployment, use a least-privilege PostgreSQL account
+restricted to \`ramon_migration.mtf_utc_bars\`. Do **not** put a
+password in Git or command history; use a protected environment-based
+DSN and connect only over the intended Docker network. A connection
+to the container's internal port 5432 is not automatically reachable
+from the Ubuntu host or another Compose project.
+
+Remaining major work: PostgreSQL implementations of decision/trade
+writers and all SQLite readers, a compatibility/rollback design,
+end-to-end tests on HP-Mini, and an actual cutover. This PR does
+not complete migration or authorize SQLite deletion.
