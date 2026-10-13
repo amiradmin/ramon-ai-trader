@@ -330,6 +330,9 @@ def persist_shadow_vote(
         raise ValueError("invalid shadow confidence")
     if not advisor or len(advisor) > 128 or not symbol.startswith("XAUUSD"):
         raise ValueError("invalid shadow vote identity")
+    if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres":
+        from .postgres_operational import persist_shadow_vote as persist_postgres
+        return persist_postgres(os.environ.get("RAMON_PG_DSN", ""), {"vote_key":vote_key,"captured":int(captured),"symbol":symbol,"signal_bar_time":int(signal_bar_time),"advisor":advisor,"decision":decision,"confidence":confidence,"regime":regime,"metadata":json.dumps(metadata or {}),"source_version":source_version})
     path = ensure_history_db(db)
     payload = json.dumps(metadata or {}, allow_nan=False, separators=(",", ":"))
     with sqlite3.connect(path, timeout=10) as conn:
@@ -457,6 +460,10 @@ def persist_trade_outcome(db: str | Path, payload: dict[str, object], received: 
     extra["training_status"] = classify_training_status(
         exit_reason, str(extra.get("exit_detail", "") or "")
     )
+    if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres":
+        from .postgres_operational import persist_trade_outcome as persist_postgres
+        persist_postgres(os.environ.get("RAMON_PG_DSN", ""), {"trade_key":trade_key,"sample_key":sample_key,"symbol":symbol,"direction":direction,"opened":opened,"closed":closed,"net_units":net,"initial_risk_units":risk,"net_r":net/risk,"exit_reason":exit_reason,"received":int(received),"telemetry":json.dumps(extra, allow_nan=False)})
+        return
     extra_names = [*TRADE_TELEMETRY_COLUMNS, "training_status"]
     updates = []
     for name in extra_names:

@@ -25,6 +25,9 @@ CREATE TABLE IF NOT EXISTS ramon.decision_samples (
  UNIQUE(captured,symbol));
 CREATE INDEX IF NOT EXISTS history_bars_symbol_tf_time ON ramon.history_bars(symbol,timeframe,time);
 CREATE INDEX IF NOT EXISTS decision_samples_symbol_quote ON ramon.decision_samples(symbol,quote_time);
+CREATE TABLE IF NOT EXISTS ramon.trade_outcomes (trade_key text PRIMARY KEY, sample_key text NOT NULL UNIQUE, symbol text NOT NULL, direction text NOT NULL, opened bigint NOT NULL, closed bigint NOT NULL, net_units double precision NOT NULL, initial_risk_units double precision NOT NULL, net_r double precision NOT NULL, exit_reason text NOT NULL, received bigint NOT NULL, telemetry jsonb NOT NULL DEFAULT '{}'::jsonb);
+CREATE TABLE IF NOT EXISTS ramon.shadow_votes (vote_key text PRIMARY KEY,captured bigint NOT NULL,symbol text NOT NULL,signal_bar_time bigint NOT NULL,advisor text NOT NULL,decision text NOT NULL,confidence double precision,regime text,metadata jsonb NOT NULL,source_version text NOT NULL);
+CREATE TABLE IF NOT EXISTS ramon.inference_audit (sample_key text PRIMARY KEY,input_sha256 text NOT NULL,recorded_utc double precision NOT NULL,response_json jsonb NOT NULL,provenance_json jsonb NOT NULL,input_context jsonb NOT NULL);
 """
 
 def _connect(dsn: str):
@@ -61,3 +64,14 @@ def persist_decision_sample(dsn: str, values: dict[str, object]) -> bool:
             cur.execute("""INSERT INTO ramon.decision_samples(sample_key,captured,symbol,signal_bar_time,quote_time,chronos_model,schema_version,direction,base_decision,final_decision,mid,spread,atr,regime_features,entry_features,meta_base_features,news_features,metadata)
             VALUES (%(sample_key)s,%(captured)s,%(symbol)s,%(signal_bar_time)s,%(quote_time)s,%(chronos_model)s,%(schema_version)s,%(direction)s,%(base_decision)s,%(final_decision)s,%(mid)s,%(spread)s,%(atr)s,%(regime_features)s::jsonb,%(entry_features)s::jsonb,%(meta_base_features)s::jsonb,%(news_features)s::jsonb,%(metadata)s::jsonb) ON CONFLICT DO NOTHING""",values)
             return cur.rowcount==1
+
+def persist_trade_outcome(dsn: str, values: dict[str, object]) -> None:
+    with _connect(dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute(DDL); cur.execute("""INSERT INTO ramon.trade_outcomes VALUES (%(trade_key)s,%(sample_key)s,%(symbol)s,%(direction)s,%(opened)s,%(closed)s,%(net_units)s,%(initial_risk_units)s,%(net_r)s,%(exit_reason)s,%(received)s,%(telemetry)s::jsonb)
+            ON CONFLICT(trade_key) DO UPDATE SET net_units=EXCLUDED.net_units,initial_risk_units=EXCLUDED.initial_risk_units,net_r=EXCLUDED.net_r,closed=EXCLUDED.closed,exit_reason=EXCLUDED.exit_reason,received=EXCLUDED.received,telemetry=ramon.trade_outcomes.telemetry || EXCLUDED.telemetry WHERE ramon.trade_outcomes.sample_key=EXCLUDED.sample_key AND ramon.trade_outcomes.symbol=EXCLUDED.symbol AND ramon.trade_outcomes.direction=EXCLUDED.direction AND ramon.trade_outcomes.opened=EXCLUDED.opened""", values)
+
+def persist_shadow_vote(dsn: str, values: dict[str, object]) -> bool:
+    with _connect(dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute(DDL); cur.execute("INSERT INTO ramon.shadow_votes VALUES (%(vote_key)s,%(captured)s,%(symbol)s,%(signal_bar_time)s,%(advisor)s,%(decision)s,%(confidence)s,%(regime)s,%(metadata)s::jsonb,%(source_version)s) ON CONFLICT DO NOTHING",values); return cur.rowcount==1
