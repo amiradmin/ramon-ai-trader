@@ -161,11 +161,11 @@ def persist_market_safely(db: str, market: Market) -> str:
         persist_market(db, market)
     except Exception as exc:
         if timing:
-            SHADOW_LOG.info("RAMON_STORAGE_TIMING stage=sqlite status=error duration_ms=%.3f",
+            SHADOW_LOG.warning("RAMON_STORAGE_TIMING stage=sqlite status=error duration_ms=%.3f",
                             (time.perf_counter() - started) * 1000)
         return f"{type(exc).__name__}: {exc}"
     if timing:
-        SHADOW_LOG.info("RAMON_STORAGE_TIMING stage=sqlite status=ok duration_ms=%.3f",
+        SHADOW_LOG.warning("RAMON_STORAGE_TIMING stage=sqlite status=ok duration_ms=%.3f",
                         (time.perf_counter() - started) * 1000)
     # Shadow occurs only after authoritative SQLite succeeds. Never raise
     # a PostgreSQL error into the live decision request.
@@ -177,11 +177,11 @@ def persist_market_safely(db: str, market: Market) -> str:
         except Exception as exc:
             SHADOW_LOG.warning("M15_POSTGRES_SHADOW_FAILED type=%s", type(exc).__name__)
             if timing:
-                SHADOW_LOG.info("RAMON_STORAGE_TIMING stage=postgres_shadow status=error duration_ms=%.3f",
+                SHADOW_LOG.warning("RAMON_STORAGE_TIMING stage=postgres_shadow status=error duration_ms=%.3f",
                                 (time.perf_counter() - shadow_started) * 1000)
         else:
             if timing:
-                SHADOW_LOG.info("RAMON_STORAGE_TIMING stage=postgres_shadow status=ok duration_ms=%.3f",
+                SHADOW_LOG.warning("RAMON_STORAGE_TIMING stage=postgres_shadow status=ok duration_ms=%.3f",
                                 (time.perf_counter() - shadow_started) * 1000)
     return ""
 
@@ -1296,7 +1296,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
         def reply(self, status: int, data: dict[str, object]) -> None:
             started = getattr(self, "_decision_started", None)
             if started is not None:
-                SHADOW_LOG.info("RAMON_DECISION_TIMING status=%d duration_ms=%.3f",
+                SHADOW_LOG.warning("RAMON_DECISION_TIMING status=%d duration_ms=%.3f",
                                 status, (time.perf_counter() - started) * 1000)
                 self._decision_started = None
             body = json.dumps(data, separators=(",", ":"), allow_nan=False).encode("utf-8")
