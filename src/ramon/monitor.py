@@ -2351,9 +2351,9 @@ def handler_for(db, diagnostic, symbol, health_url):
                     pass
                 data = build_snapshot(db, diagnostic, symbol=symbol, health=health)
                 self.reply(json.dumps(data, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
-            elif route in {"/", "/monitor", "/app.js", "/trading-psychology.js", "/style.css", "/control", "/control.js", "/wait-analysis"}:
-                filename = {"/": "index.html", "/monitor": "index.html", "/app.js": "app.js", "/trading-psychology.js": "trading-psychology.js", "/style.css": "style.css", "/control": "control.html", "/control.js": "control.js", "/wait-analysis": "wait_analysis.html"}[route]
-                content_type = {"index.html": "text/html", "app.js": "text/javascript", "trading-psychology.js": "text/javascript", "style.css": "text/css", "control.html": "text/html", "control.js": "text/javascript", "wait_analysis.html": "text/html"}[filename]
+            elif route in {"/", "/monitor", "/app.js", "/trading-psychology.js", "/style.css", "/control", "/control.js", "/wait-analysis", "/wait-summary.js"}:
+                filename = {"/": "index.html", "/monitor": "index.html", "/app.js": "app.js", "/trading-psychology.js": "trading-psychology.js", "/style.css": "style.css", "/control": "control.html", "/control.js": "control.js", "/wait-analysis": "wait_analysis.html", "/wait-summary.js": "wait-summary.js"}[route]
+                content_type = {"index.html": "text/html", "app.js": "text/javascript", "trading-psychology.js": "text/javascript", "style.css": "text/css", "control.html": "text/html", "control.js": "text/javascript", "wait_analysis.html": "text/html", "wait-summary.js": "text/javascript"}[filename]
                 self.reply((ASSETS / filename).read_bytes(), content_type + "; charset=utf-8")
             else:
                 self.send_error(404)
