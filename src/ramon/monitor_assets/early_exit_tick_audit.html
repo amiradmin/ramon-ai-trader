@@ -1,0 +1,19 @@
+<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ramon · Early Exit Tick Audit</title><link rel="stylesheet" href="/style.css"><style>main{max-width:1150px;margin:auto;padding:24px}table{width:100%;border-collapse:collapse;margin-top:18px}td,th{padding:10px;border-bottom:1px solid #7775;text-align:right;font-variant-numeric:tabular-nums}th{font-weight:700}code{direction:ltr;display:inline-block}small{color:#999} .overflow{overflow-x:auto}.muted{opacity:.75}</style></head><body><main><p><a href="/monitor">← بازگشت به داشبورد</a></p><h1>ممیزی تیک‌های خروج زودهنگام</h1><p>صرفاً مسیر قیمت Bid/Ask بعد از خروج ثبت‌شده؛ هیچ سود فرضی یا اجرای واقعی معامله از این قیمت‌ها استنتاج نمی‌شود.</p><p id="summary" aria-live="polite">در حال خواندن...</p><div class="overflow"><table><thead><tr><th>شناسه</th><th>جهت</th><th>پوشش Tick</th><th>تیک بعد از خروج</th><th>بیشترین حرکت مساعد</th><th>بیشترین حرکت نامساعد</th><th>تغییر آخر</th><th>M1</th><th>Replay</th></tr></thead><tbody id="rows"></tbody></table></div><p class="muted">تمام حرکت‌ها برحسب واحد قیمت XAUUSD_l هستند، نه سود یا زیان حساب. BUY با Bid و SELL با Ask مشاهده شده است. معیار پوشش تیک، جایگزین تأیید اجرای بروکر نیست. فقدان SL/TP اولیه تأییدشده، Fill و کارمزدها همچنان مانع Replay سود و زیان است.</p></main><script>
+const esc=v=>String(v??"—").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+async function load(){
+ try {
+  const response=await fetch("/api/early-exit-tick-audit",{cache:"no-store"});
+  if(!response.ok)throw Error("HTTP "+response.status);
+  const data=await response.json();
+  if(!data.available)throw Error(data.reason||"Unavailable");
+  const rows=data.trades||[];
+  const observed=rows.filter(r=>r.tick_audit?.status==="OBSERVED_CONTINUOUS_QUOTES").length;
+  document.getElementById("summary").textContent="معاملات: "+rows.length+" | پوشش تیک مطابق معیار اولیه: "+observed+" | Counterfactual: "+data.counterfactual_status;
+  document.getElementById("rows").innerHTML=rows.map(r=>{
+    const q=r.tick_audit||{},p=q.observed_path||{};
+    return "<tr><td><code>"+esc(r.sample_key)+"</code></td><td>"+esc(r.direction)+"</td><td>"+esc(q.status)+"</td><td>"+esc(q.after_exit_ticks)+"</td><td>"+esc(p.max_favorable_price_move)+"</td><td>"+esc(p.max_adverse_price_move)+"</td><td>"+esc(p.last_directional_price_move)+"</td><td>"+esc(r.bars?.M1?.coverage_complete?"کامل":"ناقص")+"</td><td>"+esc(r.outcome)+"</td></tr>"
+  }).join("");
+ }catch(e){document.getElementById("summary").textContent="گزارش در دسترس نیست: "+e.message;}
+}
+load();
+</script></body></html>

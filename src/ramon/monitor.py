@@ -17,6 +17,7 @@ from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 from .opportunities import read_opportunities, _live_direction
 from .evaluation_lab import evaluate as evaluation_lab_report
+from .early_exit_tick_audit import audit as early_exit_tick_audit_report
 
 
 ASSETS = Path(__file__).with_name("monitor_assets")
@@ -2287,7 +2288,11 @@ def handler_for(db, diagnostic, symbol, health_url):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             route = self.path.split("?", 1)[0]
-            if route == "/api/evaluation-lab":
+            if route == "/api/early-exit-tick-audit":
+                tick_dir = os.getenv("RAMON_EARLY_EXIT_TICKS_DIR", "/mt5-users/amir/AppData/Roaming/MetaQuotes/Terminal/Common/Files")
+                payload = early_exit_tick_audit_report(db, tick_dir, symbol=symbol)
+                self.reply(json.dumps(payload, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
+            elif route == "/api/evaluation-lab":
                 payload = evaluation_lab_report(db, symbol, limit=50000)
                 self.reply(json.dumps(payload, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
             elif route == "/api/wait-analysis":
@@ -2355,9 +2360,9 @@ def handler_for(db, diagnostic, symbol, health_url):
                     pass
                 data = build_snapshot(db, diagnostic, symbol=symbol, health=health)
                 self.reply(json.dumps(data, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
-            elif route in {"/", "/monitor", "/app.js", "/trading-psychology.js", "/style.css", "/control", "/control.js", "/wait-analysis", "/wait-summary.js", "/evaluation-lab.js"}:
-                filename = {"/": "index.html", "/monitor": "index.html", "/app.js": "app.js", "/trading-psychology.js": "trading-psychology.js", "/style.css": "style.css", "/control": "control.html", "/control.js": "control.js", "/wait-analysis": "wait_analysis.html", "/wait-summary.js": "wait-summary.js", "/evaluation-lab.js": "evaluation-lab.js"}[route]
-                content_type = {"index.html": "text/html", "app.js": "text/javascript", "trading-psychology.js": "text/javascript", "style.css": "text/css", "control.html": "text/html", "control.js": "text/javascript", "wait_analysis.html": "text/html", "wait-summary.js": "text/javascript", "evaluation-lab.js": "text/javascript"}[filename]
+            elif route in {"/", "/monitor", "/app.js", "/trading-psychology.js", "/style.css", "/control", "/control.js", "/wait-analysis", "/wait-summary.js", "/evaluation-lab.js", "/early-exit-tick-audit"}:
+                filename = {"/": "index.html", "/monitor": "index.html", "/app.js": "app.js", "/trading-psychology.js": "trading-psychology.js", "/style.css": "style.css", "/control": "control.html", "/control.js": "control.js", "/wait-analysis": "wait_analysis.html", "/wait-summary.js": "wait-summary.js", "/evaluation-lab.js": "evaluation-lab.js", "/early-exit-tick-audit": "early_exit_tick_audit.html"}[route]
+                content_type = {"index.html": "text/html", "app.js": "text/javascript", "trading-psychology.js": "text/javascript", "style.css": "text/css", "control.html": "text/html", "control.js": "text/javascript", "wait_analysis.html": "text/html", "wait-summary.js": "text/javascript", "evaluation-lab.js": "text/javascript", "early_exit_tick_audit.html": "text/html"}[filename]
                 self.reply((ASSETS / filename).read_bytes(), content_type + "; charset=utf-8")
             else:
                 self.send_error(404)
