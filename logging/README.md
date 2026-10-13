@@ -1,6 +1,6 @@
 # Ramon: isolated PostgreSQL research logging (experimental)
 
-This stack is **opt-in** and uses a separate Compose file. It never places orders,
+This stack is **opt-in** and is included in the main `compose.yaml` under the `logging` profile. It never places orders,
 does not call the EA decision endpoint and does not alter existing SQLite databases.
 The production EA, MT5 and model keep using their existing paths.
 
@@ -10,12 +10,12 @@ The production EA, MT5 and model keep using their existing paths.
    `printf 'RAMON_LOG_DB_PASSWORD=%s\n' 'YOUR_STRONG_URL_SAFE_PASSWORD' >> .env`
    Use URL-safe password characters (letters, digits, hyphens) because the password
    is embedded in a database connection URI.
-2. Validate: `docker compose -f compose.logging.yaml config --quiet`
-3. Start **only** the logging services:
-   `docker compose -f compose.logging.yaml up -d --build postgres-logs research-log-ingest`
-4. Watch: `docker compose -f compose.logging.yaml logs -f research-log-ingest`
+2. If using the separate `ramon-logging` worktree, set `RAMON_LOG_SOURCE_DATA_DIR=../ramon-ai-trader/data` in that worktree's `.env` to read the live source SQLite rather than an empty worktree data directory. Validate: `docker compose --profile logging config --quiet`
+3. Start **only** the logging services in this worktree, using a unique project name to avoid starting/altering live stack:
+   `docker compose -p ramon-logging --profile logging up -d --build postgres-logs research-log-ingest`
+4. Watch: `docker compose -p ramon-logging --profile logging logs -f research-log-ingest`
 5. Inspect:
-   `docker compose -f compose.logging.yaml exec -T postgres-logs psql -U ramon_logger -d ramon_logs -c 'SELECT * FROM logging_freshness;'`
+   `docker compose -p ramon-logging --profile logging exec -T postgres-logs psql -U ramon_logger -d ramon_logs -c 'SELECT * FROM logging_freshness;'`
 
 The existing research JSONL from 1–6 October will backfill incrementally from the
 start. Backfilling approximately 50K research lines and ~94K decisions may take
@@ -55,11 +55,11 @@ out-of-sample trading costs and a minimum sufficient sample size. A `NULL`
 
 ### Verification and rollback
 
-`docker compose -f compose.logging.yaml ps`
+`docker compose -p ramon-logging --profile logging ps`
 
-`docker compose -f compose.logging.yaml exec -T postgres-logs psql -U ramon_logger -d ramon_logs -c 'SELECT entry_source,count(*),sum(net_units) FROM trade_labels GROUP BY entry_source;'`
+`docker compose -p ramon-logging --profile logging exec -T postgres-logs psql -U ramon_logger -d ramon_logs -c 'SELECT entry_source,count(*),sum(net_units) FROM trade_labels GROUP BY entry_source;'`
 
-`docker compose -f compose.logging.yaml down` stops only this optional stack.
+`docker compose -p ramon-logging --profile logging down` stops only this optional stack.
 **Do not use `down -v`**, as that deletes the PostgreSQL data volume.
 
 ## Not yet implemented in this branch
