@@ -9,9 +9,12 @@ import argparse
 import csv
 import logging
 import math
+import os
 import sqlite3
 import time
 from pathlib import Path
+
+# PostgreSQL is an optional shadow sink, not a replacement for SQLite yet.
 
 LOG = logging.getLogger("ramon.mtf_collector")
 OFFSETS = range(-12, 15)
@@ -60,8 +63,56 @@ def import_snapshot(db: Path, source: Path, symbol: str, timeframe: str,
     return {"valid": len(rows), "latest_utc": rows[-1][2], "offset_seconds": offset_hours * 3600}
 
 
+
+def mirror_snapshot_postgres(
+    source: Path, symbol: str, timeframe: str, offset_hours: int,
+    dsn: str, now: int | None = None,
+) -> dict[str, int]:
+    """Write the same validated UTC snapshot to isolated PostgreSQL shadow tables.
+
+    Never changes SQLite or live public logging tables. Failures are reported
+    to the collector but do not change trading decisions. Requires psycopg v3.
+    """
+    try:
+        import psycopg
+    except ImportError as exc:
+        raise RuntimeError("PostgreSQL shadow needs psycopg>=3 installed") from exc
+    if timeframe not in ("M1", "M5") or offset_hours not in OFFSETS:
+        raise ValueError("invalid timeframe or UTC offset")
+    now = int(time.time() if now is None else now)
+    period = 60 if timeframe == "M1" else 300
+    rows = []
+    with source.open(encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        if not set(("time", "open", "high", "low", "close", "spread_points")).issubset(reader.fieldnames or ()):
+            raise ValueError("invalid CSV header")
+        for item in reader:
+            broker_time = int(item["time"])
+            utc = broker_time - offset_hours * 3600
+            o, h, l, c = (float(item[k]) for k in ("open", "high", "low", "close"))
+            spread = int(item["spread_points"])
+            if (utc <= 0 or utc % period != 0 or utc + period > now + 30
+                    or min(o, h, l, c) <= 0 or not all(map(math.isfinite, (o, h, l, c)))
+                    or l > min(o, c) or h < max(o, c) or spread < 0):
+                raise ValueError(f"invalid or future/unclosed bar: {broker_time}")
+            rows.append((symbol, timeframe, utc, broker_time, offset_hours * 3600,
+                         o, h, l, c, spread))
+    if not rows or any(rows[i][2] >= rows[i + 1][2] for i in range(len(rows) - 1)):
+        raise ValueError("empty or unordered snapshot")
+    with psycopg.connect(dsn, connect_timeout=5) as conn:
+        with conn.cursor() as cur:
+            cur.executemany("""INSERT INTO ramon_migration.mtf_utc_bars
+                (symbol,timeframe,time,broker_time,offset_seconds,open,high,low,close,spread_points)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT(symbol,timeframe,time) DO UPDATE SET
+                  broker_time=EXCLUDED.broker_time,offset_seconds=EXCLUDED.offset_seconds,
+                  open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,
+                  close=EXCLUDED.close,spread_points=EXCLUDED.spread_points""", rows)
+    return {"valid": len(rows), "latest_utc": rows[-1][2], "offset_seconds": offset_hours * 3600}
+
 def poll(common_files: Path, db: Path, symbol: str,
-         last_seen: dict[str, tuple[int, int]], offset_hours: int = 3) -> None:
+         last_seen: dict[str, tuple[int, int]], offset_hours: int = 3,
+         postgres_shadow_dsn: str = "") -> None:
     for tf in ("M1", "M5"):
         source = common_files / f"RamonLive_{symbol}_{tf}.csv"
         try:
@@ -77,6 +128,17 @@ def poll(common_files: Path, db: Path, symbol: str,
         except (OSError, ValueError, sqlite3.Error) as exc:
             LOG.error("IMPORT_FAILED %s: %s", tf, exc)
             continue
+        if postgres_shadow_dsn:
+            try:
+                shadow = mirror_snapshot_postgres(
+                    source, symbol, tf, offset_hours, postgres_shadow_dsn
+                )
+                LOG.info("POSTGRES_SHADOW_MIRRORED %s valid=%s latest_utc=%s",
+                         tf, shadow["valid"], shadow["latest_utc"])
+            except Exception:
+                # Do not mark the CSV snapshot as seen so a later poll retries.
+                LOG.exception("POSTGRES_SHADOW_FAILED %s", tf)
+                continue
         last_seen[tf] = signature
         LOG.info("IMPORTED_UTC %s valid=%s latest_utc=%s offset_seconds=%s",
                  tf, result["valid"], result["latest_utc"], result["offset_seconds"])
@@ -90,6 +152,8 @@ def main() -> None:
     parser.add_argument("--interval", type=int, default=30)
     parser.add_argument("--broker-utc-offset-hours", type=int, default=3,
                         help="Explicit broker clock offset, currently verified +3; stop/reconfigure if broker DST changes")
+    parser.add_argument("--postgres-shadow-dsn", default="",
+                        help="Optional psycopg DSN for isolated ramon_migration.mtf_utc_bars mirror")
     args = parser.parse_args()
     if args.interval < 10 or args.broker_utc_offset_hours not in OFFSETS:
         parser.error("invalid collector interval/offset")
@@ -97,7 +161,8 @@ def main() -> None:
     seen: dict[str, tuple[int, int]] = {}
     while True:
         try:
-            poll(args.common_files, args.db, args.symbol, seen, args.broker_utc_offset_hours)
+            poll(args.common_files, args.db, args.symbol, seen, args.broker_utc_offset_hours,
+                 args.postgres_shadow_dsn)
         except Exception:
             LOG.exception("Unexpected collector error")
         time.sleep(args.interval)
