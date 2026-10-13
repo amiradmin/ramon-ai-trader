@@ -16,6 +16,7 @@ from urllib.parse import parse_qs, urlsplit
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 from .opportunities import read_opportunities, _live_direction
+from .evaluation_lab import evaluate as evaluation_lab_report
 
 
 ASSETS = Path(__file__).with_name("monitor_assets")
@@ -2286,7 +2287,10 @@ def handler_for(db, diagnostic, symbol, health_url):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             route = self.path.split("?", 1)[0]
-            if route == "/api/wait-analysis":
+            if route == "/api/evaluation-lab":
+                payload = evaluation_lab_report(db, symbol, limit=50000)
+                self.reply(json.dumps(payload, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
+            elif route == "/api/wait-analysis":
                 params = parse_qs(urlsplit(self.path).query)
                 try:
                     limit = int(params.get("limit", ["300"])[0])
