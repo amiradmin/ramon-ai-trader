@@ -31,3 +31,28 @@ def test_training_postgres_adapter_retains_filters():
 def test_schema_has_keys():
     assert "PRIMARY KEY" in DDL
     assert "training_trade_outcomes" in DDL
+
+
+def test_same_decision_multiple_trades_sorted_by_trade_key():
+    from ramon.train_roles import read_trade_examples
+    db = sqlite3.connect(":memory:")
+    db.executescript("""
+    CREATE TABLE decision_samples (
+      sample_key TEXT, symbol TEXT, quote_time INTEGER, regime_features TEXT,
+      entry_features TEXT, news_features TEXT, meta_base_features TEXT,
+      base_decision TEXT, direction TEXT, chronos_model TEXT,
+      schema_version INTEGER, final_decision TEXT
+    );
+    CREATE TABLE trade_outcomes (
+      trade_key TEXT, sample_key TEXT, symbol TEXT, closed INTEGER,
+      net_r REAL, direction TEXT, exit_reason TEXT, training_status TEXT,
+      entry_source TEXT, opened INTEGER
+    );
+    """)
+    db.execute("INSERT INTO decision_samples VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+      ("shared","XAUUSD_l",100,"{}","{}","{}","{}","BUY","BUY","x",3,"BUY"))
+    for trade_key, closed in (("z",150),("a",130)):
+        db.execute("INSERT INTO trade_outcomes VALUES (?,?,?,?,?,?,?,?,?,?)",
+          (trade_key,"shared","XAUUSD_l",closed,1.0,"BUY","TP","LEARNABLE","AUTO_RAMON",110))
+    rows = read_trade_examples(db,"XAUUSD_l","x")
+    assert [row.label_end for row in rows] == [130,150]
