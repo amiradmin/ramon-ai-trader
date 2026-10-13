@@ -42,3 +42,27 @@ entry and initial broker SL/TP are intentionally `NOT_JOINED`/`NOT_EVALUATED`
 until independently verified. Comparisons are observational, not causal, and
 manual-action completeness remains unverified. Do not optimize trade rules from
 small groups or declare dollar-account readiness on these outputs.
+
+## Manual provenance correction and Early Exit replay readiness
+
+The audit now flags an AUTO_RAMON/RANGE_AUTO trade whose exit detail or exit
+reason explicitly contains manual/dashboard as
+`MANUAL_INTERVENTION_SUSPECTED` and excludes it from provisional autonomous
+performance. The underlying SQLite data is never updated and the status is
+**not** broker-confirmed human action. The `manual_provenance_audit` section
+contains the suspected sample/trade IDs for comparison with broker events,
+dashboard commands, position-action telemetry, and timestamps.
+
+`early_exit_replay` enumerates only remaining `early_adverse_exit` trades
+and their observed outcomes. Counterfactual values are deliberately NULL
+until original entry fill, broker initial SL/TP, relevant Bid/Ask tick path,
+spread, fees, and exit ordering can be verified. This is a *readiness stage*,
+not a completed what-if backtest. Never disable early adverse exits on this
+report alone.
+
+Verification:
+```bash
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run --with pytest python -m pytest -q tests/test_evaluation_lab.py tests/test_early_exit_provenance.py
+uv run python -m ramon.evaluation_lab --db data/ramon_history.sqlite3 > /tmp/ramon_evaluation.json
+python3 -m json.tool /tmp/ramon_evaluation.json | less
+```
