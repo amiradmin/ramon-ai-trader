@@ -2211,11 +2211,91 @@ def training_data_health(db, symbol):
     return result
 
 
+
+def wait_analysis_report(db, symbol, limit=300):
+    """Read-only WAIT diagnostics. No counterfactual P&L without executable replay."""
+    p = Path(db).expanduser().resolve()
+    if not p.is_file():
+        return {"available": False, "reason": "HISTORY_DB_MISSING"}
+    limit = max(1, min(1000, int(limit)))
+    try:
+        with sqlite3.connect(p.as_uri() + "?mode=ro", uri=True, timeout=.5) as con:
+            con.row_factory = sqlite3.Row
+            con.execute("PRAGMA query_only=ON")
+            columns = {r[1] for r in con.execute("PRAGMA table_info(decision_samples)")}
+            if not {"symbol", "final_decision", "model_metadata"}.issubset(columns):
+                return {"available": False, "reason": "SCHEMA_UNAVAILABLE"}
+            order = "id" if "id" in columns else "rowid"
+            records = con.execute(
+                f"SELECT * FROM decision_samples WHERE symbol=? AND final_decision='WAIT' "
+                f"ORDER BY {order} DESC LIMIT ?", (symbol, limit)
+            ).fetchall()
+    except sqlite3.Error as exc:
+        return {"available": False, "reason": type(exc).__name__}
+    reasons, states, conflicts, quality = {}, {}, 0, {}
+    rows = []
+    for r in records:
+        item = dict(r)
+        meta = object_json(item.get("model_metadata"))
+        audit = meta.get("decision_audit") or {}
+        final = audit.get("final") or {}
+        base = audit.get("base") or {}
+        if not isinstance(final, dict): final = {}
+        if not isinstance(base, dict): base = {}
+        market = meta.get("market_assessment") or {}
+        if not isinstance(market, dict): market = {}
+        reason = str(item.get("final_reason") or final.get("reason") or item.get("reason") or "UNKNOWN")[:120]
+        state = str(final.get("market_state") or market.get("state") or "UNKNOWN")[:80]
+        candidate = str(final.get("candidate_direction") or "")
+        market_direction = str(final.get("market_direction") or "")
+        conflict = candidate in ("BUY", "SELL") and market_direction in ("BUY", "SELL") and candidate != market_direction
+        q = final.get("data_quality_shadow_reasons") or []
+        if not isinstance(q, list): q = []
+        q = [str(x)[:80] for x in q[:8]]
+        reasons[reason] = reasons.get(reason, 0) + 1
+        states[state] = states.get(state, 0) + 1
+        conflicts += int(conflict)
+        for x in q: quality[x] = quality.get(x, 0) + 1
+        rows.append({
+            "sample_key": item.get("sample_key"),
+            "captured": item.get("captured"),
+            "reason": reason,
+            "base_reason": base.get("reason"),
+            "market_state": state,
+            "candidate_direction": candidate,
+            "market_direction": market_direction,
+            "direction_conflict": conflict,
+            "signal_strength": base.get("signal_strength"),
+            "minimum_strength": base.get("minimum_strength"),
+            "quality_shadow_reasons": q,
+            "quality_shadow_authoritative": bool(final.get("data_quality_shadow_authoritative", False)),
+            "ai_engine_v3_shadow_decision": final.get("ai_engine_v3_shadow_decision"),
+        })
+    return {
+        "available": True, "symbol": symbol, "sampled_waits": len(rows),
+        "limit": limit, "reasons": reasons, "market_states": states,
+        "direction_conflicts": conflicts, "quality_shadow_reasons": quality,
+        "rows": rows[:100],
+        "counterfactual": {"status": "NOT_EVALUATED",
+                           "reason": "requires future M1/tick path, spread, entry/exit policy and walk-forward validation"},
+        "advisory_only": True,
+    }
+
+
 def handler_for(db, diagnostic, symbol, health_url):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             route = self.path.split("?", 1)[0]
-            if route == "/api/training-data-health":
+            if route == "/api/wait-analysis":
+                params = parse_qs(urlsplit(self.path).query)
+                try:
+                    limit = int(params.get("limit", ["300"])[0])
+                except (TypeError, ValueError):
+                    self.send_error(400)
+                    return
+                payload = wait_analysis_report(db, symbol, limit)
+                self.reply(json.dumps(payload, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
+            elif route == "/api/training-data-health":
                 self.reply(json.dumps(training_data_health(db, symbol), ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
             elif route == "/api/reversal-report":
                 payload = daily_reversal_report(db, symbol)
@@ -2271,9 +2351,9 @@ def handler_for(db, diagnostic, symbol, health_url):
                     pass
                 data = build_snapshot(db, diagnostic, symbol=symbol, health=health)
                 self.reply(json.dumps(data, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
-            elif route in {"/", "/monitor", "/app.js", "/trading-psychology.js", "/style.css", "/control", "/control.js"}:
-                filename = {"/": "index.html", "/monitor": "index.html", "/app.js": "app.js", "/trading-psychology.js": "trading-psychology.js", "/style.css": "style.css", "/control": "control.html", "/control.js": "control.js"}[route]
-                content_type = {"index.html": "text/html", "app.js": "text/javascript", "trading-psychology.js": "text/javascript", "style.css": "text/css", "control.html": "text/html", "control.js": "text/javascript"}[filename]
+            elif route in {"/", "/monitor", "/app.js", "/trading-psychology.js", "/style.css", "/control", "/control.js", "/wait-analysis"}:
+                filename = {"/": "index.html", "/monitor": "index.html", "/app.js": "app.js", "/trading-psychology.js": "trading-psychology.js", "/style.css": "style.css", "/control": "control.html", "/control.js": "control.js", "/wait-analysis": "wait_analysis.html"}[route]
+                content_type = {"index.html": "text/html", "app.js": "text/javascript", "trading-psychology.js": "text/javascript", "style.css": "text/css", "control.html": "text/html", "control.js": "text/javascript", "wait_analysis.html": "text/html"}[filename]
                 self.reply((ASSETS / filename).read_bytes(), content_type + "; charset=utf-8")
             else:
                 self.send_error(404)
