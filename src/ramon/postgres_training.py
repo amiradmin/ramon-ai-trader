@@ -53,7 +53,7 @@ def sync_training_tables(sqlite_file: Path, dsn: str, batch: int = 500) -> dict[
                         cur.executemany(
                             f"""INSERT INTO ramon_migration.{target} ( {key}, source )
                                 VALUES (%s,%s::jsonb)
-                                ON CONFLICT ({key}) DO UPDATE SET source=EXCLUDED.source""",
+                                ON CONFLICT ({key}) DO UPDATE SET source=EXCLUDED.source\n                                WHERE ramon_migration.{target}.source IS DISTINCT FROM EXCLUDED.source""",
                             payloads,
                         )
                         totals[table] += len(rows)
