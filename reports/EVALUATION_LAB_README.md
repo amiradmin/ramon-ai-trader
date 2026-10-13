@@ -30,3 +30,15 @@ an unverified fill mechanism.
 
 The source audit currently reads SQLite; PostgreSQL event-to-order matching
 and detailed human provenance audits will be separate next-phase additions.
+
+## Loss Attribution (descriptive, provisional)
+
+The report includes `loss_attribution` grouped by exit_detail, exit_reason,
+entry_source, direction, entry UTC hour and EA version. Categories marked
+`UNKNOWN` reflect missing source fields, not inferred events. Each category
+returns trade count, wins, losses, account-unit net P&L, mean R and profit factor.
+Missing initial-risk observations are reported as coverage counts. Regime at
+entry and initial broker SL/TP are intentionally `NOT_JOINED`/`NOT_EVALUATED`
+until independently verified. Comparisons are observational, not causal, and
+manual-action completeness remains unverified. Do not optimize trade rules from
+small groups or declare dollar-account readiness on these outputs.
