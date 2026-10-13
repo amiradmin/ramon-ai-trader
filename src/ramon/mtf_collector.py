@@ -152,13 +152,17 @@ def main() -> None:
     parser.add_argument("--interval", type=int, default=30)
     parser.add_argument("--broker-utc-offset-hours", type=int, default=3,
                         help="Explicit broker clock offset, currently verified +3; stop/reconfigure if broker DST changes")
-    parser.add_argument("--postgres-shadow-dsn", default="",\n                        help="Optional psycopg DSN for isolated ramon_migration.mtf_utc_bars mirror")\n    args = parser.parse_args()\n    if args.interval < 10 or args.broker_utc_offset_hours not in OFFSETS:
+    parser.add_argument("--postgres-shadow-dsn", default="",
+                        help="Optional psycopg DSN for isolated ramon_migration.mtf_utc_bars mirror")
+    args = parser.parse_args()
+    if args.interval < 10 or args.broker_utc_offset_hours not in OFFSETS:
         parser.error("invalid collector interval/offset")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     seen: dict[str, tuple[int, int]] = {}
     while True:
         try:
-            poll(args.common_files, args.db, args.symbol, seen, args.broker_utc_offset_hours,\n                 args.postgres_shadow_dsn)
+            poll(args.common_files, args.db, args.symbol, seen, args.broker_utc_offset_hours,
+                 args.postgres_shadow_dsn)
         except Exception:
             LOG.exception("Unexpected collector error")
         time.sleep(args.interval)
