@@ -11,3 +11,7 @@ installer/
 .ramon/
 
 .venv-research/
+
+# Local PostgreSQL credentials and host-only rollout overrides
+.secrets/
+compose.pg-canary.yaml
