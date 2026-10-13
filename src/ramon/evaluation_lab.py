@@ -67,6 +67,7 @@ def evaluate(db_path, symbol="XAUUSD_l", limit=50000):
     waits = sum(str(d["final_decision"]).upper()=="WAIT" for d in decisions)
     sourced = Counter(str(t.get("entry_source") or "UNKNOWN").upper() for t in trades)
     qualified, attributed, excluded, unmatched = [], [], Counter(), 0
+    suspected = []
     for t in trades:
         source = str(t.get("entry_source") or "").upper()
         if source not in AUTO_SOURCES:
@@ -74,6 +75,16 @@ def evaluate(db_path, symbol="XAUUSD_l", limit=50000):
             continue
         if "manual_intervention" not in t:
             excluded["INTERVENTION_COLUMN_MISSING"] += 1
+            continue
+        exit_type = str(t.get("exit_detail") or "").strip().lower()
+        exit_reason = str(t.get("exit_reason") or "").strip().lower()
+        manual_exit = ("manual" in exit_type or "dashboard" in exit_type
+                       or "manual" in exit_reason or "dashboard" in exit_reason)
+        if manual_exit:
+            suspected.append({"trade_key": t.get("trade_key"), "sample_key": t.get("sample_key"),
+                              "exit_detail": t.get("exit_detail"), "exit_reason": t.get("exit_reason"),
+                              "status": "MANUAL_INTERVENTION_SUSPECTED"})
+            excluded["MANUAL_EXIT_SUSPECTED"] += 1
             continue
         marker = t.get("manual_intervention")
         if marker not in (None, "", "NONE", "none", "false", "0", 0):
@@ -137,6 +148,19 @@ def evaluate(db_path, symbol="XAUUSD_l", limit=50000):
         "stop_target": {"status": "NOT_EVALUATED", "reason": "initial broker SL/TP and fill provenance unverified"},
         "interpretation": "DESCRIPTIVE_ONLY_NOT_CAUSAL",
     }
+    early_exit = [t for t in attributed if str(t.get("exit_detail") or "").lower() == "early_adverse_exit"]
+    replay = {
+        "status": "BLOCKED_MISSING_VERIFIED_EXECUTION_PATH",
+        "candidate_trades": len(early_exit),
+        "observed_net_units": round(sum(t["net_units"] for t in early_exit), 5),
+        "hypothetical_net_units": None,
+        "per_trade": [{"trade_key": t.get("trade_key"), "sample_key": t.get("sample_key"),
+                       "observed_net_units": t["net_units"],
+                       "replay_status": "NOT_EVALUATED",
+                       "blockers": ["UNVERIFIED_ORIGINAL_SL_TP", "UNVERIFIED_TICK_BID_ASK",
+                                    "UNVERIFIED_ORDER_FILL_AND_FEES"]} for t in early_exit],
+        "note": "Never infer avoided losses or missed profit without verified broker SL/TP, fill and tick path.",
+    }
     gains = sum(p for p, *_ in qualified if p > 0)
     losses = -sum(p for p, *_ in qualified if p < 0)
     total = sum(p for p, *_ in qualified)
@@ -157,6 +181,9 @@ def evaluate(db_path, symbol="XAUUSD_l", limit=50000):
                         "ready_for_training": False,
                         "reason": "Manual intervention absence and execution completeness not independently audited"},
         "loss_attribution": loss_attribution,
+        "manual_provenance_audit": {"suspected_count": len(suspected), "suspected": suspected,
+                                    "status": "SOURCE_NEEDS_BROKER_EVENT_CORROBORATION"},
+        "early_exit_replay": replay,
         "wait_replay": {"status": "NOT_EVALUATED", "reason":
                         "Require time-aligned M1/ticks, executable bid/ask, intrabar SL/TP priority, "
                         "account costs and independent walk-forward folds before computing counterfactual P&L"},
