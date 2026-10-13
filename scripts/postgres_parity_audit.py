@@ -25,14 +25,17 @@ PG_TABLES = [
 
 def postgres(container: str, sql: str) -> list[str]:
     cmd = [
-        "docker", "exec", "-e", "PGOPTIONS=-c default_transaction_read_only=on",
+        "docker", "exec", "-i", "-e", "PGOPTIONS=-c default_transaction_read_only=on",
         container, "sh", "-c",
         'exec psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At',
     ]
     p = subprocess.run(cmd, input=sql, text=True, capture_output=True, check=False)
     if p.returncode:
         raise RuntimeError(f"PostgreSQL query failed (exit {p.returncode}): {p.stderr.strip()}")
-    return p.stdout.splitlines()
+    lines = p.stdout.splitlines()
+    if not lines:
+        raise RuntimeError("PostgreSQL returned no rows; verify stdin/connection and query")
+    return lines
 
 
 def sqlite_tables(db: sqlite3.Connection) -> dict[str, int]:
