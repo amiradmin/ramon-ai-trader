@@ -14,6 +14,8 @@ docker exec "$db_container" sh -c 'printf %s "$POSTGRES_PASSWORD"' > "$secret"
 [[ -s "$secret" ]] || { echo "Database credential unavailable" >&2; exit 2; }
 docker run --rm --network ramon-ai-trader_default \
   --mount "type=bind,src=$PWD/data,dst=/run/ramon_data,readonly" \
+  --mount "type=bind,src=$PWD/src,dst=/app/src,readonly" \
+  --env PYTHONPATH=/app/src \
   --mount "type=bind,src=$secret,dst=/run/pg_password,readonly" \
   --entrypoint python "$image" -c '
 import json, os, sqlite3
