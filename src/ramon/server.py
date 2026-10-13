@@ -155,18 +155,34 @@ def _persist_manual_override(db: str, payload: dict[str, object]) -> None:
 
 def persist_market_safely(db: str, market: Market) -> str:
     """Best-effort learning telemetry; never make a trading decision fail."""
+    timing = os.environ.get("RAMON_STORAGE_TIMING_ENABLED") == "1"
+    started = time.perf_counter()
     try:
         persist_market(db, market)
     except Exception as exc:
+        if timing:
+            SHADOW_LOG.info("RAMON_STORAGE_TIMING stage=sqlite status=error duration_ms=%.3f",
+                            (time.perf_counter() - started) * 1000)
         return f"{type(exc).__name__}: {exc}"
+    if timing:
+        SHADOW_LOG.info("RAMON_STORAGE_TIMING stage=sqlite status=ok duration_ms=%.3f",
+                        (time.perf_counter() - started) * 1000)
     # Shadow occurs only after authoritative SQLite succeeds. Never raise
     # a PostgreSQL error into the live decision request.
     dsn = os.environ.get("RAMON_PG_MARKET_SHADOW_DSN", "")
     if dsn and market.timeframe == "M15":
+        shadow_started = time.perf_counter()
         try:
             mirror_market_postgres(dsn, market)
         except Exception as exc:
             SHADOW_LOG.warning("M15_POSTGRES_SHADOW_FAILED type=%s", type(exc).__name__)
+            if timing:
+                SHADOW_LOG.info("RAMON_STORAGE_TIMING stage=postgres_shadow status=error duration_ms=%.3f",
+                                (time.perf_counter() - shadow_started) * 1000)
+        else:
+            if timing:
+                SHADOW_LOG.info("RAMON_STORAGE_TIMING stage=postgres_shadow status=ok duration_ms=%.3f",
+                                (time.perf_counter() - shadow_started) * 1000)
     return ""
 
 
@@ -450,6 +466,8 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
             if self.path not in {"/decision", "/trades", "/manual-override", "/manual-overrides/reset", "/human-opinion", "/position-exit-advice", "/opportunity-entry-advice", "/reload-roles", "/forecast-only"}:
                 self.send_error(404)
                 return
+            if self.path == "/decision" and os.environ.get("RAMON_DECISION_TIMING_ENABLED") == "1":
+                self._decision_started = time.perf_counter()
             try:
                 length = int(self.headers.get("Content-Length", "0"))
                 if length < 2 or length > 250_000:
@@ -1276,6 +1294,11 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 self.reply(503, {"error": "model_unavailable"})
 
         def reply(self, status: int, data: dict[str, object]) -> None:
+            started = getattr(self, "_decision_started", None)
+            if started is not None:
+                SHADOW_LOG.info("RAMON_DECISION_TIMING status=%d duration_ms=%.3f",
+                                status, (time.perf_counter() - started) * 1000)
+                self._decision_started = None
             body = json.dumps(data, separators=(",", ":"), allow_nan=False).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
