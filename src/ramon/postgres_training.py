@@ -1,8 +1,8 @@
-"""PostgreSQL-backed training samples and outcomes, with exact SQLite trainer semantics.
+"""PostgreSQL-backed training samples and outcomes.
 
-Staging storage uses JSONB to keep lossless rows, and reconstructs the
-existing SQLite query in memory until the training SQL is fully ported.
-Never connects to the live trading server.
+The source rows are retained losslessly as JSONB during the migration, but
+the trainer selection is executed natively in PostgreSQL.  This module never
+opens a SQLite database while reading training examples.
 """
 from __future__ import annotations
 
@@ -25,6 +25,44 @@ DECISION_COLS = ("sample_key","symbol","quote_time","regime_features",
                  "schema_version","final_decision")
 TRADE_COLS = ("trade_key","sample_key","symbol","closed","net_r",
               "direction","exit_reason","training_status","entry_source","opened")
+
+# Keep this predicate semantically identical to ``train_roles.read_trade_examples``.
+# JSONB fields are cast only after the migration writer has stored them; malformed
+# records are a migration failure rather than a silent, differently-labelled row.
+TRAINING_EXAMPLES_SQL = """
+    SELECT
+        (s.source->>'quote_time')::bigint,
+        (t.source->>'closed')::bigint,
+        s.source->>'regime_features',
+        s.source->>'entry_features',
+        s.source->>'news_features',
+        s.source->>'meta_base_features',
+        (t.source->>'net_r')::double precision,
+        s.source->>'base_decision',
+        t.source->>'direction',
+        t.source->>'exit_reason'
+    FROM ramon_migration.training_decision_samples AS s
+    JOIN ramon_migration.training_trade_outcomes AS t
+      ON t.source->>'sample_key' = s.source->>'sample_key'
+    WHERE s.source->>'symbol' = %s
+      AND t.source->>'symbol' = s.source->>'symbol'
+      AND s.source->>'chronos_model' = %s
+      AND (s.source->>'schema_version')::integer >= 3
+      AND s.source->>'news_features' IS NOT NULL
+      AND t.source->>'direction' = s.source->>'direction'
+      AND t.source->>'training_status' = 'LEARNABLE'
+      AND (
+            s.source->>'final_decision' = t.source->>'direction'
+            OR COALESCE(t.source->>'entry_source', 'AUTO_RAMON') = 'DASHBOARD_OPPORTUNITY'
+          )
+      AND (t.source->>'opened')::bigint >= (s.source->>'quote_time')::bigint
+      AND (t.source->>'opened')::bigint <= (s.source->>'quote_time')::bigint + 90
+      AND (t.source->>'closed')::bigint >= (t.source->>'opened')::bigint
+    ORDER BY
+        (s.source->>'quote_time')::bigint,
+        s.source->>'sample_key',
+        t.source->>'trade_key'
+"""
 
 
 def sync_training_tables(sqlite_file: Path, dsn: str, batch: int = 500) -> dict[str, int]:
@@ -61,34 +99,31 @@ def sync_training_tables(sqlite_file: Path, dsn: str, batch: int = 500) -> dict[
 
 
 def read_training_examples(dsn: str, symbol: str, chronos_model: str):
-    """Preserve the trainer's filters exactly while PostgreSQL holds the source."""
+    """Read filtered trainer examples directly from PostgreSQL.
+
+    The explicit read-only transaction prevents accidental writes from a
+    training process and gives a single consistent snapshot of both tables.
+    """
     import psycopg
-    from .train_roles import read_trade_examples
+    from .train_roles import Example
     with psycopg.connect(dsn, connect_timeout=5,
                          options="-c statement_timeout=30000") as pg:
         with pg.cursor() as cur:
-            cur.execute("SELECT source FROM ramon_migration.training_decision_samples WHERE source->>'symbol'=%s",
-                        (symbol,))
-            samples = [v[0] for v in cur.fetchall()]
-            cur.execute("SELECT source FROM ramon_migration.training_trade_outcomes WHERE source->>'symbol'=%s",
-                        (symbol,))
-            outcomes = [v[0] for v in cur.fetchall()]
-    # Minimal in-memory compatibility layer; does not access a SQLite file.
-    with sqlite3.connect(":memory:") as db:
-        numeric = {"quote_time": "INTEGER", "schema_version": "INTEGER",
-                   "opened": "INTEGER", "closed": "INTEGER", "net_r": "REAL"}
-        db.execute("CREATE TABLE decision_samples (" +
-                   ",".join(f"{name} {numeric.get(name, 'TEXT')}" for name in DECISION_COLS) + ")")
-        db.execute("CREATE TABLE trade_outcomes (" +
-                   ",".join(f"{name} {numeric.get(name, 'TEXT')}" for name in TRADE_COLS) + ")")
-        for table, columns, records in (
-            ("decision_samples", DECISION_COLS, samples),
-            ("trade_outcomes", TRADE_COLS, outcomes),
-        ):
-            stmt = f"INSERT INTO {table} VALUES (" + ",".join("?" for _ in columns) + ")"
-            db.executemany(stmt, [
-                tuple(record.get(col) if not isinstance(record.get(col), (dict,list))
-                      else json.dumps(record[col]) for col in columns)
-                for record in records
-            ])
-        return read_trade_examples(db, symbol, chronos_model)
+            cur.execute("BEGIN TRANSACTION READ ONLY")
+            cur.execute(TRAINING_EXAMPLES_SQL, (symbol, chronos_model))
+            rows = cur.fetchall()
+    return [
+        Example(
+            int(quote_time), int(closed),
+            {
+                "regime": json.loads(regime),
+                "entry": json.loads(entry),
+                "news": json.loads(news),
+                "meta_base": json.loads(meta_base),
+            },
+            int(float(net_r) > 0), float(net_r), base in {"BUY", "SELL"},
+            direction, exit_reason,
+        )
+        for quote_time, closed, regime, entry, news, meta_base, net_r,
+        base, direction, exit_reason in rows
+    ]
