@@ -95,7 +95,7 @@ def read_trade_examples(conn: sqlite3.Connection, symbol: str, chronos_model: st
                   )
               AND t.opened>=s.quote_time
               AND t.opened<=s.quote_time+90 AND t.closed>=t.opened
-            ORDER BY s.quote_time,s.sample_key
+            ORDER BY s.quote_time,s.sample_key,t.trade_key
         """, (symbol, chronos_model)).fetchall()
     return [Example(int(t), int(end), {"regime": json.loads(r), "entry": json.loads(e),
                                      "news": json.loads(n), "meta_base": json.loads(m)}, int(float(pnl) > 0),
