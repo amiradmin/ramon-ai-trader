@@ -75,10 +75,12 @@ def read_training_examples(dsn: str, symbol: str, chronos_model: str):
             outcomes = [v[0] for v in cur.fetchall()]
     # Minimal in-memory compatibility layer; does not access a SQLite file.
     with sqlite3.connect(":memory:") as db:
+        numeric = {"quote_time": "INTEGER", "schema_version": "INTEGER",
+                   "opened": "INTEGER", "closed": "INTEGER", "net_r": "REAL"}
         db.execute("CREATE TABLE decision_samples (" +
-                   ",".join(f"{name} TEXT" for name in DECISION_COLS) + ")")
+                   ",".join(f"{name} {numeric.get(name, 'TEXT')}" for name in DECISION_COLS) + ")")
         db.execute("CREATE TABLE trade_outcomes (" +
-                   ",".join(f"{name} TEXT" for name in TRADE_COLS) + ")")
+                   ",".join(f"{name} {numeric.get(name, 'TEXT')}" for name in TRADE_COLS) + ")")
         for table, columns, records in (
             ("decision_samples", DECISION_COLS, samples),
             ("trade_outcomes", TRADE_COLS, outcomes),
