@@ -12,6 +12,8 @@ WORKDIR /app
 
 ARG RAMON_UID=1000
 ARG RAMON_GID=1000
+# Optional PyPI mirror for non-PyTorch dependencies (default: upstream PyPI).
+ARG RAMON_PIP_INDEX_URL=https://pypi.org/simple
 
 # Install CPU-only PyTorch first so pip does not fetch CUDA runtime packages.
 # Keep pip's download cache in a BuildKit cache mount so transient network
@@ -30,7 +32,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     python -m pip install \
       --timeout 600 \
       --retries 10 \
-      '.[model,train,timesfm,shadow_models]' \
+      --index-url "$RAMON_PIP_INDEX_URL" \
+      '.[model,train,timesfm,shadow_models,postgres]' \
     && groupadd --gid "$RAMON_GID" ramon \
     && useradd --create-home --uid "$RAMON_UID" --gid "$RAMON_GID" ramon \
     && mkdir -p /home/ramon/.cache/huggingface /checkpoints \
