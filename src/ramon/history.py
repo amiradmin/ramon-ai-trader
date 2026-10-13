@@ -196,6 +196,9 @@ def ensure_history_db(db: str | Path) -> Path:
 
 def persist_market(db: str | Path, market: Market) -> int:
     """Upsert completed bars from a live request; never store an incomplete candle."""
+    if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres":
+        from .postgres_operational import persist_market as persist_postgres
+        return persist_postgres(os.environ.get("RAMON_PG_DSN", ""), market)
     path = ensure_history_db(db)
     spread_points = round((market.ask - market.bid) / market.point)
     newest = market.bars[-1].time
@@ -257,6 +260,18 @@ def persist_decision_sample(
     target_structure: dict[str, object] | None = None,
 ) -> bool:
     """Persist one live inference sample for later role-model training."""
+    if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres":
+        from .postgres_operational import persist_decision_sample as persist_postgres
+        mid=(market.bid+market.ask)/2.0
+        return persist_postgres(os.environ.get("RAMON_PG_DSN", ""), {
+            "sample_key": sample_key, "captured": int(captured), "symbol": market.symbol,
+            "signal_bar_time": int(signal_bar_time), "quote_time": quote_time, "chronos_model": chronos_model,
+            "schema_version": 4 if target_structure is not None else 3, "direction": direction,
+            "base_decision": base_decision, "final_decision": final_decision, "mid": mid,
+            "spread": market.ask-market.bid, "atr": atr,
+            "regime_features": json.dumps(regime_features), "entry_features": json.dumps(entry_features),
+            "meta_base_features": json.dumps(meta_base_features), "news_features": json.dumps(news_features),
+            "metadata": json.dumps({"bundle_id":bundle_id,"model_metadata":model_metadata or {},"target_structure":target_structure or {}}),})
     path = ensure_history_db(db)
     mid = (market.bid + market.ask) / 2.0
     spread = market.ask - market.bid
@@ -393,6 +408,9 @@ def history_count(db: str | Path, symbol: str = "XAUUSD_l") -> int:
 
 def load_bars(db: str | Path, symbol: str = "XAUUSD_l") -> tuple[tuple[Bar, ...], tuple[int, ...]]:
     """Read M15 historical bars from selected backend (SQLite default)."""
+    if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres":
+        from .postgres_operational import load_bars as load_postgres
+        return load_postgres(os.environ.get("RAMON_PG_DSN", ""), symbol)
     if os.environ.get("RAMON_M15_HISTORY_BACKEND", "sqlite").lower() == "postgres":
         from .postgres_m15_history import load_m15_postgres
         try:
