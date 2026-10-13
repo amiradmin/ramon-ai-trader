@@ -194,5 +194,19 @@ void RT_Deal(const ulong magic,const bool small,const ulong deal)
       +",\"swap_units\":"+DoubleToString(HistoryDealGetDouble(deal,DEAL_SWAP),8)
       +",\"comment\":\""+RT_JsonEscape(HistoryDealGetString(deal,DEAL_COMMENT))+"\"";
    RT_Append(magic,small,"deal",payload,sample,pos,HistoryDealGetInteger(deal,DEAL_TIME_MSC));
+   long entry=HistoryDealGetInteger(deal,DEAL_ENTRY);
+   if(entry==DEAL_ENTRY_OUT || entry==DEAL_ENTRY_OUT_BY || entry==DEAL_ENTRY_INOUT)
+   {
+      ENUM_DEAL_REASON why=(ENUM_DEAL_REASON)HistoryDealGetInteger(deal,DEAL_REASON);
+      string actor="broker_or_unknown";
+      if(why==DEAL_REASON_EXPERT) actor="expert_or_api";
+      else if(why==DEAL_REASON_CLIENT || why==DEAL_REASON_MOBILE || why==DEAL_REASON_WEB)
+         actor="external_manual";
+      string close_data="\"actor\":\""+actor+"\",\"source\":\"broker_deal\""
+         +",\"reason\":\""+EnumToString(why)+"\""
+         +",\"deal_id\":\""+IntegerToString((long)deal)+"\""
+         +",\"profit_units\":"+DoubleToString(HistoryDealGetDouble(deal,DEAL_PROFIT),8);
+      RT_Append(magic,small,"close_result",close_data,sample,pos,HistoryDealGetInteger(deal,DEAL_TIME_MSC));
+   }
 }
 #endif
