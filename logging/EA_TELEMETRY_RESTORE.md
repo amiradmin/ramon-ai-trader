@@ -37,3 +37,15 @@ absence of manual intervention.
 The logger never calls trading functions or HTTP. File writes can still consume
 some timer time; evaluate that latency in demo, particularly on slow disks.
 No automatic live installation, deployment or EA compilation is performed here.
+
+## Confirm correct file in MetaEditor
+
+This experimental version has `#property version "1.598"` and
+`#define RAMON_EA_VERSION "0.59.8"`, and includes
+`#include "RamonResearchTelemetry.mqh"` immediately after Trade.mqh.
+The old `0.59.7` file can compile successfully **without** telemetry.
+
+Open the exact file from the experimental folder using MetaEditor File > Open.
+If the first 8 lines do not show these markers, MetaEditor is compiling the
+wrong source path. Keep both the `.mq5` and `.mqh` together. Compile only in the
+isolated test folder; don't overwrite the production EA source or EX5.
