@@ -320,6 +320,42 @@ services:
       - mt5_prefix:/home/ramon/.wine
       - ./installer:/installer:ro
 
+  postgres-logs:
+    profiles: ["logging"]
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ramon_logs
+      POSTGRES_USER: ramon_logger
+      POSTGRES_PASSWORD: ${RAMON_LOG_DB_PASSWORD:-}
+    volumes:
+      - ramon_log_pgdata:/var/lib/postgresql/data
+      - ./logging/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ramon_logger -d ramon_logs"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  research-log-ingest:
+    profiles: ["logging"]
+    build:
+      context: .
+      dockerfile: logging/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres-logs:
+        condition: service_healthy
+    environment:
+      RAMON_LOG_DATABASE_URL: postgresql://ramon_logger:${RAMON_LOG_DB_PASSWORD:?Set RAMON_LOG_DB_PASSWORD}@postgres-logs:5432/ramon_logs
+      RAMON_RESEARCH_ROOT: /mt5-users
+      RAMON_HISTORY_DB: /data/ramon_history.sqlite3
+      RAMON_LOG_POLL_SECONDS: "10"
+    volumes:
+      - ${HOME}/.mt5/drive_c/users:/mt5-users:ro
+      - ${RAMON_LOG_SOURCE_DATA_DIR:-./data}:/data:ro
+
 volumes:
   chronos_cache:
   mt5_prefix:
+  ramon_log_pgdata:
