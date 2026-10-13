@@ -8,7 +8,7 @@ RT = (ROOT / "mt5/RamonResearchTelemetry.mqh").read_text(encoding="utf-8")
 def test_ea_version_and_session_version_match():
     assert '#property version "1.599"' in EA
     assert '#define RAMON_EA_VERSION "0.59.9"' in EA
-    assert '"0.59.9"' in RT
+    assert r'\"ea_version\":\"0.59.9\"' in RT
 
 def test_all_observability_events_present():
     for name in ("decision_gate", "order_intent", "order_result",
