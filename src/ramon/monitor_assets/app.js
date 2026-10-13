@@ -540,19 +540,10 @@ function renderOpportunities(data){
     advisory.className="fast-scalp-quality "+(entryQuality===null?"unknown":coverage<70?"partial":entryQuality>=75?"favorable":entryQuality>=50?"caution":"weak");
     const qualityTitle=document.createElement("strong");
     qualityTitle.textContent="کیفیت ورود: "+(entryQuality===null?"داده کافی نیست":entryQuality+"/100");
-    const qualitySubtitle=document.createElement("small");
-    qualitySubtitle.textContent="M1/M5: "+mtfState+" · پوشش "+coverage+"٪ ("+coverageLabel+")";
-    const qualityHistory=document.createElement("small");
-    qualityHistory.textContent="برد تاریخی: کالیبره نشده";
-    const qualityBreakdown=document.createElement("div");
-    qualityBreakdown.className="fast-scalp-quality-breakdown";
-    for(const item of qualityInputs){
-      const detail=document.createElement("small");
-      detail.textContent=item.label+": "+(item.value===null?"ناموجود":Math.round(item.value*100)+"/100")+" — "+item.status;
-      qualityBreakdown.append(detail);
-    }
-    advisory.title="امتیاز نسبی فقط از معیارهای موجود محاسبه می‌شود؛ پوشش پایین اعتبار امتیاز را کاهش می‌دهد. احتمال برد یا توصیه قطعی معامله نیست.";
-    advisory.append(qualityTitle,qualitySubtitle,qualityHistory,qualityBreakdown);
+    // Keep the secondary scalp box compact: only the entry-quality score is visible.
+    // Coverage and diagnostic limitations remain available on hover.
+    advisory.title="پوشش "+coverage+"٪ ("+coverageLabel+")؛ M1/M5: "+mtfState+"؛ امتیاز نسبی است، نه احتمال برد کالیبره‌شده یا توصیه قطعی معامله.";
+    advisory.append(qualityTitle);
     const scalpGo=scalpBlockers.length===0;
     const exitSuggested=Boolean(row.position_open&&["EXIT_NOW","LOSS_EXIT_NOW"].includes(row.chronos_exit_action));
     // A historical row must never be traded at its old price.  When a row is
