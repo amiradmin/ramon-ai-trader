@@ -4406,7 +4406,6 @@ bool ManageDashboardManualScalp()
 
 void OnTick()
 {
-   RT_ObservePosition(MagicNumber,SmallOnlyMode,LastSampleKey);
    ProcessGuardianRecoveryExits();
    // Predicted dashboard exits are exact ticket-bound price crossings and must
    // not wait for the five-second timer.
