@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import logging
 import sqlite3
 from math import isfinite
 import re
@@ -390,7 +392,16 @@ def history_count(db: str | Path, symbol: str = "XAUUSD_l") -> int:
 
 
 def load_bars(db: str | Path, symbol: str = "XAUUSD_l") -> tuple[tuple[Bar, ...], tuple[int, ...]]:
-    """Read Ramon's or the existing bridge's historical M15 schema."""
+    """Read M15 historical bars from selected backend (SQLite default)."""
+    if os.environ.get("RAMON_M15_HISTORY_BACKEND", "sqlite").lower() == "postgres":
+        from .postgres_m15_history import load_m15_postgres
+        try:
+            return load_m15_postgres(os.environ.get("RAMON_PG_HISTORY_DSN", ""), symbol)
+        except Exception as exc:
+            if os.environ.get("RAMON_M15_HISTORY_FALLBACK_SQLITE") != "1":
+                raise
+            logging.getLogger("ramon.postgres_m15_history").warning(
+                "POSTGRES_M15_READ_FALLBACK type=%s", type(exc).__name__)
     if not Path(db).is_file():
         raise FileNotFoundError(db)
     with sqlite3.connect(db) as conn:
