@@ -24,7 +24,9 @@ card("زیان‌بارترین نوع خروج",(()=>{
   const rows=Object.entries(data.loss_attribution?.by_exit_detail||{}).filter(x=>x[1].net_units<0).sort((a,b)=>a[1].net_units-b[1].net_units);
   return rows.length?rows[0][0]:"نامشخص";
 })(),"گروه‌بندی مقدماتی؛ رابطه علّی اثبات نشده"),
-card("پوشش ریسک اولیه",(data.loss_attribution?.initial_risk_units?.coverage??0)+"/"+(data.loss_attribution?.initial_risk_units?.total??0),"برحسب واحد حساب")
+card("پوشش ریسک اولیه",(data.loss_attribution?.initial_risk_units?.coverage??0)+"/"+(data.loss_attribution?.initial_risk_units?.total??0),"برحسب واحد حساب"),
+card("خروج دستی مشکوک",data.manual_provenance_audit?.suspected_count??0,"از آمار معاملات خودکار کنار گذاشته شد"),
+card("Early Exit Replay",data.early_exit_replay?.candidate_trades??0,"سناریوهای قابل بررسی؛ سود فرضی هنوز محاسبه نشده")
 ].join("");
 note.textContent="وضعیت آموزش: تأیید نشده. نبود مداخله ثبت‌شده اثبات خودکاربودن کامل معامله نیست. داده‌ها فقط خوانده می‌شوند.";
 }catch(error){target.textContent="گزارش Evaluation Lab در دسترس نیست: "+error.message;}
