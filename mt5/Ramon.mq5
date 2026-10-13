@@ -1,6 +1,6 @@
 ﻿#property strict
-#property version "1.598"
-#define RAMON_EA_VERSION "0.59.8"
+#property version "1.599"
+#define RAMON_EA_VERSION "0.59.9"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -5576,6 +5576,9 @@ void OnTimer()
    LastBundleId=bundle_id;
    LastModelDecision=decision;
    LastModelReason=reason;
+   RT_Gate(MagicNumber,SmallOnlyMode,sample_key,decision,reason,StatusLine,
+      SymbolInfoDouble(_Symbol,SYMBOL_BID),SymbolInfoDouble(_Symbol,SYMBOL_ASK),
+      RiskPerTradeUSD*MoneyUnitsPerUSD,(sample_saved>=0.5));
    LastBaseDecision=base_decision;
    LastBaseReason=base_reason;
    LastEnsembleReady=(ensemble_ready>=0.5);
@@ -6063,12 +6066,17 @@ void OnTimer()
          ValidSampleKey(dashboard_origin_sample_key) ? dashboard_origin_sample_key : LastSampleKey);
    if(!V2ExecIdentity())
    { StatusLine="V2 EXECUTION BLOCKED: account changed after preparation"; Print(StatusLine); ShowStatus(); return; }
+   RT_Order(MagicNumber,SmallOnlyMode,"order_intent",LastSampleKey,decision,
+      (dashboard_manual_entry ? "dashboard_manual" : "ea_automatic"),volume,entry,stop,target,false,0,0,0);
    bool submitted=(
       decision=="BUY"
       ? Trade.Buy(volume,_Symbol,0.0,stop,target,trade_comment)
       : Trade.Sell(volume,_Symbol,0.0,stop,target,trade_comment)
    );
    uint retcode=Trade.ResultRetcode();
+   RT_Order(MagicNumber,SmallOnlyMode,"order_result",LastSampleKey,decision,
+      (dashboard_manual_entry ? "dashboard_manual" : "ea_automatic"),volume,entry,stop,target,
+      submitted,retcode,Trade.ResultOrder(),Trade.ResultDeal());
    V2ExecRecordResult(retcode,Trade.ResultOrder(),Trade.ResultDeal());
    if(!submitted || (retcode!=TRADE_RETCODE_DONE && retcode!=TRADE_RETCODE_DONE_PARTIAL && retcode!=TRADE_RETCODE_PLACED))
    {
@@ -6474,7 +6482,19 @@ bool CloseManagedPositionFromDashboard()
    }
 
    double profit_units=PositionGetDouble(POSITION_PROFIT);
-   if(Trade.PositionClose(ticket,MaxDeviationPoints))
+   string close_sample="";
+   string close_comment=PositionGetString(POSITION_COMMENT);
+   if(StringFind(close_comment,"Ramon:")==0 && StringLen(close_comment)>=22)
+      close_sample=StringSubstr(close_comment,6,16);
+   ulong close_position=(ulong)PositionGetInteger(POSITION_IDENTIFIER);
+   RT_Append(MagicNumber,SmallOnlyMode,"close_intent",
+      "\"actor\":\"dashboard_manual\",\"detail\":\"manual_dashboard_close\",\"ticket\":\""+IntegerToString((long)ticket)+"\"",close_sample,close_position);
+   bool close_submitted=Trade.PositionClose(ticket,MaxDeviationPoints);
+   RT_Append(MagicNumber,SmallOnlyMode,"close_result",
+      "\"actor\":\"dashboard_manual\",\"detail\":\"manual_dashboard_close\",\"submitted\":"+(close_submitted?"true":"false")
+      +",\"retcode\":"+IntegerToString((long)Trade.ResultRetcode())
+      +",\"deal_id\":\""+IntegerToString((long)Trade.ResultDeal())+"\"",close_sample,close_position);
+   if(close_submitted)
    {
       RecordDealTelemetry(Trade.ResultDeal(),"manual_dashboard_close");
       LastCloseStatus="CLOSED #"+IntegerToString((long)ticket);
