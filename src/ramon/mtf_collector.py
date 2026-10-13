@@ -111,7 +111,8 @@ def mirror_snapshot_postgres(
     return {"valid": len(rows), "latest_utc": rows[-1][2], "offset_seconds": offset_hours * 3600}
 
 def poll(common_files: Path, db: Path, symbol: str,
-         last_seen: dict[str, tuple[int, int]], offset_hours: int = 3,\n         postgres_shadow_dsn: str = "") -> None:
+         last_seen: dict[str, tuple[int, int]], offset_hours: int = 3,
+         postgres_shadow_dsn: str = "") -> None:
     for tf in ("M1", "M5"):
         source = common_files / f"RamonLive_{symbol}_{tf}.csv"
         try:
