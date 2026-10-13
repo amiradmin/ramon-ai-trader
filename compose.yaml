@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_DB: ramon_research
       POSTGRES_USER: ramon_ingest
-      POSTGRES_PASSWORD: ${RAMON_PG_PASSWORD:?Set RAMON_PG_PASSWORD before using postgres-migration profile}
+      POSTGRES_PASSWORD: ${RAMON_PG_PASSWORD:-}
     volumes:
       - ramon_postgres_data:/var/lib/postgresql/data
       - ./logging/schema.sql:/docker-entrypoint-initdb.d/001-research-schema.sql:ro
