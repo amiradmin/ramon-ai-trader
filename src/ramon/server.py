@@ -5,6 +5,7 @@ from dataclasses import asdict, replace
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlsplit
 import json
+import logging
 import os
 import sqlite3
 from pathlib import Path
@@ -17,6 +18,7 @@ from .core import Forecast, Market, Settings, evaluate, independent_market_direc
 from .ensemble import EnsembleCoordinator, dominant_direction
 from .direction_roles import DirectionCoordinator
 from .history import persist_decision_sample, persist_market, persist_trade_outcome, persist_replay_input
+from .postgres_market_shadow import mirror_market_postgres
 from .model import ChronosForecaster, model_name
 from .news import DEFAULT_FOREX_FACTORY_JSON, ForexFactoryNewsProvider
 from .target_learning import build_target_structure
@@ -33,6 +35,8 @@ from .ai_decision_engine_v3 import apply_ai_engine_v3_shadow
 from .decision_safety_shadow import assess_data_quality, no_trade_recommendation
 
 
+
+SHADOW_LOG = logging.getLogger("ramon.postgres_market_shadow")
 
 ANALYTIC_OVERRIDE_STAGES = {"timing", "extension", "edge", "strength", "market_direction", "entry_timing", "base", "decision", "range", "news", "account", "limits", "risk", "order", "position"}
 
@@ -155,6 +159,14 @@ def persist_market_safely(db: str, market: Market) -> str:
         persist_market(db, market)
     except Exception as exc:
         return f"{type(exc).__name__}: {exc}"
+    # Shadow occurs only after authoritative SQLite succeeds. Never raise
+    # a PostgreSQL error into the live decision request.
+    dsn = os.environ.get("RAMON_PG_MARKET_SHADOW_DSN", "")
+    if dsn and market.timeframe == "M15":
+        try:
+            mirror_market_postgres(dsn, market)
+        except Exception as exc:
+            SHADOW_LOG.warning("M15_POSTGRES_SHADOW_FAILED type=%s", type(exc).__name__)
     return ""
 
 
