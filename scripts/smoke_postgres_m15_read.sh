@@ -13,7 +13,7 @@ trap 'rm -f "$secret"' EXIT
 docker exec "$db_container" sh -c 'printf %s "$POSTGRES_PASSWORD"' > "$secret"
 [[ -s "$secret" ]] || { echo "Database credential unavailable" >&2; exit 2; }
 docker run --rm --network ramon-ai-trader_default \
-  --mount "type=bind,src=$PWD/data/ramon_history.sqlite3,dst=/run/ramon_history.sqlite3,readonly" \
+  --mount "type=bind,src=$PWD/data,dst=/run/ramon_data,readonly" \
   --mount "type=bind,src=$secret,dst=/run/pg_password,readonly" \
   --entrypoint python "$image" -c '
 import json, os, sqlite3
@@ -24,7 +24,7 @@ password = open("/run/pg_password", encoding="utf-8").read()
 dsn = make_conninfo(host="postgres-logs", dbname="ramon_logs",
                     user="ramon_logger", password=password, connect_timeout=3)
 pg, spreads = load_m15_postgres(dsn, "XAUUSD_l")
-with sqlite3.connect("file:/run/ramon_history.sqlite3?mode=ro", uri=True) as db:
+with sqlite3.connect("file:/run/ramon_data/ramon_history.sqlite3?mode=ro", uri=True) as db:
     sq = db.execute("""SELECT time, open, high, low, close, spread_points
        FROM history_bars WHERE symbol=? AND timeframe=? ORDER BY time""",
        ("XAUUSD_l", "M15")).fetchall()
