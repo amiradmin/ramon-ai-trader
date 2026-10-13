@@ -1,4 +1,22 @@
 services:
+  research-postgres:
+    profiles: ["postgres-migration"]
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ramon_research
+      POSTGRES_USER: ramon_ingest
+      POSTGRES_PASSWORD: ${RAMON_PG_PASSWORD:?Set RAMON_PG_PASSWORD before using postgres-migration profile}
+    volumes:
+      - ramon_postgres_data:/var/lib/postgresql/data
+      - ./logging/schema.sql:/docker-entrypoint-initdb.d/001-research-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ramon_ingest -d ramon_research"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - default
   model:
     build:
       context: .
@@ -321,5 +339,6 @@ services:
       - ./installer:/installer:ro
 
 volumes:
+  ramon_postgres_data:
   chronos_cache:
   mt5_prefix:
