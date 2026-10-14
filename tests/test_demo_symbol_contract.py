@@ -6,7 +6,6 @@ def test_ea_accepts_chart_symbol_for_gold_variants():
     assert 'input string TradeSymbol = "";' in source
     assert '(TradeSymbol!="" && _Symbol!=TradeSymbol)' in source
     assert 'StringFind(_Symbol,"XAUUSD")!=0' in source
-    assert '"symbol\\":\\""+_Symbol' not in source or '_Symbol' in source
     assert 'input bool EnableLiveTrading = false;' in source
 
 
