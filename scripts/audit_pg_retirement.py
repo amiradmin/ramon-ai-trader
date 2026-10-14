@@ -78,6 +78,12 @@ with psycopg.connect(os.environ['RAMON_PG_DSN'],connect_timeout=5,options='-c de
     else:
         print("SQLite archive missing; no parity proof")
         failures.append("SQLite archive missing")
+    # Explicitly block retirement while execution-facing code retains unreviewed
+    # SQLite readers/writers, even if the primary containers report healthy.
+    for filename in ("src/ramon/monitor.py", "src/ramon/trade_outbox.py"):
+        path=ROOT/filename
+        if path.exists() and "sqlite3.connect" in path.read_text(encoding="utf-8"):
+            print("LEGACY_SQLITE_CODE:",filename)
     print("RESULT:", "NOT_APPROVED_FOR_SQLITE_RETIREMENT" if failures else "BASIC_LIVE_CHECKS_PASS_STILL_REQUIRES_TRADE_PARITY")
     for failure in failures:print("BLOCKER:",failure)
     print("NOTE: count equality alone cannot certify trade/outbox/inference parity or authorize deletion.")
