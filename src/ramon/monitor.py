@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 from .opportunities import read_opportunities, _live_direction
 from .evaluation_lab import evaluate as evaluation_lab_report
 from .missed_entry_audit import audit as missed_entry_audit_report
+from .opportunity_review import review as opportunity_review
 from .loss_diagnostics import loss_report
 from .early_exit_tick_audit import audit as early_exit_tick_audit_report
 
@@ -2497,6 +2498,16 @@ def handler_for(db, diagnostic, symbol, health_url):
                     return
                 payload = missed_entry_audit_report(db, symbol, since, until)
                 self.reply(json.dumps(payload, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
+            elif route == "/api/opportunity-review":
+                params = parse_qs(urlsplit(self.path).query)
+                try:
+                    since = int(params.get("since", [str(int(time.time())-86400)])[0])
+                    until = int(params.get("until", [str(int(time.time()))])[0])
+                except (ValueError, TypeError):
+                    self.send_error(400)
+                    return
+                payload = opportunity_review(symbol, since, until)
+                self.reply(json.dumps(payload, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
             elif route == "/api/early-exit-tick-audit":
                 tick_dir = os.getenv("RAMON_EARLY_EXIT_TICKS_DIR", "/mt5-users/amir/AppData/Roaming/MetaQuotes/Terminal/Common/Files")
                 payload = early_exit_tick_audit_report(db, tick_dir, symbol=symbol)
@@ -2572,9 +2583,9 @@ def handler_for(db, diagnostic, symbol, health_url):
                     pass
                 data = build_snapshot(db, diagnostic, symbol=symbol, health=health)
                 self.reply(json.dumps(data, ensure_ascii=False, allow_nan=False).encode(), "application/json; charset=utf-8")
-            elif route in {"/", "/monitor", "/app.js", "/trading-psychology.js", "/style.css", "/control", "/control.js", "/wait-analysis", "/wait-summary.js", "/evaluation-lab.js", "/early-exit-tick-audit", "/missed-entry-audit", "/missed-entry-audit.js", "/missed-entry-audit.css", "/loss-diagnostics"}:
-                filename = {"/": "index.html", "/monitor": "index.html", "/app.js": "app.js", "/trading-psychology.js": "trading-psychology.js", "/style.css": "style.css", "/control": "control.html", "/control.js": "control.js", "/wait-analysis": "wait_analysis.html", "/wait-summary.js": "wait-summary.js", "/evaluation-lab.js": "evaluation-lab.js", "/early-exit-tick-audit": "early_exit_tick_audit.html", "/missed-entry-audit": "missed_entry_audit.html", "/missed-entry-audit.js": "missed_entry_audit.js", "/missed-entry-audit.css": "missed_entry_audit.css", "/loss-diagnostics": "loss_diagnostics.html"}[route]
-                content_type = {"index.html": "text/html", "app.js": "text/javascript", "trading-psychology.js": "text/javascript", "style.css": "text/css", "control.html": "text/html", "control.js": "text/javascript", "wait_analysis.html": "text/html", "wait-summary.js": "text/javascript", "evaluation-lab.js": "text/javascript", "early_exit_tick_audit.html": "text/html", "missed_entry_audit.html": "text/html", "missed_entry_audit.js": "text/javascript", "missed_entry_audit.css": "text/css", "loss_diagnostics.html": "text/html"}[filename]
+            elif route in {"/", "/monitor", "/app.js", "/trading-psychology.js", "/style.css", "/control", "/control.js", "/wait-analysis", "/wait-summary.js", "/evaluation-lab.js", "/early-exit-tick-audit", "/missed-entry-audit", "/missed-entry-audit.js", "/missed-entry-audit.css", "/loss-diagnostics", "/opportunity-review"}:
+                filename = {"/": "index.html", "/monitor": "index.html", "/app.js": "app.js", "/trading-psychology.js": "trading-psychology.js", "/style.css": "style.css", "/control": "control.html", "/control.js": "control.js", "/wait-analysis": "wait_analysis.html", "/wait-summary.js": "wait-summary.js", "/evaluation-lab.js": "evaluation-lab.js", "/early-exit-tick-audit": "early_exit_tick_audit.html", "/missed-entry-audit": "missed_entry_audit.html", "/missed-entry-audit.js": "missed_entry_audit.js", "/missed-entry-audit.css": "missed_entry_audit.css", "/loss-diagnostics": "loss_diagnostics.html", "/opportunity-review": "opportunity_review.html"}[route]
+                content_type = {"index.html": "text/html", "app.js": "text/javascript", "trading-psychology.js": "text/javascript", "style.css": "text/css", "control.html": "text/html", "control.js": "text/javascript", "wait_analysis.html": "text/html", "wait-summary.js": "text/javascript", "evaluation-lab.js": "text/javascript", "early_exit_tick_audit.html": "text/html", "missed_entry_audit.html": "text/html", "missed_entry_audit.js": "text/javascript", "missed_entry_audit.css": "text/css", "loss_diagnostics.html": "text/html", "opportunity_review.html": "text/html"}[filename]
                 self.reply((ASSETS / filename).read_bytes(), content_type + "; charset=utf-8")
             else:
                 self.send_error(404)
