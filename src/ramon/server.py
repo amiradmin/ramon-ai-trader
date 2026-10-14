@@ -33,6 +33,7 @@ from .reversal_strategy import apply_reversal
 from .trade_selector import apply_live_selector
 from .ai_decision_engine import apply_ai_decision_engine
 from .ai_decision_engine_v3 import apply_ai_engine_v3_shadow
+from .live_v3_agreement_guard import apply_live_v3_agreement_guard
 from .decision_safety_shadow import assess_data_quality, no_trade_recommendation
 
 
@@ -1173,6 +1174,12 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     response["reason"] = "manual_override_final_pass"
                     response["range_execution"] = 0
 
+                # Opt-in live veto runs only after all earlier entry policies.
+                # Never grants an entry, reverses direction, or bypasses manual/range paths.
+                apply_live_v3_agreement_guard(
+                    response,
+                    enabled=os.environ.get("RAMON_V3_LIVE_AGREEMENT_GUARD", "0") == "1",
+                )
                 if not response["range_execution"]:
                     range_setup = None
                 if response["decision"] == "WAIT":
