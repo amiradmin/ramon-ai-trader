@@ -16,4 +16,6 @@ export RAMON_PG_DSN="postgresql://ramon_test:ramon_test_only@${test_host}:5432/r
 export RAMON_PG_TEST_DSN="$RAMON_PG_DSN"
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run --no-sync python -m pytest -q \
   tests/test_postgres_training_path.py tests/test_postgres_history.py \
-  tests/test_postgres_operational_integration.py
+  tests/test_postgres_operational_integration.py \
+  tests/test_server_postgres_manual_paths.py tests/test_mtf_collector.py \
+  tests/test_training_dashboard_pg_path.py tests/test_postgres_report.py
