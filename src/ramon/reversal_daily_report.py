@@ -25,17 +25,27 @@ def next_run_utc(now: datetime, hour: int) -> datetime:
 def build_report(db: Path, *, symbol: str, hour: int = 7) -> dict:
     now = datetime.now(timezone.utc)
     freshness = {}
-    with sqlite3.connect(f"file:{db.resolve()}?mode=ro", uri=True) as con:
-        for tf, threshold in (("M1", 180), ("M5", 900)):
-            latest, count = con.execute(
+    if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres":
+        import psycopg
+        with psycopg.connect(os.environ["RAMON_PG_DSN"], connect_timeout=5,
+                             options="-c default_transaction_read_only=on -c statement_timeout=5000") as con:
+            with con.cursor() as cur:
+                cur.execute("""SELECT timeframe,MAX(time),COUNT(*) FROM ramon.mtf_utc_bars
+                    WHERE symbol=%s AND timeframe IN ('M1','M5') GROUP BY timeframe""", (symbol,))
+                observed = {tf: (latest, count) for tf, latest, count in cur.fetchall()}
+    else:
+        with sqlite3.connect(f"file:{db.resolve()}?mode=ro", uri=True) as con:
+            observed = {tf: con.execute(
                 "SELECT MAX(time),COUNT(*) FROM mtf_utc_bars WHERE symbol=? AND timeframe=?",
-                (symbol, tf)).fetchone()
-            age = int(now.timestamp()) - int(latest) if latest is not None else None
-            freshness[tf] = {
-                "bars": int(count), "last_utc": int(latest) if latest is not None else None,
-                "age_seconds": age,
-                "status": ("MISSING" if age is None else "CLOCK_SKEW" if age < 0 else
-                           "READY" if age <= threshold else "STALE")}
+                (symbol, tf)).fetchone() for tf in ("M1", "M5")}
+    for tf, threshold in (("M1", 180), ("M5", 900)):
+        latest, count = observed.get(tf, (None, 0))
+        age = int(now.timestamp()) - int(latest) if latest is not None else None
+        freshness[tf] = {
+            "bars": int(count), "last_utc": int(latest) if latest is not None else None,
+            "age_seconds": age,
+            "status": ("MISSING" if age is None else "CLOCK_SKEW" if age < 0 else
+                       "READY" if age <= threshold else "STALE")}
     audit = evaluate(db, symbol=symbol)
     return {"generated_utc": now.isoformat(), "symbol": symbol,
             "purpose": "RESEARCH_ONLY", "execution_enabled": False,
