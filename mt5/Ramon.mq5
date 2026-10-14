@@ -5716,7 +5716,13 @@ void OnTimer()
       if(!ValidSampleKey(sample_key)) snapshot_invalid_field="sample_key_invalid";
       else if((datetime)signal_time!=bar_time) snapshot_invalid_field="signal_bar_time_mismatch";
       else if(decision!="BUY" && decision!="SELL" && decision!="WAIT") snapshot_invalid_field="decision_invalid";
-      else snapshot_invalid_field="semantic_validation";
+      else if(risk_model_ready<0.0 || risk_model_ready>1.0) snapshot_invalid_field="risk_model_ready_out_of_range";
+      else if(risk_probability<-1.0 || risk_probability>1.0) snapshot_invalid_field="risk_probability_out_of_range";
+      else if(risk_multiplier<0.50 || risk_multiplier>1.50) snapshot_invalid_field="risk_multiplier_out_of_range";
+      else if(risk_model_ready>=0.5 && risk_probability<0.0) snapshot_invalid_field="risk_model_ready_without_probability";
+      else if(risk_model_ready<0.5 && MathAbs(risk_multiplier-1.0)>0.000001) snapshot_invalid_field="risk_model_unready_nonunit_multiplier";
+      else if(risk_model_ready<0.5 && risk_probability!=-1.0) snapshot_invalid_field="risk_model_unready_probability_not_minus_one";
+      else snapshot_invalid_field="semantic_validation_unclassified";
    }
    StatusLine="Invalid model response: "+snapshot_invalid_field;
    Print("RAMON_MODEL_PROTOCOL_REJECT symbol=",_Symbol," field=",snapshot_invalid_field,
