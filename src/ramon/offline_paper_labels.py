@@ -120,9 +120,9 @@ def main() -> None:
     p.add_argument("--horizon", type=int, default=30)
     p.add_argument("--limit", type=int, default=2000)
     a = p.parse_args()
-    dsn=os.environ.get("RAMON_PG_DSN")
+    dsn=os.environ.get("RAMON_PG_DSN") or os.environ.get("RAMON_PG_TRAINING_DSN")
     if not dsn:
-        p.error("RAMON_PG_DSN required")
+        p.error("RAMON_PG_DSN or RAMON_PG_TRAINING_DSN required")
     print(run(dsn,a.symbol,Path(a.output),a.point,a.tp_points,a.sl_points,a.horizon,a.limit))
 
 if __name__=="__main__":
