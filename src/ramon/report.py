@@ -901,6 +901,10 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=int(os.getenv("RAMON_REPORT_LIMIT", "20")))
     parser.add_argument("--all", action="store_true")
     args = parser.parse_args()
+    if os.getenv("RAMON_STORAGE_BACKEND") == "postgres":
+        from .postgres_report import generate_postgres_report
+        generate_postgres_report(os.environ["RAMON_PG_DSN"], args.symbol, 0 if args.all else args.limit)
+        return
     generate_report(args.db, args.symbol, 0 if args.all else args.limit)
 
 
