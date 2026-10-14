@@ -33,8 +33,8 @@ docker compose -f compose.yaml config --quiet
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run --no-sync python -m pytest -q \
   tests/test_postgres_training_path.py tests/test_postgres_history.py \
   tests/test_postgres_m15_history_backend.py tests/test_postgres_m15_reconcile.py
-python scripts/postgres_archive_sqlite.py --sqlite "$sqlite" --container "$container"
-python scripts/reconcile_postgres_m15.py --sqlite "$sqlite"
+uv run --no-sync python scripts/postgres_archive_sqlite.py --sqlite "$sqlite" --container "$container"
+uv run --no-sync python scripts/reconcile_postgres_m15.py --sqlite "$sqlite"
 
 if (( ! apply )); then
   echo "PREFLIGHT PASSED: no data or service configuration was changed. Re-run with --apply for additive backup/archive/reconciliation only."
@@ -49,13 +49,13 @@ docker exec "$container" sh -c 'exec pg_dump -Fc -U "$POSTGRES_USER" -d "$POSTGR
 test -s "$backup_dir/postgres.before.dump" || fail "PostgreSQL backup is empty"
 
 say "Additive archive and typed M15 reconciliation"
-python scripts/postgres_archive_sqlite.py --sqlite "$sqlite" --container "$container" --execute
+uv run --no-sync python scripts/postgres_archive_sqlite.py --sqlite "$sqlite" --container "$container" --execute
 test -n "${RAMON_PG_HISTORY_DSN:-}" || fail "RAMON_PG_HISTORY_DSN must be supplied from the host secret manager for typed M15 reconciliation"
-python scripts/reconcile_postgres_m15.py --sqlite "$sqlite" --dsn "$RAMON_PG_HISTORY_DSN" --execute
+uv run --no-sync python scripts/reconcile_postgres_m15.py --sqlite "$sqlite" --dsn "$RAMON_PG_HISTORY_DSN" --execute
 
 say "Parity and deletion gate"
 set +e
-python scripts/postgres_parity_audit.py --sqlite "$sqlite" --container "$container" --json > "$backup_dir/parity.json"
+uv run --no-sync python scripts/postgres_parity_audit.py --sqlite "$sqlite" --container "$container" --json > "$backup_dir/parity.json"
 audit_status=$?
 set -e
 test "$audit_status" -eq 2 || fail "Parity audit failed; backups retained and no service was changed"
