@@ -81,3 +81,31 @@ def test_target_learning_backfill_on_isolated_postgres(monkeypatch) -> None:
         with conn.cursor() as cur:
             cur.execute("SELECT tp1_hit,tp2_hit,tp3_hit FROM ramon.target_outcomes WHERE sample_key=%s", (sample_key,))
             assert cur.fetchone() == (1, 1, 1)
+
+
+def test_monitor_history_reader_on_isolated_postgres(monkeypatch) -> None:
+    dsn = os.environ.get("RAMON_PG_TEST_DSN", "")
+    if not dsn:
+        pytest.skip("RAMON_PG_TEST_DSN is required for isolated PostgreSQL integration")
+    from ramon.postgres_operational import DDL
+    from ramon.monitor import read_history
+    import psycopg
+
+    sample_key = uuid4().hex[:16]
+    with psycopg.connect(dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute(DDL)
+            cur.execute("""INSERT INTO ramon.decision_samples
+              (sample_key,captured,symbol,signal_bar_time,quote_time,chronos_model,schema_version,direction,base_decision,final_decision,mid,spread,atr,regime_features,entry_features,meta_base_features,news_features,metadata)
+              VALUES (%s,200,'XAUUSD_l',200,200,'test',3,'BUY','BUY','BUY',100,1,2,'{}','{}','{}','{}','{}')""", (sample_key,))
+            cur.execute("""INSERT INTO ramon.trade_outcomes
+              (trade_key,sample_key,symbol,direction,opened,closed,net_units,initial_risk_units,net_r,exit_reason,received,telemetry)
+              VALUES (%s,%s,'XAUUSD_l','BUY',200,300,1,1,1,'DEAL_REASON_TP',300,'{"trade_role":"MAIN"}')""",
+              ("monitor-" + sample_key, sample_key))
+    monkeypatch.setenv("RAMON_STORAGE_BACKEND", "postgres")
+    monkeypatch.setenv("RAMON_PG_DSN", dsn)
+    sample, rows, trades, error = read_history("unused", "XAUUSD_l", sample_key)
+    assert error is None
+    assert sample["sample_key"] == sample_key
+    assert any(row["sample_key"] == sample_key for row in rows)
+    assert any(row["sample_key"] == sample_key for row in trades)
