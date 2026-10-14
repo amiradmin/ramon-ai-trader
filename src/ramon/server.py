@@ -141,6 +141,14 @@ def _ensure_override_table(db: str) -> None:
 def _persist_manual_override(db: str, payload: dict[str, object]) -> None:
     if not db:
         return
+    if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres":
+        from .postgres_operational import persist_manual_override
+        persist_manual_override(os.environ.get("RAMON_PG_DSN", ""), {
+            "created_utc": int(time.time()), "signal_bar_time": int(payload["signal_bar_time"]),
+            "sample_key": str(payload["sample_key"]), "stage": str(payload["stage"]),
+            "action": str(payload.get("action", "FORCE_PASS")),
+            "payload": json.dumps(payload, ensure_ascii=False, sort_keys=True)})
+        return
     _ensure_override_table(db)
     with sqlite3.connect(db) as con:
         con.execute(

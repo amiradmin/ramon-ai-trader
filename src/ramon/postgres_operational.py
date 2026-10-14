@@ -87,3 +87,7 @@ def persist_replay_input(dsn: str, values: dict[str, object]) -> bool:
 def persist_human_opinion(dsn: str, values: dict[str, object]) -> None:
     with _connect(dsn) as conn:
         with conn.cursor() as cur: cur.execute(DDL); cur.execute("INSERT INTO ramon.human_market_opinions(created_utc,reviewer,symbol,sample_key,signal_bar_time,opinion,confidence,note,snapshot) VALUES (%(created_utc)s,%(reviewer)s,%(symbol)s,%(sample_key)s,%(signal_bar_time)s,%(opinion)s,%(confidence)s,%(note)s,%(snapshot)s::jsonb)",values)
+
+def persist_manual_override(dsn: str, values: dict[str, object]) -> None:
+    with _connect(dsn) as conn:
+        with conn.cursor() as cur: cur.execute(DDL); cur.execute("INSERT INTO ramon.manual_gate_overrides(created_utc,signal_bar_time,sample_key,stage,action,payload) VALUES (%(created_utc)s,%(signal_bar_time)s,%(sample_key)s,%(stage)s,%(action)s,%(payload)s::jsonb)", values)
