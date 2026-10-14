@@ -1195,6 +1195,24 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     max_spread_ok=(market.ask-market.bid)/market.point <= settings.max_spread_points,
                     manual_override=bool(active_overrides),
                 )
+                # Diagnostic-only: emit on the first observation or a change in
+                # candidate / final action / rejection reason. Never logs credentials.
+                structure_log_state = (
+                    str(response.get("opportunity_setup", "NONE")),
+                    str(response.get("opportunity_decision", "WAIT")),
+                    str(response.get("decision", "WAIT")),
+                    str(response.get("opportunity_live_reason", "unknown")),
+                )
+                if getattr(self.server, "_structure_log_state", None) != structure_log_state:
+                    self.server._structure_log_state = structure_log_state
+                    print(
+                        "RAMON_STRUCTURE"
+                        + " setup=" + structure_log_state[0]
+                        + " candidate=" + structure_log_state[1]
+                        + " final=" + structure_log_state[2]
+                        + " reason=" + structure_log_state[3],
+                        flush=True,
+                    )
                 sample_key = uuid4().hex[:16]
                 response["sample_key"] = sample_key
                 response["sample_saved"] = 0
