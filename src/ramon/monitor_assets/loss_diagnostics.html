@@ -41,7 +41,40 @@ async function load(){
     stb.append(tr);
   }
   st.append(stb);sw.append(st);info.append(sw);
-  const root=document.getElementById("groups");root.replaceChildren(info);
+  const audit=d.dashboard_opportunity_audit||{};
+  const details=elt("section","");
+  details.append(elt("h2","ممیزی معاملات دستی از جدول فرصت‌ها (DASHBOARD_OPPORTUNITY)"));
+  const ov=audit.overall||{};
+  details.append(elt("p","معاملات: "+fmt(ov.trades)+" | خالص: "+fmt(ov.net_units)+
+      " | PF: "+fmt(ov.profit_factor)+" | ریسک اولیه ناموجود: "+fmt(audit.missing_initial_risk)));
+  for(const [key,title,col] of [["by_exit_reason","نتیجه بر اساس علت خروج","exit_reason"],
+                                 ["by_ea_version","نتیجه بر اساس نسخه EA","ea_version"]]){
+    details.append(elt("h2",title));
+    const wrap=elt("div","","scroll"),tbl=elt("table",""),head=elt("tr","");
+    ["گروه","معاملات","سود ناخالص","زیان ناخالص","خالص","PF"].forEach(v=>head.append(elt("th",v)));
+    const thead=elt("thead","");thead.append(head);tbl.append(thead);
+    const tbody=elt("tbody","");
+    for(const r of (audit[key]||[])){
+      const tr=elt("tr","");
+      [r[col],fmt(r.trades),fmt(r.gross_profit_units),fmt(r.gross_loss_units),
+       fmt(r.net_units),fmt(r.profit_factor)].forEach(v=>tr.append(elt("td",v)));
+      tbody.append(tr);
+    }tbl.append(tbody);wrap.append(tbl);details.append(wrap);
+  }
+  details.append(elt("h2","۲۵ معامله دستی با بیشترین زیان"));
+  const dw=elt("div","","scroll"),dt=elt("table",""),dh=elt("tr","");
+  ["Ticket","نسخه EA","جهت","خروج","جزئیات خروج","خالص","R","ریسک اولیه","بودجه ریسک","حداقل لات"]
+    .forEach(v=>dh.append(elt("th",v)));
+  const dhead=elt("thead","");dhead.append(dh);dt.append(dhead);
+  const db=elt("tbody","");
+  for(const r of (audit.worst_trades||[])){
+    const tr=elt("tr","");
+    [r.trade_key,r.ea_version,r.direction,r.exit_reason,r.exit_detail||"—",
+     fmt(r.net_units),fmt(r.net_r),fmt(r.initial_risk_units),
+     fmt(r.risk_budget_units),fmt(r.min_lot_override_used)]
+     .forEach(v=>tr.append(elt("td",v)));db.append(tr);
+  }dt.append(db);dw.append(dt);details.append(dw);
+  const root=document.getElementById("groups");root.replaceChildren(info,details);
   for(const [key,title] of Object.entries(groupLabels)){
     const sec=elt("section","");sec.append(elt("h2",title));const wrap=elt("div","","scroll");const tab=elt("table","");
     const thead=elt("thead",""),hr=elt("tr","");
