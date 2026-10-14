@@ -34,6 +34,7 @@ from .trade_selector import apply_live_selector
 from .ai_decision_engine import apply_ai_decision_engine
 from .ai_decision_engine_v3 import apply_ai_engine_v3_shadow
 from .market_opportunity_engine import detect_opportunity
+from .opportunity_execution import apply_live_opportunity
 from .decision_safety_shadow import assess_data_quality, no_trade_recommendation
 
 
@@ -1183,6 +1184,17 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 opportunity = detect_opportunity(market)
                 response.update({"opportunity_engine_version": "structure-v1",
                     **{"opportunity_" + k: v for k, v in opportunity.to_dict().items()}})
+                # Optional independent execution path for valid price-structure setups.
+                # Existing EA order/risk limits remain authoritative.
+                apply_live_opportunity(
+                    response, opportunity,
+                    enabled=os.environ.get("RAMON_STRUCTURE_LIVE_ENABLED", "0") == "1",
+                    ea_capable=payload.get("range_execution_ready") is True,
+                    fresh_quote=quote_time is not None,
+                    assessment=market_assessment,
+                    max_spread_ok=(market.ask-market.bid)/market.point <= settings.max_spread_points,
+                    manual_override=bool(active_overrides),
+                )
                 sample_key = uuid4().hex[:16]
                 response["sample_key"] = sample_key
                 response["sample_saved"] = 0
