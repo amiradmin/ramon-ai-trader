@@ -34,29 +34,36 @@ def main():
         print("MODEL ready=",status.get("ready"),"history_error=",bool(status.get("history_last_error")))
         if not status.get("ready") or status.get("history_last_error"):failures.append("model not ready")
     except Exception as e: failures.append("model health not accessible: "+type(e).__name__)
-    try:
-        import psycopg
-        dsn=os.environ["RAMON_PG_DSN"]
-        with psycopg.connect(dsn,connect_timeout=5,options="-c default_transaction_read_only=on -c statement_timeout=8000") as pg:
-            with pg.cursor() as cur:
-                for name in TABLES:
-                    cur.execute(f"SELECT count(*) FROM ramon.{name}")
-                    count=cur.fetchone()[0]
-                    print(f"PG {name}: {count}")
-                    if not count:failures.append(name+": PG empty")
-                cur.execute("SELECT max(captured) FROM ramon.decision_samples WHERE symbol=%s",("XAUUSD_l",))
-                latest=cur.fetchone()[0]
-                age=None if latest is None else int(time.time())-int(latest)
-                print("PG decision_samples latest_age_seconds=",age)
-                if age is None or age > 300 or age < -60:failures.append("decision samples not fresh")
-                for tf in ("M1","M5"):
-                    cur.execute("SELECT max(time) FROM ramon.mtf_utc_bars WHERE symbol=%s AND timeframe=%s",("XAUUSD_l",tf))
-                    latest=cur.fetchone()[0]
-                    age=None if latest is None else int(time.time())-int(latest)
-                    print(f"PG {tf} latest_age_seconds={age}")
-                    if age is None or age> (300 if tf=="M1" else 1200) or age < -60:failures.append(tf+": MTF stale")
-    except Exception as e:
-        failures.append("PG direct audit failed: "+type(e).__name__+" "+str(e).splitlines()[0][:180])
+    # Query PostgreSQL through the already configured isolated model runner.
+    # Do not require a host-exposed database port or expose a DSN in argv.
+    probe = """import os,time,psycopg
+with psycopg.connect(os.environ['RAMON_PG_DSN'],connect_timeout=5,options='-c default_transaction_read_only=on -c statement_timeout=8000') as db:
+ with db.cursor() as cur:
+  for name in ('history_bars','decision_samples','trade_outcomes','mtf_utc_bars'):
+   cur.execute('SELECT count(*) FROM ramon.'+name)
+   print('PG_COUNT',name,cur.fetchone()[0])
+  cur.execute('SELECT max(captured) FROM ramon.decision_samples WHERE symbol=%s',('XAUUSD_l',))
+  v=cur.fetchone()[0]
+  print('PG_AGE decision',-1 if v is None else int(time.time())-int(v))
+  for tf in ('M1','M5'):
+   cur.execute('SELECT max(time) FROM ramon.mtf_utc_bars WHERE symbol=%s AND timeframe=%s',('XAUUSD_l',tf))
+   v=cur.fetchone()[0]
+   print('PG_AGE',tf,-1 if v is None else int(time.time())-int(v))
+"""
+    check=run("docker","compose","-f","compose.yaml","-f","compose.pg-all-staging.yaml",
+              "run","--rm","--no-deps","model","python","-c",probe)
+    if check.returncode:
+        failures.append("PG probe failed (check Docker logs; password not printed)")
+        print(check.stderr[-800:])
+    else:
+        for line in check.stdout.splitlines():
+            if not line.startswith("PG_"):continue
+            print(line)
+            a=line.split()
+            if a[0]=="PG_COUNT" and int(a[2])==0:
+                failures.append(a[1]+": PG empty")
+            if a[0]=="PG_AGE" and (int(a[2])<0 or int(a[2])>({"decision":300,"M1":300,"M5":1200}[a[1]])):
+                failures.append(a[1]+": stale")
     old=ROOT/"data/ramon_history.sqlite3"
     if old.is_file():
         try:
