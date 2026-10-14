@@ -11,6 +11,18 @@ test -f src/ramon/server.py
 test -f compose.pg-all-staging.yaml
 test -f docker-compose.v3-guard.yml
 mkdir -p backups/opportunity-engine
+restore_on_error() {
+  cp "backups/opportunity-engine/server.py.$STAMP" src/ramon/server.py
+  for f in market_opportunity_engine.py opportunity_execution.py; do
+    if test -f "backups/opportunity-engine/$f.$STAMP"; then
+      cp "backups/opportunity-engine/$f.$STAMP" "src/ramon/$f"
+    else
+      rm -f "src/ramon/$f"
+    fi
+  done
+  echo "ERROR: original files restored; no Docker restart performed" >&2
+}
+trap restore_on_error ERR
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 cp src/ramon/server.py "backups/opportunity-engine/server.py.$STAMP"
 for f in market_opportunity_engine.py opportunity_execution.py; do
