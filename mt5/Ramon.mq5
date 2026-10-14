@@ -23,7 +23,7 @@ long GlobalFree(long hMem);
 long lstrcpyW(long dst,const string src);
 #import
 
-input string TradeSymbol = "XAUUSD_l";
+input string TradeSymbol = ""; // Empty: use current chart symbol (XAUUSD_l or XAUUSD_o).
 input string RequiredServerText = "LiteFinance";
 input bool AutoLockCurrentAccount = true; // Bind this EA session to the account active at OnInit.
 input long AllowedAccountLogin = 0; // Used only when AutoLockCurrentAccount=false.
@@ -6597,8 +6597,8 @@ int OnInit()
 {
    ReadControlRiskCap();
    ReadDecisionCadence();
-   if(_Symbol!=TradeSymbol || _Period!=PERIOD_M15 || StringFind(_Symbol,"XAUUSD")!=0)
-   { Print("Attach only to ",TradeSymbol," M15"); return INIT_FAILED; }
+   if((TradeSymbol!="" && _Symbol!=TradeSymbol) || _Period!=PERIOD_M15 || StringFind(_Symbol,"XAUUSD")!=0)
+   { Print("Attach only to XAUUSD M15; optional TradeSymbol=",TradeSymbol," chart=",_Symbol); return INIT_FAILED; }
    if(SmallOnlyMode && (MagicNumber!=SmallProfitMagicNumber
       || AccountInfoInteger(ACCOUNT_MARGIN_MODE)!=ACCOUNT_MARGIN_MODE_RETAIL_HEDGING))
    { Print("Small mode requires magic 26092213 and a hedging account"); return INIT_FAILED; }
