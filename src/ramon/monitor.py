@@ -2282,8 +2282,16 @@ def training_data_health(db, symbol):
                 result["wait_decisions"] = stat("decision_samples", "captured", " AND final_decision='WAIT'")
                 result["trade_outcomes"] = stat("trade_outcomes", "received")
                 result["closed_trades"] = stat("trade_outcomes", "closed", " AND closed>0")
-                for key in ("human_actions", "human_entries", "human_skips"):
-                    result[key] = {"available": False, "reason": "PG_HUMAN_EVENTS_NOT_MIGRATED"}
+                with con.cursor() as cur:
+                    cur.execute("SELECT to_regclass('ramon.human_assisted_events') IS NOT NULL")
+                    human_table_exists = bool(cur.fetchone()[0])
+                if human_table_exists:
+                    result["human_actions"] = stat("human_assisted_events", "created_utc")
+                    result["human_entries"] = stat("human_assisted_events", "created_utc", " AND action='ENTER'")
+                    result["human_skips"] = stat("human_assisted_events", "created_utc", " AND action='SKIP'")
+                else:
+                    for key in ("human_actions", "human_entries", "human_skips"):
+                        result[key] = {"available": False, "reason": "PG_HUMAN_EVENTS_NOT_MIGRATED"}
                 result["auto_outcomes"] = {"available": False, "reason": "SOURCE_CLASSIFICATION_NOT_VERIFIED"}
                 result["labeled_decisions"] = {"available": False, "reason": "JOIN_COVERAGE_NOT_AUDITED"}
                 result["missing_data"] = {"available": False, "reason": "COMPLETENESS_NOT_AUDITED"}
