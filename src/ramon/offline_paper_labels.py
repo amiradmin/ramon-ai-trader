@@ -26,7 +26,7 @@ def classify_path(*, decision_time: int, direction: str, bars: list[tuple],
         return {"status": "SKIP_MISSING_COST_OR_BARS"}
     # A new trade is entered at the open of the first *subsequent* bar,
     # not a partially observed candle or the snapshot's last price.
-    start = next((i for i, b in enumerate(bars) if int(b[0]) >= decision_time + 60), None)
+    start = next((i for i, b in enumerate(bars) if int(b[0]) >= (decision_time // 60 + 1) * 60), None)
     if start is None:
         return {"status": "SKIP_NO_FUTURE_BAR"}
     window = bars[start:start + max_minutes]
