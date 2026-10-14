@@ -1022,15 +1022,6 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     not bool(response.get("range_execution"))
                     and not reversal_selected
                 ):
-                    apply_ai_engine_v3_shadow(
-                        response,
-                        market_assessment,
-                        feature_snapshot.get("entry", {}),
-                        enabled=ai_engine_v3_shadow_enabled,
-                        minimum_direction_quality=selector_minimum_quality,
-                        minimum_quality_margin=selector_minimum_margin,
-                        maximum_forecast_distance_atr=ai_engine_v3_max_forecast_distance_atr,
-                    )
                     ai_engine_authoritative = apply_ai_decision_engine(
                         response,
                         result,
@@ -1043,6 +1034,15 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         anomaly_soft_threshold=moment_live_threshold,
                         anomaly_hard_threshold=moment_hard_veto_threshold,
                         conservative_policy=ai_engine_v2_conservative_policy,
+                    )
+                    apply_ai_engine_v3_shadow(
+                        response,
+                        market_assessment,
+                        feature_snapshot.get("entry", {}),
+                        enabled=ai_engine_v3_shadow_enabled,
+                        minimum_direction_quality=selector_minimum_quality,
+                        minimum_quality_margin=selector_minimum_margin,
+                        maximum_forecast_distance_atr=ai_engine_v3_max_forecast_distance_atr,
                     )
 
                 if ai_engine_authoritative:
