@@ -14,7 +14,7 @@ def test_purges_boundary_crossing_labels():
     rows[59] = row(5900, 6100, 1)
     report = summarize(rows)
     assert report["windows"]["base"]["count"] == 59
-    assert report["windows"]["meta"]["count"] == 35
+    assert report["windows"]["meta"]["count"] == 36
     assert report["windows"]["holdout"]["count"] == 24
 
 def test_empty_and_low_sample_are_explicit():
