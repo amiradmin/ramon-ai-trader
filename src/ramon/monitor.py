@@ -84,6 +84,8 @@ def number(value):
 
 
 def object_json(raw):
+    if isinstance(raw, dict):
+        return raw
     try:
         result = json.loads(raw or "{}")
         return result if isinstance(result, dict) else {}
@@ -140,6 +142,47 @@ def read_diagnostic(path):
 
 def read_history(path, symbol, sample_key=""):
     """Bounded queries, one read transaction, no schema migration or writable DB."""
+    if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres":
+        dsn = os.environ.get("RAMON_PG_DSN", "")
+        if not dsn:
+            return {}, [], [], "تاریخچه PostgreSQL پیکربندی نشده است"
+        try:
+            import psycopg
+            with psycopg.connect(dsn, connect_timeout=3,
+                                 options="-c default_transaction_read_only=on -c statement_timeout=3000") as con:
+                with con.cursor() as cur:
+                    cur.execute("""SELECT sample_key,captured,symbol,signal_bar_time,mid,spread,atr,direction,
+                                          base_decision,final_decision,chronos_model,schema_version,quote_time,
+                                          metadata->'model_metadata' AS model_metadata,
+                                          metadata->'target_structure' AS target_structure
+                                   FROM ramon.decision_samples WHERE symbol=%s
+                                   ORDER BY captured DESC LIMIT 24""", (symbol,))
+                    cols = tuple(item.name for item in cur.description)
+                    rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+                    if sample_key:
+                        cur.execute("""SELECT sample_key,captured,symbol,signal_bar_time,mid,spread,atr,direction,
+                                              base_decision,final_decision,chronos_model,schema_version,quote_time,
+                                              metadata->'model_metadata' AS model_metadata,
+                                              metadata->'target_structure' AS target_structure
+                                       FROM ramon.decision_samples WHERE symbol=%s AND sample_key=%s LIMIT 1""",
+                                    (symbol, sample_key))
+                        row = cur.fetchone()
+                        sample = dict(zip(cols, row)) if row else {}
+                    else:
+                        sample = rows[0] if rows else {}
+                    cur.execute("""SELECT trade_key,sample_key,symbol,direction,opened,closed,net_units,
+                                          initial_risk_units,net_r,exit_reason,received,
+                                          telemetry->>'trade_role' AS trade_role,
+                                          telemetry->>'entry_source' AS entry_source,
+                                          telemetry->>'exit_detail' AS exit_detail
+                                   FROM ramon.trade_outcomes WHERE symbol=%s
+                                     AND COALESCE(telemetry->>'trade_role','MAIN') IN ('PRIMARY','MAIN')
+                                   ORDER BY closed DESC LIMIT 150""", (symbol,))
+                    cols = tuple(item.name for item in cur.description)
+                    trades = [dict(zip(cols, row)) for row in cur.fetchall()]
+            return sample, rows, trades, None
+        except Exception as exc:
+            return {}, [], [], f"تاریخچه PostgreSQL خوانده نشد: {type(exc).__name__}"
     p = Path(path).expanduser().resolve()
     if not p.is_file():
         return {}, [], [], "تاریخچه هنوز در دسترس نیست"

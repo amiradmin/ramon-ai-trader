@@ -225,6 +225,13 @@ def _stats(db: Path, symbol: str, chronos_model: str) -> tuple[dict[str, object]
     examples = load_trade_examples(db, symbol, chronos_model)
     stats: dict[str, object] = {"trainable_samples": len(examples)}
     recent: list[dict[str, object]] = []
+    if os.environ.get("RAMON_TRAINING_BACKEND") == "postgres":
+        from .postgres_training import dashboard_training_stats
+        pg_stats, recent = dashboard_training_stats(
+            os.environ["RAMON_PG_TRAINING_DSN"], symbol, chronos_model
+        )
+        stats.update(pg_stats)
+        return stats, recent
     with sqlite3.connect(db) as con:
         con.row_factory = sqlite3.Row
         row = con.execute(

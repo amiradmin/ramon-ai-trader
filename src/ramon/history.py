@@ -196,6 +196,9 @@ def ensure_history_db(db: str | Path) -> Path:
 
 def persist_market(db: str | Path, market: Market) -> int:
     """Upsert completed bars from a live request; never store an incomplete candle."""
+    if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres":
+        from .postgres_operational import persist_market as persist_postgres
+        return persist_postgres(os.environ.get("RAMON_PG_DSN", ""), market)
     path = ensure_history_db(db)
     spread_points = round((market.ask - market.bid) / market.point)
     newest = market.bars[-1].time
@@ -257,6 +260,18 @@ def persist_decision_sample(
     target_structure: dict[str, object] | None = None,
 ) -> bool:
     """Persist one live inference sample for later role-model training."""
+    if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres":
+        from .postgres_operational import persist_decision_sample as persist_postgres
+        mid=(market.bid+market.ask)/2.0
+        return persist_postgres(os.environ.get("RAMON_PG_DSN", ""), {
+            "sample_key": sample_key, "captured": int(captured), "symbol": market.symbol,
+            "signal_bar_time": int(signal_bar_time), "quote_time": quote_time, "chronos_model": chronos_model,
+            "schema_version": 4 if target_structure is not None else 3, "direction": direction,
+            "base_decision": base_decision, "final_decision": final_decision, "mid": mid,
+            "spread": market.ask-market.bid, "atr": atr,
+            "regime_features": json.dumps(regime_features), "entry_features": json.dumps(entry_features),
+            "meta_base_features": json.dumps(meta_base_features), "news_features": json.dumps(news_features),
+            "metadata": json.dumps({"bundle_id":bundle_id,"model_metadata":model_metadata or {},"target_structure":target_structure or {}}),})
     path = ensure_history_db(db)
     mid = (market.bid + market.ask) / 2.0
     spread = market.ask - market.bid
@@ -315,6 +330,9 @@ def persist_shadow_vote(
         raise ValueError("invalid shadow confidence")
     if not advisor or len(advisor) > 128 or not symbol.startswith("XAUUSD"):
         raise ValueError("invalid shadow vote identity")
+    if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres":
+        from .postgres_operational import persist_shadow_vote as persist_postgres
+        return persist_postgres(os.environ.get("RAMON_PG_DSN", ""), {"vote_key":vote_key,"captured":int(captured),"symbol":symbol,"signal_bar_time":int(signal_bar_time),"advisor":advisor,"decision":decision,"confidence":confidence,"regime":regime,"metadata":json.dumps(metadata or {}),"source_version":source_version})
     path = ensure_history_db(db)
     payload = json.dumps(metadata or {}, allow_nan=False, separators=(",", ":"))
     with sqlite3.connect(path, timeout=10) as conn:
@@ -393,6 +411,9 @@ def history_count(db: str | Path, symbol: str = "XAUUSD_l") -> int:
 
 def load_bars(db: str | Path, symbol: str = "XAUUSD_l") -> tuple[tuple[Bar, ...], tuple[int, ...]]:
     """Read M15 historical bars from selected backend (SQLite default)."""
+    if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres":
+        from .postgres_operational import load_bars as load_postgres
+        return load_postgres(os.environ.get("RAMON_PG_DSN", ""), symbol)
     if os.environ.get("RAMON_M15_HISTORY_BACKEND", "sqlite").lower() == "postgres":
         from .postgres_m15_history import load_m15_postgres
         try:
@@ -439,6 +460,10 @@ def persist_trade_outcome(db: str | Path, payload: dict[str, object], received: 
     extra["training_status"] = classify_training_status(
         exit_reason, str(extra.get("exit_detail", "") or "")
     )
+    if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres":
+        from .postgres_operational import persist_trade_outcome as persist_postgres
+        persist_postgres(os.environ.get("RAMON_PG_DSN", ""), {"trade_key":trade_key,"sample_key":sample_key,"symbol":symbol,"direction":direction,"opened":opened,"closed":closed,"net_units":net,"initial_risk_units":risk,"net_r":net/risk,"exit_reason":exit_reason,"received":int(received),"telemetry":json.dumps(extra, allow_nan=False)})
+        return
     extra_names = [*TRADE_TELEMETRY_COLUMNS, "training_status"]
     updates = []
     for name in extra_names:
@@ -586,6 +611,13 @@ def persist_replay_input(db: str | Path, *, sample_key: str, market: Market,
                               "broker_utc_offset_seconds": broker_utc_offset_seconds,
                               "micro_bars": [asdict(b) for b in market.micro_bars]},
                   "policy_replay_scope": "price_only; no account or execution reconstruction"}
+    if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres":
+        from .postgres_operational import persist_replay_input as persist_postgres
+        return persist_postgres(os.environ.get("RAMON_PG_DSN", ""), {
+            "sample_key": sample_key, "input_sha256": digest, "recorded_utc": time.time(),
+            "response_json": json.dumps(response, allow_nan=False),
+            "provenance_json": json.dumps(provenance, allow_nan=False),
+            "input_context": json.dumps(context, allow_nan=False),})
     with sqlite3.connect(Path(db), timeout=.25) as con:
         con.execute("CREATE TABLE IF NOT EXISTS input_blobs (sha256 TEXT PRIMARY KEY, codec TEXT NOT NULL, body BLOB NOT NULL)")
         con.execute("""CREATE TABLE IF NOT EXISTS inference_audit (

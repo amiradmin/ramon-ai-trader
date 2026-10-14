@@ -45,3 +45,48 @@ def test_invalid_snapshot_is_not_imported(tmp_path: Path):
     seen = {}
     poll(common, db, "XAUUSD_l", seen, offset_hours=3)
     assert "M5" not in seen
+
+
+def test_postgres_backend_uses_repository_without_sqlite_fallback(tmp_path: Path, monkeypatch):
+    source = tmp_path / "m1.csv"
+    broker = 1791796680
+    source.write_text("time,open,high,low,close,spread_points\n"
+                      f"{broker},4182,4184,4181,4183,42\n", encoding="utf-8")
+    captured = []
+
+    class Repository:
+        def __init__(self, dsn):
+            assert dsn == "postgresql://isolated-test"
+
+        def persist_mtf_snapshot(self, rows):
+            captured.extend(rows)
+            return len(rows)
+
+    monkeypatch.setenv("RAMON_STORAGE_BACKEND", "postgres")
+    monkeypatch.setenv("RAMON_PG_DSN", "postgresql://isolated-test")
+    monkeypatch.setattr("ramon.storage.PostgresOperationalRepository", Repository)
+    db = tmp_path / "must-not-be-created.sqlite3"
+    result = import_snapshot(db, source, "XAUUSD_l", "M1", 3)
+    assert result["valid"] == 1
+    assert captured[0][:5] == ("XAUUSD_l", "M1", broker - 10800, broker, 10800)
+    assert not db.exists()
+
+
+def test_postgres_backend_propagates_write_failure(tmp_path: Path, monkeypatch):
+    source = tmp_path / "m1.csv"
+    broker = 1791796680
+    source.write_text("time,open,high,low,close,spread_points\n"
+                      f"{broker},4182,4184,4181,4183,42\n", encoding="utf-8")
+
+    class BrokenRepository:
+        def __init__(self, dsn):
+            pass
+
+        def persist_mtf_snapshot(self, rows):
+            raise ConnectionError("postgres unavailable")
+
+    monkeypatch.setenv("RAMON_STORAGE_BACKEND", "postgres")
+    monkeypatch.setenv("RAMON_PG_DSN", "postgresql://isolated-test")
+    monkeypatch.setattr("ramon.storage.PostgresOperationalRepository", BrokenRepository)
+    with pytest.raises(ConnectionError, match="postgres unavailable"):
+        import_snapshot(tmp_path / "no-fallback.sqlite3", source, "XAUUSD_l", "M1", 3)
