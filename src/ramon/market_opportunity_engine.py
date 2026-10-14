@@ -45,16 +45,37 @@ def detect_opportunity(market: Market, *, minimum_rr: float = 1.5,
     previous_mid = (max(b.high for b in earlier) + min(b.low for b in earlier)) / 2
     mid20 = (high20 + low20) / 2
     last = bars[-1]
-    # Completed-bar momentum and price-structure alignment; no vote based on future closes.
-    trend = (last.close - bars[-5].close) / atr
-    shape = (mid20 - previous_mid) / atr
+    # Trend is established BEFORE the pullback, avoiding the contradictory
+    # requirement that the final pullback candle must itself show momentum.
+    last = bars[-1]
+    impulse = bars[-13:-4]
+    impulse_first, impulse_last = impulse[0].close, impulse[-1].close
+    impulse_move = (impulse_last - impulse_first) / atr
+    pullback = bars[-4:-1]
     direction = None
     setup = "NONE"
-    if trend >= 0.28 and shape >= 0.12 and last.close >= mid20 and last.low <= mid20 + 0.35 * atr:
-        direction, setup = "BUY", "TREND_PULLBACK"
-    elif trend <= -0.28 and shape <= -0.12 and last.close <= mid20 and last.high >= mid20 - 0.35 * atr:
-        direction, setup = "SELL", "TREND_PULLBACK"
-    elif (high20 - low20) <= 3.8 * atr:
+    structural_stop = None
+    structural_target = None
+    if impulse_move >= 0.9:
+        prior_high = max(x.high for x in impulse)
+        pull_low = min(x.low for x in pullback)
+        retracement = (prior_high-pull_low)/atr
+        trigger = last.close > last.open and last.close > bars[-2].close
+        if 0.20 <= retracement <= 1.8 and trigger and last.close < prior_high:
+            direction, setup = "BUY", "TREND_PULLBACK"
+            structural_stop = pull_low - 0.12*atr
+            structural_target = prior_high
+    elif impulse_move <= -0.9:
+        prior_low = min(x.low for x in impulse)
+        pull_high = max(x.high for x in pullback)
+        retracement = (pull_high-prior_low)/atr
+        trigger = last.close < last.open and last.close < bars[-2].close
+        if 0.20 <= retracement <= 1.8 and trigger and last.close > prior_low:
+            direction, setup = "SELL", "TREND_PULLBACK"
+            structural_stop = pull_high + 0.12*atr
+            structural_target = prior_low
+
+    if direction is None and (high20 - low20) <= 3.8 * atr:
         if mid <= low20 + 0.55 * atr and last.close > last.open:
             direction, setup = "BUY", "RANGE_REJECTION"
         elif mid >= high20 - 0.55 * atr and last.close < last.open:
@@ -64,12 +85,12 @@ def detect_opportunity(market: Market, *, minimum_rr: float = 1.5,
     entry = market.ask if direction == "BUY" else market.bid
     risk = max(0.75 * atr, 2.0 * spread)
     if direction == "BUY":
-        stop = min(entry-risk, low20-0.10*atr)
-        target = high20
+        stop = min(entry-risk, structural_stop if structural_stop is not None else low20-0.10*atr)
+        target = structural_target if structural_target is not None else high20
         rr = (target-entry)/(entry-stop)
     else:
-        stop = max(entry+risk, high20+0.10*atr)
-        target = low20
+        stop = max(entry+risk, structural_stop if structural_stop is not None else high20+0.10*atr)
+        target = structural_target if structural_target is not None else low20
         rr = (entry-target)/(stop-entry)
     # Reject setups when the historical structure cannot fund the required reward/risk.
     if rr < minimum_rr or not all(isfinite(v) for v in (stop,target,rr)):
