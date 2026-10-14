@@ -1,0 +1,47 @@
+# Opt-in review-only overlay. No automatic activation; live EA stays unchanged.
+# Apply only after verifying the PostgreSQL paths and feature parity.
+services:
+  model:
+    extends:
+      file: compose.pg-core-cutover.yaml
+      service: model
+  mtf-collector:
+    extends:
+      file: compose.pg-core-cutover.yaml
+      service: mtf-collector
+  training-dashboard:
+    extends:
+      file: compose.pg-core-cutover.yaml
+      service: training-dashboard
+  dashboard:
+    volumes:
+      - ./src:/app/src:ro
+      - ./scripts/pg_service_entrypoint.sh:/app/pg_service_entrypoint.sh:ro
+      - ./.secrets/postgres-password:/run/secrets/postgres-password:ro
+    entrypoint: ["/bin/sh", "/app/pg_service_entrypoint.sh"]
+    environment:
+      PYTHONPATH: /app/src
+  market-dashboard:
+    volumes:
+      - ./src:/app/src:ro
+      - ./scripts/pg_service_entrypoint.sh:/app/pg_service_entrypoint.sh:ro
+      - ./.secrets/postgres-password:/run/secrets/postgres-password:ro
+    entrypoint: ["/bin/sh", "/app/pg_service_entrypoint.sh"]
+    environment:
+      PYTHONPATH: /app/src
+  reversal-daily-report:
+    volumes:
+      - ./src:/app/src:ro
+      - ./scripts/pg_service_entrypoint.sh:/app/pg_service_entrypoint.sh:ro
+      - ./.secrets/postgres-password:/run/secrets/postgres-password:ro
+    entrypoint: ["/bin/sh", "/app/pg_service_entrypoint.sh"]
+    environment:
+      PYTHONPATH: /app/src
+  v2-execution-health:
+    volumes:
+      - ./src:/app/src:ro
+      - ./scripts/pg_service_entrypoint.sh:/app/pg_service_entrypoint.sh:ro
+      - ./.secrets/postgres-password:/run/secrets/postgres-password:ro
+    entrypoint: ["/bin/sh", "/app/pg_service_entrypoint.sh"]
+    environment:
+      PYTHONPATH: /app/src
