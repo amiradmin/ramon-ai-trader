@@ -25,7 +25,8 @@ class Opportunity:
 
 
 def detect_opportunity(market: Market, *, minimum_rr: float = 1.5,
-                       max_spread_atr: float = 0.16) -> Opportunity:
+                       max_spread_atr: float = 0.16,
+                       require_reversal_confirmation: bool = False) -> Opportunity:
     market.validate()
     bars = market.bars
     atr = atr14(bars)
@@ -92,6 +93,32 @@ def detect_opportunity(market: Market, *, minimum_rr: float = 1.5,
         stop = max(entry+risk, structural_stop if structural_stop is not None else high20+0.10*atr)
         target = structural_target if structural_target is not None else low20
         rr = (entry-target)/(stop-entry)
+    # Optional entry timing: only confirm after a completed directional
+    # rejection candle, not merely because a range boundary was touched.
+    # Default remains legacy behavior for comparable baseline backtests.
+    if require_reversal_confirmation:
+        if setup == "RANGE_REJECTION":
+            prev = bars[-2]
+            body = abs(last.close-last.open)
+            candle_range = max(last.high-last.low, 1e-9)
+            if direction == "BUY":
+                confirmed = (last.close > last.open and
+                             last.close > prev.close and
+                             (last.close-last.low)/candle_range >= 0.65 and
+                             body >= 0.12*atr)
+            else:
+                confirmed = (last.close < last.open and
+                             last.close < prev.close and
+                             (last.high-last.close)/candle_range >= 0.65 and
+                             body >= 0.12*atr)
+            if not confirmed:
+                return wait("reversal_confirmation_missing")
+        elif setup == "TREND_PULLBACK":
+            prev = bars[-2]
+            confirmed = (last.close > prev.high if direction == "BUY"
+                         else last.close < prev.low)
+            if not confirmed:
+                return wait("reversal_confirmation_missing")
     # Reject setups when the historical structure cannot fund the required reward/risk.
     if rr < minimum_rr or not all(isfinite(v) for v in (stop,target,rr)):
         return wait("insufficient_reward_risk")
