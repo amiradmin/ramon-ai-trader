@@ -1,0 +1,33 @@
+# Explicit PG switch for validated core API paths. Other services remain legacy.
+services:
+  model:
+    image: ramon-ai-trader:pg-canary-working
+    entrypoint: ["/bin/sh", "/app/pg_service_entrypoint.sh"]
+    command: ["python", "-m", "ramon.server", "--host", "0.0.0.0", "--port", "8012"]
+    environment:
+      PYTHONPATH: /app/src
+      RAMON_STORAGE_BACKEND: postgres
+    volumes:
+      - ./src:/app/src:ro
+      - ./scripts/pg_service_entrypoint.sh:/app/pg_service_entrypoint.sh:ro
+      - ./.secrets/postgres-password:/run/secrets/postgres-password:ro
+  mtf-collector:
+    image: ramon-ai-trader:pg-canary-working
+    entrypoint: ["/bin/sh", "/app/pg_service_entrypoint.sh"]
+    environment:
+      PYTHONPATH: /app/src
+      RAMON_STORAGE_BACKEND: postgres
+    volumes:
+      - ./src:/app/src:ro
+      - ./scripts/pg_service_entrypoint.sh:/app/pg_service_entrypoint.sh:ro
+      - ./.secrets/postgres-password:/run/secrets/postgres-password:ro
+  training-dashboard:
+    image: ramon-ai-trader:pg-canary-working
+    entrypoint: ["/bin/sh", "/app/pg_service_entrypoint.sh"]
+    environment:
+      PYTHONPATH: /app/src
+      RAMON_TRAINING_BACKEND: postgres
+    volumes:
+      - ./src:/app/src:ro
+      - ./scripts/pg_service_entrypoint.sh:/app/pg_service_entrypoint.sh:ro
+      - ./.secrets/postgres-password:/run/secrets/postgres-password:ro
