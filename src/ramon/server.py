@@ -33,6 +33,7 @@ from .reversal_strategy import apply_reversal
 from .trade_selector import apply_live_selector
 from .ai_decision_engine import apply_ai_decision_engine
 from .ai_decision_engine_v3 import apply_ai_engine_v3_shadow
+from .live_v3_agreement_guard import apply_live_v3_agreement_guard
 from .decision_safety_shadow import assess_data_quality, no_trade_recommendation
 
 
@@ -1021,15 +1022,6 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     not bool(response.get("range_execution"))
                     and not reversal_selected
                 ):
-                    apply_ai_engine_v3_shadow(
-                        response,
-                        market_assessment,
-                        feature_snapshot.get("entry", {}),
-                        enabled=ai_engine_v3_shadow_enabled,
-                        minimum_direction_quality=selector_minimum_quality,
-                        minimum_quality_margin=selector_minimum_margin,
-                        maximum_forecast_distance_atr=ai_engine_v3_max_forecast_distance_atr,
-                    )
                     ai_engine_authoritative = apply_ai_decision_engine(
                         response,
                         result,
@@ -1042,6 +1034,15 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         anomaly_soft_threshold=moment_live_threshold,
                         anomaly_hard_threshold=moment_hard_veto_threshold,
                         conservative_policy=ai_engine_v2_conservative_policy,
+                    )
+                    apply_ai_engine_v3_shadow(
+                        response,
+                        market_assessment,
+                        feature_snapshot.get("entry", {}),
+                        enabled=ai_engine_v3_shadow_enabled,
+                        minimum_direction_quality=selector_minimum_quality,
+                        minimum_quality_margin=selector_minimum_margin,
+                        maximum_forecast_distance_atr=ai_engine_v3_max_forecast_distance_atr,
                     )
 
                 if ai_engine_authoritative:
@@ -1173,6 +1174,12 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     response["reason"] = "manual_override_final_pass"
                     response["range_execution"] = 0
 
+                # Opt-in live veto runs only after all earlier entry policies.
+                # Never grants an entry, reverses direction, or bypasses manual/range paths.
+                apply_live_v3_agreement_guard(
+                    response,
+                    enabled=os.environ.get("RAMON_V3_LIVE_AGREEMENT_GUARD", "0") == "1",
+                )
                 if not response["range_execution"]:
                     range_setup = None
                 if response["decision"] == "WAIT":
