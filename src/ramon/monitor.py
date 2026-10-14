@@ -2285,24 +2285,44 @@ def training_data_health(db, symbol):
 
 def wait_analysis_report(db, symbol, limit=300):
     """Read-only WAIT diagnostics. No counterfactual P&L without executable replay."""
-    p = Path(db).expanduser().resolve()
-    if not p.is_file():
-        return {"available": False, "reason": "HISTORY_DB_MISSING"}
-    limit = max(1, min(1000, int(limit)))
-    try:
-        with sqlite3.connect(p.as_uri() + "?mode=ro", uri=True, timeout=.5) as con:
-            con.row_factory = sqlite3.Row
-            con.execute("PRAGMA query_only=ON")
-            columns = {r[1] for r in con.execute("PRAGMA table_info(decision_samples)")}
-            if not {"symbol", "final_decision", "model_metadata"}.issubset(columns):
-                return {"available": False, "reason": "SCHEMA_UNAVAILABLE"}
-            order = "id" if "id" in columns else "rowid"
-            records = con.execute(
-                f"SELECT * FROM decision_samples WHERE symbol=? AND final_decision='WAIT' "
-                f"ORDER BY {order} DESC LIMIT ?", (symbol, limit)
-            ).fetchall()
-    except sqlite3.Error as exc:
-        return {"available": False, "reason": type(exc).__name__}
+    if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres":
+        limit = max(1, min(1000, int(limit)))
+        try:
+            import psycopg
+            from psycopg.rows import dict_row
+            with psycopg.connect(os.environ["RAMON_PG_DSN"], connect_timeout=3,
+                    options="-c default_transaction_read_only=on -c statement_timeout=5000",
+                    row_factory=dict_row) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""SELECT sample_key,captured,final_decision,
+                        metadata->'model_metadata' AS model_metadata
+                        FROM ramon.decision_samples
+                        WHERE symbol=%s AND final_decision='WAIT'
+                        ORDER BY captured DESC,sample_key DESC LIMIT %s""", (symbol,limit))
+                    records=cur.fetchall()
+        except Exception as exc:
+            return {"available": False, "reason": "PG_READ_FAILED", "detail": type(exc).__name__}
+    else:
+        records = None
+    if records is None:
+        p = Path(db).expanduser().resolve()
+        if not p.is_file():
+            return {"available": False, "reason": "HISTORY_DB_MISSING"}
+        limit = max(1, min(1000, int(limit)))
+        try:
+            with sqlite3.connect(p.as_uri() + "?mode=ro", uri=True, timeout=.5) as con:
+                con.row_factory = sqlite3.Row
+                con.execute("PRAGMA query_only=ON")
+                columns = {r[1] for r in con.execute("PRAGMA table_info(decision_samples)")}
+                if not {"symbol", "final_decision", "model_metadata"}.issubset(columns):
+                    return {"available": False, "reason": "SCHEMA_UNAVAILABLE"}
+                order = "id" if "id" in columns else "rowid"
+                records = con.execute(
+                    f"SELECT * FROM decision_samples WHERE symbol=? AND final_decision='WAIT' "
+                    f"ORDER BY {order} DESC LIMIT ?", (symbol, limit)
+                ).fetchall()
+        except sqlite3.Error as exc:
+            return {"available": False, "reason": type(exc).__name__}
     reasons, states, conflicts, quality = {}, {}, 0, {}
     rows = []
     for r in records:
