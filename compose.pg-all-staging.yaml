@@ -14,6 +14,7 @@ services:
       file: compose.pg-core-cutover.yaml
       service: training-dashboard
   dashboard:
+    image: ramon-ai-trader:pg-canary-working
     volumes:
       - ./src:/app/src:ro
       - ./scripts/pg_service_entrypoint.sh:/app/pg_service_entrypoint.sh:ro
@@ -22,6 +23,7 @@ services:
     environment:
       PYTHONPATH: /app/src
   market-dashboard:
+    image: ramon-ai-trader:pg-canary-working
     volumes:
       - ./src:/app/src:ro
       - ./scripts/pg_service_entrypoint.sh:/app/pg_service_entrypoint.sh:ro
@@ -30,6 +32,7 @@ services:
     environment:
       PYTHONPATH: /app/src
   reversal-daily-report:
+    image: ramon-ai-trader:pg-canary-working
     volumes:
       - ./src:/app/src:ro
       - ./scripts/pg_service_entrypoint.sh:/app/pg_service_entrypoint.sh:ro
@@ -38,6 +41,7 @@ services:
     environment:
       PYTHONPATH: /app/src
   v2-execution-health:
+    image: ramon-ai-trader:pg-canary-working
     volumes:
       - ./src:/app/src:ro
       - ./scripts/pg_service_entrypoint.sh:/app/pg_service_entrypoint.sh:ro
