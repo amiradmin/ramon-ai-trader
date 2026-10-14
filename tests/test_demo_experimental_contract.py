@@ -22,3 +22,10 @@ def test_only_frequency_gates_bypassed_and_risk_guards_kept():
 
 def test_collector_version():
     assert '#property version "1.01"' in Path("mt5/RamonM1M5Collector.mq5").read_text()
+
+
+def test_demo_default_money_units_are_usd():
+    source=Path("mt5/Ramon.mq5").read_text()
+    assert 'input double MoneyUnitsPerUSD = 1.0;' in source
+    assert 'input bool AccountIsCent = false;' in source
+    assert 'input string ExpectedAccountCurrency = "USD";' in source
