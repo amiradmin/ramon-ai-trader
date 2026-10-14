@@ -1,5 +1,6 @@
 """Read-only ledger of positive model edges; never authorizes an order."""
 import json
+import os
 import sqlite3
 import time
 from pathlib import Path
@@ -116,11 +117,15 @@ def _market_trade_scenarios(market_state, ai_side, buy_probability, sell_probabi
 
 
 def read_opportunities(db, symbol='XAUUSD_l', limit=200):
-    path=Path(db)
-    if not path.exists():
-        return {'opportunities':[], 'scope':'positive_model_edge', 'error':'history unavailable'}
-    con=sqlite3.connect(f'file:{path.resolve()}?mode=ro',uri=True,timeout=.5)
-    con.row_factory=sqlite3.Row
+    if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres":
+        from .opportunities_pg import OpportunityPG
+        con = OpportunityPG()
+    else:
+        path=Path(db)
+        if not path.exists():
+            return {'opportunities':[], 'scope':'positive_model_edge', 'error':'history unavailable'}
+        con=sqlite3.connect(f'file:{path.resolve()}?mode=ro',uri=True,timeout=.5)
+        con.row_factory=sqlite3.Row
     try:
         tables={row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         # Context freshness is measured against wall-clock time, not the
