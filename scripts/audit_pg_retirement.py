@@ -11,8 +11,8 @@ def run(*cmd):
 def main():
     failures=[]
     for name in SERVICES:
-        p=run("docker","compose","ps","-q",name)
-        cid=p.stdout.strip()
+        p=run("docker","compose","-f","compose.yaml","-f","compose.pg-all-staging.yaml","ps","-q",name)
+        cid=p.stdout.strip().splitlines()[0] if p.stdout.strip() else ""
         if not cid:
             failures.append(name+": container missing");continue
         i=run("docker","inspect","--format","{{json .Config.Env}}|{{.State.Running}}|{{.State.Health.Status}}",cid)
