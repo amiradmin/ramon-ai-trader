@@ -97,7 +97,12 @@ def migrate(path: Path, dsn: str, batch_size: int = 500):
                                 for name in names:
                                     value = row.get(name)
                                     if name == required_json and value is None:
-                                        value = {}
+                                        # Keep provenance instead of inventing an
+                                        # original snapshot/override payload.
+                                        value = {
+                                            "_migration_missing_field": name,
+                                            "_legacy_original_row": row,
+                                        }
                                     if name in JSON_COLS and value is not None:
                                         if isinstance(value, str):
                                             value = json.loads(value)
