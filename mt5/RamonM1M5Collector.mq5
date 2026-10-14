@@ -1,5 +1,5 @@
 #property strict
-#property version "1.00"
+#property version "1.01"
 #property description "Read-only M1/M5 closed bar exporter for Ramon. Attach to one chart; no trade APIs."
 
 input string ExportSymbol=""; // Empty: use chart symbol (demo and cent variants).
