@@ -127,3 +127,54 @@ def read_training_examples(dsn: str, symbol: str, chronos_model: str):
         for quote_time, closed, regime, entry, news, meta_base, net_r,
         base, direction, exit_reason in rows
     ]
+
+
+def dashboard_training_stats(dsn: str, symbol: str, chronos_model: str):
+    """Read dashboard aggregates and recent trades from PostgreSQL directly."""
+    import psycopg
+    where = """
+        s.source->>'symbol' = %s
+        AND t.source->>'symbol' = s.source->>'symbol'
+        AND s.source->>'chronos_model' = %s
+        AND (s.source->>'schema_version')::integer >= 3
+        AND s.source->>'news_features' IS NOT NULL
+        AND t.source->>'direction' = s.source->>'direction'
+        AND t.source->>'training_status' = 'LEARNABLE'
+        AND t.source->>'entry_source' = 'DASHBOARD_OPPORTUNITY'
+        AND (t.source->>'opened')::bigint >= (s.source->>'quote_time')::bigint
+        AND (t.source->>'opened')::bigint <= (s.source->>'quote_time')::bigint + 90
+        AND (t.source->>'closed')::bigint >= (t.source->>'opened')::bigint
+    """
+    with psycopg.connect(dsn, connect_timeout=5, options="-c statement_timeout=30000") as pg:
+        with pg.cursor() as cur:
+            cur.execute(f"""
+                SELECT COUNT(*),
+                       COUNT(*) FILTER (WHERE (t.source->>'net_units')::double precision > 0),
+                       COUNT(*) FILTER (WHERE (t.source->>'net_units')::double precision <= 0),
+                       COALESCE(SUM((t.source->>'net_units')::double precision), 0)
+                FROM ramon_migration.training_decision_samples s
+                JOIN ramon_migration.training_trade_outcomes t
+                  ON t.source->>'sample_key' = s.source->>'sample_key'
+                WHERE {where}
+            """, (symbol, chronos_model))
+            n, wins, losses, net = cur.fetchone()
+            cur.execute("""
+                SELECT to_char(to_timestamp((source->>'closed')::bigint) AT TIME ZONE 'UTC',
+                               'YYYY-MM-DD HH24:MI:SS'),
+                       source->>'direction', (source->>'net_units')::double precision,
+                       source->>'entry_source', source->>'training_status'
+                FROM ramon_migration.training_trade_outcomes
+                WHERE source->>'symbol' = %s
+                  AND source->>'entry_source' = 'DASHBOARD_OPPORTUNITY'
+                ORDER BY (source->>'closed')::bigint DESC, source->>'trade_key' DESC LIMIT 30
+            """, (symbol,))
+            recent = [
+                dict(zip(("closed_utc", "direction", "net_units", "entry_source", "training_status"), row))
+                for row in cur.fetchall()
+            ]
+    return {
+        "dashboard_trainable": int(n),
+        "dashboard_wins": int(wins),
+        "dashboard_losses": int(losses),
+        "dashboard_net_units": round(float(net), 4),
+    }, recent
