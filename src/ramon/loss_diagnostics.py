@@ -44,11 +44,15 @@ def loss_report(symbol="XAUUSD_l", limit=500):
                 row_factory=dict_row) as con:
             with con.cursor() as cur:
                 cur.execute("""SELECT t.trade_key,t.sample_key,t.direction,t.opened,t.closed,
-                          t.received,t.net_units,t.exit_reason,
+                          t.received,t.net_units,t.exit_reason,t.initial_risk_units,t.net_r,
                           t.telemetry->>'entry_ea_version' AS ea_version,
                           t.telemetry->>'entry_source' AS entry_source,
                           t.telemetry->>'trade_role' AS trade_role,
                           t.telemetry->>'closed_utc_offset_seconds' AS closed_offset,
+                          t.telemetry->>'exit_detail' AS exit_detail,
+                          t.telemetry->>'min_lot_override_used' AS min_lot_override,
+                          t.telemetry->>'risk_budget_units' AS risk_budget_units,
+                          t.telemetry->>'max_executable_risk_usd' AS risk_cap_usd,
                           s.metadata->'model_metadata'->'decision_audit'->'final'->>'market_state' AS regime_final,
                           s.metadata->'model_metadata'->'market_assessment'->>'state' AS regime_assessed
                        FROM ramon.trade_outcomes t
@@ -79,10 +83,32 @@ def loss_report(symbol="XAUUSD_l", limit=500):
                 "market_regime": r["regime_final"] or r["regime_assessed"] or "UNKNOWN",
                 "entry_source": r["entry_source"] or "UNKNOWN",
                 "net_units": net,
+                "initial_risk_units": r["initial_risk_units"],
+                "net_r": r["net_r"],
+                "exit_detail": r["exit_detail"],
+                "risk_budget_units": r["risk_budget_units"],
+                "min_lot_override_used": r["min_lot_override"],
+                "risk_cap_usd": r["risk_cap_usd"],
             })
         profit = sum(max(0, r["net_units"]) for r in rows)
         loss = sum(max(0, -r["net_units"]) for r in rows)
+        missing = {field: sum(row[field] == "UNKNOWN" for row in rows)
+                   for field in ("ea_version", "market_regime", "entry_source")}
+        stop_rows = [row for row in rows if row["exit_reason"] in
+                     ("DEAL_REASON_SL", "DEAL_REASON_SO")]
+        worst_stops = sorted(stop_rows, key=lambda row: row["net_units"])[:20]
+        def stop_view(row):
+            return {field: row.get(field) for field in (
+                "trade_key", "exit_reason", "exit_detail", "net_units", "net_r",
+                "initial_risk_units", "risk_budget_units", "min_lot_override_used",
+                "risk_cap_usd", "direction", "hour_tehran", "ea_version", "market_regime")}
+        stop_summary = {
+            "count": len(stop_rows),
+            "net_units": round(sum(row["net_units"] for row in stop_rows), 4),
+            "worst_trades": [stop_view(row) for row in worst_stops],
+        }
         return {"available": True, "symbol": symbol, "sample_limit": limit,
+                "missing_metadata": missing, "stop_loss_audit": stop_summary,
                 "trades_analyzed": len(rows), "gross_profit_units": round(profit, 4),
                 "gross_loss_units": round(loss, 4), "net_units": round(profit-loss, 4),
                 "profit_factor": round(profit/loss, 3) if loss else None,
@@ -92,7 +118,9 @@ def loss_report(symbol="XAUUSD_l", limit=500):
                     "Outcome rows are not independently reconciled with MT5 deals.",
                     "Time grouping uses explicit broker UTC offset when present; otherwise received time.",
                     "Unknown entry-source rows are not assumed to be automatic.",
-                    "Regime is missing if not persisted in decision audit."
+                    "Regime is missing if not persisted in decision audit.",
+                    "Legacy SQLite fields may be absent from PostgreSQL telemetry. UNKNOWN values must not be guessed.",
+                    "Stop-loss initial risk has not been verified against original MT5 deals."
                 ],
                 "read_only": True}
     except Exception as exc:
