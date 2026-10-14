@@ -418,7 +418,7 @@ def dollar_readiness(trades, current_ea_version=None):
         "profit_factor": None if profit_factor is None else round(profit_factor, 3),
         "gross_profit_units": round(wins, 4),
         "gross_loss_units": round(losses, 4),
-        "sample_scope": "recent_150_closed_primary_auto_only",
+        "sample_scope": "automatic_subset_of_latest_150_primary_trade_outcomes",
         "source": "ramon.trade_outcomes" if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres" else "sqlite.trade_outcomes",
         "sample_first_opened": number(rows_asc[0].get("opened")) if rows_asc else None,
         "sample_last_closed": number(rows_asc[-1].get("closed")) if rows_asc else None,
