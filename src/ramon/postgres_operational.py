@@ -91,3 +91,10 @@ def persist_human_opinion(dsn: str, values: dict[str, object]) -> None:
 def persist_manual_override(dsn: str, values: dict[str, object]) -> None:
     with _connect(dsn) as conn:
         with conn.cursor() as cur: cur.execute(DDL); cur.execute("INSERT INTO ramon.manual_gate_overrides(created_utc,signal_bar_time,sample_key,stage,action,payload) VALUES (%(created_utc)s,%(signal_bar_time)s,%(sample_key)s,%(stage)s,%(action)s,%(payload)s::jsonb)", values)
+
+def recent_human_opinions(dsn: str, symbol: str, limit: int) -> list[dict[str, object]]:
+    with _connect(dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute(DDL); cur.execute("SELECT created_utc,reviewer,symbol,sample_key,signal_bar_time,opinion,confidence,note FROM ramon.human_market_opinions WHERE symbol=%s ORDER BY id DESC LIMIT %s",(symbol,max(1,min(int(limit),50))))
+            names=("created_utc","reviewer","symbol","sample_key","signal_bar_time","opinion","confidence","note")
+            return [dict(zip(names,row)) for row in cur.fetchall()]

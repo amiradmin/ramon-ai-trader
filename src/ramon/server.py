@@ -106,6 +106,9 @@ def _persist_human_opinion(db: str, payload: dict[str, object]) -> None:
 def _recent_human_opinions(db: str, symbol: str = "XAUUSD_l", limit: int = 12) -> list[dict[str, object]]:
     if not db:
         return []
+    if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres":
+        from .postgres_operational import recent_human_opinions
+        return recent_human_opinions(os.environ.get("RAMON_PG_DSN", ""), symbol, limit)
     _ensure_human_opinion_table(db)
     with sqlite3.connect(db) as con:
         con.row_factory = sqlite3.Row
