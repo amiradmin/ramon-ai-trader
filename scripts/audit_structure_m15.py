@@ -61,6 +61,8 @@ def main():
         if result.reason == "no_valid_setup":
             atr = atr14(b)
             previous = b[-21:-1]
+            hi = max(x.high for x in previous)
+            lo = min(x.low for x in previous)
             impulse = b[-13:-4]
             pullback = b[-4:-1]
             impulse_move = (impulse[-1].close-impulse[0].close)/atr
