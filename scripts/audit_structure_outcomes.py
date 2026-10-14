@@ -29,7 +29,7 @@ def classify(side, entry, stop, target, future):
     return "TIMEOUT", len(future)
 
 
-def audit(bars, *, spread, horizon):
+def audit(bars, *, spread, horizon, confirm=False):
     stats = defaultdict(Counter)
     details = []
     for end in range(128, len(bars)-horizon):
@@ -38,7 +38,7 @@ def audit(bars, *, spread, horizon):
         market = Market("XAUUSD_l", "M15", signal_close-spread/2,
                         signal_close+spread/2, .01, tuple(history))
         try:
-            idea = detect_opportunity(market)
+            idea = detect_opportunity(market, require_reversal_confirmation=confirm)
         except ValueError:
             continue
         if idea.decision == "WAIT":
@@ -86,6 +86,7 @@ def main():
         con.close()
     bars=[Bar(int(t),float(o),float(h),float(l),float(c)) for t,o,h,l,c in rows]
     stats, details=audit(bars,spread=a.spread,horizon=a.horizon)
+    confirmed_stats, confirmed_details=audit(bars,spread=a.spread,horizon=a.horizon,confirm=True)
     print(f"bars={len(bars)} spread_assumed={a.spread} horizon_M15={a.horizon}")
     print("HYPOTHETICAL touch audit; not realized P&L, fills, or validated trading edge.")
     for key in ("TREND_PULLBACK","RANGE_REJECTION"):
@@ -94,6 +95,10 @@ def main():
         print(f"{key}: TP={counts['TP']} SL={counts['SL']} AMBIGUOUS={counts['AMBIGUOUS']} "
               f"TIMEOUT={counts['TIMEOUT']} GAP_SKIP={counts['GAP_SKIP']} INVALID={counts['INVALID']} "
               f"resolved_TP_rate={(counts['TP']/resolved if resolved else float('nan')):.1%}")
+    print("CONFIRMED ENTRY FILTER (same history, narrower signals):")
+    for key in ("TREND_PULLBACK","RANGE_REJECTION"):
+        counts=confirmed_stats[key]
+        print(f"{key}: TP={counts['TP']} SL={counts['SL']} AMBIGUOUS={counts['AMBIGUOUS']} TIMEOUT={counts['TIMEOUT']} GAP_SKIP={counts['GAP_SKIP']}")
     print("Rows: signal_utc_epoch setup side outcome bars_elapsed theoretical_RR")
     for line in details:
         print(*line)
