@@ -9,13 +9,13 @@ target="$mt5_root/Experts/Ramon"
 mkdir -p "$target"
 backup="$source_root/backups/demo-mt5-$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "$backup"
-for filename in Ramon.mq5 RamonM1M5Collector.mq5; do
+for filename in Ramon.mq5 Ramon.ex5 RamonM1M5Collector.mq5 RamonM1M5Collector.ex5; do
   if [[ -e "$target/$filename" ]]; then cp -p "$target/$filename" "$backup/$filename"; fi
 done
 install -m 0644 "$source_root/mt5/Ramon.mq5" "$target/Ramon.mq5"
 install -m 0644 "$source_root/mt5/RamonM1M5Collector.mq5" "$target/RamonM1M5Collector.mq5"
 echo "Source files copied to $target"
-echo "Backups: $backup"
+echo "Backups: $backup (including any prior .ex5 binaries)"
 echo "NEXT: Compile both files in MetaEditor (F7). Do NOT enable AutoTrading yet."
 echo "EA Inputs demo USD: TradeSymbol empty; AccountIsCent=false; MoneyUnitsPerUSD=1;"
 echo "ExpectedAccountCurrency=USD; EnableLiveTrading=false; ConfirmMoneyUnitsPerUSD=false."
