@@ -4,6 +4,21 @@ function cell(tr,v){const td=document.createElement("td");td.textContent=String(
 function rows(id,records,keys){$(id).replaceChildren();for(const r of records){const tr=document.createElement("tr");keys.forEach(k=>cell(tr,typeof k==="function"?k(r):r[k]));$(id).append(tr)}}
 async function load(since){$("status").textContent="در حال بارگذاری…";try{const until=Math.floor(Date.now()/1000);const res=await fetch("/api/opportunity-review?since="+since+"&until="+until,{cache:"no-store"});if(!res.ok)throw Error("HTTP "+res.status);const d=await res.json();if(!d.available)throw Error(d.reason||"ناموجود");$("metrics").replaceChildren();for(const [k,v] of [["تصمیم‌های ثبت‌شده",fmt(d.decision_samples_total)],["تصمیم WAIT",fmt(d.wait_decisions)],["معاملات زیان‌ده ثبت‌شده",fmt(d.losing_outcomes)],["خالص معاملات دریافت‌شده",fmt(d.realized_net_units)],["فرصت سودآور ازدست‌رفته","تأیید نشده"]]){let box=document.createElement("div");box.className="metric";let label=document.createElement("span");label.textContent=k;let value=document.createElement("strong");value.textContent=v;box.append(label,value);$("metrics").append(box)}
 $("disclaimer").textContent=d.profitable_missed_positions.explanation+(d.decision_samples_truncated?" | تعداد تصمیم‌ها محدود به نمونه است.":"");
+const shadow=d.shadow_replay||{};
+$("replay-summary").replaceChildren();
+for(const [label,value] of [["فرصت‌های مستقل آزمایش‌شده",fmt(shadow.independent_candidate_count||0)],
+ ["برخورد فرضی TP",fmt((shadow.outcome_counts||{}).SIMULATED_TP||0)],
+ ["برخورد فرضی SL",fmt((shadow.outcome_counts||{}).SIMULATED_SL||0)],
+ ["مبهم در یک کندل",fmt((shadow.outcome_counts||{}).AMBIGUOUS_SAME_BAR||0)],
+ ["نامشخص یا داده ناکافی",fmt(Object.entries(shadow.outcome_counts||{}).filter(([k])=>!["SIMULATED_TP","SIMULATED_SL","AMBIGUOUS_SAME_BAR"].includes(k)).reduce((a,[,v])=>a+v,0))]]) {
+ const box=document.createElement("div");box.className="metric";
+ const title=document.createElement("span");title.textContent=label;
+ const val=document.createElement("strong");val.textContent=value;
+ box.append(title,val);$("replay-summary").append(box);
+}
+rows("replay-cases",shadow.cases||[],[
+ r=>new Date(r.captured*1000).toISOString().slice(0,16), "direction","reason",
+ "status",r=>fmt(r.entry),r=>fmt(r.target),r=>fmt(r.stop)]);
 rows("wait",Object.entries(d.wait_reasons).map(([reason,count])=>({reason,count})),["reason","count"]);
 rows("losses",d.worst_losses,["trade_key","direction",r=>fmt(r.net_units),r=>fmt(r.net_r),"exit_reason","exit_detail",r=>fmt(r.initial_risk_units),"entry_source"]);
 $("actions").replaceChildren();for(const action of d.improvement_actions){const li=document.createElement("li");li.textContent=action.action+" — فقط پژوهشی";$("actions").append(li)}$("status").textContent="به‌روز شد"}catch(e){$("status").textContent="خطا: "+e.message}}
