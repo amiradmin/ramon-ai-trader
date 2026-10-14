@@ -37,6 +37,7 @@ input double V2MaxSymbolRiskUSD = 0.35;
 input double V2MaxDirectionRiskUSD = 0.35;
 input double V2MinimumMarginLevelPercent = 300.0;
 
+input bool EnableStructureOpportunity = false; // Opt-in independent structure opportunities.
 input bool SmallOnlyMode = false; // Attach second EA instance on another M15 chart for parallel SMALL trades.
 const ulong PrimaryMagicNumber = 26092212;
 const ulong SmallProfitMagicNumber = 26092213;
@@ -5527,6 +5528,7 @@ void OnTimer()
    double trend_min_path_atr=0.0,trend_min_consistency=0.0,trend_min_edge_fraction=0.0,trend_min_micro_move_atr=0.0;
    double manual_execution_override=0.0;
    double ai_engine_v2_selected=0.0;
+   double opportunity_live_selected=0.0;
    double ai_engine_v2_buy_quality=-1.0,ai_engine_v2_sell_quality=-1.0;
    double ai_engine_v2_quality_margin=-1.0,ai_engine_v2_score=-1.0;
    string ai_engine_v2_direction_source="NONE";
@@ -5616,6 +5618,8 @@ void OnTimer()
       || (datetime)signal_time!=bar_time
       || (decision!="BUY" && decision!="SELL" && decision!="WAIT"))
    { LastModelSnapshotTime=0; EarlyAdverseWeakSnapshots=0; StatusLine="Invalid/stale model response"; ShowStatus(); return; }
+   // Optional protocol: old servers omit this field and remain compatible.
+   JsonNumber(reply,"opportunity_live_selected",opportunity_live_selected);
    LastModelSnapshotTime=LastDecisionRequestTime;
    LastSampleKey=sample_key;
    LastSampleSaved=(sample_saved>=0.5);
@@ -5942,10 +5946,21 @@ void OnTimer()
    JsonNumber(reply,"range_execution",range_execution);
    bool range_trade=(range_execution>=0.5 && !dashboard_manual_entry);
    bool live_direction_ai=(ai_engine_v2_selected>=0.5 && (decision=="BUY" || decision=="SELL"));
-   if(!range_trade && manual_execution_override<0.5 && !live_direction_ai
+   bool live_structure_ai=(opportunity_live_selected>=0.5 &&
+      (decision=="BUY" || decision=="SELL") &&
+      StringFind(reason,"structure_")==0 &&
+      target_method=="structure_opportunity_v1" &&
+      target_direction==decision &&
+      target_structure_ready<0.5 &&
+      stop_distance>0.0 && target_distance>0.0);
+   if(opportunity_live_selected>=0.5 && (!EnableStructureOpportunity || !live_structure_ai))
+   { StatusLine="STRUCTURE ENTRY BLOCKED: opt-in or protocol invalid"; Print(StatusLine); ShowStatus(); return; }
+   if(!range_trade && manual_execution_override<0.5 && !live_direction_ai && !live_structure_ai
       && (intrabar_confirmed<0.5 || ai_trend_confirmed<0.5
       || intrabar_direction!=decision || ai_trend_direction!=decision))
    { StatusLine="DIRECTION GUARD: normal entry needs aligned confirmations"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+   if(!range_trade && live_structure_ai)
+      Print("Ramon execution: LIVE STRUCTURE accepted ",decision," sample=",sample_key);
    if(!range_trade && live_direction_ai)
       Print("Ramon execution: LIVE DIRECTION AI accepted ",decision,
          " sample=",sample_key);
