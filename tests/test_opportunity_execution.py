@@ -59,3 +59,21 @@ def test_conflicting_direction_blocks():
         ea_capable=True, fresh_quote=True, assessment={"route": "ALLOW"},
         max_spread_ok=True)
     assert not selected and response["decision"] == "WAIT"
+
+
+def test_candidate_funnel_telemetry_survives_earlier_veto():
+    missing = Opportunity("WAIT", "NONE", "no_valid_setup", 4200, 4200, 4200, 0, 3)
+    selected, response = run(missing, assessment={"route": "WAIT"})
+    assert selected is False
+    assert response["opportunity_live_reason"] == "market_hazard_or_spread"
+    assert response["opportunity_candidate_available"] == 0
+    assert response["opportunity_candidate_reason"] == "no_valid_setup"
+    assert response["opportunity_execution_prerequisites"]["market_route_wait"] is True
+
+
+def test_candidate_funnel_available_even_if_ea_not_ready():
+    selected, response = run(ea_capable=False)
+    assert not selected
+    assert response["opportunity_candidate_available"] == 1
+    assert response["opportunity_candidate_setup"] == "TREND_PULLBACK"
+    assert response["opportunity_execution_prerequisites"]["ea_capable"] is False
