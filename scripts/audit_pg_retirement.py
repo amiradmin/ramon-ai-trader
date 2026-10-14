@@ -15,15 +15,15 @@ def main():
         cid=p.stdout.strip().splitlines()[0] if p.stdout.strip() else ""
         if not cid:
             failures.append(name+": container missing");continue
-        i=run("docker","inspect","--format","{{json .Config.Env}}|{{.State.Running}}|{{.State.Health.Status}}",cid)
+        i=run("docker","inspect","--format","{{json .Config.Env}}|{{.State.Running}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}",cid)
         if i.returncode or "|" not in i.stdout:
-            failures.append(name+": inspect failed");continue
+            failures.append(name+": inspect failed: "+i.stderr.strip()[:180]);continue
         try:
             env,running,health=i.stdout.strip().rsplit("|",2)
             values=json.loads(env)
             backend=next((v.split("=",1)[1] for v in values if v.startswith("RAMON_STORAGE_BACKEND=")),None)
             pg_entry=run("docker","inspect","--format","{{json .Config.Entrypoint}}",cid).stdout
-            ok=running=="true" and (health in ("healthy","<no value>")) and "pg_service_entrypoint.sh" in pg_entry and (backend=="postgres" or "pg_service_entrypoint.sh" in pg_entry)
+            ok=running=="true" and (health in ("healthy","none")) and "pg_service_entrypoint.sh" in pg_entry and (backend=="postgres" or "pg_service_entrypoint.sh" in pg_entry)
             print(f"SERVICE {name}: running={running} health={health} postgres_entrypoint={'pg_service_entrypoint.sh' in pg_entry}")
             if not ok: failures.append(name+": not verifiably running PG")
         except Exception:
