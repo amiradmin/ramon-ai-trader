@@ -31,6 +31,26 @@ CREATE TABLE IF NOT EXISTS ramon.inference_audit (sample_key text PRIMARY KEY,in
 CREATE TABLE IF NOT EXISTS ramon.human_market_opinions (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,created_utc bigint NOT NULL,reviewer text NOT NULL,symbol text NOT NULL,sample_key text NOT NULL,signal_bar_time bigint NOT NULL,opinion text NOT NULL,confidence integer NOT NULL,note text NOT NULL,snapshot jsonb NOT NULL);
 CREATE INDEX IF NOT EXISTS human_market_opinions_time ON ramon.human_market_opinions(symbol,created_utc DESC);
 CREATE TABLE IF NOT EXISTS ramon.manual_gate_overrides (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,created_utc bigint NOT NULL,signal_bar_time bigint NOT NULL,sample_key text NOT NULL,stage text NOT NULL,action text NOT NULL,payload jsonb NOT NULL);
+CREATE INDEX IF NOT EXISTS manual_gate_overrides_bar_stage ON ramon.manual_gate_overrides(signal_bar_time,stage,created_utc DESC);
+CREATE TABLE IF NOT EXISTS ramon.mtf_utc_bars (
+ symbol text NOT NULL, timeframe text NOT NULL, time bigint NOT NULL,
+ broker_time bigint NOT NULL, offset_seconds integer NOT NULL,
+ open double precision NOT NULL, high double precision NOT NULL,
+ low double precision NOT NULL, close double precision NOT NULL,
+ spread_points integer NOT NULL, PRIMARY KEY(symbol,timeframe,time));
+CREATE INDEX IF NOT EXISTS mtf_utc_bars_symbol_tf_time ON ramon.mtf_utc_bars(symbol,timeframe,time);
+CREATE TABLE IF NOT EXISTS ramon.target_outcomes (
+ sample_key text PRIMARY KEY, trade_key text NOT NULL, symbol text NOT NULL,
+ direction text NOT NULL, opened bigint NOT NULL, closed bigint NOT NULL,
+ tp1 double precision NOT NULL, tp2 double precision NOT NULL, tp3 double precision NOT NULL,
+ tp1_hit integer NOT NULL, tp2_hit integer NOT NULL, tp3_hit integer NOT NULL,
+ tp1_time bigint, tp2_time bigint, tp3_time bigint,
+ bars_to_tp1 integer, bars_to_tp2 integer, bars_to_tp3 integer,
+ mfe_price double precision NOT NULL, mae_price double precision NOT NULL,
+ mfe_atr double precision, mae_atr double precision,
+ continuation_tp2 integer NOT NULL, continuation_tp3 integer NOT NULL,
+ source text NOT NULL, computed_at bigint NOT NULL);
+CREATE INDEX IF NOT EXISTS target_outcomes_symbol_opened ON ramon.target_outcomes(symbol,opened);
 """
 
 def _connect(dsn: str):
@@ -98,3 +118,24 @@ def recent_human_opinions(dsn: str, symbol: str, limit: int) -> list[dict[str, o
             cur.execute(DDL); cur.execute("SELECT created_utc,reviewer,symbol,sample_key,signal_bar_time,opinion,confidence,note FROM ramon.human_market_opinions WHERE symbol=%s ORDER BY id DESC LIMIT %s",(symbol,max(1,min(int(limit),50))))
             names=("created_utc","reviewer","symbol","sample_key","signal_bar_time","opinion","confidence","note")
             return [dict(zip(names,row)) for row in cur.fetchall()]
+
+def persist_mtf_snapshot(dsn: str, rows: list[tuple[object, ...]]) -> int:
+    """Atomically upsert one already-validated M1/M5 snapshot.
+
+    Validation remains in the collector so PostgreSQL and legacy SQLite accept
+    precisely the same input contract.  A connection failure propagates to the
+    caller; it must never be misreported as a successful collection.
+    """
+    if not rows:
+        raise ValueError("M1/M5 snapshot is empty")
+    with _connect(dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute(DDL)
+            cur.executemany("""INSERT INTO ramon.mtf_utc_bars
+                (symbol,timeframe,time,broker_time,offset_seconds,open,high,low,close,spread_points)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT(symbol,timeframe,time) DO UPDATE SET
+                  broker_time=EXCLUDED.broker_time,offset_seconds=EXCLUDED.offset_seconds,
+                  open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,
+                  close=EXCLUDED.close,spread_points=EXCLUDED.spread_points""", rows)
+    return len(rows)

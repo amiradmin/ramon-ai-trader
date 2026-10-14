@@ -22,6 +22,7 @@ class OperationalRepository(Protocol):
     def persist_human_opinion(self, values: dict[str, object]) -> None: ...
     def persist_manual_override(self, values: dict[str, object]) -> None: ...
     def recent_human_opinions(self, symbol: str, limit: int) -> list[dict[str, object]]: ...
+    def persist_mtf_snapshot(self, rows: list[tuple[object, ...]]) -> int: ...
 
 
 @dataclass(frozen=True)
@@ -64,3 +65,7 @@ class PostgresOperationalRepository:
     def recent_human_opinions(self, symbol: str, limit: int) -> list[dict[str, object]]:
         from .postgres_operational import recent_human_opinions
         return recent_human_opinions(self.dsn, symbol, limit)
+
+    def persist_mtf_snapshot(self, rows: list[tuple[object, ...]]) -> int:
+        from .postgres_operational import persist_mtf_snapshot
+        return persist_mtf_snapshot(self.dsn, rows)

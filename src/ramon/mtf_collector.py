@@ -14,7 +14,9 @@ import sqlite3
 import time
 from pathlib import Path
 
-# PostgreSQL is an optional shadow sink, not a replacement for SQLite yet.
+# SQLite remains the explicit legacy backend.  In postgres mode this collector
+# writes only through StorageRepository; it never falls back after a failed PG
+# write, because silently losing M1/M5 telemetry makes a cutover unsafe.
 
 LOG = logging.getLogger("ramon.mtf_collector")
 OFFSETS = range(-12, 15)
@@ -51,6 +53,10 @@ def import_snapshot(db: Path, source: Path, symbol: str, timeframe: str,
                          o, h, l, c, spread))
     if not rows or any(rows[i][2] >= rows[i + 1][2] for i in range(len(rows) - 1)):
         raise ValueError("empty or unordered snapshot")
+    if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres":
+        from .storage import PostgresOperationalRepository
+        PostgresOperationalRepository(os.environ.get("RAMON_PG_DSN", "")).persist_mtf_snapshot(rows)
+        return {"valid": len(rows), "latest_utc": rows[-1][2], "offset_seconds": offset_hours * 3600}
     with sqlite3.connect(db, timeout=30) as con:
         con.execute(SCHEMA)
         con.executemany("""INSERT INTO mtf_utc_bars
