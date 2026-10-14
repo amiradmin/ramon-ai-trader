@@ -32,6 +32,36 @@ def aggregate(rows):
             ("hour_tehran", "direction", "ea_version", "exit_reason", "market_regime", "entry_source")}
 
 
+def dashboard_opportunity_audit(rows):
+    """Descriptive breakdown without treating unknown source as automatic."""
+    selected = [r for r in rows if r.get("entry_source") == "DASHBOARD_OPPORTUNITY"]
+    def total(items):
+        gains = sum(max(0.0, float(r["net_units"])) for r in items)
+        losses = sum(max(0.0, -float(r["net_units"])) for r in items)
+        return {"trades": len(items), "gross_profit_units": round(gains, 4),
+                "gross_loss_units": round(losses, 4), "net_units": round(gains-losses, 4),
+                "profit_factor": round(gains/losses, 3) if losses else None}
+    worst = sorted(selected, key=lambda r: float(r["net_units"]))[:25]
+    fields = ("trade_key", "ea_version", "direction", "exit_reason", "exit_detail",
+              "net_units", "net_r", "initial_risk_units", "risk_budget_units",
+              "min_lot_override_used", "risk_cap_usd", "hour_tehran")
+    return {
+        "overall": total(selected),
+        "by_exit_reason": [
+            dict({"exit_reason": reason}, **total([r for r in selected if r["exit_reason"] == reason]))
+            for reason in sorted({r["exit_reason"] for r in selected})
+        ],
+        "by_ea_version": [
+            dict({"ea_version": version}, **total([r for r in selected if r["ea_version"] == version]))
+            for version in sorted({r["ea_version"] for r in selected})
+        ],
+        "worst_trades": [{field: row.get(field) for field in fields} for row in worst],
+        "missing_initial_risk": sum(r.get("initial_risk_units") is None for r in selected),
+        "unknown_ea_version": sum(r.get("ea_version") == "UNKNOWN" for r in selected),
+        "scope": "DASHBOARD_OPPORTUNITY only; independent MT5 deal reconciliation pending"
+    }
+
+
 def loss_report(symbol="XAUUSD_l", limit=500):
     if os.environ.get("RAMON_STORAGE_BACKEND", "").lower() != "postgres":
         return {"available": False, "reason": "POSTGRES_REQUIRED"}
@@ -109,6 +139,7 @@ def loss_report(symbol="XAUUSD_l", limit=500):
         }
         return {"available": True, "symbol": symbol, "sample_limit": limit,
                 "missing_metadata": missing, "stop_loss_audit": stop_summary,
+                "dashboard_opportunity_audit": dashboard_opportunity_audit(rows),
                 "trades_analyzed": len(rows), "gross_profit_units": round(profit, 4),
                 "gross_loss_units": round(loss, 4), "net_units": round(profit-loss, 4),
                 "profit_factor": round(profit/loss, 3) if loss else None,
