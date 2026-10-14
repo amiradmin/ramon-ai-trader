@@ -383,6 +383,12 @@ bool LiveExecutionReady(string &reason)
       reason="Live trading disabled";
       return false;
    }
+   if(DemoExperimentActive() && (AccountIsCent || MathAbs(MoneyUnitsPerUSD-1.0)>0.000001
+      || AccountInfoString(ACCOUNT_CURRENCY)!="USD"))
+   {
+      reason="BLOCKED: demo experimental requires USD account, AccountIsCent=false and MoneyUnitsPerUSD=1";
+      return false;
+   }
    if(!ConfirmMoneyUnitsPerUSD)
    {
       reason="BLOCKED: confirm MoneyUnitsPerUSD";
