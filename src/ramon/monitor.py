@@ -227,23 +227,48 @@ def match(text, pattern):
 
 def trade_trace(path, symbol, trade_key):
     """Exact historical attribution; never mix in the current terminal snapshot."""
-    p = Path(path).expanduser().resolve()
-    if not p.is_file():
-        return None
-    with sqlite3.connect(p.as_uri() + "?mode=ro", uri=True, timeout=.3) as con:
-        con.row_factory = sqlite3.Row
-        con.execute("PRAGMA query_only=ON")
-        con.execute("BEGIN")
-        row = con.execute("SELECT * FROM trade_outcomes WHERE symbol=? AND trade_key=? LIMIT 1",
-                          (symbol, trade_key)).fetchone()
-        if not row:
+    if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres":
+        import psycopg
+        from psycopg.rows import dict_row
+        with psycopg.connect(os.environ["RAMON_PG_DSN"], connect_timeout=3,
+                options="-c default_transaction_read_only=on -c statement_timeout=5000",
+                row_factory=dict_row) as con:
+            with con.cursor() as cur:
+                cur.execute("SELECT * FROM ramon.trade_outcomes WHERE symbol=%s AND trade_key=%s LIMIT 1",
+                            (symbol, trade_key))
+                trade = cur.fetchone()
+                if trade is None:
+                    return None
+                trade = dict(trade)
+                extra = trade.get("telemetry") or {}
+                if isinstance(extra, dict):
+                    for key, value in extra.items():
+                        trade.setdefault(key, value)
+                if str(trade.get("trade_role") or "MAIN").upper() not in {"MAIN","PRIMARY"}:
+                    return None
+                cur.execute("""SELECT sample_key,captured,final_decision,chronos_model,
+                               metadata->'model_metadata' AS model_metadata
+                               FROM ramon.decision_samples WHERE symbol=%s AND sample_key=%s LIMIT 1""",
+                            (symbol, trade.get("sample_key")))
+                sample = dict(cur.fetchone() or {})
+    else:
+        p = Path(path).expanduser().resolve()
+        if not p.is_file():
             return None
-        trade = dict(row)
-        if str(trade.get("trade_role") or "MAIN").upper() not in {"MAIN", "PRIMARY"}:
-            return None
-        row = con.execute("SELECT * FROM decision_samples WHERE symbol=? AND sample_key=? LIMIT 1",
-                          (symbol, trade.get("sample_key"))).fetchone()
-        sample = dict(row) if row else {}
+        with sqlite3.connect(p.as_uri() + "?mode=ro", uri=True, timeout=.3) as con:
+            con.row_factory = sqlite3.Row
+            con.execute("PRAGMA query_only=ON")
+            con.execute("BEGIN")
+            row = con.execute("SELECT * FROM trade_outcomes WHERE symbol=? AND trade_key=? LIMIT 1",
+                              (symbol, trade_key)).fetchone()
+            if not row:
+                return None
+            trade = dict(row)
+            if str(trade.get("trade_role") or "MAIN").upper() not in {"MAIN", "PRIMARY"}:
+                return None
+            row = con.execute("SELECT * FROM decision_samples WHERE symbol=? AND sample_key=? LIMIT 1",
+                              (symbol, trade.get("sample_key"))).fetchone()
+            sample = dict(row) if row else {}
     metadata = object_json(sample.get("model_metadata"))
     audit = metadata.get("decision_audit")
     audit = audit if isinstance(audit, dict) else {}
