@@ -25,37 +25,69 @@ def _finite(value):
         return None
 
 
+def _pg_rows(symbol, now, limit):
+    """Read live operational outcomes without opening the legacy SQLite file."""
+    import psycopg
+    from psycopg.rows import dict_row
+    dsn = os.environ["RAMON_PG_DSN"]
+    with psycopg.connect(dsn, connect_timeout=3,
+                         options="-c default_transaction_read_only=on -c statement_timeout=5000",
+                         row_factory=dict_row) as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT trade_key,symbol,closed,net_units,net_r,exit_reason,direction,
+                       telemetry->>'commission_units' AS commission_units,
+                       telemetry->>'swap_units' AS swap_units,
+                       telemetry->>'fee_units' AS fee_units,
+                       telemetry->>'training_status' AS training_status,
+                       telemetry->>'exit_detail' AS exit_detail,
+                       telemetry->>'actual_fill_price' AS actual_fill_price,
+                       telemetry->>'entry_source' AS entry_source
+                FROM ramon.trade_outcomes
+                WHERE symbol=%s AND closed<=%s
+                ORDER BY closed DESC,trade_key DESC LIMIT %s
+            """, (symbol, now, limit))
+            return cur.fetchall()
+
+
 def analyze(db_path, *, symbol="XAUUSD_l", limit=500, current_time=None):
     """Capture costs/exits/quality from latest realized EA trades, no look-ahead."""
     if limit < 1 or limit > 100_000:
         raise ValueError("limit must be between 1 and 100000")
     now = int(time.time()) if current_time is None else int(current_time)
-    path = Path(db_path)
-    if not path.is_file():
-        return {"ready": False, "reason": "database_not_found", "symbol": symbol}
-    try:
-        con = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True, timeout=2)
-        con.row_factory = sqlite3.Row
-        with con:
-            columns = {row[1] for row in con.execute("PRAGMA table_info(trade_outcomes)")}
-            required = {"trade_key", "symbol", "closed", "net_units", "net_r", "exit_reason"}
-            if not required.issubset(columns):
-                return {"ready": False, "reason": "trade_outcomes_schema_missing", "symbol": symbol}
-            optional = ("commission_units", "swap_units", "fee_units", "training_status",
-                        "exit_detail", "actual_fill_price", "entry_source", "direction")
-            selected = ", ".join(
-                [*sorted(required), *(col for col in optional if col in columns)])
-            rows = con.execute(
-                f"SELECT {selected} FROM trade_outcomes "
-                "WHERE symbol=? AND closed<=? ORDER BY closed DESC, trade_key DESC LIMIT ?",
-                (symbol, now, limit)).fetchall()
-    except (sqlite3.Error, OSError) as exc:
-        return {"ready": False, "reason": "database_read_failed", "symbol": symbol,
-                "error_type": type(exc).__name__}
-    finally:
-        if "con" in locals():
-            con.close()
-
+    if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres":
+        try:
+            rows = _pg_rows(symbol, now, limit)
+        except Exception as exc:
+            return {"ready": False, "reason": "postgres_read_failed",
+                    "symbol": symbol, "error_type": type(exc).__name__}
+    else:
+        path = Path(db_path)
+        if not path.is_file():
+            return {"ready": False, "reason": "database_not_found", "symbol": symbol}
+        try:
+            con = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True, timeout=2)
+            con.row_factory = sqlite3.Row
+            with con:
+                columns = {row[1] for row in con.execute("PRAGMA table_info(trade_outcomes)")}
+                required = {"trade_key", "symbol", "closed", "net_units", "net_r", "exit_reason"}
+                if not required.issubset(columns):
+                    return {"ready": False, "reason": "trade_outcomes_schema_missing", "symbol": symbol}
+                optional = ("commission_units", "swap_units", "fee_units", "training_status",
+                            "exit_detail", "actual_fill_price", "entry_source", "direction")
+                selected = ", ".join(
+                    [*sorted(required), *(col for col in optional if col in columns)])
+                rows = con.execute(
+                    f"SELECT {selected} FROM trade_outcomes "
+                    "WHERE symbol=? AND closed<=? ORDER BY closed DESC, trade_key DESC LIMIT ?",
+                    (symbol, now, limit)).fetchall()
+        except (sqlite3.Error, OSError) as exc:
+            return {"ready": False, "reason": "database_read_failed", "symbol": symbol,
+                    "error_type": type(exc).__name__}
+        finally:
+            if "con" in locals():
+                con.close()
+    
     if not rows:
         return {"ready": True, "symbol": symbol, "trade_count": 0,
                 "last_closed_utc": None, "net_units": 0.0, "mean_r": None,
