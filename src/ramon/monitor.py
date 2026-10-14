@@ -1653,47 +1653,76 @@ def daily_profit_summary(db, symbol, opened, diagnostic=None, now=None):
     open_baselines = reset.get("open_baselines") or {}
     realized = 0.0
     closed_count = 0
-    path = Path(db).expanduser().resolve()
-    if path.is_file():
+    if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres":
         try:
-            with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=.3) as con:
-                con.row_factory = sqlite3.Row
-                con.execute("PRAGMA query_only=ON")
-                tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-                if "trade_outcomes" in tables:
-                    cols = {r[1] for r in con.execute("PRAGMA table_info(trade_outcomes)")}
-                    role_clause = (
-                        " AND (trade_role IS NULL OR trade_role='' OR UPPER(trade_role) IN ('PRIMARY','MAIN'))"
-                        if "trade_role" in cols else ""
-                    )
-                    query = (
-                        "SELECT sample_key,closed,received,net_units"
-                        + (",closed_utc_offset_seconds" if "closed_utc_offset_seconds" in cols else ",NULL AS closed_utc_offset_seconds")
-                        + " FROM trade_outcomes WHERE symbol=?" + role_clause
-                    )
-                    for row in con.execute(query, (symbol,)):
-                        closed = number(row["closed"])
-                        received = number(row["received"])
-                        offset = number(row["closed_utc_offset_seconds"])
-                        if closed is not None and offset is not None:
-                            utc_stamp = closed - offset
-                        elif received is not None:
-                            utc_stamp = received
-                        else:
+            import psycopg
+            with psycopg.connect(os.environ["RAMON_PG_DSN"], connect_timeout=3,
+                    options="-c default_transaction_read_only=on -c statement_timeout=5000") as con:
+                with con.cursor() as cur:
+                    cur.execute("""SELECT sample_key, closed, received, net_units,
+                                          telemetry->>'closed_utc_offset_seconds' AS utc_offset,
+                                          telemetry->>'trade_role' AS trade_role
+                                   FROM ramon.trade_outcomes WHERE symbol=%s""", (symbol,))
+                    for sample_key, closed, received, net_units, offset_raw, role in cur:
+                        if str(role or "MAIN").upper() not in {"MAIN","PRIMARY"}:
                             continue
-                        trade_day = datetime.fromtimestamp(utc_stamp, timezone.utc).astimezone(tehran).date()
-                        if trade_day != today or (reset_utc > 0.0 and utc_stamp < reset_utc):
+                        closed, received, offset = number(closed), number(received), number(offset_raw)
+                        stamp = closed - offset if closed is not None and offset is not None else received
+                        if stamp is None:
                             continue
-                        pnl = number(row["net_units"]) or 0.0
-                        sample_key = str(row["sample_key"] or "")
-                        # If the position was already open at reset, count only
-                        # P/L earned/lost after the reset baseline.
-                        if sample_key in open_baselines:
-                            pnl -= float(open_baselines[sample_key])
+                        trade_day = datetime.fromtimestamp(stamp, timezone.utc).astimezone(tehran).date()
+                        if trade_day != today or (reset_utc > 0 and stamp < reset_utc):
+                            continue
+                        pnl = number(net_units) or 0.0
+                        if str(sample_key or "") in open_baselines:
+                            pnl -= float(open_baselines[str(sample_key)])
                         realized += pnl
                         closed_count += 1
-        except (sqlite3.Error, OSError, ValueError, OverflowError):
+        except Exception:
+            # Never silently fall back to stale SQLite P/L in PostgreSQL mode.
             pass
+    else:
+        path = Path(db).expanduser().resolve()
+        if path.is_file():
+            try:
+                with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=.3) as con:
+                    con.row_factory = sqlite3.Row
+                    con.execute("PRAGMA query_only=ON")
+                    tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                    if "trade_outcomes" in tables:
+                        cols = {r[1] for r in con.execute("PRAGMA table_info(trade_outcomes)")}
+                        role_clause = (
+                            " AND (trade_role IS NULL OR trade_role='' OR UPPER(trade_role) IN ('PRIMARY','MAIN'))"
+                            if "trade_role" in cols else ""
+                        )
+                        query = (
+                            "SELECT sample_key,closed,received,net_units"
+                            + (",closed_utc_offset_seconds" if "closed_utc_offset_seconds" in cols else ",NULL AS closed_utc_offset_seconds")
+                            + " FROM trade_outcomes WHERE symbol=?" + role_clause
+                        )
+                        for row in con.execute(query, (symbol,)):
+                            closed = number(row["closed"])
+                            received = number(row["received"])
+                            offset = number(row["closed_utc_offset_seconds"])
+                            if closed is not None and offset is not None:
+                                utc_stamp = closed - offset
+                            elif received is not None:
+                                utc_stamp = received
+                            else:
+                                continue
+                            trade_day = datetime.fromtimestamp(utc_stamp, timezone.utc).astimezone(tehran).date()
+                            if trade_day != today or (reset_utc > 0.0 and utc_stamp < reset_utc):
+                                continue
+                            pnl = number(row["net_units"]) or 0.0
+                            sample_key = str(row["sample_key"] or "")
+                            # If the position was already open at reset, count only
+                            # P/L earned/lost after the reset baseline.
+                            if sample_key in open_baselines:
+                                pnl -= float(open_baselines[sample_key])
+                            realized += pnl
+                            closed_count += 1
+            except (sqlite3.Error, OSError, ValueError, OverflowError):
+                pass
     floating = 0.0
     for sample_key, info in (opened or {}).items():
         profit = number(info.get("profit_units"))
