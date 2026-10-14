@@ -136,8 +136,9 @@ def main():
                         user="ramon_logger", password=args.password_file.read_text().strip())
     result = migrate(args.sqlite, dsn)
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    if any(result.get(t, {}).get("status") == "failed" for t in CRITICAL):
-        raise SystemExit(2)
+    failed = [name for name, item in result.items() if item.get("status") == "failed"]
+    if failed:
+        raise SystemExit("INCOMPLETE: failed tables: " + ", ".join(failed))
 
 
 if __name__ == "__main__":
