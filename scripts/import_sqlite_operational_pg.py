@@ -55,8 +55,18 @@ def migrate(path: Path, dsn: str, batch_size: int = 500):
                           WHERE table_schema='ramon' AND table_name=%s
                           ORDER BY ordinal_position""", (table,))
                         dest_columns = cur.fetchall()
+                    # Older SQLite versions did not include required JSON payload
+                    # columns. Restore the missing values from existing archived rows
+                    # when available; otherwise supply explicit empty JSON objects.
                     names = [n for n, identity, _ in dest_columns
                              if n in columns and identity == "NO"]
+                    required_json = {
+                        "inference_audit": "input_context",
+                        "human_market_opinions": "snapshot",
+                        "manual_gate_overrides": "payload",
+                    }.get(table)
+                    if required_json and required_json not in names:
+                        names.append(required_json)
                     if not names:
                         result[table] = {"status": "no_mapped_columns"}
                         continue
@@ -75,7 +85,8 @@ def migrate(path: Path, dsn: str, batch_size: int = 500):
                         sql.SQL(",").join(sql.Placeholder() for _ in names),
                         sql.SQL("ON CONFLICT DO NOTHING") if primary else sql.SQL("")
                     )
-                    query = 'SELECT ' + ",".join('"' + x + '"' for x in names) + f' FROM "{table}"'
+                    source_names = [name for name in names if name in columns]
+                    query = 'SELECT ' + ",".join('"' + x + '"' for x in source_names) + f' FROM "{table}"'
                     imported = 0
                     with target.cursor() as cur:
                         rows = src.execute(query)
@@ -84,7 +95,9 @@ def migrate(path: Path, dsn: str, batch_size: int = 500):
                             for row in rows_to_dicts(batch):
                                 values = []
                                 for name in names:
-                                    value = row[name]
+                                    value = row.get(name)
+                                    if name == required_json and value is None:
+                                        value = {}
                                     if name in JSON_COLS and value is not None:
                                         if isinstance(value, str):
                                             value = json.loads(value)
