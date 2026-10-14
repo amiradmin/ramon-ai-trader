@@ -29,7 +29,9 @@ def apply_live_v3_agreement_guard(response: dict, *, enabled: bool = False) -> d
     v3_active = int(response.get("ai_engine_v3_shadow_active", 0) or 0) == 1
     candidate = str(response.get("ai_engine_v3_shadow_decision", "WAIT"))
     if not v3_active:
-        reason = "v3_unavailable"
+        payload["v3_agreement_guard_reason"] = "v3_unavailable_no_veto"
+        response.update(payload)
+        return payload
     elif candidate not in {"BUY", "SELL"}:
         payload["v3_agreement_guard_reason"] = "v3_wait_no_veto"
         response.update(payload)
