@@ -5,6 +5,7 @@ execution permissions, costs, and future path. This report is diagnostic only.
 """
 import os
 import time
+from .shadow_missed_replay import replay_report
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -36,7 +37,7 @@ def review(symbol="XAUUSD_l", since=None, until=None):
                 c.execute("""SELECT count(*) AS n FROM ramon.decision_samples
                              WHERE symbol=%s AND captured>=%s AND captured<%s""",(symbol,since,until))
                 total=int(c.fetchone()["n"])
-                c.execute("""SELECT sample_key,captured,signal_bar_time,final_decision,
+                c.execute("""SELECT sample_key,captured,signal_bar_time,final_decision,spread,
                         metadata->'model_metadata' AS model_metadata
                         FROM ramon.decision_samples
                         WHERE symbol=%s AND captured>=%s AND captured<%s
@@ -48,6 +49,11 @@ def review(symbol="XAUUSD_l", since=None, until=None):
                              received>=%s AND received<%s
                              ORDER BY received DESC LIMIT 5000""",(symbol,since,until))
                 trades=c.fetchall()
+                c.execute("""SELECT time,open,high,low,close FROM ramon.mtf_utc_bars
+                    WHERE symbol=%s AND timeframe='M1'
+                    AND time>=%s AND time<=%s ORDER BY time LIMIT 15000""",
+                    (symbol,since,until+3600))
+                m1=[dict(r) for r in c.fetchall()]
         trade_cases=[]
         for t in trades:
             metadata=t.get("telemetry") or {}
@@ -81,7 +87,8 @@ def review(symbol="XAUUSD_l", since=None, until=None):
                    "executed_outcome_in_window":d["sample_key"] in sample_keys,
                    "potential_profit":"NOT_EVALUATED",
                    "required_evidence":"M1/tick replay, spread, broker order gates, risk, SL/TP"})
-        return {"available":True,"read_only":True,"symbol":symbol,"since_utc":since,
+        shadow = replay_report(decisions,m1)
+        return {"available":True,"read_only":True,"shadow_replay":shadow,"symbol":symbol,"since_utc":since,
                 "until_utc":until,"decision_samples":len(decisions),"decision_samples_total":total,
                 "decision_samples_truncated":total>len(decisions),
                 "wait_decisions":wait,"wait_reasons":dict(reasons.most_common(20)),
