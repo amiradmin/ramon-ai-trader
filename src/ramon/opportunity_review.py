@@ -6,6 +6,7 @@ execution permissions, costs, and future path. This report is diagnostic only.
 import os
 import time
 from .shadow_missed_replay import replay_report
+from .prevention_plan import prevention_plan
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -88,7 +89,8 @@ def review(symbol="XAUUSD_l", since=None, until=None):
                    "potential_profit":"NOT_EVALUATED",
                    "required_evidence":"M1/tick replay, spread, broker order gates, risk, SL/TP"})
         shadow = replay_report(decisions,m1)
-        return {"available":True,"read_only":True,"shadow_replay":shadow,"symbol":symbol,"since_utc":since,
+        return {"available":True,"read_only":True,"shadow_replay":shadow,
+                "prevention_plan":prevention_plan(shadow, loss_cases),"symbol":symbol,"since_utc":since,
                 "until_utc":until,"decision_samples":len(decisions),"decision_samples_total":total,
                 "decision_samples_truncated":total>len(decisions),
                 "wait_decisions":wait,"wait_reasons":dict(reasons.most_common(20)),
