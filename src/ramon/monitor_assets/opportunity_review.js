@@ -15,6 +15,7 @@ function reportForAnalysis(d){
   shadow_replay:d.shadow_replay,
   profitable_missed_positions:d.profitable_missed_positions,
   improvement_actions:d.improvement_actions,
+  prevention_plan:d.prevention_plan,
   limitations:d.limitations,
   note:"Hypothetical TP does not establish a real executable missed trade. No automated strategy changes."
  };
@@ -59,7 +60,7 @@ rows("replay-cases",shadow.cases||[],[
  "status",r=>fmt(r.entry),r=>fmt(r.target),r=>fmt(r.stop)]);
 rows("wait",Object.entries(d.wait_reasons).map(([reason,count])=>({reason,count})),["reason","count"]);
 rows("losses",d.worst_losses,["trade_key","direction",r=>fmt(r.net_units),r=>fmt(r.net_r),"exit_reason","exit_detail",r=>fmt(r.initial_risk_units),"entry_source"]);
-$("actions").replaceChildren();for(const action of d.improvement_actions){const li=document.createElement("li");li.textContent=action.action+" — فقط پژوهشی";$("actions").append(li)}$("status").textContent="به‌روز شد"}catch(e){$("status").textContent="خطا: "+e.message}}
+$("actions").replaceChildren();for(const action of (d.prevention_plan?.proposals||d.improvement_actions)){const li=document.createElement("li");li.textContent=(action.hypothesis||action.action)+" | شرط: "+(action.condition||"—")+" | وضعیت: "+(action.status||"RESEARCH_ONLY")+" — فقط پژوهشی";$("actions").append(li)}$("status").textContent="به‌روز شد"}catch(e){$("status").textContent="خطا: "+e.message}}
 $("copy-report").addEventListener("click",copyFullReview);
 $("day").onclick=()=>load(Math.floor(Date.now()/1000)-86400);
 $("yesterday").onclick=()=>{const d=new Date();d.setDate(d.getDate()-1);d.setHours(0,0,0,0);load(Math.floor(d.getTime()/1000))};
