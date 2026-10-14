@@ -20,7 +20,28 @@ async function load(){
   const m=document.getElementById("metrics");m.replaceChildren();
   for(const [label,value] of [["معاملات بررسی‌شده",fmt(d.trades_analyzed)],["خالص سود/زیان",fmt(d.net_units)+" واحد حساب"],["سود ناخالص",fmt(d.gross_profit_units)],["زیان ناخالص",fmt(d.gross_loss_units)],["Profit Factor",fmt(d.profit_factor)]]){const div=elt("div","", "metric");div.append(elt("span",label),elt("strong",value));m.append(div)}
   document.getElementById("notes").textContent="فقط "+fmt(d.sample_limit)+" نتیجه اخیر قبل از دسته‌بندی خوانده می‌شود. رکوردهای نامشخص خودکار فرض نمی‌شوند. تطبیق با تاریخچه MT5 هنوز ضروری است.";
-  const root=document.getElementById("groups");root.replaceChildren();
+  const info=elt("section","");
+  info.append(elt("h2","کیفیت داده‌های تاریخی"));
+  const missing=d.missing_metadata||{};
+  info.append(elt("p","فیلدهای نامشخص — نسخه EA: "+fmt(missing.ea_version)+
+    " | رژیم بازار: "+fmt(missing.market_regime)+
+    " | منبع ورود: "+fmt(missing.entry_source)));
+  const sl=d.stop_loss_audit||{};
+  info.append(elt("h2","ممیزی SL / Stop Out"));
+  info.append(elt("p","تعداد: "+fmt(sl.count)+" | خالص: "+fmt(sl.net_units)+" واحد حساب؛ تشخیص علت نیازمند تطبیق با MT5 است."));
+  const sw=elt("div","","scroll"),st=elt("table",""),sh=elt("tr","");
+  for(const h of ["شناسه معامله","نوع خروج","خالص","R","ریسک اولیه","بودجه ریسک","حداقل لات"])sh.append(elt("th",h));
+  const sth=elt("thead","");sth.append(sh);st.append(sth);
+  const stb=elt("tbody","");
+  for(const item of (sl.worst_trades||[])){
+    const tr=elt("tr","");
+    [item.trade_key,item.exit_reason,fmt(item.net_units),fmt(item.net_r),
+     fmt(item.initial_risk_units),fmt(item.risk_budget_units),fmt(item.min_lot_override_used)]
+     .forEach(v=>tr.append(elt("td",v)));
+    stb.append(tr);
+  }
+  st.append(stb);sw.append(st);info.append(sw);
+  const root=document.getElementById("groups");root.replaceChildren(info);
   for(const [key,title] of Object.entries(groupLabels)){
     const sec=elt("section","");sec.append(elt("h2",title));const wrap=elt("div","","scroll");const tab=elt("table","");
     const thead=elt("thead",""),hr=elt("tr","");
