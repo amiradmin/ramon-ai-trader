@@ -84,6 +84,10 @@ def _persist_human_opinion(db: str, payload: dict[str, object]) -> None:
         raise ValueError("opinion must be BUY, SELL or WAIT")
     if confidence not in {1, 2, 3, 4, 5}:
         raise ValueError("confidence must be 1..5")
+    if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres":
+        from .postgres_operational import persist_human_opinion
+        persist_human_opinion(os.environ.get("RAMON_PG_DSN", ""), {"created_utc":int(time.time()),"reviewer":reviewer,"symbol":symbol,"sample_key":sample_key,"signal_bar_time":signal_bar_time,"opinion":opinion,"confidence":confidence,"note":note,"snapshot":json.dumps(snapshot, ensure_ascii=False, allow_nan=False)})
+        return
     _ensure_human_opinion_table(db)
     with sqlite3.connect(db) as con:
         con.execute(

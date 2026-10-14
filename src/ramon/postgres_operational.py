@@ -28,6 +28,9 @@ CREATE INDEX IF NOT EXISTS decision_samples_symbol_quote ON ramon.decision_sampl
 CREATE TABLE IF NOT EXISTS ramon.trade_outcomes (trade_key text PRIMARY KEY, sample_key text NOT NULL UNIQUE, symbol text NOT NULL, direction text NOT NULL, opened bigint NOT NULL, closed bigint NOT NULL, net_units double precision NOT NULL, initial_risk_units double precision NOT NULL, net_r double precision NOT NULL, exit_reason text NOT NULL, received bigint NOT NULL, telemetry jsonb NOT NULL DEFAULT '{}'::jsonb);
 CREATE TABLE IF NOT EXISTS ramon.shadow_votes (vote_key text PRIMARY KEY,captured bigint NOT NULL,symbol text NOT NULL,signal_bar_time bigint NOT NULL,advisor text NOT NULL,decision text NOT NULL,confidence double precision,regime text,metadata jsonb NOT NULL,source_version text NOT NULL);
 CREATE TABLE IF NOT EXISTS ramon.inference_audit (sample_key text PRIMARY KEY,input_sha256 text NOT NULL,recorded_utc double precision NOT NULL,response_json jsonb NOT NULL,provenance_json jsonb NOT NULL,input_context jsonb NOT NULL);
+CREATE TABLE IF NOT EXISTS ramon.human_market_opinions (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,created_utc bigint NOT NULL,reviewer text NOT NULL,symbol text NOT NULL,sample_key text NOT NULL,signal_bar_time bigint NOT NULL,opinion text NOT NULL,confidence integer NOT NULL,note text NOT NULL,snapshot jsonb NOT NULL);
+CREATE INDEX IF NOT EXISTS human_market_opinions_time ON ramon.human_market_opinions(symbol,created_utc DESC);
+CREATE TABLE IF NOT EXISTS ramon.manual_gate_overrides (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,created_utc bigint NOT NULL,signal_bar_time bigint NOT NULL,sample_key text NOT NULL,stage text NOT NULL,action text NOT NULL,payload jsonb NOT NULL);
 """
 
 def _connect(dsn: str):
@@ -80,3 +83,7 @@ def persist_replay_input(dsn: str, values: dict[str, object]) -> bool:
     with _connect(dsn) as conn:
         with conn.cursor() as cur:
             cur.execute(DDL); cur.execute("INSERT INTO ramon.inference_audit VALUES (%(sample_key)s,%(input_sha256)s,%(recorded_utc)s,%(response_json)s::jsonb,%(provenance_json)s::jsonb,%(input_context)s::jsonb) ON CONFLICT DO NOTHING", values); return cur.rowcount == 1
+
+def persist_human_opinion(dsn: str, values: dict[str, object]) -> None:
+    with _connect(dsn) as conn:
+        with conn.cursor() as cur: cur.execute(DDL); cur.execute("INSERT INTO ramon.human_market_opinions(created_utc,reviewer,symbol,sample_key,signal_bar_time,opinion,confidence,note,snapshot) VALUES (%(created_utc)s,%(reviewer)s,%(symbol)s,%(sample_key)s,%(signal_bar_time)s,%(opinion)s,%(confidence)s,%(note)s,%(snapshot)s::jsonb)",values)
