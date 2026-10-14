@@ -2,7 +2,8 @@
 #property version "1.00"
 #property description "Read-only M1/M5 closed bar exporter for Ramon. Attach to one chart; no trade APIs."
 
-input string ExportSymbol="XAUUSD_l";
+input string ExportSymbol=""; // Empty: use chart symbol (demo and cent variants).
+string ActiveExportSymbol="";
 input int ExportEverySeconds=60;
 input int ExportClosedBars=1500;
 
@@ -11,19 +12,19 @@ void ExportBars(ENUM_TIMEFRAMES timeframe,string label)
    MqlRates bars[];
    ArraySetAsSeries(bars,false);
    ResetLastError();
-   int copied=CopyRates(ExportSymbol,timeframe,1,ExportClosedBars,bars);
+   int copied=CopyRates(ActiveExportSymbol,timeframe,1,ExportClosedBars,bars);
    if(copied<=0)
    {
       PrintFormat("RAMON_MTF_EXPORT FAIL tf=%s CopyRates err=%d",label,GetLastError());
       return;
    }
-   string filename="RamonLive_"+ExportSymbol+"_"+label+".csv";
+   string filename="RamonLive_"+ActiveExportSymbol+"_"+label+".csv";
    string tmp=filename+".tmp";
    int h=FileOpen(tmp,FILE_WRITE|FILE_CSV|FILE_ANSI|FILE_COMMON,',',CP_UTF8);
    if(h==INVALID_HANDLE)
    { PrintFormat("RAMON_MTF_EXPORT FAIL tf=%s open err=%d",label,GetLastError()); return; }
    FileWrite(h,"time","open","high","low","close","spread_points");
-   int digits=(int)SymbolInfoInteger(ExportSymbol,SYMBOL_DIGITS);
+   int digits=(int)SymbolInfoInteger(ActiveExportSymbol,SYMBOL_DIGITS);
    long newest=0;
    for(int i=0;i<copied;i++)
    {
@@ -52,8 +53,9 @@ void OnTimer()
 }
 int OnInit()
 {
-   if(ExportSymbol=="" || ExportEverySeconds<15 || ExportClosedBars<50 ||
-      ExportClosedBars>10000 || !SymbolSelect(ExportSymbol,true))
+   ActiveExportSymbol=(ExportSymbol=="" ? _Symbol : ExportSymbol);
+   if(StringFind(ActiveExportSymbol,"XAUUSD")!=0 || ExportEverySeconds<15 || ExportClosedBars<50 ||
+      ExportClosedBars>10000 || !SymbolSelect(ActiveExportSymbol,true))
       return INIT_PARAMETERS_INCORRECT;
    if(!EventSetTimer(ExportEverySeconds))return INIT_FAILED;
    Print("RAMON_MTF_EXPORT read-only collector started; no order execution");
