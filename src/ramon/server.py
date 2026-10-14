@@ -552,9 +552,11 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         "node_values": payload.get("node_values") if isinstance(payload.get("node_values"), dict) else {},
                         "operator": "dashboard",
                     }
+                    _persist_manual_override(history_db, row)
+                    # Audit durability precedes the in-memory trading-visible state:
+                    # a PostgreSQL failure must not create an un-audited override.
                     if action == "FORCE_PASS":
                         manual_overrides_by_bar.setdefault(signal_bar_time, {})[stage] = row
-                    _persist_manual_override(history_db, row)
                     self.reply(200, {
                         "saved": True,
                         "action": action,
