@@ -68,8 +68,6 @@ def _ensure_human_opinion_table(db: str) -> None:
 
 
 def _persist_human_opinion(db: str, payload: dict[str, object]) -> None:
-    if not db:
-        raise ValueError("history persistence is disabled")
     reviewer = str(payload.get("reviewer", "Sahar")).strip()[:64] or "Sahar"
     symbol = str(payload.get("symbol", "XAUUSD_l")).strip()
     sample_key = str(payload.get("sample_key", "")).strip()
@@ -88,6 +86,8 @@ def _persist_human_opinion(db: str, payload: dict[str, object]) -> None:
         from .storage import PostgresOperationalRepository
         PostgresOperationalRepository(os.environ.get("RAMON_PG_DSN", "")).persist_human_opinion({"created_utc":int(time.time()),"reviewer":reviewer,"symbol":symbol,"sample_key":sample_key,"signal_bar_time":signal_bar_time,"opinion":opinion,"confidence":confidence,"note":note,"snapshot":json.dumps(snapshot, ensure_ascii=False, allow_nan=False)})
         return
+    if not db:
+        raise ValueError("history persistence is disabled")
     _ensure_human_opinion_table(db)
     with sqlite3.connect(db) as con:
         con.execute(
@@ -104,11 +104,11 @@ def _persist_human_opinion(db: str, payload: dict[str, object]) -> None:
 
 
 def _recent_human_opinions(db: str, symbol: str = "XAUUSD_l", limit: int = 12) -> list[dict[str, object]]:
-    if not db:
-        return []
     if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres":
         from .storage import PostgresOperationalRepository
         return PostgresOperationalRepository(os.environ.get("RAMON_PG_DSN", "")).recent_human_opinions(symbol, limit)
+    if not db:
+        return []
     _ensure_human_opinion_table(db)
     with sqlite3.connect(db) as con:
         con.row_factory = sqlite3.Row
@@ -142,8 +142,6 @@ def _ensure_override_table(db: str) -> None:
 
 
 def _persist_manual_override(db: str, payload: dict[str, object]) -> None:
-    if not db:
-        return
     if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres":
         from .storage import PostgresOperationalRepository
         PostgresOperationalRepository(os.environ.get("RAMON_PG_DSN", "")).persist_manual_override({
@@ -151,6 +149,8 @@ def _persist_manual_override(db: str, payload: dict[str, object]) -> None:
             "sample_key": str(payload["sample_key"]), "stage": str(payload["stage"]),
             "action": str(payload.get("action", "FORCE_PASS")),
             "payload": json.dumps(payload, ensure_ascii=False, sort_keys=True)})
+        return
+    if not db:
         return
     _ensure_override_table(db)
     with sqlite3.connect(db) as con:
@@ -321,6 +321,10 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
     latest_decision_snapshot: dict[str, object] | None = None
     latest_decision_snapshot_utc = 0
     history_db = os.getenv("RAMON_HISTORY_DB", "").strip()
+    storage_backend = os.getenv("RAMON_STORAGE_BACKEND", "sqlite").strip().lower()
+    storage_enabled = bool(history_db) or storage_backend == "postgres"
+    if storage_backend == "postgres" and not os.getenv("RAMON_PG_DSN", "").strip():
+        raise ValueError("RAMON_PG_DSN is required when RAMON_STORAGE_BACKEND=postgres")
     range_live_enabled = os.getenv("RAMON_RANGE_LIVE_ENABLED", "0") == "1"
     reversal_live_enabled = os.getenv("RAMON_REVERSAL_LIVE_ENABLED", "0") == "1"
     ensemble_dir = os.getenv("RAMON_ENSEMBLE_DIR", "/checkpoints/ensemble").strip()
@@ -447,13 +451,13 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 {
                     "ready": True,
                     "market_state_policy_enabled": settings.market_state_policy_enabled,
-                    "replay_inputs_enabled": bool(history_db),
+                    "replay_inputs_enabled": storage_enabled,
                     "model": model.model_id,
                     "forecast_context": "completed_m15_cached",
                     "live_quote_decisions": True,
                     "position_exit_advice": True,
                     "opportunity_entry_advice": True,
-                    "history_enabled": bool(history_db),
+                    "history_enabled": storage_enabled,
                     "allow_weak_intrabar_entries": settings.allow_weak_intrabar_entries,
                     "minimum_strength": settings.minimum_strength,
                     "weak_entry_policy": "forecast_intrabar_ai_trend_agreement",
@@ -769,7 +773,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     })
                     return
                 if self.path == "/trades":
-                    if not history_db:
+                    if not storage_enabled:
                         raise ValueError("history persistence is disabled")
                     persist_trade_outcome(history_db, payload, int(time.time()))
                     try:
@@ -797,7 +801,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 latest_market = market
                 latest_market_received_utc = int(time.time())
 
-                if history_db:
+                if storage_enabled:
                     key = f"{market.symbol}:{market.timeframe}"
                     newest = market.bars[-1].time
                     if last_persisted_bar.get(key) != newest:
@@ -1182,7 +1186,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     bool(active_overrides & {"entry_timing", "base", "decision"})
                 )
 
-                if history_db:
+                if storage_enabled:
                     try:
                         saved = persist_decision_sample(
                             history_db,
