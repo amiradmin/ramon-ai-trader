@@ -71,6 +71,7 @@ def detect_opportunity(market: Market, *, minimum_rr: float = 1.5,
         stop = max(entry+risk, high20+0.10*atr)
         target = low20
         rr = (entry-target)/(stop-entry)
-    # A historical structure target is required; never invent a distant TP just\n    # to force a superficially attractive reward/risk ratio.\n    if rr < minimum_rr or not all(isfinite(v) for v in (stop,target,rr)):
+    # Reject setups when the historical structure cannot fund the required reward/risk.
+    if rr < minimum_rr or not all(isfinite(v) for v in (stop,target,rr)):
         return wait("insufficient_reward_risk")
     return Opportunity(direction, setup, "candidate_only", entry, stop, target, rr, atr)
