@@ -13,6 +13,22 @@ def apply_live_opportunity(response: dict, opportunity: Opportunity, *,
     max_spread_ok: bool, manual_override: bool = False) -> bool:
     response["opportunity_live_enabled"] = int(enabled)
     response["opportunity_live_selected"] = 0
+    # Independent funnel telemetry: separate signal scarcity from execution vetoes.
+    # These fields are informational and never change order eligibility.
+    response["opportunity_candidate_available"] = int(opportunity.decision in {"BUY", "SELL"})
+    response["opportunity_candidate_setup"] = opportunity.setup
+    response["opportunity_candidate_reason"] = opportunity.reason
+    response["opportunity_execution_prerequisites"] = {
+        "enabled": bool(enabled),
+        "ea_capable": bool(ea_capable),
+        "fresh_quote": bool(fresh_quote),
+        "manual_override": bool(manual_override),
+        "spread_ok": bool(max_spread_ok),
+        "market_route_wait": assessment.get("route") == "WAIT",
+        "moment_veto": bool(response.get("moment_live_veto", 0)),
+        "another_lane": bool(response.get("range_execution") or response.get("reversal_execution")),
+        "base_decision_wait": response.get("decision") == "WAIT",
+    }
     def reject(reason: str) -> bool:
         response["opportunity_live_reason"] = reason
         return False
