@@ -43,10 +43,10 @@ input bool SmallOnlyMode = false; // Attach second EA instance on another M15 ch
 const ulong PrimaryMagicNumber = 26092212;
 const ulong SmallProfitMagicNumber = 26092213;
 input string ModelUrl = "http://127.0.0.1:8012/decision";
-input double MoneyUnitsPerUSD = 100.0; // CENT account: 100 account units = 1 USD.
-input bool AccountIsCent = true; // Configured account mode; MT5 ACCOUNT_CURRENCY alone cannot identify CENT.
+input double MoneyUnitsPerUSD = 1.0; // USD demo account: 1 account unit = 1 USD. For CENT use 100.0.
+input bool AccountIsCent = false; // USD demo default; set true only on a verified CENT account.
 input bool ConfirmMoneyUnitsPerUSD = false; // Must be true before live trading can arm.
-input string ExpectedAccountCurrency = ""; // Optional exact ACCOUNT_CURRENCY check when non-empty.
+input string ExpectedAccountCurrency = "USD"; // Demo USD default; adjust explicitly for other account currencies.
 input double RiskPerTradeUSD = 0.06; // Preferred sizing budget.
 input bool AllowMinLotRiskOverride = true; // Permit minimum volume within the executable risk cap.
 double MaxExecutableRiskUSD = 0.35; // Default; updated by the Control dashboard for PRIMARY.
