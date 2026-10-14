@@ -5625,7 +5625,98 @@ void OnTimer()
       || (risk_model_ready<0.5 && (MathAbs(risk_multiplier-1.0)>0.000001 || risk_probability!=-1.0))
       || (datetime)signal_time!=bar_time
       || (decision!="BUY" && decision!="SELL" && decision!="WAIT"))
-   { LastModelSnapshotTime=0; EarlyAdverseWeakSnapshots=0; StatusLine="Invalid/stale model response"; ShowStatus(); return; }
+   { LastModelSnapshotTime=0; EarlyAdverseWeakSnapshots=0;
+   string snapshot_invalid_field="";
+   // Diagnostic only: executed on rejected responses, never changes acceptance.
+   if(snapshot_invalid_field=="" && !JsonText(reply,"decision",decision)) snapshot_invalid_field="decision";
+   if(snapshot_invalid_field=="" && !JsonText(reply,"reason",reason)) snapshot_invalid_field="reason";
+   if(snapshot_invalid_field=="" && !JsonText(reply,"sample_key",sample_key)) snapshot_invalid_field="sample_key";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"sample_saved",sample_saved)) snapshot_invalid_field="sample_saved";
+   if(snapshot_invalid_field=="" && !JsonText(reply,"ensemble_bundle",bundle_id)) snapshot_invalid_field="ensemble_bundle";
+   if(snapshot_invalid_field=="" && !JsonText(reply,"base_decision",base_decision)) snapshot_invalid_field="base_decision";
+   if(snapshot_invalid_field=="" && !JsonText(reply,"base_reason",base_reason)) snapshot_invalid_field="base_reason";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"ensemble_ready",ensemble_ready)) snapshot_invalid_field="ensemble_ready";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"ensemble_active",ensemble_active)) snapshot_invalid_field="ensemble_active";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"regime_probability",regime_probability)) snapshot_invalid_field="regime_probability";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"entry_probability",entry_probability)) snapshot_invalid_field="entry_probability";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"news_probability",news_probability)) snapshot_invalid_field="news_probability";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"meta_probability",meta_probability)) snapshot_invalid_field="meta_probability";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"risk_model_ready",risk_model_ready)) snapshot_invalid_field="risk_model_ready";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"risk_probability",risk_probability)) snapshot_invalid_field="risk_probability";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"risk_multiplier",risk_multiplier)) snapshot_invalid_field="risk_multiplier";
+   if(snapshot_invalid_field=="" && !JsonText(reply,"news_source",news_source)) snapshot_invalid_field="news_source";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"news_source_ready",news_source_ready)) snapshot_invalid_field="news_source_ready";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"news_model_ready",news_model_ready)) snapshot_invalid_field="news_model_ready";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"news_source_age_seconds",news_source_age_seconds)) snapshot_invalid_field="news_source_age_seconds";
+   if(snapshot_invalid_field=="" && !JsonText(reply,"news_event_title",news_event_title)) snapshot_invalid_field="news_event_title";
+   if(snapshot_invalid_field=="" && !JsonText(reply,"news_event_country",news_event_country)) snapshot_invalid_field="news_event_country";
+   if(snapshot_invalid_field=="" && !JsonText(reply,"news_event_impact",news_event_impact)) snapshot_invalid_field="news_event_impact";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"news_event_time",news_event_time)) snapshot_invalid_field="news_event_time";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"news_event_delta_minutes",news_event_delta_minutes)) snapshot_invalid_field="news_event_delta_minutes";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"signal_bar_time",signal_time)) snapshot_invalid_field="signal_bar_time";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"signal_bid",signal_bid)) snapshot_invalid_field="signal_bid";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"signal_ask",signal_ask)) snapshot_invalid_field="signal_ask";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"forecast_low",forecast_low)) snapshot_invalid_field="forecast_low";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"forecast_median",median)) snapshot_invalid_field="forecast_median";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"forecast_high",forecast_high)) snapshot_invalid_field="forecast_high";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"atr",atr)) snapshot_invalid_field="atr";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"edge",edge)) snapshot_invalid_field="edge";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"buy_edge",buy_edge)) snapshot_invalid_field="buy_edge";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"sell_edge",sell_edge)) snapshot_invalid_field="sell_edge";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"minimum_edge",minimum_edge)) snapshot_invalid_field="minimum_edge";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"uncertainty",uncertainty)) snapshot_invalid_field="uncertainty";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"signal_strength",signal_strength)) snapshot_invalid_field="signal_strength";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"minimum_strength",minimum_strength)) snapshot_invalid_field="minimum_strength";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"intrabar_confirmed",intrabar_confirmed)) snapshot_invalid_field="intrabar_confirmed";
+   if(snapshot_invalid_field=="" && !JsonText(reply,"intrabar_direction",intrabar_direction)) snapshot_invalid_field="intrabar_direction";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"intrabar_move_atr",intrabar_move_atr)) snapshot_invalid_field="intrabar_move_atr";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"intrabar_rebound_atr",intrabar_rebound_atr)) snapshot_invalid_field="intrabar_rebound_atr";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"intrabar_min_strength",intrabar_min_strength)) snapshot_invalid_field="intrabar_min_strength";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"intrabar_min_move_atr",intrabar_min_move_atr)) snapshot_invalid_field="intrabar_min_move_atr";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"intrabar_min_rebound_atr",intrabar_min_rebound_atr)) snapshot_invalid_field="intrabar_min_rebound_atr";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"ai_trend_confirmed",ai_trend_confirmed)) snapshot_invalid_field="ai_trend_confirmed";
+   if(snapshot_invalid_field=="" && !JsonText(reply,"ai_trend_direction",ai_trend_direction)) snapshot_invalid_field="ai_trend_direction";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"ai_trend_score",ai_trend_score)) snapshot_invalid_field="ai_trend_score";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"ai_trend_move_atr",ai_trend_move_atr)) snapshot_invalid_field="ai_trend_move_atr";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"ai_trend_consistency",ai_trend_consistency)) snapshot_invalid_field="ai_trend_consistency";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"trend_min_path_atr",trend_min_path_atr)) snapshot_invalid_field="trend_min_path_atr";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"trend_min_consistency",trend_min_consistency)) snapshot_invalid_field="trend_min_consistency";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"trend_min_edge_fraction",trend_min_edge_fraction)) snapshot_invalid_field="trend_min_edge_fraction";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"trend_min_micro_move_atr",trend_min_micro_move_atr)) snapshot_invalid_field="trend_min_micro_move_atr";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"manual_execution_override",manual_execution_override)) snapshot_invalid_field="manual_execution_override";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"ai_engine_v2_selected",ai_engine_v2_selected)) snapshot_invalid_field="ai_engine_v2_selected";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"ai_engine_v2_buy_quality",ai_engine_v2_buy_quality)) snapshot_invalid_field="ai_engine_v2_buy_quality";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"ai_engine_v2_sell_quality",ai_engine_v2_sell_quality)) snapshot_invalid_field="ai_engine_v2_sell_quality";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"ai_engine_v2_quality_margin",ai_engine_v2_quality_margin)) snapshot_invalid_field="ai_engine_v2_quality_margin";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"ai_engine_v2_score",ai_engine_v2_score)) snapshot_invalid_field="ai_engine_v2_score";
+   if(snapshot_invalid_field=="" && !JsonText(reply,"ai_engine_v2_direction_source",ai_engine_v2_direction_source)) snapshot_invalid_field="ai_engine_v2_direction_source";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"spread_points",model_spread)) snapshot_invalid_field="spread_points";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"stop_distance",stop_distance)) snapshot_invalid_field="stop_distance";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"target_distance",target_distance)) snapshot_invalid_field="target_distance";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"target_learning_active",target_learning_active)) snapshot_invalid_field="target_learning_active";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"target_structure_ready",target_structure_ready)) snapshot_invalid_field="target_structure_ready";
+   if(snapshot_invalid_field=="" && !JsonText(reply,"target_method",target_method)) snapshot_invalid_field="target_method";
+   if(snapshot_invalid_field=="" && !JsonText(reply,"target_direction",target_direction)) snapshot_invalid_field="target_direction";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"target_impulse_start",target_impulse_start)) snapshot_invalid_field="target_impulse_start";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"target_impulse_end",target_impulse_end)) snapshot_invalid_field="target_impulse_end";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"target_impulse_range",target_impulse_range)) snapshot_invalid_field="target_impulse_range";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"target_impulse_atr",target_impulse_atr)) snapshot_invalid_field="target_impulse_atr";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"target_tp1",target_tp1)) snapshot_invalid_field="target_tp1";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"target_tp2",target_tp2)) snapshot_invalid_field="target_tp2";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"target_tp3",target_tp3)) snapshot_invalid_field="target_tp3";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"legacy_target_price",legacy_target_price)) snapshot_invalid_field="legacy_target_price";
+   if(snapshot_invalid_field=="")
+   {
+      if(!ValidSampleKey(sample_key)) snapshot_invalid_field="sample_key_invalid";
+      else if((datetime)signal_time!=bar_time) snapshot_invalid_field="signal_bar_time_mismatch";
+      else if(decision!="BUY" && decision!="SELL" && decision!="WAIT") snapshot_invalid_field="decision_invalid";
+      else snapshot_invalid_field="semantic_validation";
+   }
+   StatusLine="Invalid model response: "+snapshot_invalid_field;
+   Print("RAMON_MODEL_PROTOCOL_REJECT symbol=",_Symbol," field=",snapshot_invalid_field,
+         " local_bar=",IntegerToString((long)bar_time),
+         " response_bar=",DoubleToString(signal_time,0));
+   ShowStatus(); return; }
    // Optional protocol: old servers omit this field and remain compatible.
    JsonNumber(reply,"opportunity_live_selected",opportunity_live_selected);
    LastModelSnapshotTime=LastDecisionRequestTime;
