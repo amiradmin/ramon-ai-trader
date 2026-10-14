@@ -35,3 +35,13 @@ def test_invalid_market_is_rejected():
     broken = replace(market(), ask=0.0)
     with pytest.raises(ValueError):
         detect_opportunity(broken)
+
+
+def test_optional_confirmation_never_adds_unconfirmed_candidate():
+    baseline = detect_opportunity(market())
+    confirmed = detect_opportunity(market(), require_reversal_confirmation=True)
+    if baseline.decision == "WAIT":
+        assert confirmed.decision == "WAIT"
+    if confirmed.decision != "WAIT":
+        assert confirmed.decision == baseline.decision
+        assert confirmed.setup == baseline.setup
