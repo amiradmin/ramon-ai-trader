@@ -57,6 +57,27 @@ def main():
             counts["invalid_historical_bars"] += 1
             continue
         counts[result.reason if result.decision=="WAIT" else result.setup] += 1
+        # Explain the no_valid_setup funnel without changing production rules.
+        if result.reason == "no_valid_setup":
+            atr = atr14(b)
+            previous = b[-21:-1]
+            early = b[-35:-21]
+            hi, lo = max(x.high for x in previous), min(x.low for x in previous)
+            middle = (hi + lo) / 2
+            older_middle = (max(x.high for x in early) + min(x.low for x in early)) / 2
+            trend = (b[-1].close - b[-5].close) / atr
+            shift = (middle - older_middle) / atr
+            if abs(trend) < 0.28:
+                prefilters["trend_momentum_below_threshold"] += 1
+            if abs(shift) < 0.12:
+                prefilters["range_midpoint_shift_small"] += 1
+            if (hi-lo) > 3.8*atr:
+                prefilters["range_width_too_wide"] += 1
+            if (hi-lo) <= 3.8*atr and not (
+                (mid <= lo+0.55*atr and b[-1].close>b[-1].open) or
+                (mid >= hi-0.55*atr and b[-1].close<b[-1].open)):
+                prefilters["range_boundary_rejection_absent"] += 1
+
         if result.decision != "WAIT":
             candidates.append((b[-1].time, result.decision, result.setup,
                                round(result.reward_risk,3)))
@@ -66,6 +87,8 @@ def main():
     print("These numbers are setup eligibility diagnostics, NOT trading returns.")
     for reason,n in counts.most_common():
         print(f"{reason}: {n} ({n/max(1,sum(counts.values())):.1%})")
+    print("No-setup conditions (may overlap):")
+    for reason,n in prefilters.most_common(): print(f"{reason}: {n}")
     print("Sample candidates (bar UTC timestamp, side, setup, theoretical RR):")
     for row in candidates[:20]: print(*row)
     if not candidates: print("(none at the assumed spread)")
