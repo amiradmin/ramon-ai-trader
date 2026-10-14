@@ -61,16 +61,24 @@ def main():
         if result.reason == "no_valid_setup":
             atr = atr14(b)
             previous = b[-21:-1]
-            early = b[-35:-21]
-            hi, lo = max(x.high for x in previous), min(x.low for x in previous)
-            middle = (hi + lo) / 2
-            older_middle = (max(x.high for x in early) + min(x.low for x in early)) / 2
-            trend = (b[-1].close - b[-5].close) / atr
-            shift = (middle - older_middle) / atr
-            if abs(trend) < 0.28:
-                prefilters["trend_momentum_below_threshold"] += 1
-            if abs(shift) < 0.12:
-                prefilters["range_midpoint_shift_small"] += 1
+            impulse = b[-13:-4]
+            pullback = b[-4:-1]
+            impulse_move = (impulse[-1].close-impulse[0].close)/atr
+            if abs(impulse_move) < 0.9:
+                prefilters["trend_impulse_below_threshold"] += 1
+            else:
+                if impulse_move > 0:
+                    retrace = (max(x.high for x in impulse) -
+                               min(x.low for x in pullback))/atr
+                    trigger = b[-1].close>b[-1].open and b[-1].close>b[-2].close
+                else:
+                    retrace = (max(x.high for x in pullback) -
+                               min(x.low for x in impulse))/atr
+                    trigger = b[-1].close<b[-1].open and b[-1].close<b[-2].close
+                if not 0.20 <= retrace <= 1.8:
+                    prefilters["trend_retracement_outside_band"] += 1
+                if not trigger:
+                    prefilters["trend_rejection_trigger_absent"] += 1
             if (hi-lo) > 3.8*atr:
                 prefilters["range_width_too_wide"] += 1
             if (hi-lo) <= 3.8*atr and not (
