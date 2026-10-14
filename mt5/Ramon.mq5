@@ -1,6 +1,6 @@
 ﻿#property strict
-#property version "1.601"
-#define RAMON_EA_VERSION "0.60.1"
+#property version "1.610"
+#define RAMON_EA_VERSION "0.61.0"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -31,6 +31,7 @@ input bool EnableRangeMain = true; // Explicit cent-account range-reversal trial
 const double RangeMainTargetUnits = 5.0; // Quick RANGE take-profit: USD 0.05 on 100 units/USD.
 const double RangeMainMaxLossUnits = 5.0; // RANGE entries must keep broker SL risk <= USD 0.05.
 input bool EnableLiveTrading = false;
+input bool DemoExperimentalMode = false; // Only active on demo; bypasses selected entry frequency gates.
 input bool EnableV2AccountRiskGuard = true; // Reject new entries without an account-wide risk preflight.
 input double V2MaxPortfolioRiskUSD = 0.35;
 input double V2MaxSymbolRiskUSD = 0.35;
@@ -2980,8 +2981,14 @@ int ReadCooldownPosition(const ulong identifier,string &direction,
    return 1;
 }
 
+bool DemoExperimentActive()
+{
+   return DemoExperimentalMode && AccountInfoInteger(ACCOUNT_TRADE_MODE)==ACCOUNT_TRADE_MODE_DEMO;
+}
+
 bool LocalLossCooldownBlocked(const string direction,string &reason)
 {
+   if(DemoExperimentActive()) { reason=""; return false; }
    reason="";
    datetime now=TimeCurrent();
    if(!HistorySelect(0,now))
@@ -4047,6 +4054,7 @@ bool IsRangeTradeComment(const string comment)
 
 int RangeMainCooldownRemaining()
 {
+   if(DemoExperimentActive()) return 0;
    datetime now=TimeCurrent();
    if(!HistorySelect(now-86400,now)) return -1;
    int total=HistoryDealsTotal();
@@ -5933,7 +5941,7 @@ void OnTimer()
    if(!dashboard_manual_entry && LocalLossCooldownBlocked(decision,cooldown_reason))
    { StatusLine=cooldown_reason; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
    int today=(SmallOnlyMode || dashboard_manual_entry ? 0 : TradesToday());
-   if(!dashboard_manual_entry && !SmallOnlyMode && (today<0 || today>=MaxTradesPerDay))
+   if(!DemoExperimentActive() && !dashboard_manual_entry && !SmallOnlyMode && (today<0 || today>=MaxTradesPerDay))
    { StatusLine="Daily trade limit/history unavailable"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
    MqlTick tick;
    if(!SymbolInfoTick(_Symbol,tick) || TimeCurrent()-tick.time>30)
@@ -6093,7 +6101,7 @@ void OnTimer()
    if(!dashboard_manual_entry && !SmallOnlyMode)
    {
       today=TradesToday();
-      if(today<0 || today>=MaxTradesPerDay)
+      if(!DemoExperimentActive() && (today<0 || today>=MaxTradesPerDay))
       { StatusLine="V2 EXECUTION BLOCKED: daily limit changed"; Print(StatusLine); ShowStatus(); return; }
    }
    if(SmallOnlyMode)
@@ -6595,6 +6603,8 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
 
 int OnInit()
 {
+   if(DemoExperimentalMode && AccountInfoInteger(ACCOUNT_TRADE_MODE)!=ACCOUNT_TRADE_MODE_DEMO)
+   { Print("DEMO EXPERIMENTAL BLOCKED: only allowed on DEMO accounts"); return INIT_FAILED; }
    ReadControlRiskCap();
    ReadDecisionCadence();
    if((TradeSymbol!="" && _Symbol!=TradeSymbol) || _Period!=PERIOD_M15 || StringFind(_Symbol,"XAUUSD")!=0)
