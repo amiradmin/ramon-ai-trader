@@ -2225,6 +2225,31 @@ def daily_reversal_report(db, symbol, now=None):
 
 def training_data_health(db, symbol):
     """Read-only, low-frequency training inventory; never claims unlabeled WAITs are outcomes."""
+    if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres":
+        result = {"available": True, "symbol": symbol, "generated_utc": int(time.time())}
+        try:
+            import psycopg
+            with psycopg.connect(os.environ["RAMON_PG_DSN"], connect_timeout=3,
+                options="-c default_transaction_read_only=on -c statement_timeout=4000") as con:
+                def stat(table, column, clause=""):
+                    # All table/column/clause values are local hardcoded constants.
+                    with con.cursor() as cur:
+                        cur.execute(f"SELECT COUNT(*), MAX({column}) FROM ramon.{table} WHERE symbol=%s" + clause, (symbol,))
+                        count, latest = cur.fetchone()
+                    return {"available": True, "count": count, "last_utc": latest}
+                result["decisions"] = stat("decision_samples", "captured")
+                result["wait_decisions"] = stat("decision_samples", "captured", " AND final_decision='WAIT'")
+                result["trade_outcomes"] = stat("trade_outcomes", "received")
+                result["closed_trades"] = stat("trade_outcomes", "closed", " AND closed>0")
+                for key in ("human_actions", "human_entries", "human_skips"):
+                    result[key] = {"available": False, "reason": "PG_HUMAN_EVENTS_NOT_MIGRATED"}
+                result["auto_outcomes"] = {"available": False, "reason": "SOURCE_CLASSIFICATION_NOT_VERIFIED"}
+                result["labeled_decisions"] = {"available": False, "reason": "JOIN_COVERAGE_NOT_AUDITED"}
+                result["missing_data"] = {"available": False, "reason": "COMPLETENESS_NOT_AUDITED"}
+                result["training_readiness"] = "NOT_AUDITED"
+                return result
+        except Exception as exc:
+            return {"available": False, "reason": "PG_DATABASE_READ_FAILED", "detail": type(exc).__name__}
     path = Path(db).expanduser().resolve()
     if not path.is_file():
         return {"available": False, "reason": "HISTORY_DB_MISSING"}
