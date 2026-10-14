@@ -9,6 +9,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 import json
 import math
+import os
 from pathlib import Path
 import sqlite3
 from .entry_timing_v2_lab import _features, _signal
@@ -42,10 +43,21 @@ def evaluate(db, symbol="XAUUSD_l", horizon_minutes=5, folds=4,
             0.3<=train_fraction<=0.8 and point_size>0 and
             spread_price>=0 and slippage_price>=0 and min_days>=2):
         raise ValueError("invalid evaluation parameters")
-    with sqlite3.connect(f"file:{Path(db).resolve()}?mode=ro",uri=True) as con:
-        bars=con.execute("""SELECT timeframe,time,close,spread_points
-            FROM mtf_utc_bars WHERE symbol=? AND timeframe IN ('M1','M5')
-            ORDER BY time""",(symbol,)).fetchall()
+    if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres":
+        import psycopg
+        with psycopg.connect(os.environ["RAMON_PG_DSN"], connect_timeout=5,
+                             options="-c default_transaction_read_only=on -c statement_timeout=30000") as con:
+            with con.cursor() as cur:
+                cur.execute("""SELECT timeframe,time,close,spread_points
+                    FROM ramon.mtf_utc_bars
+                    WHERE symbol=%s AND timeframe IN ('M1','M5')
+                    ORDER BY time""", (symbol,))
+                bars=cur.fetchall()
+    else:
+        with sqlite3.connect(f"file:{Path(db).resolve()}?mode=ro",uri=True) as con:
+            bars=con.execute("""SELECT timeframe,time,close,spread_points
+                FROM mtf_utc_bars WHERE symbol=? AND timeframe IN ('M1','M5')
+                ORDER BY time""",(symbol,)).fetchall()
     m1={int(t):float(c) for tf,t,c,_ in bars if tf=="M1" and math.isfinite(c)}
     m5={int(t):float(c) for tf,t,c,_ in bars if tf=="M5" and math.isfinite(c)}
     spreads={int(t):int(sp) for tf,t,_,sp in bars if tf=="M1" and sp is not None}
