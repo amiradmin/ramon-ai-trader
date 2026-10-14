@@ -36,11 +36,11 @@ def test_disagreement_changes_entry_to_wait():
     assert item["v3_agreement_guard_applied"] == 1
 
 
-def test_missing_v3_fails_closed_for_v2_entry():
+def test_missing_v3_does_not_suppress_v2_entry():
     item = response(ai_engine_v3_shadow_active=0)
     apply_live_v3_agreement_guard(item, enabled=True)
-    assert item["decision"] == "WAIT"
-    assert item["v3_agreement_guard_reason"] == "v3_unavailable"
+    assert item["decision"] == "BUY"
+    assert item["v3_agreement_guard_reason"] == "v3_unavailable_no_veto"
 
 
 def test_never_changes_wait_to_entry():
@@ -67,3 +67,10 @@ def test_cannot_resurrect_v2_inactive_entry():
     item = response(ai_engine_v2_active=0, ai_engine_v3_shadow_decision="WAIT")
     apply_live_v3_agreement_guard(item, enabled=True)
     assert item["decision"] == "BUY"
+
+
+def test_v3_wait_does_not_suppress_v2_entry():
+    item = response(ai_engine_v3_shadow_decision="WAIT")
+    apply_live_v3_agreement_guard(item, enabled=True)
+    assert item["decision"] == "BUY"
+    assert item["v3_agreement_guard_reason"] == "v3_wait_no_veto"
