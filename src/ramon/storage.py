@@ -19,6 +19,9 @@ class OperationalRepository(Protocol):
     def persist_trade(self, values: dict[str, object]) -> None: ...
     def persist_shadow_vote(self, values: dict[str, object]) -> bool: ...
     def persist_replay_input(self, values: dict[str, object]) -> bool: ...
+    def persist_human_opinion(self, values: dict[str, object]) -> None: ...
+    def persist_manual_override(self, values: dict[str, object]) -> None: ...
+    def recent_human_opinions(self, symbol: str, limit: int) -> list[dict[str, object]]: ...
 
 
 @dataclass(frozen=True)
@@ -49,3 +52,15 @@ class PostgresOperationalRepository:
     def persist_replay_input(self, values: dict[str, object]) -> bool:
         from .postgres_operational import persist_replay_input
         return persist_replay_input(self.dsn, values)
+
+    def persist_human_opinion(self, values: dict[str, object]) -> None:
+        from .postgres_operational import persist_human_opinion
+        persist_human_opinion(self.dsn, values)
+
+    def persist_manual_override(self, values: dict[str, object]) -> None:
+        from .postgres_operational import persist_manual_override
+        persist_manual_override(self.dsn, values)
+
+    def recent_human_opinions(self, symbol: str, limit: int) -> list[dict[str, object]]:
+        from .postgres_operational import recent_human_opinions
+        return recent_human_opinions(self.dsn, symbol, limit)

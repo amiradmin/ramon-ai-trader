@@ -85,8 +85,8 @@ def _persist_human_opinion(db: str, payload: dict[str, object]) -> None:
     if confidence not in {1, 2, 3, 4, 5}:
         raise ValueError("confidence must be 1..5")
     if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres":
-        from .postgres_operational import persist_human_opinion
-        persist_human_opinion(os.environ.get("RAMON_PG_DSN", ""), {"created_utc":int(time.time()),"reviewer":reviewer,"symbol":symbol,"sample_key":sample_key,"signal_bar_time":signal_bar_time,"opinion":opinion,"confidence":confidence,"note":note,"snapshot":json.dumps(snapshot, ensure_ascii=False, allow_nan=False)})
+        from .storage import PostgresOperationalRepository
+        PostgresOperationalRepository(os.environ.get("RAMON_PG_DSN", "")).persist_human_opinion({"created_utc":int(time.time()),"reviewer":reviewer,"symbol":symbol,"sample_key":sample_key,"signal_bar_time":signal_bar_time,"opinion":opinion,"confidence":confidence,"note":note,"snapshot":json.dumps(snapshot, ensure_ascii=False, allow_nan=False)})
         return
     _ensure_human_opinion_table(db)
     with sqlite3.connect(db) as con:
@@ -107,8 +107,8 @@ def _recent_human_opinions(db: str, symbol: str = "XAUUSD_l", limit: int = 12) -
     if not db:
         return []
     if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres":
-        from .postgres_operational import recent_human_opinions
-        return recent_human_opinions(os.environ.get("RAMON_PG_DSN", ""), symbol, limit)
+        from .storage import PostgresOperationalRepository
+        return PostgresOperationalRepository(os.environ.get("RAMON_PG_DSN", "")).recent_human_opinions(symbol, limit)
     _ensure_human_opinion_table(db)
     with sqlite3.connect(db) as con:
         con.row_factory = sqlite3.Row
@@ -145,8 +145,8 @@ def _persist_manual_override(db: str, payload: dict[str, object]) -> None:
     if not db:
         return
     if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres":
-        from .postgres_operational import persist_manual_override
-        persist_manual_override(os.environ.get("RAMON_PG_DSN", ""), {
+        from .storage import PostgresOperationalRepository
+        PostgresOperationalRepository(os.environ.get("RAMON_PG_DSN", "")).persist_manual_override({
             "created_utc": int(time.time()), "signal_bar_time": int(payload["signal_bar_time"]),
             "sample_key": str(payload["sample_key"]), "stage": str(payload["stage"]),
             "action": str(payload.get("action", "FORCE_PASS")),
