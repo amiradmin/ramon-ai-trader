@@ -33,6 +33,7 @@ from .reversal_strategy import apply_reversal
 from .trade_selector import apply_live_selector
 from .ai_decision_engine import apply_ai_decision_engine
 from .ai_decision_engine_v3 import apply_ai_engine_v3_shadow
+from .market_opportunity_engine import detect_opportunity
 from .decision_safety_shadow import assess_data_quality, no_trade_recommendation
 
 
@@ -1177,6 +1178,11 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     range_setup = None
                 if response["decision"] == "WAIT":
                     response["reversal_execution"] = 0
+                # Independently observe an actionable price-structure setup.
+                # Not an order authorization: existing V2/EA constraints remain authoritative.
+                opportunity = detect_opportunity(market)
+                response.update({"opportunity_engine_version": "structure-v1",
+                    **{"opportunity_" + k: v for k, v in opportunity.to_dict().items()}})
                 sample_key = uuid4().hex[:16]
                 response["sample_key"] = sample_key
                 response["sample_saved"] = 0
