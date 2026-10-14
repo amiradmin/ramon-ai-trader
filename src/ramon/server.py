@@ -33,6 +33,8 @@ from .reversal_strategy import apply_reversal
 from .trade_selector import apply_live_selector
 from .ai_decision_engine import apply_ai_decision_engine
 from .ai_decision_engine_v3 import apply_ai_engine_v3_shadow
+from .market_opportunity_engine import detect_opportunity
+from .opportunity_execution import apply_live_opportunity
 from .decision_safety_shadow import assess_data_quality, no_trade_recommendation
 
 
@@ -1177,6 +1179,40 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     range_setup = None
                 if response["decision"] == "WAIT":
                     response["reversal_execution"] = 0
+                # Independently observe an actionable price-structure setup.
+                # Not an order authorization: existing V2/EA constraints remain authoritative.
+                opportunity = detect_opportunity(market)
+                response.update({"opportunity_engine_version": "structure-v1",
+                    **{"opportunity_" + k: v for k, v in opportunity.to_dict().items()}})
+                # Optional independent execution path for valid price-structure setups.
+                # Existing EA order/risk limits remain authoritative.
+                apply_live_opportunity(
+                    response, opportunity,
+                    enabled=os.environ.get("RAMON_STRUCTURE_LIVE_ENABLED", "0") == "1",
+                    ea_capable=payload.get("range_execution_ready") is True,
+                    fresh_quote=quote_time is not None,
+                    assessment=market_assessment,
+                    max_spread_ok=(market.ask-market.bid)/market.point <= settings.max_spread_points,
+                    manual_override=bool(active_overrides),
+                )
+                # Diagnostic-only: emit on the first observation or a change in
+                # candidate / final action / rejection reason. Never logs credentials.
+                structure_log_state = (
+                    str(response.get("opportunity_setup", "NONE")),
+                    str(response.get("opportunity_decision", "WAIT")),
+                    str(response.get("decision", "WAIT")),
+                    str(response.get("opportunity_live_reason", "unknown")),
+                )
+                if getattr(self.server, "_structure_log_state", None) != structure_log_state:
+                    self.server._structure_log_state = structure_log_state
+                    print(
+                        "RAMON_STRUCTURE"
+                        + " setup=" + structure_log_state[0]
+                        + " candidate=" + structure_log_state[1]
+                        + " final=" + structure_log_state[2]
+                        + " reason=" + structure_log_state[3],
+                        flush=True,
+                    )
                 sample_key = uuid4().hex[:16]
                 response["sample_key"] = sample_key
                 response["sample_saved"] = 0

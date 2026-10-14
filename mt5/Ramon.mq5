@@ -1,6 +1,6 @@
 ﻿#property strict
-#property version "1.600"
-#define RAMON_EA_VERSION "0.60.0"
+#property version "1.610"
+#define RAMON_EA_VERSION "0.61.0"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -23,7 +23,7 @@ long GlobalFree(long hMem);
 long lstrcpyW(long dst,const string src);
 #import
 
-input string TradeSymbol = "XAUUSD_l";
+input string TradeSymbol = ""; // Empty: use current chart symbol (XAUUSD_l or XAUUSD_o).
 input string RequiredServerText = "LiteFinance";
 input bool AutoLockCurrentAccount = true; // Bind this EA session to the account active at OnInit.
 input long AllowedAccountLogin = 0; // Used only when AutoLockCurrentAccount=false.
@@ -31,20 +31,22 @@ input bool EnableRangeMain = true; // Explicit cent-account range-reversal trial
 const double RangeMainTargetUnits = 5.0; // Quick RANGE take-profit: USD 0.05 on 100 units/USD.
 const double RangeMainMaxLossUnits = 5.0; // RANGE entries must keep broker SL risk <= USD 0.05.
 input bool EnableLiveTrading = false;
+input bool DemoExperimentalMode = false; // Only active on demo; bypasses selected entry frequency gates.
 input bool EnableV2AccountRiskGuard = true; // Reject new entries without an account-wide risk preflight.
 input double V2MaxPortfolioRiskUSD = 0.35;
 input double V2MaxSymbolRiskUSD = 0.35;
 input double V2MaxDirectionRiskUSD = 0.35;
 input double V2MinimumMarginLevelPercent = 300.0;
 
+input bool EnableStructureOpportunity = false; // Opt-in independent structure opportunities.
 input bool SmallOnlyMode = false; // Attach second EA instance on another M15 chart for parallel SMALL trades.
 const ulong PrimaryMagicNumber = 26092212;
 const ulong SmallProfitMagicNumber = 26092213;
 input string ModelUrl = "http://127.0.0.1:8012/decision";
-input double MoneyUnitsPerUSD = 100.0; // CENT account: 100 account units = 1 USD.
-input bool AccountIsCent = true; // Configured account mode; MT5 ACCOUNT_CURRENCY alone cannot identify CENT.
+input double MoneyUnitsPerUSD = 1.0; // USD demo account: 1 account unit = 1 USD. For CENT use 100.0.
+input bool AccountIsCent = false; // USD demo default; set true only on a verified CENT account.
 input bool ConfirmMoneyUnitsPerUSD = false; // Must be true before live trading can arm.
-input string ExpectedAccountCurrency = ""; // Optional exact ACCOUNT_CURRENCY check when non-empty.
+input string ExpectedAccountCurrency = "USD"; // Demo USD default; adjust explicitly for other account currencies.
 input double RiskPerTradeUSD = 0.06; // Preferred sizing budget.
 input bool AllowMinLotRiskOverride = true; // Permit minimum volume within the executable risk cap.
 double MaxExecutableRiskUSD = 0.35; // Default; updated by the Control dashboard for PRIMARY.
@@ -379,6 +381,12 @@ bool LiveExecutionReady(string &reason)
    if(!EnableLiveTrading)
    {
       reason="Live trading disabled";
+      return false;
+   }
+   if(DemoExperimentActive() && (AccountIsCent || MathAbs(MoneyUnitsPerUSD-1.0)>0.000001
+      || AccountInfoString(ACCOUNT_CURRENCY)!="USD"))
+   {
+      reason="BLOCKED: demo experimental requires USD account, AccountIsCent=false and MoneyUnitsPerUSD=1";
       return false;
    }
    if(!ConfirmMoneyUnitsPerUSD)
@@ -2979,8 +2987,14 @@ int ReadCooldownPosition(const ulong identifier,string &direction,
    return 1;
 }
 
+bool DemoExperimentActive()
+{
+   return DemoExperimentalMode && AccountInfoInteger(ACCOUNT_TRADE_MODE)==ACCOUNT_TRADE_MODE_DEMO;
+}
+
 bool LocalLossCooldownBlocked(const string direction,string &reason)
 {
+   if(DemoExperimentActive()) { reason=""; return false; }
    reason="";
    datetime now=TimeCurrent();
    if(!HistorySelect(0,now))
@@ -4046,6 +4060,7 @@ bool IsRangeTradeComment(const string comment)
 
 int RangeMainCooldownRemaining()
 {
+   if(DemoExperimentActive()) return 0;
    datetime now=TimeCurrent();
    if(!HistorySelect(now-86400,now)) return -1;
    int total=HistoryDealsTotal();
@@ -5527,6 +5542,7 @@ void OnTimer()
    double trend_min_path_atr=0.0,trend_min_consistency=0.0,trend_min_edge_fraction=0.0,trend_min_micro_move_atr=0.0;
    double manual_execution_override=0.0;
    double ai_engine_v2_selected=0.0;
+   double opportunity_live_selected=0.0;
    double ai_engine_v2_buy_quality=-1.0,ai_engine_v2_sell_quality=-1.0;
    double ai_engine_v2_quality_margin=-1.0,ai_engine_v2_score=-1.0;
    string ai_engine_v2_direction_source="NONE";
@@ -5615,7 +5631,106 @@ void OnTimer()
       || (risk_model_ready<0.5 && (MathAbs(risk_multiplier-1.0)>0.000001 || risk_probability!=-1.0))
       || (datetime)signal_time!=bar_time
       || (decision!="BUY" && decision!="SELL" && decision!="WAIT"))
-   { LastModelSnapshotTime=0; EarlyAdverseWeakSnapshots=0; StatusLine="Invalid/stale model response"; ShowStatus(); return; }
+   { LastModelSnapshotTime=0; EarlyAdverseWeakSnapshots=0;
+   string snapshot_invalid_field="";
+   // Diagnostic only: executed on rejected responses, never changes acceptance.
+   if(snapshot_invalid_field=="" && !JsonText(reply,"decision",decision)) snapshot_invalid_field="decision";
+   if(snapshot_invalid_field=="" && !JsonText(reply,"reason",reason)) snapshot_invalid_field="reason";
+   if(snapshot_invalid_field=="" && !JsonText(reply,"sample_key",sample_key)) snapshot_invalid_field="sample_key";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"sample_saved",sample_saved)) snapshot_invalid_field="sample_saved";
+   if(snapshot_invalid_field=="" && !JsonText(reply,"ensemble_bundle",bundle_id)) snapshot_invalid_field="ensemble_bundle";
+   if(snapshot_invalid_field=="" && !JsonText(reply,"base_decision",base_decision)) snapshot_invalid_field="base_decision";
+   if(snapshot_invalid_field=="" && !JsonText(reply,"base_reason",base_reason)) snapshot_invalid_field="base_reason";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"ensemble_ready",ensemble_ready)) snapshot_invalid_field="ensemble_ready";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"ensemble_active",ensemble_active)) snapshot_invalid_field="ensemble_active";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"regime_probability",regime_probability)) snapshot_invalid_field="regime_probability";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"entry_probability",entry_probability)) snapshot_invalid_field="entry_probability";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"news_probability",news_probability)) snapshot_invalid_field="news_probability";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"meta_probability",meta_probability)) snapshot_invalid_field="meta_probability";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"risk_model_ready",risk_model_ready)) snapshot_invalid_field="risk_model_ready";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"risk_probability",risk_probability)) snapshot_invalid_field="risk_probability";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"risk_multiplier",risk_multiplier)) snapshot_invalid_field="risk_multiplier";
+   if(snapshot_invalid_field=="" && !JsonText(reply,"news_source",news_source)) snapshot_invalid_field="news_source";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"news_source_ready",news_source_ready)) snapshot_invalid_field="news_source_ready";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"news_model_ready",news_model_ready)) snapshot_invalid_field="news_model_ready";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"news_source_age_seconds",news_source_age_seconds)) snapshot_invalid_field="news_source_age_seconds";
+   if(snapshot_invalid_field=="" && !JsonText(reply,"news_event_title",news_event_title)) snapshot_invalid_field="news_event_title";
+   if(snapshot_invalid_field=="" && !JsonText(reply,"news_event_country",news_event_country)) snapshot_invalid_field="news_event_country";
+   if(snapshot_invalid_field=="" && !JsonText(reply,"news_event_impact",news_event_impact)) snapshot_invalid_field="news_event_impact";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"news_event_time",news_event_time)) snapshot_invalid_field="news_event_time";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"news_event_delta_minutes",news_event_delta_minutes)) snapshot_invalid_field="news_event_delta_minutes";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"signal_bar_time",signal_time)) snapshot_invalid_field="signal_bar_time";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"signal_bid",signal_bid)) snapshot_invalid_field="signal_bid";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"signal_ask",signal_ask)) snapshot_invalid_field="signal_ask";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"forecast_low",forecast_low)) snapshot_invalid_field="forecast_low";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"forecast_median",median)) snapshot_invalid_field="forecast_median";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"forecast_high",forecast_high)) snapshot_invalid_field="forecast_high";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"atr",atr)) snapshot_invalid_field="atr";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"edge",edge)) snapshot_invalid_field="edge";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"buy_edge",buy_edge)) snapshot_invalid_field="buy_edge";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"sell_edge",sell_edge)) snapshot_invalid_field="sell_edge";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"minimum_edge",minimum_edge)) snapshot_invalid_field="minimum_edge";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"uncertainty",uncertainty)) snapshot_invalid_field="uncertainty";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"signal_strength",signal_strength)) snapshot_invalid_field="signal_strength";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"minimum_strength",minimum_strength)) snapshot_invalid_field="minimum_strength";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"intrabar_confirmed",intrabar_confirmed)) snapshot_invalid_field="intrabar_confirmed";
+   if(snapshot_invalid_field=="" && !JsonText(reply,"intrabar_direction",intrabar_direction)) snapshot_invalid_field="intrabar_direction";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"intrabar_move_atr",intrabar_move_atr)) snapshot_invalid_field="intrabar_move_atr";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"intrabar_rebound_atr",intrabar_rebound_atr)) snapshot_invalid_field="intrabar_rebound_atr";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"intrabar_min_strength",intrabar_min_strength)) snapshot_invalid_field="intrabar_min_strength";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"intrabar_min_move_atr",intrabar_min_move_atr)) snapshot_invalid_field="intrabar_min_move_atr";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"intrabar_min_rebound_atr",intrabar_min_rebound_atr)) snapshot_invalid_field="intrabar_min_rebound_atr";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"ai_trend_confirmed",ai_trend_confirmed)) snapshot_invalid_field="ai_trend_confirmed";
+   if(snapshot_invalid_field=="" && !JsonText(reply,"ai_trend_direction",ai_trend_direction)) snapshot_invalid_field="ai_trend_direction";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"ai_trend_score",ai_trend_score)) snapshot_invalid_field="ai_trend_score";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"ai_trend_move_atr",ai_trend_move_atr)) snapshot_invalid_field="ai_trend_move_atr";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"ai_trend_consistency",ai_trend_consistency)) snapshot_invalid_field="ai_trend_consistency";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"trend_min_path_atr",trend_min_path_atr)) snapshot_invalid_field="trend_min_path_atr";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"trend_min_consistency",trend_min_consistency)) snapshot_invalid_field="trend_min_consistency";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"trend_min_edge_fraction",trend_min_edge_fraction)) snapshot_invalid_field="trend_min_edge_fraction";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"trend_min_micro_move_atr",trend_min_micro_move_atr)) snapshot_invalid_field="trend_min_micro_move_atr";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"manual_execution_override",manual_execution_override)) snapshot_invalid_field="manual_execution_override";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"ai_engine_v2_selected",ai_engine_v2_selected)) snapshot_invalid_field="ai_engine_v2_selected";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"ai_engine_v2_buy_quality",ai_engine_v2_buy_quality)) snapshot_invalid_field="ai_engine_v2_buy_quality";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"ai_engine_v2_sell_quality",ai_engine_v2_sell_quality)) snapshot_invalid_field="ai_engine_v2_sell_quality";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"ai_engine_v2_quality_margin",ai_engine_v2_quality_margin)) snapshot_invalid_field="ai_engine_v2_quality_margin";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"ai_engine_v2_score",ai_engine_v2_score)) snapshot_invalid_field="ai_engine_v2_score";
+   if(snapshot_invalid_field=="" && !JsonText(reply,"ai_engine_v2_direction_source",ai_engine_v2_direction_source)) snapshot_invalid_field="ai_engine_v2_direction_source";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"spread_points",model_spread)) snapshot_invalid_field="spread_points";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"stop_distance",stop_distance)) snapshot_invalid_field="stop_distance";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"target_distance",target_distance)) snapshot_invalid_field="target_distance";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"target_learning_active",target_learning_active)) snapshot_invalid_field="target_learning_active";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"target_structure_ready",target_structure_ready)) snapshot_invalid_field="target_structure_ready";
+   if(snapshot_invalid_field=="" && !JsonText(reply,"target_method",target_method)) snapshot_invalid_field="target_method";
+   if(snapshot_invalid_field=="" && !JsonText(reply,"target_direction",target_direction)) snapshot_invalid_field="target_direction";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"target_impulse_start",target_impulse_start)) snapshot_invalid_field="target_impulse_start";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"target_impulse_end",target_impulse_end)) snapshot_invalid_field="target_impulse_end";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"target_impulse_range",target_impulse_range)) snapshot_invalid_field="target_impulse_range";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"target_impulse_atr",target_impulse_atr)) snapshot_invalid_field="target_impulse_atr";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"target_tp1",target_tp1)) snapshot_invalid_field="target_tp1";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"target_tp2",target_tp2)) snapshot_invalid_field="target_tp2";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"target_tp3",target_tp3)) snapshot_invalid_field="target_tp3";
+   if(snapshot_invalid_field=="" && !JsonNumber(reply,"legacy_target_price",legacy_target_price)) snapshot_invalid_field="legacy_target_price";
+   if(snapshot_invalid_field=="")
+   {
+      if(!ValidSampleKey(sample_key)) snapshot_invalid_field="sample_key_invalid";
+      else if((datetime)signal_time!=bar_time) snapshot_invalid_field="signal_bar_time_mismatch";
+      else if(decision!="BUY" && decision!="SELL" && decision!="WAIT") snapshot_invalid_field="decision_invalid";
+      else if(risk_model_ready<0.0 || risk_model_ready>1.0) snapshot_invalid_field="risk_model_ready_out_of_range";
+      else if(risk_probability<-1.0 || risk_probability>1.0) snapshot_invalid_field="risk_probability_out_of_range";
+      else if(risk_multiplier<0.50 || risk_multiplier>1.50) snapshot_invalid_field="risk_multiplier_out_of_range";
+      else if(risk_model_ready>=0.5 && risk_probability<0.0) snapshot_invalid_field="risk_model_ready_without_probability";
+      else if(risk_model_ready<0.5 && MathAbs(risk_multiplier-1.0)>0.000001) snapshot_invalid_field="risk_model_unready_nonunit_multiplier";
+      else if(risk_model_ready<0.5 && risk_probability!=-1.0) snapshot_invalid_field="risk_model_unready_probability_not_minus_one";
+      else snapshot_invalid_field="semantic_validation_unclassified";
+   }
+   StatusLine="Invalid model response: "+snapshot_invalid_field;
+   Print("RAMON_MODEL_PROTOCOL_REJECT symbol=",_Symbol," field=",snapshot_invalid_field,
+         " local_bar=",IntegerToString((long)bar_time),
+         " response_bar=",DoubleToString(signal_time,0));
+   ShowStatus(); return; }
+   // Optional protocol: old servers omit this field and remain compatible.
+   JsonNumber(reply,"opportunity_live_selected",opportunity_live_selected);
    LastModelSnapshotTime=LastDecisionRequestTime;
    LastSampleKey=sample_key;
    LastSampleSaved=(sample_saved>=0.5);
@@ -5929,7 +6044,7 @@ void OnTimer()
    if(!dashboard_manual_entry && LocalLossCooldownBlocked(decision,cooldown_reason))
    { StatusLine=cooldown_reason; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
    int today=(SmallOnlyMode || dashboard_manual_entry ? 0 : TradesToday());
-   if(!dashboard_manual_entry && !SmallOnlyMode && (today<0 || today>=MaxTradesPerDay))
+   if(!DemoExperimentActive() && !dashboard_manual_entry && !SmallOnlyMode && (today<0 || today>=MaxTradesPerDay))
    { StatusLine="Daily trade limit/history unavailable"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
    MqlTick tick;
    if(!SymbolInfoTick(_Symbol,tick) || TimeCurrent()-tick.time>30)
@@ -5942,10 +6057,21 @@ void OnTimer()
    JsonNumber(reply,"range_execution",range_execution);
    bool range_trade=(range_execution>=0.5 && !dashboard_manual_entry);
    bool live_direction_ai=(ai_engine_v2_selected>=0.5 && (decision=="BUY" || decision=="SELL"));
-   if(!range_trade && manual_execution_override<0.5 && !live_direction_ai
+   bool live_structure_ai=(opportunity_live_selected>=0.5 &&
+      (decision=="BUY" || decision=="SELL") &&
+      StringFind(reason,"structure_")==0 &&
+      target_method=="structure_opportunity_v1" &&
+      target_direction==decision &&
+      target_structure_ready<0.5 &&
+      stop_distance>0.0 && target_distance>0.0);
+   if(opportunity_live_selected>=0.5 && (!EnableStructureOpportunity || !live_structure_ai))
+   { StatusLine="STRUCTURE ENTRY BLOCKED: opt-in or protocol invalid"; Print(StatusLine); ShowStatus(); return; }
+   if(!range_trade && manual_execution_override<0.5 && !live_direction_ai && !live_structure_ai
       && (intrabar_confirmed<0.5 || ai_trend_confirmed<0.5
       || intrabar_direction!=decision || ai_trend_direction!=decision))
    { StatusLine="DIRECTION GUARD: normal entry needs aligned confirmations"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+   if(!range_trade && live_structure_ai)
+      Print("Ramon execution: LIVE STRUCTURE accepted ",decision," sample=",sample_key);
    if(!range_trade && live_direction_ai)
       Print("Ramon execution: LIVE DIRECTION AI accepted ",decision,
          " sample=",sample_key);
@@ -6078,7 +6204,7 @@ void OnTimer()
    if(!dashboard_manual_entry && !SmallOnlyMode)
    {
       today=TradesToday();
-      if(today<0 || today>=MaxTradesPerDay)
+      if(!DemoExperimentActive() && (today<0 || today>=MaxTradesPerDay))
       { StatusLine="V2 EXECUTION BLOCKED: daily limit changed"; Print(StatusLine); ShowStatus(); return; }
    }
    if(SmallOnlyMode)
@@ -6580,10 +6706,12 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
 
 int OnInit()
 {
+   if(DemoExperimentalMode && AccountInfoInteger(ACCOUNT_TRADE_MODE)!=ACCOUNT_TRADE_MODE_DEMO)
+   { Print("DEMO EXPERIMENTAL BLOCKED: only allowed on DEMO accounts"); return INIT_FAILED; }
    ReadControlRiskCap();
    ReadDecisionCadence();
-   if(_Symbol!=TradeSymbol || _Period!=PERIOD_M15 || StringFind(_Symbol,"XAUUSD")!=0)
-   { Print("Attach only to ",TradeSymbol," M15"); return INIT_FAILED; }
+   if((TradeSymbol!="" && _Symbol!=TradeSymbol) || _Period!=PERIOD_M15 || StringFind(_Symbol,"XAUUSD")!=0)
+   { Print("Attach only to XAUUSD M15; optional TradeSymbol=",TradeSymbol," chart=",_Symbol); return INIT_FAILED; }
    if(SmallOnlyMode && (MagicNumber!=SmallProfitMagicNumber
       || AccountInfoInteger(ACCOUNT_MARGIN_MODE)!=ACCOUNT_MARGIN_MODE_RETAIL_HEDGING))
    { Print("Small mode requires magic 26092213 and a hedging account"); return INIT_FAILED; }
