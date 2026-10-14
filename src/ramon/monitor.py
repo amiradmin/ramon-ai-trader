@@ -1868,6 +1868,25 @@ def opportunities_with_execution_state(db, diagnostic, symbol, health_url=None):
 
 
 def _ensure_human_assisted_table(db):
+    if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres":
+        import psycopg
+        with psycopg.connect(os.environ["RAMON_PG_DSN"], connect_timeout=5) as con:
+            with con.cursor() as cur:
+                cur.execute("""CREATE TABLE IF NOT EXISTS ramon.human_assisted_events (
+                    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                    created_utc bigint NOT NULL, symbol text NOT NULL,
+                    sample_key text NOT NULL, signal_bar_time bigint NOT NULL,
+                    action text NOT NULL, human_direction text, entry_mode text,
+                    v2_decision text, v2_reason text, v3_shadow_decision text,
+                    v3_shadow_reason text, v3_shadow_block text,
+                    buy_quality double precision, sell_quality double precision,
+                    entry_timing_ready integer, forecast_distance_atr double precision,
+                    market_state text, moment_label text,
+                    snapshot_json jsonb NOT NULL
+                )""")
+                cur.execute("""CREATE INDEX IF NOT EXISTS human_assisted_events_sample_idx
+                    ON ramon.human_assisted_events(sample_key,created_utc)""")
+        return
     if not db:
         return
     with sqlite3.connect(db, timeout=5) as con:
@@ -1920,6 +1939,28 @@ def _human_assisted_snapshot(row):
 def persist_human_assisted_event(db, symbol, row, *, action, direction=None, mode=None):
     _ensure_human_assisted_table(db)
     snap = _human_assisted_snapshot(row)
+    if os.environ.get("RAMON_STORAGE_BACKEND", "sqlite").lower() == "postgres":
+        import psycopg
+        from psycopg.types.json import Jsonb
+        with psycopg.connect(os.environ["RAMON_PG_DSN"], connect_timeout=5) as con:
+            with con.cursor() as cur:
+                cur.execute("""INSERT INTO ramon.human_assisted_events
+                    (created_utc,symbol,sample_key,signal_bar_time,action,human_direction,
+                     entry_mode,v2_decision,v2_reason,v3_shadow_decision,v3_shadow_reason,
+                     v3_shadow_block,buy_quality,sell_quality,entry_timing_ready,
+                     forecast_distance_atr,market_state,moment_label,snapshot_json)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    (int(time.time()),symbol,str(row.get("sample_key") or ""),
+                     int(row.get("signal_bar_time") or 0),str(action),
+                     direction if direction in {"BUY","SELL"} else None,
+                     mode,snap.get("v2_decision"),snap.get("v2_reason"),
+                     snap.get("v3_shadow_decision"),snap.get("v3_shadow_reason"),
+                     snap.get("v3_shadow_block"),number(snap.get("buy_quality")),
+                     number(snap.get("sell_quality")),
+                     int(bool(snap.get("entry_timing_ready"))) if snap.get("entry_timing_ready") is not None else None,
+                     number(snap.get("forecast_distance_atr")),snap.get("market_state"),
+                     snap.get("moment_label"),Jsonb(snap)))
+        return
     with sqlite3.connect(db, timeout=5) as con:
         con.execute(
             """INSERT INTO human_assisted_events
