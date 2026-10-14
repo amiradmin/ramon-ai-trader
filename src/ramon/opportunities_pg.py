@@ -44,24 +44,20 @@ class OpportunityPG:
             table = "ramon.mtf_utc_bars"
             sql = query.replace("mtf_utc_bars", table).replace("?", "%s")
         elif "from decision_samples" in q:
-            table = "ramon_migration.training_decision_samples"
+            # Live decisions are written to the native operational table.
+            # The migration archive is intentionally NOT the live source.
+            table = "ramon.decision_samples"
             if "max(captured)" in q:
-                sql = "SELECT max((source->>'captured')::bigint) FROM "+table+" WHERE source->>'symbol'=%s"
+                sql = "SELECT max(captured) FROM "+table+" WHERE symbol=%s"
             else:
-                sql = """SELECT (source->>'captured')::bigint AS captured,
-                    (source->>'signal_bar_time')::bigint AS signal_bar_time,
-                    source->>'sample_key' AS sample_key,
-                    (source->>'quote_time')::bigint AS quote_time,
-                    (source->>'mid')::double precision AS mid,
-                    (source->>'spread')::double precision AS spread,
-                    (source->>'stop_distance')::double precision AS stop_distance,
-                    (source->>'target_distance')::double precision AS target_distance,
-                    source->>'final_decision' AS final_decision,
-                    source->>'model_metadata' AS model_metadata
-                    FROM """+table+""" WHERE source->>'symbol'=%s
-                    AND (source->>'captured')::bigint >= %s
-                    ORDER BY (source->>'captured')::bigint,
-                             (source->>'id')::bigint NULLS LAST, source->>'sample_key'"""
+                sql = """SELECT captured, signal_bar_time, sample_key,
+                    quote_time, mid, spread,
+                    (metadata->'model_metadata'->'decision_audit'->'base'->>'stop_distance')::double precision AS stop_distance,
+                    (metadata->'model_metadata'->'decision_audit'->'base'->>'target_distance')::double precision AS target_distance,
+                    final_decision,
+                    COALESCE(metadata->'model_metadata','{}'::jsonb)::text AS model_metadata
+                    FROM """+table+""" WHERE symbol=%s AND captured >= %s
+                    ORDER BY captured, sample_key"""
         elif "from trade_outcomes" in q:
             sql = "SELECT sample_key FROM ramon.trade_outcomes WHERE symbol=%s"
         else:
