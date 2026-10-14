@@ -65,12 +65,12 @@ def detect_opportunity(market: Market, *, minimum_rr: float = 1.5,
     risk = max(0.75 * atr, 2.0 * spread)
     if direction == "BUY":
         stop = min(entry-risk, low20-0.10*atr)
-        target = max(entry+minimum_rr*(entry-stop), high20)
+        target = high20
         rr = (target-entry)/(entry-stop)
     else:
         stop = max(entry+risk, high20+0.10*atr)
-        target = min(entry-minimum_rr*(stop-entry), low20)
+        target = low20
         rr = (entry-target)/(stop-entry)
-    if rr < minimum_rr or not all(isfinite(v) for v in (stop,target,rr)):
+    # A historical structure target is required; never invent a distant TP just\n    # to force a superficially attractive reward/risk ratio.\n    if rr < minimum_rr or not all(isfinite(v) for v in (stop,target,rr)):
         return wait("insufficient_reward_risk")
     return Opportunity(direction, setup, "candidate_only", entry, stop, target, rr, atr)
