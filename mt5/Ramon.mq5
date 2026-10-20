@@ -1,7 +1,7 @@
 ﻿#property strict
 #property version "1.600"
 #define RAMON_EA_VERSION "0.60.0"
-#property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
+#property description "Independent Chronos-2 XAUUSD_o M15 bot; demo symbol; local model server required."
 
 #include <Trade/Trade.mqh>
 #include "RamonResearchTelemetry.mqh"
@@ -23,7 +23,7 @@ long GlobalFree(long hMem);
 long lstrcpyW(long dst,const string src);
 #import
 
-input string TradeSymbol = "XAUUSD_l";
+input string TradeSymbol = "XAUUSD_o";
 input string RequiredServerText = "LiteFinance";
 input bool AutoLockCurrentAccount = true; // Bind this EA session to the account active at OnInit.
 input long AllowedAccountLogin = 0; // Used only when AutoLockCurrentAccount=false.
