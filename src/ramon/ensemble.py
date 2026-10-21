@@ -398,9 +398,10 @@ class EnsembleCoordinator:
                 candidate_risk_probability = self.risk.predict_proba(risk_features(market, decision))
                 if isfinite(candidate_risk_probability) and 0.0 <= candidate_risk_probability <= 1.0:
                     risk_probability = candidate_risk_probability
-            except (KeyError, TypeError, ValueError, OverflowError):
+            except Exception:
                 # A loaded role is not necessarily valid for every request.
-                # Keep the API contract explicit instead of claiming readiness.
+                # Treat any prediction failure as unavailable; never leak a
+                # partially valid risk response or abort the decision request.
                 risk_probability = -1.0
         risk_model_ready_for_request = self.risk is not None and risk_probability >= 0.0
         risk_multiplier = (
