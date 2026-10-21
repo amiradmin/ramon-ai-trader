@@ -443,6 +443,15 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 limit = int(params.get("limit", ["12"])[0])
                 self.reply(200, {"opinions": _recent_human_opinions(history_db, symbol, limit)})
                 return
+            if route == "/decision":
+                # Decisions require a POSTed JSON market snapshot. Return a
+                # clear method hint instead of a misleading generic 404 when
+                # an operator probes this endpoint with a browser or curl GET.
+                self.reply(405, {
+                    "error": "method_not_allowed",
+                    "message": "Use POST /decision with a JSON market snapshot; GET does not produce a trading decision.",
+                })
+                return
             if route != "/health":
                 self.send_error(404)
                 return
