@@ -232,7 +232,7 @@ class DirectionCoordinator(EnsembleCoordinator):
 
     def status(self):
         return {**super().status(), "ensemble_mode": "direction_live", "ensemble_active": 1,
-                "risk_model_ready": int(risk_model_ready_for_request),
+                "risk_model_ready": int(self.risk_ready),
                 "direction_quality_live": int(self.buy_quality is not None and self.sell_quality is not None),
                 "buy_quality_ready": int(self.buy_quality is not None),
                 "sell_quality_ready": int(self.sell_quality is not None),
@@ -288,7 +288,7 @@ class DirectionCoordinator(EnsembleCoordinator):
                    "ensemble_ready": int(self.ready), "ensemble_active": 1,
                    "ensemble_bundle": self.bundle_id,
                    "ensemble_mode": "direction_live",
-                   "risk_model_ready": int(self.risk_ready),
+                   "risk_model_ready": int(risk_model_ready_for_request),
                    "risk_probability": risk_probability,
                    "risk_target": "full_stop_loss", "risk_multiplier": 1.0,
                    "full_sl_probability": risk_probability,
