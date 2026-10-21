@@ -232,7 +232,7 @@ class DirectionCoordinator(EnsembleCoordinator):
 
     def status(self):
         return {**super().status(), "ensemble_mode": "direction_live", "ensemble_active": 1,
-                "risk_model_ready": int(self.risk_ready),
+                "risk_model_ready": int(risk_model_ready_for_request),
                 "direction_quality_live": int(self.buy_quality is not None and self.sell_quality is not None),
                 "buy_quality_ready": int(self.buy_quality is not None),
                 "sell_quality_ready": int(self.sell_quality is not None),
@@ -265,6 +265,13 @@ class DirectionCoordinator(EnsembleCoordinator):
         meta_input = {**features["meta_base"], **{name + "_probability": p for name, p in probabilities.items()}}
         probabilities["meta"] = predict("meta", meta_input) if all(p >= 0 for p in probabilities.values()) else -1.0
         risk_probability = predict("risk", risk_features(market, decision))
+        # Report request-level readiness, not merely whether a model file loaded.
+        # A symbol mismatch or failed/non-finite prediction must remain unavailable.
+        risk_model_ready_for_request = (
+            self.risk is not None
+            and math.isfinite(risk_probability)
+            and 0.0 <= risk_probability <= 1.0
+        )
         buy_base = direction_risk_features(market, decision, "BUY")
         sell_base = direction_risk_features(market, decision, "SELL")
         if int(self.manifest.get("schema_version", 1)) == 2:
