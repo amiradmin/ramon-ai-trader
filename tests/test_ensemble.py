@@ -108,3 +108,42 @@ def test_risk_multiplier_is_bounded_and_neutral_at_half_probability() -> None:
     assert probability_to_risk_multiplier(0.5) == 1.0
     assert probability_to_risk_multiplier(0.75) == 1.5
     assert probability_to_risk_multiplier(1.0) == 1.5
+
+import math
+import pytest
+
+
+@pytest.mark.parametrize("bad_probability", [math.nan, math.inf, -0.01, 1.01, None])
+def test_invalid_request_risk_probability_is_unavailable(tmp_path: Path, bad_probability) -> None:
+    coordinator = EnsembleCoordinator(tmp_path)
+
+    class InvalidRisk:
+        metadata = {"target": "full_stop_loss"}
+
+        def predict_proba(self, features):
+            return bad_probability
+
+    coordinator.risk = InvalidRisk()
+    payload, _ = coordinator.assess(_market(), _decision())
+
+    assert payload["risk_model_ready"] == 0
+    assert payload["risk_probability"] == -1.0
+    assert payload["risk_multiplier"] == 1.0
+
+
+def test_risk_prediction_exception_is_neutral(tmp_path: Path) -> None:
+    coordinator = EnsembleCoordinator(tmp_path)
+
+    class BrokenRisk:
+        metadata = {"target": "full_stop_loss"}
+
+        def predict_proba(self, features):
+            raise RuntimeError("risk model unavailable")
+
+    coordinator.risk = BrokenRisk()
+    payload, _ = coordinator.assess(_market(), _decision())
+
+    assert payload["risk_model_ready"] == 0
+    assert payload["risk_probability"] == -1.0
+    assert payload["risk_multiplier"] == 1.0
+
