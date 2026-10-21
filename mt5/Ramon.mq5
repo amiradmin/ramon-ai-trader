@@ -5940,12 +5940,24 @@ void OnTimer()
    { StatusLine="Invalid stop/target"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
    double range_execution=0.0,range_stop=0.0,range_target=0.0,range_low=0.0,range_high=0.0;
    JsonNumber(reply,"range_execution",range_execution);
+   double opportunity_live_selected=0.0;
+   JsonNumber(reply,"opportunity_live_selected",opportunity_live_selected);
    bool range_trade=(range_execution>=0.5 && !dashboard_manual_entry);
+   bool structure_trade=(
+      opportunity_live_selected>=0.5
+      && StringFind(reason,"structure_")==0
+      && (decision=="BUY" || decision=="SELL")
+      && !dashboard_manual_entry
+   );
    bool live_direction_ai=(ai_engine_v2_selected>=0.5 && (decision=="BUY" || decision=="SELL"));
-   if(!range_trade && manual_execution_override<0.5 && !live_direction_ai
+   if(!range_trade && !structure_trade
+      && manual_execution_override<0.5 && !live_direction_ai
       && (intrabar_confirmed<0.5 || ai_trend_confirmed<0.5
       || intrabar_direction!=decision || ai_trend_direction!=decision))
    { StatusLine="DIRECTION GUARD: normal entry needs aligned confirmations"; if(dashboard_manual_entry) Print("Ramon manual dashboard BLOCKED: ",StatusLine); ShowStatus(); return; }
+   if(structure_trade)
+      Print("Ramon execution: STRUCTURE opportunity accepted ",decision,
+         " sample=",sample_key);
    if(!range_trade && live_direction_ai)
       Print("Ramon execution: LIVE DIRECTION AI accepted ",decision,
          " sample=",sample_key);

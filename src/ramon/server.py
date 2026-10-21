@@ -32,7 +32,10 @@ from .market_state import POLICY_VERSION, assess_market, apply_market_policy
 from .reversal_strategy import apply_reversal
 from .trade_selector import apply_live_selector
 from .ai_decision_engine import apply_ai_decision_engine
+from .market_opportunity_engine import detect_opportunity, diagnose_opportunity
+from .opportunity_execution import apply_live_opportunity
 from .ai_decision_engine_v3 import apply_ai_engine_v3_shadow
+from .live_v3_agreement_guard import apply_live_v3_agreement_guard
 from .decision_safety_shadow import assess_data_quality, no_trade_recommendation
 
 
@@ -442,6 +445,38 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                 symbol = str(params.get("symbol", ["XAUUSD_l"])[0])
                 limit = int(params.get("limit", ["12"])[0])
                 self.reply(200, {"opinions": _recent_human_opinions(history_db, symbol, limit)})
+                return
+            if route == "/decision-diagnostic":
+                snapshot = latest_decision_snapshot
+                captured_utc = int(latest_decision_snapshot_utc or 0)
+                age = int(time.time()) - captured_utc if captured_utc else 10**9
+                if not snapshot or age < 0 or age > 90:
+                    self.reply(200, {
+                        "ready": False,
+                        "reason": "no_fresh_decision_snapshot",
+                        "age_seconds": age,
+                    })
+                    return
+
+                # Expose only decision and opportunity diagnostics, not the
+                # complete request/response or any unrelated internal fields.
+                result = {
+                    key: value for key, value in snapshot.items()
+                    if key.startswith("opportunity_")
+                }
+                for key in (
+                    "decision", "reason", "symbol", "sample_key",
+                    "signal_bar_time", "market_direction",
+                    "market_state", "route", "allowed_directions",
+                    "spread_points", "atr", "market_state_diagnostic",
+                ):
+                    if key in snapshot:
+                        result[key] = snapshot[key]
+
+                result["ready"] = True
+                result["age_seconds"] = age
+                result["captured_utc"] = captured_utc
+                self.reply(200, result)
                 return
             if route == "/decision":
                 # Decisions require a POSTed JSON market snapshot. Return a
@@ -993,6 +1028,44 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     forced_range = range_candidate(market)
                     if forced_range.get("range_candidate"):
                         range_setup = forced_range
+                # Observability only: explain range rejection without changing eligibility.
+                range_capable = payload.get("range_execution_ready") is True
+                range_spread_points = (
+                    (market.ask - market.bid) / market.point
+                    if market.point > 0 else float("inf")
+                )
+                range_allowed_reasons = {
+                    "insufficient_model_strength",
+                    "insufficient_model_edge",
+                    "adverse_intrabar_timing",
+                    "direction_confirmation_required",
+                }
+                range_route_eligible = (
+                    response.get("decision") == "WAIT"
+                    and response.get("reason") in range_allowed_reasons
+                ) or "range" in active_overrides
+
+                if not range_live_enabled:
+                    range_diagnostic = {"range_route_status": "RANGE_LIVE_DISABLED"}
+                elif not range_capable:
+                    range_diagnostic = {"range_route_status": "EA_NOT_CAPABLE"}
+                elif quote_time is None:
+                    range_diagnostic = {"range_route_status": "MISSING_QUOTE_TIME"}
+                elif range_spread_points > settings.max_spread_points:
+                    range_diagnostic = {"range_route_status": "SPREAD_TOO_HIGH"}
+                else:
+                    range_diagnostic = dict(range_setup or range_candidate(market))
+                    range_diagnostic["range_route_eligible"] = int(range_route_eligible)
+                    if not range_route_eligible:
+                        range_diagnostic["range_route_status"] = "DECISION_NOT_ELIGIBLE"
+                    elif range_setup:
+                        range_diagnostic["range_route_status"] = "CANDIDATE_ACCEPTED"
+                    else:
+                        range_diagnostic["range_route_status"] = (
+                            range_diagnostic.get("range_shadow_status", "CANDIDATE_REJECTED")
+                        )
+
+                response["range_diagnostic"] = range_diagnostic
                 response["range_execution"] = int(range_setup is not None)
                 if range_setup:
                     response.update({
@@ -1030,15 +1103,6 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     not bool(response.get("range_execution"))
                     and not reversal_selected
                 ):
-                    apply_ai_engine_v3_shadow(
-                        response,
-                        market_assessment,
-                        feature_snapshot.get("entry", {}),
-                        enabled=ai_engine_v3_shadow_enabled,
-                        minimum_direction_quality=selector_minimum_quality,
-                        minimum_quality_margin=selector_minimum_margin,
-                        maximum_forecast_distance_atr=ai_engine_v3_max_forecast_distance_atr,
-                    )
                     ai_engine_authoritative = apply_ai_decision_engine(
                         response,
                         result,
@@ -1051,6 +1115,15 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                         anomaly_soft_threshold=moment_live_threshold,
                         anomaly_hard_threshold=moment_hard_veto_threshold,
                         conservative_policy=ai_engine_v2_conservative_policy,
+                    )
+                    apply_ai_engine_v3_shadow(
+                        response,
+                        market_assessment,
+                        feature_snapshot.get("entry", {}),
+                        enabled=ai_engine_v3_shadow_enabled,
+                        minimum_direction_quality=selector_minimum_quality,
+                        minimum_quality_margin=selector_minimum_margin,
+                        maximum_forecast_distance_atr=ai_engine_v3_max_forecast_distance_atr,
                     )
 
                 if ai_engine_authoritative:
@@ -1182,10 +1255,54 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                     response["reason"] = "manual_override_final_pass"
                     response["range_execution"] = 0
 
+                apply_live_v3_agreement_guard(
+                    response,
+                    enabled=os.environ.get("RAMON_V3_LIVE_AGREEMENT_GUARD", "0") == "1",
+                )
                 if not response["range_execution"]:
                     range_setup = None
                 if response["decision"] == "WAIT":
                     response["reversal_execution"] = 0
+                # Structure opportunity execution bridge (independent of V2 WAIT).
+                # Disable automatically unless explicitly opted in.
+                opportunity = detect_opportunity(market)
+                response.update({
+                    "opportunity_engine_version": "structure-v1",
+                    **{"opportunity_" + k: v for k, v in opportunity.to_dict().items()},
+                })
+                response["opportunity_diagnostic"] = diagnose_opportunity(market)
+                response["market_state_diagnostic"] = {
+                    "state": market_assessment.get("state"),
+                    "conditions": market_assessment.get("conditions", []),
+                    "route": market_assessment.get("route"),
+                    "allowed_directions": market_assessment.get("allowed_directions", []),
+                }
+                apply_live_opportunity(
+                    response, opportunity,
+                    enabled=os.environ.get("RAMON_STRUCTURE_LIVE_ENABLED", "0") == "1",
+                    ea_capable=payload.get("range_execution_ready") is True,
+                    fresh_quote=quote_time is not None,
+                    assessment=market_assessment,
+                    max_spread_ok=(market.ask-market.bid)/market.point <= settings.max_spread_points,
+                    manual_override=bool(active_overrides),
+                )
+                # Diagnostics only; never modifies the trade response.
+                structure_log_state = (
+                    str(response.get("opportunity_setup", "NONE")),
+                    str(response.get("opportunity_decision", "WAIT")),
+                    str(response.get("decision", "WAIT")),
+                    str(response.get("opportunity_live_reason", "unknown")),
+                )
+                if getattr(self.server, "_structure_log_state", None) != structure_log_state:
+                    self.server._structure_log_state = structure_log_state
+                    print(
+                        "RAMON_STRUCTURE"
+                        + " setup=" + structure_log_state[0]
+                        + " candidate=" + structure_log_state[1]
+                        + " final=" + structure_log_state[2]
+                        + " reason=" + structure_log_state[3],
+                        flush=True,
+                    )
                 sample_key = uuid4().hex[:16]
                 response["sample_key"] = sample_key
                 response["sample_saved"] = 0
@@ -1230,6 +1347,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                                     else "chronos"
                                 ),
                                 "range_setup": range_setup,
+                                "range_diagnostic": response.get("range_diagnostic"),
                                 "market_assessment": (
                                     {**market_assessment, "base_route": market_assessment["route"],
                                      "route": "CONFIRMED_REVERSAL", "allowed_directions": [response["decision"]]}
@@ -1241,6 +1359,7 @@ def serve(host: str, port: int, model: ChronosForecaster, settings: Settings) ->
                                     "final": {**ensemble_payload, "decision": response["decision"],
                                               "reason": response["reason"],
                                               "range_execution": response["range_execution"],
+                                              "range_diagnostic": response.get("range_diagnostic"),
                                               "reversal_execution": response.get("reversal_execution", 0),
                                               "reversal_live_enabled": int(reversal_live_enabled),
                                               "market_state": response["market_state"],

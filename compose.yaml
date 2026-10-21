@@ -98,6 +98,8 @@ services:
       - "8013"
       - --db
       - /data/ramon_history.sqlite3
+      - --symbol
+      - XAUUSD_o
       - --health-url
       - http://model:8012/health
     environment:
