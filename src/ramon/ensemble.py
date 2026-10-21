@@ -391,11 +391,21 @@ class EnsembleCoordinator:
         regime_probability = self.regime.predict_proba(r_features) if self.regime else -1.0
         entry_probability = self.entry.predict_proba(e_features) if self.entry else -1.0
         news_probability = self.news.predict_proba(n_features) if self.news else -1.0
-        risk_probability = self.risk.predict_proba(risk_features(market, decision)) if self.risk else -1.0
+        risk_probability = -1.0
         risk_target = str(self.risk.metadata.get("target", "win")) if self.risk else "none"
+        if self.risk is not None:
+            try:
+                candidate_risk_probability = self.risk.predict_proba(risk_features(market, decision))
+                if isfinite(candidate_risk_probability) and 0.0 <= candidate_risk_probability <= 1.0:
+                    risk_probability = candidate_risk_probability
+            except (KeyError, TypeError, ValueError, OverflowError):
+                # A loaded role is not necessarily valid for every request.
+                # Keep the API contract explicit instead of claiming readiness.
+                risk_probability = -1.0
+        risk_model_ready_for_request = self.risk is not None and risk_probability >= 0.0
         risk_multiplier = (
             probability_to_risk_multiplier(risk_probability, target=risk_target)
-            if self.risk else 1.0
+            if risk_model_ready_for_request else 1.0
         )
 
         meta_probability = -1.0
@@ -441,7 +451,7 @@ class EnsembleCoordinator:
             "entry_probability": entry_probability,
             "news_probability": news_probability,
             "meta_probability": meta_probability,
-            "risk_model_ready": int(self.risk_ready),
+            "risk_model_ready": int(risk_model_ready_for_request),
             "risk_probability": risk_probability,
             "risk_target": risk_target,
             "risk_multiplier": risk_multiplier,
