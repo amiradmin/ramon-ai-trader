@@ -99,6 +99,42 @@ def test_prediction_exception_is_display_error_only(tmp_path):
     assert "regime" in result["role_errors"]
 
 
+@pytest.mark.parametrize("bad_probability", [float("nan"), float("inf"), -0.01, 1.01, None])
+def test_invalid_request_risk_probability_is_reported_unavailable(tmp_path, bad_probability):
+    shadow_bundle(tmp_path, p=0.77)
+    coordinator = DirectionCoordinator(tmp_path, "test/model")
+
+    class InvalidRisk:
+        def predict_proba(self, features):
+            return bad_probability
+
+    coordinator.risk = InvalidRisk()
+    result, _ = coordinator.assess(_market(), _decision())
+
+    assert result["risk_model_ready"] == 0
+    assert result["risk_probability"] == -1.0
+    assert result["full_sl_probability"] == -1.0
+    assert result["risk_multiplier"] == 1.0
+
+
+def test_risk_prediction_exception_is_reported_unavailable(tmp_path):
+    shadow_bundle(tmp_path, p=0.77)
+    coordinator = DirectionCoordinator(tmp_path, "test/model")
+
+    class BrokenRisk:
+        def predict_proba(self, features):
+            raise RuntimeError("risk prediction unavailable")
+
+    coordinator.risk = BrokenRisk()
+    result, _ = coordinator.assess(_market(), _decision())
+
+    assert result["risk_model_ready"] == 0
+    assert result["risk_probability"] == -1.0
+    assert result["full_sl_probability"] == -1.0
+    assert result["risk_multiplier"] == 1.0
+    assert "risk" in result["role_errors"]
+
+
 def test_training_regime_without_trades_never_writes_live_pointer(tmp_path, monkeypatch):
     import ramon.direction_roles as module
     from ramon.train_roles import Example
