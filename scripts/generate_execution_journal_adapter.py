@@ -41,7 +41,7 @@ const int TRADE_RETCODE_INVALID_PRICE=10015,TRADE_RETCODE_INVALID_STOPS=10016;
 const int TRADE_RETCODE_TRADE_DISABLED=10017,TRADE_RETCODE_MARKET_CLOSED=10018,TRADE_RETCODE_NO_MONEY=10019;
 const int ORDER_TYPE_BUY=0,ORDER_TICKET=10,ORDER_STATE=11,ORDER_STATE_FILLED=12,ORDER_SYMBOL=13;
 const int ORDER_VOLUME_CURRENT=14,ORDER_VOLUME_INITIAL=15;
-const int DEAL_ORDER=16,DEAL_ENTRY=17,DEAL_ENTRY_IN=18,DEAL_TYPE=19,DEAL_TYPE_BUY=20,DEAL_TYPE_SELL=21;
+const int DEAL_ORDER=16,DEAL_ENTRY=17,DEAL_ENTRY_IN=18,DEAL_ENTRY_OUT=31,DEAL_ENTRY_OUT_BY=32,DEAL_TYPE=19,DEAL_TYPE_BUY=20,DEAL_TYPE_SELL=21;
 const int DEAL_SYMBOL=22,DEAL_POSITION_ID=23,DEAL_VOLUME=24;
 const int POSITION_IDENTIFIER=25,POSITION_SL=26,POSITION_VOLUME=27,POSITION_TYPE=28;
 const int POSITION_TYPE_BUY=29,POSITION_TYPE_SELL=30,POSITION_PRICE_OPEN=31,POSITION_SYMBOL=32;
@@ -71,6 +71,7 @@ string FileReadString(int fd){string s;char c;ssize_t n;
  if(n<0)LastError=1;return s;}
 // One synthetic order/deal/position, deliberately no broker or network operations.
 bool HistorySelect(long,long){return Mode!="history_error";}
+bool HistorySelectByPosition(ulong position){return position==44 && Mode!="history_error";}
 bool HistoryOrderSelect(ulong order){return order==42;}
 long HistoryOrderGetInteger(ulong,int p){return p==ORDER_TICKET?42:(Mode=="placed"?0:ORDER_STATE_FILLED);}
 string HistoryOrderGetString(ulong,int){return _Symbol;}
