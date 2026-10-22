@@ -22,7 +22,7 @@ TRADE_TELEMETRY_COLUMNS = {
     "profit_units": "REAL", "commission_units": "REAL", "swap_units": "REAL", "fee_units": "REAL",
     "opened_utc_offset_seconds": "INTEGER", "closed_utc_offset_seconds": "INTEGER",
     "exit_detail": "TEXT", "entry_ea_version": "TEXT",
-    "trade_role": "TEXT", "entry_magic": "INTEGER",
+    "trade_role": "TEXT", "entry_magic": "INTEGER", "entry_strategy": "TEXT",
     **SIZING_TELEMETRY_COLUMNS,
 }
 
@@ -332,6 +332,8 @@ def persist_trade_outcome(db: str | Path, payload: dict[str, object], received: 
     extra["training_status"] = classify_training_status(
         exit_reason, str(extra.get("exit_detail", "") or "")
     )
+    if extra.get("entry_strategy") == "h1_m1_pullback":
+        extra["training_status"] = "CENSORED_ALTERNATIVE_STRATEGY"
     extra_names = [*TRADE_TELEMETRY_COLUMNS, "training_status"]
     updates = []
     for name in extra_names:
@@ -346,13 +348,15 @@ def persist_trade_outcome(db: str | Path, payload: dict[str, object], received: 
                            f"WHEN excluded.closed!=trade_outcomes.closed OR "
                            f"excluded.exit_reason!=trade_outcomes.exit_reason THEN NULL "
                            f"ELSE trade_outcomes.{name} END")
-        elif name in SIZING_TELEMETRY_COLUMNS:
+        elif name in SIZING_TELEMETRY_COLUMNS or name == "entry_strategy":
             # Entry sizing is immutable provenance. Enrich a legacy first delivery,
             # but never replace sizing that was already persisted for this trade.
             updates.append(f"{name}=COALESCE(trade_outcomes.{name},excluded.{name})")
         elif name == "training_status":
             updates.append(
                 "training_status=CASE "
+                "WHEN COALESCE(trade_outcomes.entry_strategy,excluded.entry_strategy)='h1_m1_pullback' "
+                "THEN 'CENSORED_ALTERNATIVE_STRATEGY' "
                 "WHEN excluded.exit_reason=trade_outcomes.exit_reason "
                 "AND excluded.exit_reason='DEAL_REASON_EXPERT' "
                 "AND excluded.exit_detail IS NULL "
@@ -410,6 +414,11 @@ def validate_trade_telemetry(payload: dict[str, object], net: float) -> dict[str
                 raise ValueError("invalid trade telemetry text")
             extra[name] = value
 
+    if payload.get("entry_strategy") is not None:
+        strategy = str(payload["entry_strategy"])
+        if strategy not in {"chronos", "h1_m1_pullback"}:
+            raise ValueError("invalid entry_strategy")
+        extra["entry_strategy"] = strategy
     if payload.get("trade_role") is not None:
         role = str(payload["trade_role"]).upper()
         if role not in {"MAIN", "SMALL"}:
@@ -445,3 +454,4 @@ def validate_trade_telemetry(payload: dict[str, object], net: float) -> dict[str
             if minimum_risk <= budget or minimum_risk > cap_units + 0.0001:
                 raise ValueError("inconsistent minimum-lot override telemetry")
     return extra
+
