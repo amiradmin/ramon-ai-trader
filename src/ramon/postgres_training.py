@@ -43,7 +43,7 @@ TRAINING_EXAMPLES_SQL = """
         t.source->>'exit_reason'
     FROM ramon_migration.training_decision_samples AS s
     JOIN ramon_migration.training_trade_outcomes AS t
-      ON t.source->>'sample_key' = s.source->>'sample_key'
+      ON t.source->>'sample_key' = s.sample_key
     WHERE s.source->>'symbol' = %s
       AND t.source->>'symbol' = s.source->>'symbol'
       AND s.source->>'chronos_model' = %s
@@ -154,7 +154,7 @@ def dashboard_training_stats(dsn: str, symbol: str, chronos_model: str):
                        COALESCE(SUM((t.source->>'net_units')::double precision), 0)
                 FROM ramon_migration.training_decision_samples s
                 JOIN ramon_migration.training_trade_outcomes t
-                  ON t.source->>'sample_key' = s.source->>'sample_key'
+                  ON t.source->>'sample_key' = s.sample_key
                 WHERE {where}
             """, (symbol, chronos_model))
             n, wins, losses, net = cur.fetchone()
