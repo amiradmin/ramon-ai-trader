@@ -1,0 +1,67 @@
+services:
+  django-bridge:
+    build:
+      context: .
+      dockerfile: backend/django_bridge/Dockerfile
+    image: ramon-django-bridge:local
+    init: true
+    restart: unless-stopped
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Set a unique DJANGO_SECRET_KEY in .env}
+      DJANGO_DEBUG: "0"
+      DJANGO_ALLOWED_HOSTS: "127.0.0.1,localhost,django-bridge"
+      DJANGO_DB_PATH: /app/data/django.sqlite3
+      RAMON_EA_BEARER_TOKEN: ${RAMON_EA_BEARER_TOKEN:?Set a long random RAMON_EA_BEARER_TOKEN in .env}
+      RAMON_PIPELINE_INGEST_ENABLED: ${RAMON_PIPELINE_INGEST_ENABLED:-0}
+      RAMON_REDIS_URL: redis://redis:6379/0
+      RAMON_REDIS_MARKET_MAXLEN: ${RAMON_REDIS_MARKET_MAXLEN:-100000}
+    ports:
+      - "127.0.0.1:8016:8016"
+    volumes:
+      - ramon_django_data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8016/healthz', timeout=2).read()"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+
+  redis:
+    image: redis:7-alpine
+    init: true
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "512mb", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - ramon_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  ramon-stream-worker:
+    image: ramon-django-bridge:local
+    init: true
+    restart: unless-stopped
+    command: ["python", "manage.py", "consume_ramon_streams", "--count", "100", "--block-ms", "1000"]
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Set a unique DJANGO_SECRET_KEY in .env}
+      DJANGO_DEBUG: "0"
+      DJANGO_DB_PATH: /app/data/django.sqlite3
+      RAMON_REDIS_URL: redis://redis:6379/0
+      RAMON_REDIS_CONSUMER: ramon-worker-1
+      RAMON_REDIS_MARKET_MAXLEN: ${RAMON_REDIS_MARKET_MAXLEN:-100000}
+    volumes:
+      - ramon_django_data:/app/data
+    depends_on:
+      django-bridge:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  ramon_django_data:
+  ramon_redis_data:
