@@ -1,6 +1,6 @@
 ﻿#property strict
-#property version "1.600"
-#define RAMON_EA_VERSION "0.60.0"
+#property version "1.601"
+#define RAMON_EA_VERSION "0.60.1"
 #property description "Independent Chronos-2 XAUUSD_o M15 bot; demo symbol; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -1401,6 +1401,9 @@ void DrawDashboard()
    UiLabel("LIVE","LIVE: "+LiveStateText()
       +"   LOCK: "+(lock_ok ? "OK" : "FAIL")
       +"   PERMS: "+(permissions ? "OK" : "FAIL"),28,82,live_color,10);
+   ObjectSetString(0,UiPrefix+"LIVE",OBJPROP_TOOLTIP,
+      "Django telemetry: "+DjangoBridgeStatus+" | latency "
+      +DoubleToString(LastDjangoHeartbeatLatencyMs,0)+" ms | telemetry only; no trade authorization.");
 
    UiLabel("DECISION","DECISION: "+LastModelDecision+"   "+LastModelReason,
       28,108,state_color,11);
@@ -5497,7 +5500,7 @@ void SendDjangoHeartbeatIfDue()
    string headers="Content-Type: application/json\r\nAuthorization: Bearer "+DjangoBearerToken+"\r\n";
    ulong started=GetTickCount64();
    ResetLastError();
-   int code=WebRequest("POST",DjangoHeartbeatUrl,headers,400,request,response,response_headers);
+   int code=WebRequest("POST",DjangoHeartbeatUrl,headers,250,request,response,response_headers);
    LastDjangoHeartbeatLatencyMs=(double)(GetTickCount64()-started);
    if(code==200)
       DjangoBridgeStatus="CONNECTED "+DoubleToString(LastDjangoHeartbeatLatencyMs,0)+"ms";
