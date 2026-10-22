@@ -1,8 +1,8 @@
 import json
 from unittest.mock import Mock, patch
 from django.test import TestCase, override_settings
-from django.urls import reverse
-from .models import EAEvent, MarketBar, OrderIntentRecord
+from .models import EAEvent, MarketBar
+from ramon_pipeline.management.commands.consume_ramon_streams import Command
 
 
 class EAIngestionTests(TestCase):
@@ -49,3 +49,29 @@ class EAIngestionTests(TestCase):
     def test_rejects_when_token_is_not_configured(self):
         response = self.client.post(self.url, data=json.dumps(self.payload), content_type="application/json")
         self.assertEqual(response.status_code, 503)
+
+
+class StreamPersistenceTests(TestCase):
+    def setUp(self):
+        self.worker = Command()
+
+    def test_execution_event_persistence_is_idempotent(self):
+        record = {"kind": "execution_event", "source": "ea-test-1", "event_id": "fill-001",
+                  "occurred_at": "2026-10-22T10:00:00+00:00",
+                  "payload": json.dumps({"ticket": "123", "profit": 0.15})}
+        self.worker._persist(record)
+        self.worker._persist(record)
+        self.assertEqual(EAEvent.objects.filter(event_id="fill-001").count(), 1)
+
+    def test_market_bar_persistence_is_idempotent_and_normalized(self):
+        record = {"kind": "market_bar", "source": "ea-test-1", "event_id": "bar-001",
+                  "occurred_at": "2026-10-22T10:00:00+00:00",
+                  "payload": json.dumps({"symbol": "XAUUSD_o", "timeframe": "m1",
+                      "timestamp": "2026-10-22T10:00:00+00:00", "open": "100", "high": "102",
+                      "low": "99", "close": "101", "volume": "3"})}
+        self.worker._persist(record)
+        self.worker._persist(record)
+        self.assertEqual(MarketBar.objects.count(), 1)
+        bar = MarketBar.objects.get()
+        self.assertEqual(bar.timeframe, "M1")
+        self.assertEqual(str(bar.close), "101.0000000000")
