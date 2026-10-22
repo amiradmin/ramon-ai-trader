@@ -48,19 +48,21 @@ flowchart TD
 
 ## ساختار ریپو
 
+ساختار اصلی کد در سه پوشهٔ ریشه نگه داشته می‌شود: `data/` برای دادهٔ محلی، `mt5/` برای اکسپرت‌ها و `backend/` برای سرویس‌ها و بستهٔ Python. فایل‌های Compose، Dockerfile و تنظیمات ساخت در ریشه باقی می‌مانند.
+
 | مسیر | کار |
 | --- | --- |
 | mt5/Ramon.mq5 | اکسپرت مستقل MT5 و کنترل‌های قبل از سفارش |
-| src/ramon/model.py | بارگذاری checkpoint و خواندن خروجی واقعی Chronos‑2 |
-| src/ramon/core.py | اعتبارسنجی داده، ATR، اسپرد و تصمیم BUY/SELL/WAIT |
-| src/ramon/server.py | سرویس محلی HTTP و پاسخ سلامت |
-| src/ramon/preflight.py | آزمایش بارگذاری مدل و یک پیش‌بینی واقعی، بدون سفارش |
-| src/ramon/history.py و replay.py | خواندن تاریخچه و ارزیابی ترتیبی آفلاین |
-| src/ramon/train.py | ساخت checkpoint جدید با LoRA و ثبت تقسیم داده |
+| backend/ramon/model.py | بارگذاری checkpoint و خواندن خروجی واقعی Chronos‑2 |
+| backend/ramon/core.py | اعتبارسنجی داده، ATR، اسپرد و تصمیم BUY/SELL/WAIT |
+| backend/ramon/server.py | سرویس محلی HTTP و پاسخ سلامت |
+| backend/ramon/preflight.py | آزمایش بارگذاری مدل و یک پیش‌بینی واقعی، بدون سفارش |
+| backend/ramon/history.py و replay.py | خواندن تاریخچه و ارزیابی ترتیبی آفلاین |
+| backend/ramon/train.py | ساخت checkpoint جدید با LoRA و ثبت تقسیم داده |
 | Dockerfile و compose.yaml | اجرای مدل و ابزارهای پیش‌بینی/بازپخش/آموزش در کانتینر CPU |
 | Dockerfile.mt5 و scripts/mt5_container.sh | محیط اختیاری MT5 با Wine و صفحهٔ نصب در مرورگر محلی |
 | scripts/setup_local.sh | نصب محلی جایگزین، آزمایش مدل و کامپایل اکسپرت در Ubuntu/Wine |
-| tests/ | تست تصمیم، پاسخ HTTP، سازگاری آداپتور مدل و ترتیب بازپخش |
+| tests/ | مجموعهٔ تست قدیمی عمداً حذف شده است؛ طراحی تست‌های جدید از ابتدا انجام می‌شود |
 
 ## اجرا با Docker Compose
 
@@ -384,12 +386,11 @@ uv run --extra model python -m ramon.replay \
 
 ~~~bash
 uv sync --extra dev
-uv run --extra dev pytest
-python -m compileall -q src tests
+python -m compileall -q backend/ramon
 bash -n scripts/setup_local.sh
 ~~~
 
-تست‌ها تصمیم BUY/SELL/WAIT، هزینهٔ اسپرد، رد دادهٔ خراب، استخراج کوانتیل مدل، ارتباط HTTP و ترتیب ورود در بازپخش را پوشش می‌دهند. آنها وزن واقعی را دانلود نمی‌کنند و کامپایل MQL5 را جایگزین نمی‌کنند. فرمان preflight، MetaEditor و بررسی نمودار برای آزمون کامل روی دستگاه خودتان لازم‌اند.
+مجموعهٔ تست‌های خودکار قبلی عمداً حذف شده تا طراحی و پیاده‌سازی مجموعهٔ جدید از صفر انجام شود. بررسی نحوی Python و اسکریپت نصب به‌تنهایی اثبات صحت معاملات نیستند؛ فرمان preflight، کامپایل MetaEditor و بررسی نمودار نیز برای اعتبارسنجی دستگاه لازم‌اند.
 
 ## منابع
 

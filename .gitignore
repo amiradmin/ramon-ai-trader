@@ -5,7 +5,8 @@ __pycache__/
 runtime/
 *.sqlite3
 .env
-data/
+data/*
+!data/.gitkeep
 checkpoints/
 installer/
 .ramon/
