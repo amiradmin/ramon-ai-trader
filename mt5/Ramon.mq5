@@ -139,6 +139,9 @@ const int ExitModelFreshnessSeconds = 75;
 datetime LastEntrySignalBar = 0;
 int LastSmallEntriesOnSignalBar = 0;
 string StatusLine = "Starting";
+datetime LastDjangoHeartbeatAttempt = 0;
+string DjangoBridgeStatus = "DISABLED";
+double LastDjangoHeartbeatLatencyMs = -1.0;
 string LastModelDecision = "NONE";
 string LastModelReason = "NONE";
 string LastSampleKey = "";
@@ -5448,10 +5451,6 @@ void ProcessGuardianRecoveryExits()
       else HandleManagedExitFailure(ticket,"GUARDIAN TIME EXIT");
    }
 }
-
-datetime LastDjangoHeartbeatAttempt = 0;
-string DjangoBridgeStatus = "DISABLED";
-double LastDjangoHeartbeatLatencyMs = -1.0;
 
 void SendDjangoHeartbeatIfDue()
 {
