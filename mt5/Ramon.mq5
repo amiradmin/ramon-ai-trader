@@ -1,6 +1,6 @@
 ﻿#property strict
-#property version "1.601"
-#define RAMON_EA_VERSION "0.60.1"
+#property version "1.602"
+#define RAMON_EA_VERSION "0.60.2"
 #property description "Independent Chronos-2 XAUUSD_o M15 bot; demo symbol; local model server required."
 
 #include <Trade/Trade.mqh>
