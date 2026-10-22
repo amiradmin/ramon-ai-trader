@@ -15,6 +15,8 @@ class EventKind(StrEnum):
     EA_HEARTBEAT = "ea_heartbeat"
     EXECUTION_EVENT = "execution_event"
     STRATEGY_DECISION = "strategy_decision"
+    RISK_VERDICT = "risk_verdict"
+    ORDER_INTENT = "order_intent"
     TELEMETRY = "telemetry"
 
 def utc_now() -> datetime:
@@ -50,3 +52,11 @@ class Envelope:
                 "occurred_at": self.occurred_at.astimezone(timezone.utc).isoformat(),
                 "correlation_id": self.correlation_id or "",
                 "payload": json.dumps(dict(self.payload), separators=(",", ":"), allow_nan=False)}
+
+    @classmethod
+    def from_record(cls, record: Mapping[str, str]) -> "Envelope":
+        return cls(kind=EventKind(record["kind"]), source=record["source"],
+                   payload=json.loads(record["payload"]), event_id=record["event_id"],
+                   schema_version=int(record.get("schema_version", "1")),
+                   occurred_at=datetime.fromisoformat(record["occurred_at"]),
+                   correlation_id=record.get("correlation_id") or None)

@@ -1,23 +1,38 @@
 # Ramon Django pipeline modules
 
-Each stage has a separate Python module. These contracts and validation helpers
-are an architectural first step; they are **not yet wired into the existing
-Django EA views** and are not a complete live trading engine.
+The pipeline is staged into separate Python modules and is being introduced alongside
+(not in place of) the current EA bridge.
 
-- `ingestion.py`: request size validation and event classification.
-- `redis_buffer.py`: separate Redis Streams lanes for market, execution, telemetry.
+## Implemented foundation
+- `ingestion.py`: request-size validation and event classification helper.
+- `django_adapter.py`: Redis connection and pipeline construction.
+- `redis_buffer.py`: Redis Streams lanes for market, execution, and telemetry.
+- `management/commands/consume_ramon_streams.py`: consumer groups, pending-entry reclaim,
+  transactional persistence, idempotent upserts, bounded retries and dead-letter stream.
 - `market_data.py`: UTC and OHLCV normalization.
-- `strategy.py`: injected strategy interface and decision validation.
-- `risk.py`: independent fail-closed risk gate contract.
-- `execution.py`: order intent and EA outcome contracts.
-- `persistence.py`: idempotent repository ports for Django ORM adapters.
-- `learning_telemetry.py`: decision-to-outcome attribution contract.
-- `recovery.py`: retry/quarantine policy and UTC parsing.
-- `pipeline.py`: top-level composition boundary.
-- `schemas.py`: shared event envelope.
+- `strategy.py`, `risk.py`, `execution.py`: contracts for decisions, independent risk and intents.
+- `persistence.py`: repository ports.
+- `learning_telemetry.py`: outcome attribution contract.
+- `recovery.py`: retry policy and UTC parsing.
+- `schemas.py`: shared versioned event envelope.
 
-Before live use, implement ORM models/migrations, Redis worker loops and pending
-recovery, EA command/ack protocol, actual strategy/risk adapters, integration
-and failure tests. Redis is a buffer, not the durable source of truth. Do not
-remove `backend/ramon` until legacy behavior has been inventoried, migrated and
-regression-tested. Existing live decision endpoints remain unchanged for now.
+## Data model
+The `ea_bridge` app now has models/migration for normalized market bars, strategy decisions,
+risk verdicts and order intents. Existing EAHeartbeat/EAEvent models remain in place.
+
+## Safe rollout
+The existing synchronous event-ingestion path remains the default. Set
+`RAMON_PIPELINE_INGEST_ENABLED=1` only after Redis and the stream worker are healthy and
+integration tests have passed. If Redis is unavailable in pipeline mode, the endpoint
+returns 503 so the EA can retry; it does not silently fall back to a potentially overloaded DB.
+
+Compose starts a private Redis service and worker. Redis has AOF enabled and a no-eviction
+policy; market/telemetry streams have a trim target while execution events are not auto-trimmed.
+Monitor disk/memory/stream growth and configure operational alerts before enabling ingestion.
+
+## Not yet a live trading engine
+The strategy/risk contracts are not connected to Ramon’s existing model-serving logic; order
+intents are not exposed to the EA, and no Django code authorizes live trades. The EA command /
+acknowledgement protocol, risk policy implementation, full outcome reconciliation and demo-account
+integration tests remain follow-up tasks. Do not delete `backend/ramon` until behavior is migrated
+and regression-tested.
