@@ -1,0 +1,27 @@
+services:
+  django-bridge:
+    build:
+      context: .
+      dockerfile: django_bridge/Dockerfile
+    image: ramon-django-bridge:local
+    init: true
+    restart: unless-stopped
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Set a unique DJANGO_SECRET_KEY in .env}
+      DJANGO_DEBUG: "0"
+      DJANGO_ALLOWED_HOSTS: "127.0.0.1,localhost,django-bridge"
+      DJANGO_DB_PATH: /app/data/django.sqlite3
+      RAMON_EA_BEARER_TOKEN: ${RAMON_EA_BEARER_TOKEN:?Set a long random RAMON_EA_BEARER_TOKEN in .env}
+    ports:
+      - "127.0.0.1:8016:8016"
+    volumes:
+      - ramon_django_data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8016/healthz', timeout=2).read()"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  ramon_django_data:
