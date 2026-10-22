@@ -16,3 +16,6 @@ installer/
 # Local PostgreSQL credentials and host-only rollout overrides
 .secrets/
 compose.pg-canary.yaml
+
+# Local IDE settings
+.idea/
