@@ -26,7 +26,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
       'torch>=2.2,<3'
 
 COPY pyproject.toml README.md ./
-COPY src/ ./src/
+COPY backend/ ./backend/
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     python -m pip install \

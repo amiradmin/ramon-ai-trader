@@ -2,7 +2,7 @@ services:
   django-bridge:
     build:
       context: .
-      dockerfile: django_bridge/Dockerfile
+      dockerfile: backend/django_bridge/Dockerfile
     image: ramon-django-bridge:local
     init: true
     restart: unless-stopped
