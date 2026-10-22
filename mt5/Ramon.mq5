@@ -1,5 +1,6 @@
 #property strict
-#property version "1.620"
+#property version "1.621"
+#define RAMON_EA_VERSION "0.62.1"
 #property description "Independent Chronos-2 XAUUSD_l M15 bot; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -29,6 +30,9 @@ input bool SmallOnlyMode = false; // Attach second EA instance on another M15 ch
 const ulong PrimaryMagicNumber = 26092212;
 const ulong SmallProfitMagicNumber = 26092213;
 input string ModelUrl = "http://127.0.0.1:8012/decision";
+input bool EnableDjangoBridge = false; // Telemetry only; never grants trading permission.
+input string DjangoHeartbeatUrl = "http://127.0.0.1:8016/api/ea/v1/heartbeat";
+input string DjangoBearerToken = ""; // Set locally in MT5; never commit/share this value.
 input double MoneyUnitsPerUSD = 100.0; // CENT account: 100 account units = 1 USD.
 input bool AccountIsCent = true; // Configured account mode; MT5 ACCOUNT_CURRENCY alone cannot identify CENT.
 input bool ConfirmMoneyUnitsPerUSD = false; // Must be true before live trading can arm.
@@ -111,6 +115,9 @@ datetime LastDecisionSuccessTime = 0;
 datetime LastEntrySignalBar = 0;
 int LastSmallEntriesOnSignalBar = 0;
 string StatusLine = "Starting";
+datetime LastDjangoHeartbeatAttempt = 0;
+string DjangoBridgeStatus = "DISABLED";
+double LastDjangoHeartbeatLatencyMs = -1.0;
 int LastDirectionConsensusVotes = 0;
 string LastDirectionConsensusStatus = "NOT_EVALUATED";
 string LastModelDecision = "NONE";
@@ -3348,8 +3355,66 @@ void ManageOpenPosition()
       HandleManagedExitFailure(ticket,"TIME EXIT");
 }
 
+void SendDjangoHeartbeatIfDue()
+{
+   if(!EnableDjangoBridge)
+   {
+      DjangoBridgeStatus = "DISABLED";
+      return;
+   }
+   if(StringLen(DjangoBearerToken)<32)
+   {
+      DjangoBridgeStatus = "TOKEN NOT CONFIGURED";
+      return;
+   }
+   datetime now=TimeLocal();
+   if(LastDjangoHeartbeatAttempt>0 && now-LastDjangoHeartbeatAttempt<30)
+      return;
+   LastDjangoHeartbeatAttempt=now;
+
+   string instance_id=IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN))
+      +"-"+_Symbol+"-"+IntegerToString((long)MagicNumber);
+   bool terminal_connected=(bool)TerminalInfoInteger(TERMINAL_CONNECTED);
+   bool trade_allowed=terminal_connected
+      && (bool)MQLInfoInteger(MQL_TRADE_ALLOWED)
+      && (bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED);
+   string payload="{"
+      +"\"instance_id\":\""+JsonEscape(instance_id)+"\","
+      +"\"account_login\":\""+IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN))+"\","
+      +"\"server_name\":\""+JsonEscape(AccountInfoString(ACCOUNT_SERVER))+"\","
+      +"\"symbol\":\""+JsonEscape(_Symbol)+"\","
+      +"\"ea_version\":\""+RAMON_EA_VERSION+"\","
+      +"\"status\":\""+JsonEscape(StatusLine)+"\","
+      +"\"terminal_connected\":"+(terminal_connected ? "true" : "false")+","
+      +"\"trade_allowed\":"+(trade_allowed ? "true" : "false")+","
+      +"\"sent_at_utc\":\""+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+"\""
+      +"}";
+   char request[];
+   int n=StringToCharArray(payload,request,0,WHOLE_ARRAY,CP_UTF8);
+   if(n<=1)
+   {
+      DjangoBridgeStatus="PAYLOAD ERROR";
+      return;
+   }
+   ArrayResize(request,n-1);
+   char response[];
+   string response_headers;
+   string headers="Content-Type: application/json\\r\\nAuthorization: Bearer "+DjangoBearerToken+"\\r\\n";
+   ulong started=GetTickCount64();
+   ResetLastError();
+   int code=WebRequest("POST",DjangoHeartbeatUrl,headers,250,request,response,response_headers);
+   LastDjangoHeartbeatLatencyMs=(double)(GetTickCount64()-started);
+   if(code==200)
+      DjangoBridgeStatus="CONNECTED "+DoubleToString(LastDjangoHeartbeatLatencyMs,0)+"ms";
+   else if(code<0)
+      DjangoBridgeStatus="DISCONNECTED err="+IntegerToString(GetLastError());
+   else
+      DjangoBridgeStatus="HTTP "+IntegerToString(code);
+}
+
 void OnTimer()
 {
+   SendDjangoHeartbeatIfDue();
    ShowStatus();
    if(!(bool)TerminalInfoInteger(TERMINAL_CONNECTED))
    { StatusLine="Terminal disconnected"; ShowStatus(); return; }
