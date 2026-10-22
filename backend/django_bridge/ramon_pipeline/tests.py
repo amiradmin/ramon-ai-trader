@@ -1,12 +1,18 @@
-"""Unit tests for the pure-Python pipeline contracts (python -m unittest)."""
+"""Unit tests for the pure-Python pipeline contracts and Django orchestration."""
 import unittest
 from datetime import datetime, timezone
 from decimal import Decimal
+
+from django.test import TestCase
 
 from .schemas import Envelope, EventKind, PipelineError
 from .market_data import normalize_bar
 from .redis_buffer import RedisStreamBuffer, STREAMS
 from .recovery import RecoveryPolicy, parse_utc, should_quarantine
+from .orchestration import evaluate_and_record
+from .risk import RiskVerdict
+from .strategy import StrategyDecision
+from ea_bridge.models import OrderIntentRecord, RiskVerdictRecord, StrategyDecisionRecord
 
 
 class FakeRedis:
@@ -61,5 +67,49 @@ class PipelineContractTests(unittest.TestCase):
             parse_utc("2026-10-22T12:00:00")
 
 
-if __name__ == "__main__":
-    unittest.main()
+class FakeStrategy:
+    def __init__(self, action="BUY", decision_id="decision-test-1"):
+        self.action = action
+        self.decision_id = decision_id
+
+    def decide(self, market_snapshot):
+        return StrategyDecision(self.decision_id, "XAUUSD_o", self.action, 0.9,
+                                "unit_test", "test-policy-v1", {"sample": 1})
+
+
+class ApprovedRiskPolicy:
+    def evaluate(self, decision, account, market):
+        return RiskVerdict(True, "APPROVED", 0.1, 99.0, 103.0)
+
+
+class OrchestrationTests(TestCase):
+    def test_missing_risk_policy_fails_closed_and_creates_no_intent(self):
+        result = evaluate_and_record({}, {}, strategy_engine=FakeStrategy(),
+                                     risk_policy=None, instance_id="ea-test-1")
+        self.assertFalse(result["risk_approved"])
+        self.assertEqual(result["risk_reason"], "RISK_POLICY_UNAVAILABLE")
+        self.assertIsNone(result["intent_id"])
+        self.assertEqual(OrderIntentRecord.objects.count(), 0)
+        self.assertEqual(StrategyDecisionRecord.objects.count(), 1)
+        self.assertEqual(RiskVerdictRecord.objects.count(), 1)
+
+    def test_hold_decision_never_creates_intent(self):
+        result = evaluate_and_record({}, {}, strategy_engine=FakeStrategy(action="HOLD"),
+                                     risk_policy=ApprovedRiskPolicy(), instance_id="ea-test-1")
+        self.assertEqual(result["risk_reason"], "NO_TRADE_ACTION")
+        self.assertIsNone(result["intent_id"])
+        self.assertEqual(OrderIntentRecord.objects.count(), 0)
+
+    def test_approved_intent_is_deterministic_and_persisted_once(self):
+        kwargs = {"market_snapshot": {"spread": 20}, "account_snapshot": {"equity": 1000},
+                  "strategy_engine": FakeStrategy(), "risk_policy": ApprovedRiskPolicy(),
+                  "instance_id": "ea-test-1"}
+        first = evaluate_and_record(**kwargs)
+        second = evaluate_and_record(**kwargs)
+        self.assertTrue(first["risk_approved"])
+        self.assertEqual(first["intent_id"], second["intent_id"])
+        self.assertEqual(OrderIntentRecord.objects.count(), 1)
+        intent = OrderIntentRecord.objects.get()
+        self.assertEqual(intent.state, OrderIntentRecord.State.PENDING)
+        self.assertEqual(intent.volume, Decimal("0.10000000"))
+        self.assertFalse(first["mt5_delivery_enabled"])
