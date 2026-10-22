@@ -164,7 +164,7 @@ def _publish_promoted_shadow(db: Path, out: Path, symbol: str, chronos_model: st
     promoted bundle does not contain these display/quality specialists.
     """
     manifest, models = load_active_bundle(out, chronos_model)
-    examples = load_trade_examples(db, symbol, chronos_model)
+    examples = _load_examples(db, symbol, chronos_model)
     roles: dict[str, object] = {}
     published = dict(models)
     for name in ("regime", "entry", "news", "meta", "risk"):
@@ -221,11 +221,21 @@ class TrainingState:
         self.events: list[dict[str, object]] = []
 
 
+def _load_examples(db: Path, symbol: str, chronos_model: str):
+    """Load training examples from the selected backend without cross-reading SQLite."""
+    if os.environ.get("RAMON_TRAINING_BACKEND", "").strip().lower() == "postgres":
+        from .postgres_training import read_training_examples
+        return read_training_examples(
+            os.environ["RAMON_PG_TRAINING_DSN"], symbol, chronos_model
+        )
+    return load_trade_examples(db, symbol, chronos_model)
+
+
 def _stats(db: Path, symbol: str, chronos_model: str) -> tuple[dict[str, object], list[dict[str, object]]]:
-    examples = load_trade_examples(db, symbol, chronos_model)
+    examples = _load_examples(db, symbol, chronos_model)
     stats: dict[str, object] = {"trainable_samples": len(examples)}
     recent: list[dict[str, object]] = []
-    if os.environ.get("RAMON_TRAINING_BACKEND") == "postgres":
+    if os.environ.get("RAMON_TRAINING_BACKEND", "").strip().lower() == "postgres":
         from .postgres_training import dashboard_training_stats
         pg_stats, recent = dashboard_training_stats(
             os.environ["RAMON_PG_TRAINING_DSN"], symbol, chronos_model
