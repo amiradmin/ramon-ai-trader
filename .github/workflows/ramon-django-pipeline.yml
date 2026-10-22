@@ -4,14 +4,14 @@ on:
   pull_request:
     paths:
       - "backend/django_bridge/**"
-      - "compose.django.yaml"
+      - "docker-compose.yaml"
       - "docs/ramon-django-pipeline/**"
       - ".github/workflows/ramon-django-pipeline.yml"
   push:
     branches: ["feat/ramon-django-pipeline"]
     paths:
       - "backend/django_bridge/**"
-      - "compose.django.yaml"
+      - "docker-compose.yaml"
       - ".github/workflows/ramon-django-pipeline.yml"
 
 permissions:
@@ -29,8 +29,13 @@ jobs:
       RAMON_EA_BEARER_TOKEN: ci-test-token
       RAMON_PIPELINE_INGEST_ENABLED: "0"
       RAMON_REDIS_URL: redis://127.0.0.1:6379/0
+      RAMON_PG_PASSWORD: ci-only-not-a-secret
+      RAMON_LOG_DB_PASSWORD: ci-only-not-a-secret
     steps:
       - uses: actions/checkout@v4
+      - name: Validate consolidated Docker Compose
+        working-directory: .
+        run: docker compose -f docker-compose.yaml config --quiet
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

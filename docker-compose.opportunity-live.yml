@@ -1,4 +1,0 @@
-services:
-  model:
-    environment:
-      RAMON_STRUCTURE_LIVE_ENABLED: "1"
