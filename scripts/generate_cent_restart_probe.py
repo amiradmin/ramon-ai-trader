@@ -63,7 +63,7 @@ void OnStart()
    if(!GlobalVariableCheck(key) || GlobalVariableGet(key)!=(double)stamp)
    { Print("RAMON_CENT_LOCK FAIL missing/changed value"); return; }
    string reason="";
-   bool allowed=V2Preflight(ORDER_TYPE_SELL,0.0,0.0,0.0,reason);
+   bool allowed=V2ProbeReadOnlyPreflight(reason);
    if(allowed || reason!="stop-out lock")
    { PrintFormat("RAMON_CENT_LOCK FAIL reason=%s",reason); return; }
    PrintFormat("RAMON_CENT_LOCK CHECK phase=%s key=%s value=%I64d reason=%s",

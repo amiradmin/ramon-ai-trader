@@ -4,6 +4,8 @@
 Not native MQL5, Wine locking, broker lifecycle or power-loss acceptance.
 """
 from pathlib import Path
+import sys
+import re
 from generate_stopout_history_cpp_adapter import ADAPTER
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,7 +20,36 @@ def create_adapter(source):
     broker = extract(source, '// BEGIN V2 EXECUTION BROKER RECONCILIATION', '// END V2 EXECUTION BROKER RECONCILIATION')
     core = core.replace('uchar data[],key[],digest[];', 'std::vector<uchar> data,key,digest;')
     core = core.replace('string fields[];', 'std::vector<string> fields;')
-    return ADAPTER + API + core + broker + MAIN
+    # Remove generic Stop Out mocks that conflict with journal-specific,
+    # stateful implementations below.
+    shared = ADAPTER
+    removals = (
+        ("const int DEAL_TIME=10,DEAL_SYMBOL=11,DEAL_POSITION_ID=12;",
+         "const int DEAL_TIME=10;"),
+        ("int PositionsTotal(){return 0;}", ""),
+        ("bool AccountLockHealthy(){return true;}", ""),
+        ('string HistoryDealGetString(ulong,int){return "XAUUSD";}', ""),
+    )
+    for old, new in removals:
+        count = shared.count(old)
+        if count != 1:
+            sys.exit(
+                f"STOP: expected one shared declaration {old!r}, "
+                f"found {count}; file not written"
+            )
+        shared = shared.replace(old, new, 1)
+
+    for forbidden in (
+        "int PositionsTotal(){return 0;}",
+        "bool AccountLockHealthy(){return true;}",
+        'string HistoryDealGetString(ulong,int){return "XAUUSD";}',
+        "DEAL_SYMBOL=11",
+        "DEAL_POSITION_ID=12",
+    ):
+        if forbidden in shared:
+            sys.exit(f"STOP: duplicate mock remains: {forbidden}; no changes made")
+
+    return shared + API + core + broker + MAIN
 
 
 API = r'''

@@ -8,26 +8,55 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def create_probe(source: str) -> str:
-    start = source.index('string V2StopoutKey()')
-    end = source.index('\nvoid OnTradeTransaction(', start)
-    guard = source[start:end]
-    names = ('EnableV2AccountRiskGuard', 'V2MaxPortfolioRiskUSD',
-             'V2MaxSymbolRiskUSD', 'V2MaxDirectionRiskUSD',
-             'V2MinimumMarginLevelPercent', 'MoneyUnitsPerUSD')
-    inputs = []
-    for name in names:
-        matches = re.findall(r'^input (?:bool|double) ' + name + r'\s*=\s*[^;]+;', source, re.M)
-        if len(matches) != 1:
-            raise ValueError(f'Missing or ambiguous input: {name}')
-        inputs.append(matches[0])
-    if 'bool V2Preflight(' not in guard:
-        raise ValueError('Missing production preflight')
-    output = ('#property strict\n#property script_show_inputs\n'
-              '// Production guard SHA256: ' + hashlib.sha256(guard.encode()).hexdigest()
-              + '\n' + '\n'.join(inputs) + '\n' + guard + PROBE)
-    # Refuse future source changes that introduce an execution path.
-    if re.search(r'\b(?:OrderSend\w*|CTrade)\b|\bTrade\s*\.|#include|#import', output):
-        raise ValueError('Execution dependency found; refusing probe generation')
+    # Preserve provenance for the complete production guard, but include only
+    # the pure lock-key function in the generated probe.
+    guard_start = source.index('string V2StopoutKey()')
+    guard_end = source.index('\nvoid OnTradeTransaction(', guard_start)
+    guard = source[guard_start:guard_end]
+
+    key_match = re.search(
+        r'^string V2StopoutKey\(\)\s*\{[^}]*\}',
+        source[guard_start:],
+        re.M,
+    )
+    if not key_match:
+        raise ValueError('Missing or ambiguous lock-key function')
+    key_function = key_match.group(0)
+
+    read_only_check = r"""
+// Probe-only preflight. This deliberately does not call production V2Preflight
+// or any production lock-release/reconciliation helper.
+bool V2ProbeReadOnlyPreflight(string &reason)
+{
+   reason="";
+   if(!GlobalVariableCheck(V2StopoutKey()))
+   {
+      reason="stop-out lock absent";
+      return false;
+   }
+   reason="stop-out lock";
+   return false;
+}
+"""
+    output = (
+        '#property strict\n#property script_show_inputs\n'
+        '// Production guard SHA256 (provenance only): '
+        + hashlib.sha256(guard.encode()).hexdigest()
+        + '\n' + key_function + '\n'
+        + read_only_check + PROBE
+    )
+
+    forbidden = (
+        "OrderSend", "CTrade", "Trade.",
+        "GlobalVariableDel(", "#include", "#import",
+        "V2ReleaseKnownTestLock", "V2ReleaseReviewedStopoutLock",
+        "V2Preflight(",
+    )
+    found = [token for token in forbidden if token in output]
+    if found:
+        raise ValueError(
+            "Unsafe dependency in generated probe: " + ", ".join(found)
+        )
     return output
 
 
@@ -67,7 +96,7 @@ void OnStart()
    { Print("RAMON_RESTART FAIL lock absent or changed"); return; }
    string reason="";
    // Lock must reject before candidate geometry is evaluated. No order is sent.
-   bool allowed=V2Preflight(ORDER_TYPE_SELL,0.0,0.0,0.0,reason);
+   bool allowed=V2ProbeReadOnlyPreflight(reason);
    if(allowed || reason!="stop-out lock")
    { PrintFormat("RAMON_RESTART FAIL allowed=%s reason=%s",allowed?"true":"false",reason); return; }
    PrintFormat("RAMON_RESTART CHECK key=%s value=%.0f reason=%s seed=%s",

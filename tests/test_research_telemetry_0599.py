@@ -1,4 +1,4 @@
-"""Read-only source invariants for EA 0.59.9 research coverage."""
+"""Read-only source invariants for current EA research telemetry."""
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -6,9 +6,9 @@ EA = (ROOT / "mt5/Ramon.mq5").read_text(encoding="utf-8-sig")
 RT = (ROOT / "mt5/RamonResearchTelemetry.mqh").read_text(encoding="utf-8")
 
 def test_ea_version_and_session_version_match():
-    assert '#property version "1.599"' in EA
-    assert '#define RAMON_EA_VERSION "0.59.9"' in EA
-    assert r'\"ea_version\":\"0.59.9\"' in RT
+    assert '#property version "1.621"' in EA
+    assert '#define RAMON_EA_VERSION "0.62.1"' in EA
+    assert r'\"ea_version\":\"0.62.1\"' in RT
 
 def test_all_observability_events_present():
     for name in ("decision_gate", "order_intent", "order_result",

@@ -48,7 +48,7 @@ def test_stopout_history_is_scanned_at_startup_and_before_optional_risk_guard():
     assert init.index("LockedAccountLogin=current_login") < init.index("V2RecoverStopoutHistory(stopout_reason)")
     preflight=code[code.index("bool V2Preflight("):code.index("void OnTradeTransaction(")]
     assert preflight.index("V2RecoverStopoutHistory(reason)") < preflight.index("if(!EnableV2AccountRiskGuard)")
-    history=code[code.index("bool V2RecoverStopoutHistory("):code.index("bool V2Preflight(")]
+    history=code[code.index("bool V2RecoverStopoutHistory("):code.index("bool V2ReleaseReviewedStopoutLock(")]
     assert "HistorySelect(0,now)" in history
     assert "DEAL_REASON_SO" in history and "DEAL_TIME_MSC" in history
     assert "DEAL_MAGIC" not in history and "DEAL_SYMBOL" not in history

@@ -41,13 +41,38 @@ bool MockHistoryDealGetInteger(ulong ticket,ENUM_DEAL_PROPERTY_INTEGER prop,long
    if(!MockReadOK) return false;
    for(int i=0;i<MockCount;i++)
       if(MockTickets[i]==ticket)
-      { value=(prop==DEAL_REASON ? MockReasons[i] : MockTimes[i]); return true; }
+      {
+         if(prop==DEAL_REASON) value=MockReasons[i];
+         else if(prop==DEAL_TIME_MSC) value=MockTimes[i];
+         else if(prop==DEAL_TIME) value=MockTimes[i]/1000;
+         else if(prop==DEAL_POSITION_ID) value=(long)MockTickets[i];
+         else value=0;
+         return true;
+      }
    return false;
+}
+long MockHistoryDealGetInteger(ulong ticket,ENUM_DEAL_PROPERTY_INTEGER prop)
+{
+   long value=0;
+   if(!MockHistoryDealGetInteger(ticket,prop,value)) return 0;
+   return value;
 }
 int MockFind(string name)
 {
    for(int i=0;i<MockGlobalsCount;i++) if(MockNames[i]==name) return i;
    return -1;
+}
+bool MockGlobalVariableDel(string name)
+{
+   int i=MockFind(name);
+   if(i<0) return false;
+   for(int j=i;j<MockGlobalsCount-1;j++)
+   {
+      MockNames[j]=MockNames[j+1];
+      MockValues[j]=MockValues[j+1];
+   }
+   MockGlobalsCount--;
+   return true;
 }
 bool MockGlobalVariableCheck(string name) { return MockFind(name)>=0; }
 bool MockGlobalVariableGet(string name,double &value)
@@ -75,6 +100,7 @@ void MockGlobalVariablesFlush() { MockFlushCount++; }
 #define GlobalVariableCheck MockGlobalVariableCheck
 #define GlobalVariableGet MockGlobalVariableGet
 #define GlobalVariableSet MockGlobalVariableSet
+#define GlobalVariableDel MockGlobalVariableDel
 #define GlobalVariablesFlush MockGlobalVariablesFlush
 '''
 
@@ -99,7 +125,11 @@ bool Veto(string expected)
 {
    string reason="";
    bool allowed=V2Preflight(ORDER_TYPE_SELL,0,0,0,reason);
-   return !allowed && reason==expected;
+   if(allowed) return false;
+   // Stop Out lock rejections may include a diagnostic suffix.
+   if(expected=="stop-out lock")
+      return StringFind(reason,expected)==0;
+   return reason==expected;
 }
 void OnStart()
 {

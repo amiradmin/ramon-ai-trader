@@ -53,6 +53,10 @@ static_assert(sizeof(long)==8 && sizeof(ulong)==8,"64-bit Linux adapter required
 const int ACCOUNT_LOGIN=1,ACCOUNT_SERVER=2,TERMINAL_CONNECTED=3;
 const int DEAL_REASON=4,DEAL_TIME_MSC=5,DEAL_REASON_SO=6,DEAL_REASON_CLIENT=7;
 const int ORDER_TYPE_SELL=8,CRYPT_HASH_SHA256=9,WHOLE_ARRAY=-1,CP_UTF8=65001;
+const int DEAL_TIME=10,DEAL_SYMBOL=11,DEAL_POSITION_ID=12;
+const int TIME_DATE=1,TIME_SECONDS=2;
+const int ACCOUNT_EQUITY=13,ACCOUNT_MARGIN=14,ACCOUNT_MARGIN_FREE=15;
+const double V2MinimumMarginLevelPercent=100.0;
 string IntegerToString(long value){return std::to_string(value);}
 int StringLen(const string &value){return value.size();}
 int StringFind(const string &value,const string &pattern){
@@ -81,6 +85,20 @@ template<typename... Args> void PrintFormat(string format,Args... args){
 }
 template<typename... Args> void Print(Args... args){(std::cout<<...<<args);std::cout<<'\n';}
 void TerminalClose(int){} // Fixture completion only; never controls a terminal.
+
+// Offline-only stand-ins for dependencies used by guarded release helpers.
+// These never connect to or mutate a real MT5 terminal/account.
+int PositionsTotal(){return 0;}
+int OrdersTotal(){return 0;}
+bool AccountLockHealthy(){return true;}
+double AccountInfoDouble(int property){
+    if(property==ACCOUNT_EQUITY) return 1000.0;
+    if(property==ACCOUNT_MARGIN) return 100.0;
+    if(property==ACCOUNT_MARGIN_FREE) return 900.0;
+    return 0.0;
+}
+string TimeToString(datetime value,int){return std::to_string(value);}
+string HistoryDealGetString(ulong,int){return "XAUUSD";}
 '''
 
 
