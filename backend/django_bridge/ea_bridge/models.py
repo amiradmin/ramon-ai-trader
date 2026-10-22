@@ -12,7 +12,7 @@ class EAHeartbeat(models.Model):
     last_seen = models.DateTimeField(auto_now=True)
     payload = models.JSONField(default=dict, blank=True)
     class Meta:
-        indexes = [models.Index(fields=["-last_seen"])]
+        indexes = [models.Index(fields=["-last_seen"], name="ea_bridge_e_last_se_4b6f70_idx")]
 
 class EAEvent(models.Model):
     instance_id = models.CharField(max_length=128, db_index=True)
@@ -22,7 +22,7 @@ class EAEvent(models.Model):
     received_at = models.DateTimeField(auto_now_add=True)
     payload = models.JSONField(default=dict, blank=True)
     class Meta:
-        indexes = [models.Index(fields=["-received_at"])]
+        indexes = [models.Index(fields=["-received_at"], name="ea_bridge_e_receive_2e64a1_idx")]
 
 class MarketBar(models.Model):
     source = models.CharField(max_length=128)
