@@ -5474,15 +5474,15 @@ void SendDjangoHeartbeatIfDue()
       && (bool)MQLInfoInteger(MQL_TRADE_ALLOWED)
       && (bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED);
    string payload="{"
-      +"\\"instance_id\\":\\""+JsonEscape(instance_id)+"\\","
-      +"\\"account_login\\":\\""+IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN))+"\\","
-      +"\\"server_name\\":\\""+JsonEscape(AccountInfoString(ACCOUNT_SERVER))+"\\","
-      +"\\"symbol\\":\\""+JsonEscape(_Symbol)+"\\","
-      +"\\"ea_version\\":\\""+RAMON_EA_VERSION+"\\","
-      +"\\"status\\":\\""+JsonEscape(StatusLine)+"\\","
-      +"\\"terminal_connected\\":"+(terminal_connected ? "true" : "false")+","
-      +"\\"trade_allowed\\":"+(trade_allowed ? "true" : "false")+","
-      +"\\"sent_at_utc\\":\\""+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+"\\""
+      +"\"instance_id\":\""+JsonEscape(instance_id)+"\","
+      +"\"account_login\":\""+IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN))+"\","
+      +"\"server_name\":\""+JsonEscape(AccountInfoString(ACCOUNT_SERVER))+"\","
+      +"\"symbol\":\""+JsonEscape(_Symbol)+"\","
+      +"\"ea_version\":\""+RAMON_EA_VERSION+"\","
+      +"\"status\":\""+JsonEscape(StatusLine)+"\","
+      +"\"terminal_connected\":"+(terminal_connected ? "true" : "false")+","
+      +"\"trade_allowed\":"+(trade_allowed ? "true" : "false")+","
+      +"\"sent_at_utc\":\""+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+"\""
       +"}";
    char request[];
    int n=StringToCharArray(payload,request,0,WHOLE_ARRAY,CP_UTF8);
