@@ -1,0 +1,76 @@
+
+name: ramon-ai-trader-bridge
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ramon_django
+      POSTGRES_USER: ramon_django
+      POSTGRES_PASSWORD: ${RAMON_PG_PASSWORD:?Set RAMON_PG_PASSWORD in .env}
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+      - ./backend/django_bridge/001-timescaledb.sql:/docker-entrypoint-initdb.d/001-timescaledb.sql:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - backend
+
+  django-bridge:
+    build:
+      context: .
+      dockerfile: backend/django_bridge/Dockerfile
+    image: ramon-django-bridge:local
+    init: true
+    restart: unless-stopped
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    environment:
+      DJANGO_ALLOWED_HOSTS: "127.0.0.1,localhost,django-bridge"
+      DJANGO_DEBUG: "0"
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY in .env}
+      RAMON_EA_BEARER_TOKEN: ${RAMON_EA_BEARER_TOKEN:?Set RAMON_EA_BEARER_TOKEN in .env}
+      DJANGO_DB_ENGINE: postgresql
+      DJANGO_DB_NAME: ramon_django
+      DJANGO_DB_USER: ramon_django
+      DJANGO_DB_PASSWORD: ${RAMON_PG_PASSWORD:?Set RAMON_PG_PASSWORD in .env}
+      DJANGO_DB_HOST: timescaledb
+      DJANGO_DB_PORT: "5432"
+    ports:
+      - "127.0.0.1:8016:8016"
+    volumes:
+      # Preserve the old SQLite database volume for rollback/recovery.
+      - type: volume
+        source: ramon_django_data
+        target: /legacy-data
+        read_only: true
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8016/healthz', timeout=3).read()"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - backend
+
+networks:
+  backend:
+    name: ramon-ai-trader-bridge_backend
+
+volumes:
+  timescale_data:
+    name: ramon-ai-trader-bridge_timescale_data
+  ramon_django_data:
+    name: ramon-ai-trader-bridge_ramon_django_data

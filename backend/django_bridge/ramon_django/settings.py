@@ -21,3 +21,30 @@ STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 EA_BEARER_TOKEN = os.environ.get("RAMON_EA_BEARER_TOKEN", "")
 EA_MAX_BODY_BYTES = int(os.environ.get("RAMON_EA_MAX_BODY_BYTES", "65536"))
+
+DB_ENGINE = os.environ.get("DJANGO_DB_ENGINE", "sqlite").lower()
+
+if DB_ENGINE in {"postgres", "postgresql"}:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.environ["DJANGO_DB_NAME"],
+            "USER": os.environ["DJANGO_DB_USER"],
+            "PASSWORD": os.environ["DJANGO_DB_PASSWORD"],
+            "HOST": os.environ.get("DJANGO_DB_HOST", "timescaledb"),
+            "PORT": os.environ.get("DJANGO_DB_PORT", "5432"),
+            "CONN_MAX_AGE": 60,
+            "OPTIONS": {"connect_timeout": 5},
+        }
+    }
+else:
+    DB_PATH = Path(
+        os.environ.get("DJANGO_DB_PATH", str(BASE_DIR / "data" / "django.sqlite3"))
+    )
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": str(DB_PATH),
+        }
+    }
