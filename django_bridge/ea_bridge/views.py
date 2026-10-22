@@ -23,6 +23,18 @@ def handshake(request):
         return denied
     return JsonResponse({"ok": True, "protocol": "ramon-ea-v1", "server_time_utc": datetime.now(timezone.utc).isoformat(), "trading_authorization": False})
 
+@require_GET
+def status(request):
+    denied = BearerTokenRequired.reject_if_invalid(request)
+    if denied:
+        return denied
+    now = datetime.now(timezone.utc)
+    rows = []
+    for row in EAHeartbeat.objects.order_by("-last_seen")[:100]:
+        age = max(0, int((now - row.last_seen).total_seconds()))
+        rows.append({"instance_id": row.instance_id, "symbol": row.symbol, "ea_version": row.ea_version, "status": row.status, "terminal_connected": row.terminal_connected, "trade_allowed": row.trade_allowed, "last_seen_utc": row.last_seen.isoformat(), "age_seconds": age, "connected": age <= 90})
+    return JsonResponse({"ok": True, "instances": rows})
+
 @csrf_exempt
 @require_POST
 def heartbeat(request):
