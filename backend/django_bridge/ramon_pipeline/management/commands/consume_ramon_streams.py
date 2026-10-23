@@ -12,7 +12,7 @@ from redis import Redis
 from redis.exceptions import ResponseError
 
 from django.conf import settings
-from ea_bridge.models import EAEvent
+from ea_bridge.models import EAEvent, MarketBar
 from ramon_pipeline.redis_buffer import STREAMS
 
 log = logging.getLogger(__name__)
@@ -39,6 +39,42 @@ def _decode_event(fields):
 
 class Command(BaseCommand):
     help = "Consume Ramon EA Redis Streams and persist snapshots/events to PostgreSQL."
+
+    @staticmethod
+    def _persist(fields):
+        """Idempotently persist one decoded Redis record; caller ACKs after this returns."""
+        event_id, instance_id, event_type, occurred_at, payload = _decode_event(fields)
+        kind = str(fields.get("kind", "")).lower()
+        if kind == "market_bar" and all(key in payload for key in ("symbol", "timeframe", "timestamp", "open", "high", "low", "close")):
+            bar_time = parse_datetime(str(payload["timestamp"]))
+            if bar_time is None:
+                raise ValueError("market bar timestamp must be an ISO datetime")
+            if bar_time.tzinfo is None:
+                bar_time = bar_time.replace(tzinfo=timezone.utc)
+            MarketBar.objects.get_or_create(
+                source=instance_id,
+                symbol=str(payload["symbol"])[:32],
+                timeframe=str(payload["timeframe"]).upper()[:16],
+                timestamp=bar_time,
+                defaults={
+                    "open": payload["open"],
+                    "high": payload["high"],
+                    "low": payload["low"],
+                    "close": payload["close"],
+                    "volume": payload.get("volume", 0),
+                },
+            )
+            return
+        with transaction.atomic():
+            EAEvent.objects.get_or_create(
+                event_id=event_id,
+                defaults={
+                    "instance_id": instance_id,
+                    "event_type": event_type,
+                    "occurred_at": occurred_at,
+                    "payload": payload,
+                },
+            )
 
     def add_arguments(self, parser):
         parser.add_argument("--count", type=int, default=100)
@@ -77,17 +113,7 @@ class Command(BaseCommand):
                         reclaimed = []
                     for message_id, fields in reclaimed:
                         try:
-                            event_id, instance_id, event_type, occurred_at, payload = _decode_event(fields)
-                            with transaction.atomic():
-                                EAEvent.objects.get_or_create(
-                                    event_id=event_id,
-                                    defaults={
-                                        "instance_id": instance_id,
-                                        "event_type": event_type,
-                                        "occurred_at": occurred_at,
-                                        "payload": payload,
-                                    },
-                                )
+                            self._persist(fields)
                             client.xack(stream, group, message_id)
                         except Exception:
                             log.exception("Failed to recover pending event stream=%s id=%s", stream, message_id)
@@ -99,17 +125,7 @@ class Command(BaseCommand):
                 for stream, messages in batches:
                     for message_id, fields in messages:
                         try:
-                            event_id, instance_id, event_type, occurred_at, payload = _decode_event(fields)
-                            with transaction.atomic():
-                                EAEvent.objects.get_or_create(
-                                    event_id=event_id,
-                                    defaults={
-                                        "instance_id": instance_id,
-                                        "event_type": event_type,
-                                        "occurred_at": occurred_at,
-                                        "payload": payload,
-                                    },
-                                )
+                            self._persist(fields)
                             # Acknowledge only after the database transaction has committed.
                             client.xack(stream, group, message_id)
                         except Exception:
