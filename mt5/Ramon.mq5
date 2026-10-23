@@ -40,7 +40,7 @@ input double V2MinimumMarginLevelPercent = 300.0;
 input bool SmallOnlyMode = false; // Attach second EA instance on another M15 chart for parallel SMALL trades.
 const ulong PrimaryMagicNumber = 26092212;
 const ulong SmallProfitMagicNumber = 26092213;
-input string ModelUrl = "http://127.0.0.1:8012/decision";
+input string ModelUrl = "http://127.0.0.1:8017/api/ea/v1/decision";
 input bool EnableDjangoBridge = false; // Telemetry only; never grants trading permission.
 input string DjangoHeartbeatUrl = "http://127.0.0.1:8017/api/ea/v1/heartbeat";
 input string DjangoEventsUrl = "http://127.0.0.1:8017/api/ea/v1/events";
@@ -1834,7 +1834,13 @@ bool BuildRequest(string &payload,datetime &bar_time)
    payload+="],\"quote_time\":"+IntegerToString((long)tick.time)
       +",\"broker_utc_offset_seconds\":"+IntegerToString((int)BrokerUtcOffsetSeconds())
       +",\"account_is_cent\":"+(AccountIsCent ? "true" : "false")
-      +",\"range_execution_ready\":"+((EnableRangeMain && !SmallOnlyMode) ? "true" : "false")+"}";
+      +",\"range_execution_ready\":"+((EnableRangeMain && !SmallOnlyMode) ? "true" : "false")
+      +",\"account_balance\":"+DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),2)
+      +",\"risk_percent\":"+DoubleToString(MathMin(0.5,RiskPerTradeUSD*MoneyUnitsPerUSD/MathMax(1.0,AccountInfoDouble(ACCOUNT_BALANCE))*100.0),6)
+      +",\"point_value_per_lot\":"+DoubleToString(SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_VALUE)*SymbolInfoDouble(_Symbol,SYMBOL_POINT)/MathMax(SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_SIZE),SymbolInfoDouble(_Symbol,SYMBOL_POINT)),8)
+      +",\"volume_step\":"+DoubleToString(SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_STEP),8)
+      +",\"min_volume\":"+DoubleToString(SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN),8)
+      +",\"max_volume\":"+DoubleToString(SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MAX),8)+"}";
    return true;
 }
 
@@ -1844,6 +1850,7 @@ bool QueryModel(const string payload,string &reply)
    StringToCharArray(payload,request,0,WHOLE_ARRAY,CP_UTF8);
    ArrayResize(request,ArraySize(request)-1); // Remove terminal NUL from JSON body.
    string headers="Content-Type: application/json\r\n";
+   if(StringLen(DjangoBearerToken)>=32) headers+="Authorization: Bearer "+DjangoBearerToken+"\r\n";
    string response_headers="";
    ResetLastError();
    int code=WebRequest("POST",ModelUrl,headers,RequestTimeoutMs,request,response,response_headers);

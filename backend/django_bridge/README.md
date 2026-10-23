@@ -64,3 +64,10 @@ All timestamps stored by Django use UTC. The EA's `observed_utc_epoch` field is 
 - A Redis outage in Redis-ingestion mode returns HTTP 503 so the EA can retry; the event is not falsely acknowledged.
 - The worker commits to the database before Redis `XACK`. Duplicate `event_id` values are safe to redeliver.
 - Validate service health, admin login, Redis stream flow, and persisted rows before enabling regular snapshots. Never enable live trading because the telemetry bridge is healthy.
+
+
+## Django-hosted Ramon decision API
+
+The EA decision URL is `http://127.0.0.1:8017/api/ea/v1/decision`. Configure the same private `RAMON_EA_BEARER_TOKEN` in Compose `.env` and the EA's `DjangoBearerToken` input; never commit the token. The endpoint accepts completed M15 bars and quote/account metadata, evaluates SignalFlow and records a durable decision audit row.
+
+The initial engine is a deterministic EMA/ATR technical baseline, **not a trained Chronos or other ML model**. It returns explicit BUY/SELL/WAIT decisions using the legacy EA response schema. It intentionally does not assert news readiness, AI confirmation or trading authorization. Existing EA news, account, margin, stop-loss, spread, execution and risk safeguards remain mandatory. Keep live trading disabled during validation. Set `RAMON_DJANGO_DECISION_ENABLED=0` to disable this endpoint.

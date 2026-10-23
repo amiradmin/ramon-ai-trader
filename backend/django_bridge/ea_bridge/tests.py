@@ -75,3 +75,41 @@ class StreamPersistenceTests(TestCase):
         bar = MarketBar.objects.get()
         self.assertEqual(bar.timeframe, "M1")
         self.assertEqual(str(bar.close), "101.0000000000")
+
+class DjangoDecisionApiTests(TestCase):
+    url="/api/ea/v1/decision"
+    headers={"HTTP_AUTHORIZATION":"Bearer test-token"}
+    def payload(self):
+        bars=[]
+        for i in range(256):
+            c=2300+i*.08
+            bars.append({"time":1790000000+i*900,"open":c-.03,"high":c+.12,"low":c-.12,"close":c})
+        return {"symbol":"XAUUSD_o","timeframe":"M15","bid":2320.30,"ask":2320.35,"point":.01,"bars":bars,
+          "account_balance":10000,"risk_percent":.06,"point_value_per_lot":1,"volume_step":.01,"min_volume":.01,"max_volume":100}
+    @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
+    def test_complete_contract_and_audit(self):
+        r=self.client.post(self.url,data=json.dumps(self.payload()),content_type="application/json",**self.headers)
+        self.assertEqual(r.status_code,200,r.content); b=r.json()
+        self.assertIn(b["decision"],("BUY","SELL","WAIT")); self.assertEqual(len(b["sample_key"]),16)
+        self.assertEqual(b["signal_bar_time"],self.payload()["bars"][-1]["time"])
+        self.assertFalse(b["trading_authorization"]); self.assertFalse(b["execution_enabled"])
+        for k in ("base_decision","base_reason","ensemble_ready","regime_probability","news_source","news_source_ready",
+          "news_source_age_seconds","signal_bid","signal_ask","forecast_low","forecast_median","forecast_high","atr",
+          "intrabar_confirmed","intrabar_direction","ai_trend_confirmed","ai_trend_direction","spread_points",
+          "stop_distance","target_distance","target_tp1","target_tp2","target_tp3","legacy_target_price"):
+            self.assertIn(k,b)
+        from .models import StrategyDecisionRecord
+        self.assertTrue(StrategyDecisionRecord.objects.filter(decision_id=b["sample_key"]).exists())
+    @override_settings(EA_BEARER_TOKEN="wrong-token",RAMON_DJANGO_DECISION_ENABLED=True)
+    def test_rejects_wrong_token(self):
+        r=self.client.post(self.url,data=json.dumps(self.payload()),content_type="application/json",**self.headers)
+        self.assertEqual(r.status_code,401)
+    @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=False)
+    def test_can_be_disabled(self):
+        r=self.client.post(self.url,data=json.dumps(self.payload()),content_type="application/json",**self.headers)
+        self.assertEqual(r.status_code,503)
+    @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
+    def test_rejects_insufficient_bars(self):
+        p=self.payload(); p["bars"]=p["bars"][:10]
+        r=self.client.post(self.url,data=json.dumps(p),content_type="application/json",**self.headers)
+        self.assertEqual(r.status_code,400)
