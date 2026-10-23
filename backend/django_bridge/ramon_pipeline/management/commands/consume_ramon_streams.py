@@ -66,6 +66,32 @@ class Command(BaseCommand):
         while True:
             close_old_connections()
             try:
+                # Reclaim messages left pending by a crashed consumer before reading new data.
+                for stream in streams:
+                    try:
+                        _next, reclaimed, _cursor = client.xautoclaim(
+                            stream, group, consumer, min_idle_time=60_000,
+                            start_id="0-0", count=options["count"],
+                        )
+                    except (AttributeError, ResponseError):
+                        reclaimed = []
+                    for message_id, fields in reclaimed:
+                        try:
+                            event_id, instance_id, event_type, occurred_at, payload = _decode_event(fields)
+                            with transaction.atomic():
+                                EAEvent.objects.get_or_create(
+                                    event_id=event_id,
+                                    defaults={
+                                        "instance_id": instance_id,
+                                        "event_type": event_type,
+                                        "occurred_at": occurred_at,
+                                        "payload": payload,
+                                    },
+                                )
+                            client.xack(stream, group, message_id)
+                        except Exception:
+                            log.exception("Failed to recover pending event stream=%s id=%s", stream, message_id)
+
                 batches = client.xreadgroup(
                     group, consumer, {stream: ">" for stream in streams},
                     count=options["count"], block=options["block_ms"] or None,
