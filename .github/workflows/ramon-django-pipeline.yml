@@ -30,6 +30,7 @@ jobs:
       RAMON_PIPELINE_INGEST_ENABLED: "0"
       RAMON_REDIS_URL: redis://127.0.0.1:6379/0
       RAMON_PG_PASSWORD: ci-only-not-a-secret
+      POSTGRES_PASSWORD: ci-only-not-a-secret
       RAMON_LOG_DB_PASSWORD: ci-only-not-a-secret
     steps:
       - uses: actions/checkout@v4
