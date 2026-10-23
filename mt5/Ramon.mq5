@@ -42,8 +42,8 @@ const ulong PrimaryMagicNumber = 26092212;
 const ulong SmallProfitMagicNumber = 26092213;
 input string ModelUrl = "http://127.0.0.1:8012/decision";
 input bool EnableDjangoBridge = false; // Telemetry only; never grants trading permission.
-input string DjangoHeartbeatUrl = "http://127.0.0.1:8016/api/ea/v1/heartbeat";
-input string DjangoEventsUrl = "http://127.0.0.1:8016/api/ea/v1/events";
+input string DjangoHeartbeatUrl = "http://127.0.0.1:8017/api/ea/v1/heartbeat";
+input string DjangoEventsUrl = "http://127.0.0.1:8017/api/ea/v1/events";
 input int DjangoSnapshotIntervalSeconds = 15; // Observational snapshot cadence; never used for trading decisions.
 input string DjangoBearerToken = ""; // Set locally in MT5; never commit/share this value.
 input double MoneyUnitsPerUSD = 100.0; // CENT account: 100 account units = 1 USD.
