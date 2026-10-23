@@ -1,39 +1,33 @@
 # Ramon Django pipeline modules
 
-The pipeline is staged into separate Python modules and is being introduced alongside
-(not in place of) the current EA bridge.
+The Django pipeline contains an event-ingestion/processing foundation and a newer modular SignalFlow decision pipeline. They are distinct at this stage; SignalFlow has not yet been wired into an EA `/decision` endpoint.
 
-## Implemented foundation
-- `ingestion.py`: request-size validation and event classification helper.
-- `django_adapter.py`: Redis connection and pipeline construction.
-- `redis_buffer.py`: Redis Streams lanes for market, execution, and telemetry.
-- `management/commands/consume_ramon_streams.py`: consumer groups, pending-entry reclaim,
-  transaction-before-ACK, idempotent persistence, bounded retries and dead-letter handling.
+## Current modules
+
+- `ingestion.py`, `schemas.py`: request/event classification and versioned envelopes.
+- `django_adapter.py`, `redis_buffer.py`: Redis connection and Redis Streams buffering.
+- `management/commands/consume_ramon_streams.py`: stream consumer, pending-entry recovery, transaction-before-ACK, idempotent persistence, retries, and dead-letter handling.
 - `market_data.py`: UTC and OHLCV normalization.
-- `strategy.py`, `risk.py`, `execution.py`: strategy, risk and order-intent contracts.
-- `orchestration.py`: transactionally persist a decision, risk verdict and deterministic intent.
-- `persistence.py`: repository ports.
-- `learning_telemetry.py`: outcome attribution contract.
+- `strategy.py`, `risk.py`, `execution.py`: legacy strategy, risk, and order-intent contracts used by existing orchestration/tests.
+- `orchestration.py`, `persistence.py`: decision/risk/intent persistence abstractions.
+- `learning_telemetry.py`: outcome-attribution contract.
 - `recovery.py`: retry policy and UTC parsing.
-- `schemas.py`: shared versioned event envelope.
+- `signalflow/opportunities.py`: opportunity filtering.
+- `signalflow/entry_timing.py`: entry quality and spread checks.
+- `signalflow/risk_management.py`: bounded risk-percent and volume sizing.
+- `signalflow/learning.py`: validates and classifies an outcome; it does not persist or adapt from it yet.
+- `signalflow/pipeline.py`: runs SignalFlow stages and returns BUY/SELL/HOLD with `execution_enabled: false`.
 
-## Data model
-The `ea_bridge` app has models/migration for normalized market bars, strategy decisions,
-risk verdicts and order intents. Existing EAHeartbeat/EAEvent models remain in place.
+## Runtime configuration
 
-## Safe rollout
-The existing synchronous event-ingestion path remains the default. Set
-`RAMON_PIPELINE_INGEST_ENABLED=1` only after Redis and the stream worker are healthy and
-integration tests have passed. If Redis is unavailable in pipeline mode, the endpoint
-returns 503 so the EA can retry; it does not silently fall back to the DB.
-
-Compose starts a private Redis service and worker. Redis has AOF enabled and a no-eviction
-policy; market/telemetry streams have a trim target while execution events are not auto-trimmed.
-Monitor disk/memory/stream growth and configure operational alerts before enabling ingestion.
+Compose runs private Redis and TimescaleDB services plus a worker. Event ingestion is disabled by default with `RAMON_PIPELINE_INGEST_ENABLED=0`. Enable it only after the services and integration tests are verified. In ingestion mode, Redis failure returns a retryable 503 rather than silently acknowledging an event.
 
 ## Not yet a live trading engine
-The strategy/risk contracts are not connected to Ramon’s existing model-serving logic; the
-orchestration service will fail closed without a configured risk policy. Order intents are not
-exposed to the EA, and no Django code authorizes live trades. The EA command/acknowledgement
-protocol, strategy parity, full outcome reconciliation and demo-account integration tests remain
-follow-up tasks. Do not delete `backend/ramon` until behavior is migrated and regression-tested.
+
+- The EA-facing `/decision` endpoint is not implemented in Django.
+- SignalFlow is not integrated into the Django request path.
+- Learning outcomes are not yet durably persisted by SignalFlow and do not update policy.
+- Order intents are not exposed as EA commands; Django does not authorize live trades.
+- Strategy parity, outcome reconciliation, and demo-account end-to-end tests remain outstanding.
+
+Keep the legacy modules until their importers, worker, and tests have been migrated. Do not treat a passing health check as proof that decision-making or live execution is working.
