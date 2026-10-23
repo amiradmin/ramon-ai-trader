@@ -356,10 +356,7 @@ string ExperimentalReason = "NONE";
 
 bool IsAllowedModelUrl(const string url)
 {
-   return (
-      url=="http://127.0.0.1:8012/decision"
-      || url=="http://model:8012/decision"
-   );
+   return (url=="http://127.0.0.1:8017/api/ea/v1/decision");
 }
 
 bool AccountLockHealthy()
