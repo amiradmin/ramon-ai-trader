@@ -1,6 +1,6 @@
 ﻿#property strict
-#property version "1.603"
-#define RAMON_EA_VERSION "0.60.3"
+#property version "1.604"
+#define RAMON_EA_VERSION "0.60.4"
 #property description "Django-hosted SignalFlow XAUUSD_o M15 EA; local Django decision API required."
 
 #include <Trade/Trade.mqh>
@@ -41,7 +41,7 @@ input bool SmallOnlyMode = false; // Attach second EA instance on another M15 ch
 const ulong PrimaryMagicNumber = 26092212;
 const ulong SmallProfitMagicNumber = 26092213;
 input string ModelUrl = "http://127.0.0.1:8017/api/ea/v1/decision";
-input bool EnableDjangoBridge = false; // Telemetry only; never grants trading permission.
+input bool EnableDjangoBridge = true; // Telemetry only; never grants trading permission.
 input string DjangoHeartbeatUrl = "http://127.0.0.1:8017/api/ea/v1/heartbeat";
 input string DjangoEventsUrl = "http://127.0.0.1:8017/api/ea/v1/events";
 input int DjangoSnapshotIntervalSeconds = 15; // Observational snapshot cadence; never used for trading decisions.
