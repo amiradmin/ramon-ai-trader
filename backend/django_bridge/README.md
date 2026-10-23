@@ -1,36 +1,44 @@
-# Ramon Django EA Bridge (initial slice)
+# Ramon Django EA Bridge
 
-This service provides a small authenticated telemetry channel between the MT5 EA and Django. It does **not** authorize trades, change EA risk settings, or replace the Chronos decision endpoint (`127.0.0.1:8012/decision`). It is intentionally an optional sidecar so existing trading services are not changed by default.
+Django is the active EA-facing service in the current Compose stack. It exposes authenticated telemetry endpoints; it is **not yet the EA's trading-decision service** and does not authorize orders or change EA risk settings.
 
-## Start locally
+## Run
 
-From the repository root, create `.env` values without committing them:
+Create an untracked root `.env` file with strong, unique values for:
 
-```bash
-printf 'DJANGO_SECRET_KEY=%s\n' "$(python -c 'import secrets; print(secrets.token_urlsafe(48))')" >> .env
-printf 'RAMON_EA_BEARER_TOKEN=%s\n' "$(python -c 'import secrets; print(secrets.token_urlsafe(48))')" >> .env
-docker compose -f compose.yaml -f compose.django.yaml up -d --build django-bridge
-curl -fsS http://127.0.0.1:8016/healthz
+```dotenv
+POSTGRES_DB=ramon
+POSTGRES_USER=ramon
+POSTGRES_PASSWORD=replace-with-a-strong-database-password
+DJANGO_SECRET_KEY=replace-with-a-long-random-secret
+RAMON_EA_BEARER_TOKEN=replace-with-a-long-random-token
 ```
 
-Keep the endpoint bound to loopback unless you deliberately configure TLS and a trusted network path. Never commit `.env` or place the bearer token in source code. In MT5, add `http://127.0.0.1:8016` to Tools → Options → Expert Advisors → Allow WebRequest for listed URL. Configure the same token in the EA's `DjangoBearerToken` input. The EA input is local terminal configuration; do not export or share set files containing it.
+Then run from the repository root:
 
-## API contract
+```bash
+docker compose config --services
+docker compose up -d --build
+docker compose ps
+curl -fsS http://127.0.0.1:8017/healthz
+```
 
-- `GET /api/ea/v1/handshake` — authenticated protocol/version handshake. `trading_authorization` is always `false`.
-- `POST /api/ea/v1/heartbeat` — upserts `instance_id`, `account_login`, `server_name`, `symbol`, `ea_version`, `status`, `terminal_connected`, `trade_allowed`, plus the complete bounded JSON payload.
-- `POST /api/ea/v1/events` — idempotently accepts event records keyed by unique `event_id`.
-- `GET /healthz` — process health only; it does not prove the EA is connected.
+Compose binds Django to host loopback `127.0.0.1:8017` and container port `8016`. Keep the API private unless a separate secured deployment is deliberately configured. Never commit `.env` or publish bearer tokens.
 
-Requests use `Authorization: Bearer <RAMON_EA_BEARER_TOKEN>`. The API rejects requests if no token is configured, limits bodies to 64 KiB, validates JSON objects, and does not expose any endpoint that can change trading parameters. Treat the account login as operationally sensitive; don't publish this dashboard/API to the internet.
+## API
 
-## Latency / socket policy
+All `/api/ea/v1/` endpoints require `Authorization: Bearer <RAMON_EA_BEARER_TOKEN>`.
 
-The EA currently makes synchronous `WebRequest` calls to the model endpoint. This bridge should be called at a low frequency (heartbeat every 15–30 seconds, events only when needed), with a short timeout and outside the order-entry decision path. Record client-side elapsed milliseconds and inspect p95/p99 latency before choosing another transport. On loopback, HTTP is typically the simplest and sufficiently fast option. If measured latency or synchronous stalls are unacceptable, move telemetry to a persistent socket worker/bridge; do **not** replace the model decision call with a socket or route trade authorization through Django as part of this telemetry change.
+- `GET /healthz` — process health only; it does not prove EA connectivity.
+- `GET /api/ea/v1/handshake` — protocol/version handshake; `trading_authorization` is always `false`.
+- `POST /api/ea/v1/heartbeat` — records EA instance and terminal status.
+- `POST /api/ea/v1/events` — idempotently accepts events, either in the database or (when explicitly enabled) through Redis ingestion.
+- `GET /api/ea/v1/status` — recent EA heartbeat status.
 
-## Safety and rollout
+The body limit is 64 KiB. Requests are validated as JSON objects, and a missing/invalid bearer token is rejected.
 
-1. Keep the bridge disabled in the EA until the token and URL are configured.
-2. Verify heartbeat freshness and event idempotency, then test service restart and disconnect/reconnect.
-3. A Django outage must not stop existing-position management or weaken any EA-local risk guards. This telemetry-only API must never be treated as a trade permission.
-4. The bridge is an initial integration slice, not proof of a live connection. Do not enable live trading based on `/healthz` alone.
+## Important migration status
+
+The EA source `mt5/Ramon.mq5` still defaults to `http://127.0.0.1:8012/decision`. Django does **not** currently expose that decision endpoint. Do not change the EA's URL or enable live trading until the decision contract is implemented, risk checks fail closed, and demo-account integration tests pass.
+
+Telemetry calls should remain outside the order-entry path. A Django outage must not stop EA-local management of existing positions or weaken its local risk controls.
