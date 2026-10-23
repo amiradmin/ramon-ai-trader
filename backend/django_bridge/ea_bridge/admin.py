@@ -2,7 +2,7 @@ import json
 
 from django.contrib import admin
 
-from .models import EAEvent, EAHeartbeat
+from .models import EAEvent, EAHeartbeat, StrategyDecisionRecord
 
 
 @admin.register(EAHeartbeat)
@@ -44,6 +44,25 @@ class EAEventAdmin(admin.ModelAdmin):
 
     def has_change_permission(self, request, obj=None):
         # Permit opening the detail page; all fields remain read-only.
+        return True
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(StrategyDecisionRecord)
+class StrategyDecisionRecordAdmin(admin.ModelAdmin):
+    list_display = ("created_at", "symbol", "action", "confidence", "rationale_code", "model_version")
+    list_filter = ("symbol", "action", "model_version", "created_at")
+    search_fields = ("decision_id", "symbol", "rationale_code", "model_version")
+    readonly_fields = ("decision_id", "symbol", "action", "confidence", "rationale_code", "model_version", "features", "created_at")
+    ordering = ("-created_at",)
+    list_per_page = 50
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
         return True
 
     def has_delete_permission(self, request, obj=None):
