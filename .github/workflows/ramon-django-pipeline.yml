@@ -34,6 +34,16 @@ jobs:
       RAMON_LOG_DB_PASSWORD: ci-only-not-a-secret
     steps:
       - uses: actions/checkout@v4
+      - name: Create CI-only Compose environment file
+        working-directory: .
+        run: |
+          cat > .env <<'EOF'
+          POSTGRES_DB=ramon
+          POSTGRES_USER=ramon
+          POSTGRES_PASSWORD=ci-only-not-a-secret
+          RAMON_EA_BEARER_TOKEN=ci-test-token
+          DJANGO_SECRET_KEY=ci-only-not-a-secret
+          EOF
       - name: Validate consolidated Docker Compose
         working-directory: .
         run: docker compose -f docker-compose.yaml config --quiet
