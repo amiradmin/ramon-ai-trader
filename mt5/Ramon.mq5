@@ -1,7 +1,7 @@
 ﻿#property strict
-#property version "1.601"
-#define RAMON_EA_VERSION "0.60.1"
-#property description "Independent Chronos-2 XAUUSD_o M15 bot; demo symbol; local model server required."
+#property version "1.602"
+#define RAMON_EA_VERSION "0.60.2"
+#property description "Django-hosted SignalFlow XAUUSD_o M15 EA; local Django decision API required."
 
 #include <Trade/Trade.mqh>
 #include "RamonResearchTelemetry.mqh"
