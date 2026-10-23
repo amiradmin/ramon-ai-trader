@@ -43,7 +43,8 @@ class EAEventAdmin(admin.ModelAdmin):
         return False
 
     def has_change_permission(self, request, obj=None):
-        return False
+        # Permit opening the detail page; all fields remain read-only.
+        return True
 
     def has_delete_permission(self, request, obj=None):
         return False
