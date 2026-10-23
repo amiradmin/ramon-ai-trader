@@ -21,6 +21,7 @@ services:
       DJANGO_DB_USER: ${POSTGRES_USER:-ramon}
       DJANGO_DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       RAMON_REDIS_URL: redis://redis:6379/0
+      RAMON_DJANGO_DECISION_ENABLED: "1"
     ports:
       - "127.0.0.1:8017:8016"
     depends_on:
