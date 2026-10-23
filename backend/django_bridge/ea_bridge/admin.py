@@ -1,16 +1,8 @@
 import json
 
 from django.contrib import admin
-from django.utils.html import format_html
 
-from .models import (
-    EAEvent,
-    EAHeartbeat,
-    MarketBar,
-    OrderIntentRecord,
-    RiskVerdictRecord,
-    StrategyDecisionRecord,
-)
+from .models import EAEvent, EAHeartbeat
 
 
 @admin.register(EAHeartbeat)
@@ -55,47 +47,3 @@ class EAEventAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
-
-
-@admin.register(MarketBar)
-class MarketBarAdmin(admin.ModelAdmin):
-    list_display = ("timestamp", "source", "symbol", "timeframe", "open", "high", "low", "close", "volume")
-    list_filter = ("symbol", "timeframe", "source")
-    search_fields = ("symbol", "source")
-    date_hierarchy = "timestamp"
-    list_per_page = 50
-    ordering = ("-timestamp",)
-    show_full_result_count = False
-
-
-@admin.register(StrategyDecisionRecord)
-class StrategyDecisionRecordAdmin(admin.ModelAdmin):
-    list_display = ("created_at", "decision_id", "symbol", "action", "confidence", "model_version")
-    list_filter = ("symbol", "action", "model_version")
-    search_fields = ("decision_id", "symbol", "rationale_code", "model_version")
-    readonly_fields = ("created_at",)
-    date_hierarchy = "created_at"
-    list_per_page = 50
-    ordering = ("-created_at",)
-
-
-@admin.register(RiskVerdictRecord)
-class RiskVerdictRecordAdmin(admin.ModelAdmin):
-    list_display = ("created_at", "decision_id", "approved", "reason_code", "approved_volume")
-    list_filter = ("approved", "reason_code")
-    search_fields = ("decision_id", "reason_code")
-    readonly_fields = ("created_at",)
-    date_hierarchy = "created_at"
-    list_per_page = 50
-    ordering = ("-created_at",)
-
-
-@admin.register(OrderIntentRecord)
-class OrderIntentRecordAdmin(admin.ModelAdmin):
-    list_display = ("created_at", "intent_id", "decision_id", "instance_id", "symbol", "side", "volume", "state")
-    list_filter = ("state", "symbol", "side")
-    search_fields = ("intent_id", "decision_id", "instance_id", "symbol", "broker_ticket")
-    readonly_fields = ("created_at", "updated_at")
-    date_hierarchy = "created_at"
-    list_per_page = 50
-    ordering = ("-created_at",)
