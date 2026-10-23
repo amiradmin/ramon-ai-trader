@@ -1,6 +1,6 @@
 ﻿#property strict
-#property version "1.602"
-#define RAMON_EA_VERSION "0.60.2"
+#property version "1.603"
+#define RAMON_EA_VERSION "0.60.3"
 #property description "Django-hosted SignalFlow XAUUSD_o M15 EA; local Django decision API required."
 
 #include <Trade/Trade.mqh>
