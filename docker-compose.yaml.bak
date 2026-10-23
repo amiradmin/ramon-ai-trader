@@ -1,0 +1,90 @@
+
+name: ramon
+
+services:
+  django:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ramon-django
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings
+      DB_ENGINE: django.db.backends.postgresql
+      DB_HOST: timescaledb
+      DB_PORT: "5432"
+      DB_NAME: ${POSTGRES_DB:-ramon}
+      DB_USER: ${POSTGRES_USER:-ramon}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "127.0.0.1:8017:8000"
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ramon_backend
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+  redis:
+    image: redis:7-alpine
+    container_name: ramon-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - ramon_backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  timescaledb:
+    image: timescale/timescaledb:latest-pg17
+    container_name: ramon-timescaledb
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ramon}
+      POSTGRES_USER: ${POSTGRES_USER:-ramon}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - ramon_backend
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    # Keep PostgreSQL internal to Docker by default.
+    # Uncomment for local host access if needed.
+    # ports:
+    #   - "127.0.0.1:5433:5432"
+
+networks:
+  ramon_backend:
+    driver: bridge
+
+volumes:
+  timescale_data:
+  redis_data:
