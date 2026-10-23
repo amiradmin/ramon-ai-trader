@@ -1,36 +1,66 @@
-# Ramon Django EA Bridge (initial slice)
+# Ramon EA → Redis → Django → TimescaleDB
 
-This service provides a small authenticated telemetry channel between the MT5 EA and Django. It does **not** authorize trades, change EA risk settings, or replace the Chronos decision endpoint (`127.0.0.1:8012/decision`). It is intentionally an optional sidecar so existing trading services are not changed by default.
+The bridge receives read-only EA telemetry and snapshots. It does not authorize trades or change EA risk settings. The trading decision endpoint remains separate.
 
-## Start locally
+## Data path
 
-From the repository root, create `.env` values without committing them:
+1. `mt5/Ramon.mq5` sends an authenticated heartbeat every 30 seconds and a JSON `SNAPSHOT` event at the configured interval (default 15 seconds).
+2. `POST /api/ea/v1/events` validates the event and publishes it to a Redis Stream. Snapshot events are routed to `ramon:telemetry:v1`.
+3. The `worker` service runs `manage.py consume_ramon_streams` and consumes Redis consumer groups.
+4. The worker inserts each event into `ea_bridge.EAEvent` in PostgreSQL/TimescaleDB, using the unique `event_id` for idempotency. Redis is acknowledged only after the database transaction commits.
+5. Django Admin displays saved snapshots with server-side pagination and a read-only JSON payload detail page.
 
-```bash
-printf 'DJANGO_SECRET_KEY=%s\n' "$(python -c 'import secrets; print(secrets.token_urlsafe(48))')" >> .env
-printf 'RAMON_EA_BEARER_TOKEN=%s\n' "$(python -c 'import secrets; print(secrets.token_urlsafe(48))')" >> .env
-docker compose -f compose.yaml -f compose.django.yaml up -d --build django-bridge
-curl -fsS http://127.0.0.1:8016/healthz
+## Configure and start
+
+Set secrets in the repository-root `.env` file; never commit it:
+
+```dotenv
+DJANGO_SECRET_KEY=<a-long-random-secret>
+RAMON_EA_BEARER_TOKEN=<a-long-random-token>
+POSTGRES_DB=ramon
+POSTGRES_USER=ramon
+POSTGRES_PASSWORD=<a-strong-database-password>
+RAMON_PIPELINE_INGEST_ENABLED=1
 ```
 
-Keep the endpoint bound to loopback unless you deliberately configure TLS and a trusted network path. Never commit `.env` or place the bearer token in source code. In MT5, add `http://127.0.0.1:8016` to Tools → Options → Expert Advisors → Allow WebRequest for listed URL. Configure the same token in the EA's `DjangoBearerToken` input. The EA input is local terminal configuration; do not export or share set files containing it.
+Keep `RAMON_PIPELINE_INGEST_ENABLED=0` while validating the services. Set it to `1` when ready for the EA events endpoint to queue events through Redis. With the setting disabled, the legacy endpoint writes events directly to the database instead of using Redis.
 
-## API contract
+From the repository root:
 
-- `GET /api/ea/v1/handshake` — authenticated protocol/version handshake. `trading_authorization` is always `false`.
-- `POST /api/ea/v1/heartbeat` — upserts `instance_id`, `account_login`, `server_name`, `symbol`, `ea_version`, `status`, `terminal_connected`, `trade_allowed`, plus the complete bounded JSON payload.
-- `POST /api/ea/v1/events` — idempotently accepts event records keyed by unique `event_id`.
-- `GET /healthz` — process health only; it does not prove the EA is connected.
+```bash
+docker compose config -q
+docker compose up -d --build timescaledb redis django worker
+docker compose ps -a
+docker compose logs --tail=100 django worker
+```
 
-Requests use `Authorization: Bearer <RAMON_EA_BEARER_TOKEN>`. The API rejects requests if no token is configured, limits bodies to 64 KiB, validates JSON objects, and does not expose any endpoint that can change trading parameters. Treat the account login as operationally sensitive; don't publish this dashboard/API to the internet.
+The Django service is published only on host loopback at `127.0.0.1:8017`. Health check: `http://127.0.0.1:8017/healthz`. Admin: `http://127.0.0.1:8017/admin/`.
 
-## Latency / socket policy
+Create an admin account once:
 
-The EA currently makes synchronous `WebRequest` calls to the model endpoint. This bridge should be called at a low frequency (heartbeat every 15–30 seconds, events only when needed), with a short timeout and outside the order-entry decision path. Record client-side elapsed milliseconds and inspect p95/p99 latency before choosing another transport. On loopback, HTTP is typically the simplest and sufficiently fast option. If measured latency or synchronous stalls are unacceptable, move telemetry to a persistent socket worker/bridge; do **not** replace the model decision call with a socket or route trade authorization through Django as part of this telemetry change.
+```bash
+docker compose exec django python manage.py createsuperuser
+```
 
-## Safety and rollout
+In MT5, add the URL used by `DjangoHeartbeatUrl` and `DjangoEventsUrl` to **Tools → Options → Expert Advisors → Allow WebRequest for listed URL**. Set `EnableDjangoBridge=true` and the same `DjangoBearerToken` locally in the EA inputs. Do not commit or share the token. `DjangoSnapshotIntervalSeconds` controls the snapshot cadence; snapshots are observational only and never grant trading permission.
 
-1. Keep the bridge disabled in the EA until the token and URL are configured.
-2. Verify heartbeat freshness and event idempotency, then test service restart and disconnect/reconnect.
-3. A Django outage must not stop existing-position management or weaken any EA-local risk guards. This telemetry-only API must never be treated as a trade permission.
-4. The bridge is an initial integration slice, not proof of a live connection. Do not enable live trading based on `/healthz` alone.
+## Admin snapshot viewer
+
+Open **EA bridge → EA events**. The list is newest-first, paginated at 50 rows per page, filterable by event type/date and searchable by instance/event ID. Select a row to inspect its full read-only JSON payload. The heartbeat list is available separately.
+
+## Event API
+
+- `GET /api/ea/v1/handshake` — authenticated protocol handshake; `trading_authorization` is always false.
+- `POST /api/ea/v1/heartbeat` — updates current EA connectivity status.
+- `POST /api/ea/v1/events` — accepts event objects containing `instance_id`, `event_id`, and `event_type`; Redis mode acknowledges only after Redis accepts the event.
+- `GET /healthz` — Django process health only, not proof that the EA is connected.
+
+All timestamps stored by Django use UTC. The EA's `observed_utc_epoch` field is retained in the JSON snapshot payload, while `received_at` records the database insertion time.
+
+## Safety / rollout
+
+- The bridge defaults to disabled in the EA and the Redis ingestion flag defaults to disabled.
+- Keep the admin service loopback-only and use a strong admin password and bearer token.
+- A Redis outage in Redis-ingestion mode returns HTTP 503 so the EA can retry; the event is not falsely acknowledged.
+- The worker commits to the database before Redis `XACK`. Duplicate `event_id` values are safe to redeliver.
+- Validate service health, admin login, Redis stream flow, and persisted rows before enabling regular snapshots. Never enable live trading because the telemetry bridge is healthy.
