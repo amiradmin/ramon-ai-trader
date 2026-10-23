@@ -1,778 +1,90 @@
-# Ramon — ربات معاملاتی مبتنی بر Chronos‑2
+# Ramon — Django EA Bridge
 
-**Ramon** یک پروژهٔ مستقل برای معاملهٔ طلا در MetaTrader 5 است. هدف آن ساخت رباتی است که با یک مدل واقعی سری زمانی تصمیم بگیرد، نتیجهٔ معاملات واقعی حساب سنتی را اندازه‌گیری کند و در نسخه‌های بعدی از داده‌های خودش یاد بگیرد؛ در عین حال، اندازهٔ ریسک و شرایط اجرای سفارش قابل بررسی و کنترل باشند.
+Ramon is being consolidated around Django as the single service-facing entry point for the MetaTrader 5 Expert Advisor (EA). The active Compose stack contains Django, Redis, TimescaleDB, and a stream worker. The legacy standalone Chronos/advisor/MT5 container Dockerfiles have been removed.
 
-**وضعیت پروژه: نسخهٔ اولیهٔ قابل آزمایش.** سرویس محلی Chronos‑2، اکسپرت MT5، ثبت تاریخچهٔ بسته‌شدهٔ M15 و چرخهٔ آموزش روزانهٔ challenger پیاده‌سازی شده‌اند. مدل جدید فقط وقتی معیارهای holdout تعریف‌شده را بهتر کند می‌تواند جایگزین مدل فعال شود. از نسخهٔ 0.24، آموزش مدل‌های Entry و Meta از نتیجهٔ خالص معاملات واقعیِ بسته‌شده و قابل اتصال به شناسهٔ تصمیم انجام می‌شود؛ فعال‌شدن آن‌ها نیازمند دادهٔ کافی و عبور از ارزیابی زمانی است. هیچ بازده یا سود تضمین‌شده‌ای وجود ندارد.
+## Current status
 
-> دامنهٔ فعلی: LiteFinance، نماد دقیق XAUUSD_l، تایم‌فریم M15، حساب واقعی سنتی با تأیید دستی تبدیل واحدهای حساب. Ramon از Eskandar و قوانین شش‌مرحله‌ای آن مستقل است.
+**The migration is not yet complete.** Django currently provides health and authenticated EA telemetry endpoints. The new `ramon_pipeline/signalflow/` package defines opportunity detection, entry timing, risk sizing, and outcome classification, but it is not yet wired into a Django `/decision` endpoint.
 
-## هدف نهایی
+The EA source `mt5/Ramon.mq5` still defaults to `http://127.0.0.1:8012/decision`. Do not assume the EA is using Django or enable live trading on the strength of Django's health check. Before routing decisions through Django, implement and test the decision contract, update the EA URL, and verify fail-closed behavior and EA-local risk protections.
 
-می‌خواهیم Ramon این چرخه را با دادهٔ قابل ردیابی طی کند:
+## Active architecture
 
-1. آخرین کندل‌های بسته‌شده و هزینهٔ واقعی ورود را از MT5 دریافت کند.
-2. با نسخهٔ مشخصی از مدل، مسیر احتمالی قیمت و عدم‌قطعیت آن را پیش‌بینی کند و BUY، SELL یا WAIT را همراه دلیل تولید کند.
-3. تنها در چارچوب بودجهٔ ریسک، محدودیت حساب و شرایط سالم بازار سفارش بدهد.
-4. برای هر تصمیم، ورودی‌ها، خروجی مدل، سفارش و نتیجهٔ واقعی معامله را ثبت کند؛ از جمله تصمیم‌های WAIT و سیگنال‌هایی که به علت حداقل حجم کارگزار اجرا نشده‌اند.
-5. مدل جدید را با تاریخچهٔ بدون نشت اطلاعات آموزش دهد، روی دوره‌های بعدی و هزینه‌های واقعی بسنجد، و تنها پس از بهتر شدن معیارهای از پیش تعیین‌شده به‌صورت نسخه‌بندی‌شده جایگزین کند.
-6. بتواند در صورت خرابی مدل، تغییر رفتار بازار یا افت عملکرد، ورود جدید را متوقف کند و به نسخهٔ قبلی برگردد.
+- **Django** — authenticated EA API; host port `127.0.0.1:8017`, container port `8016`.
+- **SignalFlow** — modular decision stages under `backend/django_bridge/ramon_pipeline/signalflow/`; currently not connected to the EA decision route.
+- **Redis** — stream buffering for opt-in event ingestion.
+- **TimescaleDB/PostgreSQL** — durable telemetry and pipeline data.
+- **Worker** — consumes queued events. Compose sets `RAMON_PIPELINE_INGEST_ENABLED=0` by default, so confirm the desired ingestion mode before changing it.
+- **MT5 EA** — remains responsible for its own order execution and local safety checks.
 
-«هوشمند» در این پروژه یعنی مدل قابل آموزش، پیش‌بینی همراه عدم‌قطعیت و تصمیم قابل ارزیابی. صرفِ تعداد بیشتر معاملات یا حذف WAIT نشان‌دهندهٔ هوشمندی نیست. ربات باید بتواند فرصت‌های خوب را بگیرد و در موقعیت نامناسب علت صبر کردن را نشان دهد.
+## Run locally
 
-## امروز چه چیزی کار می‌کند؟
+Create or update an untracked `.env` file with these values. Use strong, unique secrets; never commit the file.
 
-| بخش | وضعیت فعلی |
-| --- | --- |
-| پیش‌بینی | کد بارگذاری checkpoint **autogluon/chronos-2-small** با API پایتون Chronos‑2؛ استفاده از حداکثر ۲۵۶ قیمت بسته‌شدن برای پیش‌بینی چهار کندل آینده و کوانتیل‌های ۱۰٪، ۵۰٪ و ۹۰٪؛ اجرای وزن واقعی روی دستگاه کاربر هنوز تأیید نشده است |
-| تصمیم | BUY/SELL/WAIT از میانهٔ پیش‌بینی کندل چهارم، اسپرد، ATR و پهنای بازهٔ پیش‌بینی؛ حداقل مزیت و قدرت سیگنال فعلاً پارامترهای ثابت‌اند |
-| ارتباط | سرویس HTTP روی 127.0.0.1:8012 در اجرای محلی؛ در Docker فقط همین نشانی از میزبان منتشر می‌شود؛ خطای مدل یا پاسخ نامعتبر به سفارش منجر نمی‌شود |
-| اجرای MT5 | بررسی نماد و حساب، مجوز معامله، تازگی قیمت، اسپرد، پوزیشن‌های موجود، مارجین، سقف دفعات ورود و محاسبهٔ حجم با OrderCalcProfit |
-| ارزیابی | بازپخش آفلاین دادهٔ M15 از پایگاه SQLite با ورود در کندل بعدی، حداکثر چهار کندل نگهداری، اسپرد و فرض محافظه‌کارانه برای برخورد همزمان SL/TP |
-| آموزش | LoRA نسخه‌بندی‌شده + job روزانهٔ challenger؛ ۷۰٪ train، ۱۰٪ validation و ۲۰٪ holdout؛ promotion فقط پس از عبور از گیت net-R، تعداد معامله و drawdown |
-| هنوز در برنامه | ارزیابی فرصت‌های اجرا‌نشده، تعویض هماهنگ checkpoint Chronos و نقش‌ها، بازگشت خودکار بر اساس افت عملکرد و تأیید عملی MT5 |
+```dotenv
+POSTGRES_DB=ramon
+POSTGRES_USER=ramon
+POSTGRES_PASSWORD=replace-with-a-strong-database-password
+DJANGO_SECRET_KEY=replace-with-a-long-random-secret
+RAMON_EA_BEARER_TOKEN=replace-with-a-long-random-token
+```
 
-Chronos‑2 در نسخهٔ فعلی **پیش‌بینی‌کنندهٔ سری زمانی** است، نه عاملی که مستقیماً از پاداش معامله یاد گرفته باشد. فیلتر مزیت خالص، حد سود/ضرر و محدودیت‌های اجرا هنوز کد مشخص دارند. در صورت در دسترس نبودن مدل، استراتژی EMA/RSI جای آن قرار نمی‌گیرد. Ollama در این معماری لازم نیست.
+Generate secrets with Python if needed:
 
-## معماری
+```bash
+python -c 'import secrets; print(secrets.token_urlsafe(48))'
+```
 
-~~~mermaid
-flowchart TD
-    A["MT5: Ramon EA روی XAUUSD_l M15"] -->|"کندل بسته‌شده، Bid/Ask"| B["سرویس محلی 127.0.0.1:8012"]
-    B -->|"تا ۲۵۶ قیمت بسته‌شدن"| C["Chronos-2: پیش‌بینی ۴ کندل"]
-    C -->|"بازه و میانهٔ پیش‌بینی"| B
-    B -->|"BUY/SELL/WAIT + دلیل"| A
-    A -->|"کنترل ریسک و ارسال سفارش"| D["حساب سنتی LiteFinance"]
-~~~
+Start the stack:
 
-ورودی Chronos از کندل‌های کامل‌شدهٔ M15 است؛ اکسپرت هر ۳۰ ثانیه با Bid/Ask تازه و دادهٔ M1 مجدداً شرایط ورود را بررسی می‌کند. ثبت snapshot در زمان داشتن پوزیشن نیز ادامه دارد. سرویس یک endpoint سلامت به نشانی /health و یک endpoint تصمیم به نشانی /decision دارد. سرویس روی loopback گوش می‌دهد و برای استفاده روی همان ماشینی طراحی شده که MT5 زیر Wine اجرا می‌شود.
-
-## ساختار ریپو
-
-ساختار اصلی کد در سه پوشهٔ ریشه نگه داشته می‌شود: `data/` برای دادهٔ محلی، `mt5/` برای اکسپرت‌ها و `backend/` برای سرویس‌ها و بستهٔ Python. فایل‌های Compose، Dockerfile و تنظیمات ساخت در ریشه باقی می‌مانند.
-
-| مسیر | کار |
-| --- | --- |
-| mt5/Ramon.mq5 | اکسپرت مستقل MT5 و کنترل‌های قبل از سفارش |
-| backend/ramon/model.py | بارگذاری checkpoint و خواندن خروجی واقعی Chronos‑2 |
-| backend/ramon/core.py | اعتبارسنجی داده، ATR، اسپرد و تصمیم BUY/SELL/WAIT |
-| backend/ramon/server.py | سرویس محلی HTTP و پاسخ سلامت |
-| backend/ramon/preflight.py | آزمایش بارگذاری مدل و یک پیش‌بینی واقعی، بدون سفارش |
-| backend/ramon/history.py و replay.py | خواندن تاریخچه و ارزیابی ترتیبی آفلاین |
-| backend/ramon/train.py | ساخت checkpoint جدید با LoRA و ثبت تقسیم داده |
-| Dockerfile و docker-compose.yaml | اجرای مدل و ابزارهای پیش‌بینی/بازپخش/آموزش در کانتینر CPU |
-| Dockerfile.mt5 و scripts/mt5_container.sh | محیط اختیاری MT5 با Wine و صفحهٔ نصب در مرورگر محلی |
-| scripts/setup_local.sh | نصب محلی جایگزین، آزمایش مدل و کامپایل اکسپرت در Ubuntu/Wine |
-| tests/ | مجموعهٔ تست قدیمی عمداً حذف شده است؛ طراحی تست‌های جدید از ابتدا انجام می‌شود |
-
-## اجرا با Docker Compose
-
-Docker Compose سرویس **Chronos‑2** و فرمان‌های پایتونی Ramon را داخل کانتینر اجرا می‌کند؛ بسته‌های Python و PyTorch داخل image نصب می‌شوند و به APT سیستم میزبان وابسته نیستند. برای MT5 دو مسیر دارید: استفاده از نصب Wine فعلی روی میزبان، یا ساخت محیط Wine جداگانه در پروفایل اختیاری `mt5`. پروفایل اختیاری برنامهٔ MT5 را نصب نمی‌کند؛ برای آن باید فایل نصب ویندوزی MT5 را تهیه و از محیط گرافیکی داخل کانتینر اجرا کنید. اجرای زنده به‌صورت پیش‌فرض در اکسپرت خاموش است.
-
-پیش‌نیاز: Docker Engine و افزونهٔ Docker Compose **از قبل نصب و قابل اجرا باشند**. اگر Docker روی Ubuntu فعلی نصب نیست، با مخزن‌های ناسازگار noble/questing برای نصب آن سراغ `apt install` نروید؛ ابتدا مخزن‌های سیستم باید ترمیم شوند. فضای کافی برای image پایتون/PyTorch و cache مدل لازم است.
-
-~~~bash
-cd ~/Documents/Presentation/ramon-ai-trader
-git pull --ff-only
-mkdir -p data checkpoints
-docker compose build
-docker compose up -d model
+```bash
+docker compose config --services
+docker compose up -d --build
 docker compose ps
-curl http://127.0.0.1:8012/health
-~~~
+curl -fsS http://127.0.0.1:8017/healthz
+```
 
-اولین اجرا باید وزن مدل را در volume پایدار `chronos_cache` دانلود و بارگذاری کند؛ تا آماده‌شدن مدل، `curl` ممکن است موقتاً خطا بدهد. برای دیدن پیشرفت و خطاها: `docker compose logs -f model`. در پاسخ موفق، `ready` برابر `true` و نام مدل برابر checkpoint بارگذاری‌شده است. اگر UID/GID کاربرتان 1000 نیست، هنگام ساخت image مقدارهای خودتان را بفرستید: `RAMON_UID=$(id -u) RAMON_GID=$(id -g) docker compose build`؛ همان مقدارها را در فایل `.env` برای اجرای بعدی Compose ثبت کنید.
-
-مدل داخل کانتینر روی همهٔ رابط‌های **خود کانتینر** گوش می‌دهد، اما Compose پورت را فقط به `127.0.0.1:8012` میزبان وصل می‌کند. اگر MT5 روی همین میزبان اجرا می‌شود، نشانی `ModelUrl` اکسپرت و URL مجاز WebRequest همان `http://127.0.0.1:8012` هستند. این سرویس HTTP احراز هویت ندارد؛ پورت آن را روی شبکهٔ عمومی منتشر نکنید. اگر پورت 8012 میزبان اشغال است، سرویس قدیمی Ramon را متوقف کنید و سپس Compose را اجرا کنید.
-
-برای آزمون پیش‌بینی واقعی و کارهای آفلاین، سرویس ابزارها را با همان image اجرا کنید:
-
-~~~bash
-docker compose --profile tools run --rm tools -m ramon.preflight --device cpu
-
-# فایل تاریخچهٔ SQLite را ابتدا در پوشهٔ data/ قرار دهید.
-docker compose --profile tools run --rm tools -m ramon.replay \
-  --db /data/history.sqlite3 --symbol XAUUSD_l --device cpu
-
-# آموزش دستی؛ قبل از جایگزینی مدل زنده خروجی را جداگانه ارزیابی کنید.
-docker compose --profile tools run --rm tools -m ramon.train \
-  --db /data/history.sqlite3 --device cpu --out /checkpoints/checkpoint-001
-~~~
-
-`data/` فقط خواندنی است و checkpointها در `checkpoints/` روی میزبان باقی می‌مانند. ابزارهای آموزش و بازپخش با پروفایل جدا اجرا می‌شوند و خودکار در زمان راه‌اندازی مدل فعال نمی‌شوند. برای سرو کردن checkpoint تأییدشده، مقدار `CHRONOS_MODEL=/checkpoints/checkpoint-001/model` را در `.env` بگذارید و `docker compose up -d --force-recreate model` را اجرا کنید. آموزش CPU می‌تواند بسیار کند باشد؛ Compose فعلی شتاب‌دهندهٔ GPU را درخواست نمی‌کند.
-
-برای خاموش کردن سرویس: `docker compose down`. این فرمان volume مدل را حذف نمی‌کند؛ از `down -v` استفاده نکنید مگر اینکه بخواهید cache مدل را پاک کنید. برای کامپایل EA در MT5 موجود روی میزبان، بخش بعدی و دستور `bash scripts/setup_local.sh --mt5-only` را ببینید؛ اگر MetaEditor وجود ندارد، نصب MT5 فعلی را بررسی کنید یا از محیط جداگانهٔ زیر استفاده کنید.
-
-### MT5 در کانتینر جداگانه (اختیاری)
-
-این مسیر مشکل بسته‌های Wine میزبان را دور می‌زند: image اختیاری از Ubuntu 24.04 ساخته می‌شود و Wine64/Wine32 را از همان مخزن داخل کانتینر می‌گیرد. به Docker فعال، فضای دیسک اضافی و فایل نصب **ویندوزی** MT5 از منبع مورداعتماد خودتان نیاز دارد. برنامه و اطلاعات ورود MT5 در volume جداگانهٔ `mt5_prefix` نگهداری می‌شوند؛ پیشوند `~/.mt5` میزبان به کانتینر وصل نمی‌شود. این محیط هنوز روی دستگاه شما ساخته و آزموده نشده است.
-
-~~~bash
-cd ~/Documents/Presentation/ramon-ai-trader
-mkdir -p installer checkpoints
-# فایل نصب ویندوزی MT5 را با نام installer/mt5setup.exe در این مسیر بگذارید.
-docker compose --profile mt5 up -d --build mt5
-docker compose --profile mt5 ps
-docker compose --profile mt5 exec -d mt5 wine /installer/mt5setup.exe
-~~~
-
-آدرس `http://127.0.0.1:6080/vnc.html` را در مرورگر **همان دستگاه** باز کنید و مراحل نصب MT5 را در پنجرهٔ گرافیکی انجام دهید. مرورگر این محیط رمز عبور ندارد و Compose آن را فقط روی loopback میزبان منتشر می‌کند؛ پورت 6080 را به شبکهٔ عمومی باز نکنید. پس از تکمیل نصب، بدون وارد کردن اطلاعات حساب به خط فرمان، کامپایل را انجام دهید و ترمینال را باز کنید:
-
-~~~bash
-docker compose --profile mt5 exec mt5 bash scripts/setup_local.sh --mt5-only
-docker compose --profile mt5 exec -d mt5 run-mt5
-~~~
-
-در MT5 داخل کانتینر، URL مجاز WebRequest را **`http://model:8012`** قرار دهید و ورودی `ModelUrl` اکسپرت را `http://model:8012/decision` تنظیم کنید؛ `127.0.0.1` در این حالت به خود کانتینر MT5 اشاره می‌کند. سپس از رابط MT5 با حساب درست وارد شوید، اکسپرت کامپایل‌شده را به نمودار `XAUUSD_l` در `M15` وصل کنید و ابتدا فقط وضعیت غیرفعال آن را ببینید. بعد از راه‌اندازی دوبارهٔ کانتینر، فرمان `run-mt5` را دوباره اجرا کنید؛ خودکار اجرا شدن ترمینال هنوز تنظیم نشده است. اگر نصب یا کامپایل شکست خورد، `docker compose --profile mt5 logs mt5` و فایل `Ramon.log` داخل پوشهٔ Experts را بررسی کنید. اعتبارسنجیِ کامپایل، اتصال واقعی و تصمیم مدل روی رایانهٔ شما همچنان لازم است.
-
-## نصب محلی روی Ubuntu و MT5 (جایگزین Compose)
-
-پیش‌نیازها: Python 3.11 یا بالاتر، uv، Wine، MetaTrader 5 و MetaEditor سالم، دسترسی به اینترنت برای دریافت بسته‌ها و وزن مدل، و RAM/فضای دیسک کافی برای PyTorch. دانلود بستهٔ PyTorch می‌تواند بسیار بزرگ‌تر از فایل وزن مدل باشد. این راهنما فرض می‌کند MT5 روی همان دستگاه Ubuntu اجرا می‌شود.
-
-~~~bash
-git clone https://github.com/amiradmin/ramon-ai-trader.git
-cd ramon-ai-trader
-bash scripts/setup_local.sh
-~~~
-
-این دستور وابستگی‌ها را نصب می‌کند، مدل را دانلود و بارگذاری می‌کند، یک پیش‌بینی چهارمرحله‌ای واقعی را می‌سنجد، سپس Ramon.mq5 را در Experts کپی و با MetaEditor کامپایل می‌کند. **این دستور معاملهٔ زنده را فعال نمی‌کند.**
-
-اسکریپت مسیر MetaEditor و پوشهٔ Experts را در پیشوندهای رایج Wine مانند ~/.mt5 و ~/.wine جست‌وجو می‌کند. برای نمایش نتیجهٔ جست‌وجو **بدون نصب و کپی فایل** از حالت تشخیص استفاده کنید. اگر ریپو از قبل روی دستگاهتان است، ابتدا تغییرات را بگیرید:
-
-~~~bash
-git pull --ff-only
-bash scripts/setup_local.sh --diagnose
-~~~
-
-اگر MetaEditor پیدا نشد، با دستور زیر محل نصبش را ببینید. اگر چند پوشهٔ داده پیدا شد، مسیر ترمینال درست را از **File → Open Data Folder** در MT5 بردارید. RAMON_MT5_DIR باید به پوشهٔ حاوی metaeditor64.exe اشاره کند و RAMON_MT5_DATA_DIR باید پوشه‌ای باشد که MQL5/Experts در آن وجود دارد:
-
-~~~bash
-find "$HOME/.mt5" "$HOME/.wine" -type f \
-  \( -iname 'metaeditor64.exe' -o -iname 'metaeditor.exe' \) -print 2>/dev/null
-
-RAMON_MT5_DIR="/path/to/MetaTrader 5" \
-RAMON_MT5_DATA_DIR="/path/to/terminal-data" \
-bash scripts/setup_local.sh
-~~~
-
-برای نصب و آزمون **فقط مدل** در زمانی که مسیر MT5 مشخص نیست، از حالت جداگانه استفاده کنید؛ پس از یافتن مسیر MT5، نصب کامل را دوباره اجرا کنید:
-
-~~~bash
-bash scripts/setup_local.sh --model-only
-bash scripts/setup_local.sh
-~~~
-
-اگر پیش‌بینی مدل موفق بود ولی اجرای MetaEditor زیر Wine شکست خورد، برای تکرار **فقط کپی و کامپایل اکسپرت** از فرمان زیر استفاده کنید؛ وزن مدل دوباره آزمایش نمی‌شود:
-
-~~~bash
-bash scripts/setup_local.sh --mt5-only
-~~~
-
-خطای «wine32 is missing» همراه با خطای باز شدن metaeditor.exe معمولاً به وابستگی ۳۲ بیتی Wine یا DLLهای آن مربوط است. ابتدا نوع فایل و وضعیت بسته را بررسی کنید:
-
-~~~bash
-file "$HOME/.mt5/drive_c/Program Files/MetaTrader 5/metaeditor.exe"
-dpkg --print-foreign-architectures
-dpkg-query -W wine32:i386 2>/dev/null || true
-~~~
-
-اگر خروجی file برابر PE32 بود، wine32:i386 ممکن است لازم باشد؛ **تا وقتی نسخه‌های مخزن‌های APT یکسان نیستند آن را نصب نکنید**. برای نمونه، انتخاب libgcc-s1:amd64 نسخهٔ questing و libgcc-s1:i386 نسخهٔ noble باعث شکست حل وابستگی می‌شود و با نصب اجباری یا پایین‌آوردن نسخهٔ کتابخانه‌های اصلی نباید حل شود. پیش از هر نصب، نسخهٔ سیستم، منبع بسته‌ها و فایل مخزن‌ها را بخوانید:
-
-~~~bash
-. /etc/os-release; printf 'OS=%s CODENAME=%s\n' "$PRETTY_NAME" "$VERSION_CODENAME"
-apt-cache policy libgcc-s1:amd64 libgcc-s1:i386 wine32:i386
-grep -RniE 'noble|questing|cloudflareclient|Architectures:' \
-  /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null
-~~~
-
-APT باید نسخه‌های سازگار از **همان نسخهٔ Ubuntu** را برای amd64 و i386 ببیند. خطای «pkg.cloudflareclient.com questing Release» مشکل دیگری است: آن مخزن نسخهٔ questing را منتشر نمی‌کند؛ ابتدا فایل مخزن مربوطه را شناسایی کنید و برای رفع خطای APT فقط همان مخزن ناسازگار را اصلاح یا غیرفعال کنید. این کار مشکل مخزن‌های مخلوط Ubuntu را به‌تنهایی برطرف نمی‌کند. پس از اصلاح منابع، تغییرات پیشنهادی **apt -s install wine32:i386** را بررسی کنید؛ اگر حذف Wine یا تنزل کتابخانه‌های اصلی پیشنهاد شد، نصب را انجام ندهید. خطای c0000135 می‌تواند از DLL دیگری هم باشد؛ اگر wine32 از قبل نصب بود یا MetaEditor فایل PE32+ بود، خروجی Wine و فایل Ramon.log را بررسی کنید. پس از رفع Wine فرمان --mt5-only کافی است.
-
-راه جایگزین بدون تغییر بسته‌های Ubuntu: اگر MetaEditor از داخل MT5 باز می‌شود، فایل کپی‌شدهٔ MQL5/Experts/Ramon/Ramon.mq5 را در آن باز کنید و F7 بزنید. تنها پس از کامپایل موفق و نمایش صفر خطا، اکسپرت را به نمودار وصل کنید؛ EnableLiveTrading همچنان false بماند.
-
-اگر پردازشگر گرافیکی CUDA و نصب سازگار PyTorch دارید، RAMON_DEVICE=cuda را برای آزمون اولیه بگذارید؛ حالت پیش‌فرض CPU است. اگر اسکریپت MetaEditor را پیدا نکرد، می‌توان فایل mt5/Ramon.mq5 را دستی به MQL5/Experts/Ramon/ کپی کرد و در MetaEditor با F7 کامپایل کرد.
-
-پس از نصب، سرویس را در یک ترمینال جداگانه اجرا کنید و تا زمانی که Ramon روی نمودار است باز نگه دارید:
-
-~~~bash
-cd ramon-ai-trader
-uv run --extra model python -m ramon.server --device cpu
-~~~
-
-بررسی سرویس:
-
-~~~bash
-curl http://127.0.0.1:8012/health
-~~~
-
-باید ready برابر true و نام checkpoint را نشان دهد. بارگذاری checkpoint آموزش‌دیدهٔ محلی با گزینهٔ --model و مسیر پوشهٔ مدل ممکن است؛ مراحل ارزیابی قبل از جایگزینی را در بخش آموزش ببینید.
-
-### اتصال اکسپرت
-
-1. در MT5 به **Tools → Options → Expert Advisors** بروید؛ Allow WebRequest را فعال و http://127.0.0.1:8012 را به فهرست URLها اضافه کنید.
-2. اکسپرت Ramon را به **نمودار جداگانهٔ XAUUSD_l در M15** وصل کنید. ورودی EnableLiveTrading در شروع **false** باشد.
-3. /health، پنل نمودار و تب Experts را بررسی کنید. باید وضعیت مدل، دلیل BUY/SELL/WAIT و خطای احتمالی ارتباط دیده شود. پنل حالت DISARMED را نشان می‌دهد و در این حالت سفارش نمی‌فرستد.
-4. پیش از فعال‌سازی حساب سنتی، مقدار MoneyUnitsPerUSD را با مشخصات همان حساب بررسی کنید. حالت پیش‌فرض AutoLockCurrentAccount=true است: Ramon در OnInit به همان login و server فعال قفل می‌شود و اگر بعداً حساب یا سرور تغییر کند ورود جدید را متوقف می‌کند؛ بنابراین شمارهٔ حساب در ریپو هاردکد نمی‌شود. اگر قفل دستی می‌خواهید، AutoLockCurrentAccount=false و AllowedAccountLogin را محلی تنظیم کنید. پس از بررسی ریسک، EnableLiveTrading را فقط روی همان نشست MT5 فعال کنید.
-
-
-### خروجی تشخیصی Ramon با یک دستور
-
-Ramon v0.17 در هر به‌روزرسانی پنل، فایل `Ramon_Diagnostic.txt` را در پوشهٔ مشترک MT5 (`FILE_COMMON`) می‌نویسد. این فایل شامل آخرین تصمیم مدل، دلیل BUY/SELL/WAIT، زمان کندل سیگنال، low/median/high پیش‌بینی، ATR، edge، spread، فاصلهٔ SL/TP، وضعیت account lock، مجوزهای معامله، پوزیشن مدیریت‌شده، تعداد معاملات روز و وضعیت فعلی اجرا است. شمارهٔ login حساب در این خروجی چاپ نمی‌شود.
-
-پس از اینکه Ramon روی نمودار `XAUUSD_l / M15` اجرا شد، برای گرفتن وضعیت کامل مدل و MT5 فقط این فرمان را اجرا کنید:
-
-~~~bash
-cd ~/Documents/Presentation/ramon-ai-trader
-bash scripts/ramon_diagnostic.sh
-~~~
-
-خروجی با دو بخش شروع می‌شود: `RAMON MODEL SERVICE` برای سلامت کانتینر Chronos-2 و `RAMON MT5 DIAGNOSTIC` برای وضعیت EA. اگر چند Wine prefix وجود داشته باشد، اسکریپت جدیدترین فایل تشخیصی را انتخاب می‌کند. برای اجبار مسیر خاص می‌توان `RAMON_DIAGNOSTIC_FILE=/absolute/path/Ramon_Diagnostic.txt` را قبل از فرمان تنظیم کرد.
-
-WebRequest در Strategy Tester متاتریدر اجرا نمی‌شود؛ بازپخش تاریخی مستقل از تستر انجام می‌شود. اگر سرویس خاموش شود یا پاسخ معتبر برای کندل جاری ندهد، ورود جدید انجام نمی‌شود. حد ضرر و حد سود سفارش‌های باز نزد کارگزار ثبت می‌شوند؛ خروج زمانی چهارکندلی به وصل بودن اکسپرت نیاز دارد.
-
-## منطق تصمیم و محدودیت ریسک نسخهٔ اولیه
-
-| پارامتر | مقدار پیش‌فرض / رفتار |
-| --- | --- |
-| افق پیش‌بینی | چهار کندل M15 آینده؛ ورودی حداکثر ۲۵۶ کندل بسته‌شده |
-| حداقل مزیت | بیشینهٔ ۰٫۱۲ × ATR14 و ۱٫۵ × اسپرد؛ نسبت مزیت به پهنای پیش‌بینی دست‌کم ۰٫۲۰ |
-| حد ضرر / هدف | فاصلهٔ اولیه ۱٫۵ × ATR14 و ۳ × ATR14؛ هدف اسمی حدود ۲ برابر فاصلهٔ حد ضرر است |
-| ریسک هر معامله | بودجهٔ **برنامه‌ریزی‌شدهٔ ۰٫۰۶ دلار** با فرض دستی MoneyUnitsPerUSD=100 برای حساب سنتی |
-| اسپرد / دفعات معامله | حداکثر ۵۰ پوینت؛ حداکثر چهار ورود برای این اکسپرت در روزِ سرور کارگزار |
-| حجم و موقعیت | بررسی حداقل حجم با OrderCalcProfit؛ اگر کوچک‌ترین حجم مجاز از بودجه بگذرد، ورود رد می‌شود؛ همزمان یک موقعیت برای Ramon |
-| نگهداری موقعیت | حداکثر چهار کندل M15 تا تلاش برای خروج زمانی؛ SL/TP طبق سفارش نزد کارگزار ثبت می‌شوند |
-| شروع | EnableLiveTrading=false؛ AutoLockCurrentAccount=true نشست را به login/server فعلی MT5 قفل می‌کند. AllowedAccountLogin فقط برای قفل دستی استفاده می‌شود |
-
-۰٫۰۶ دلار **سقف قطعی زیان واقعی نیست**: لغزش، گپ، کمیسیون، تغییر قیمت و رفتار کارگزار می‌توانند زیان را بیشتر کنند. محدودیت چهار ورود در روز، محدودیت زیان تجمعی روزانه نیست. فیلتر مستقل اخبار، قطع‌کنندهٔ افت سرمایهٔ روزانه و ثبت کامل کارمزد هنوز پیاده‌سازی نشده‌اند. بنابراین وضعیت خبری UNKNOWN در نسخهٔ فعلی به معنی سنجش ایمنی خبر نیست.
-
-## ارزیابی با دادهٔ کارگزار
-
-برای دادهٔ تاریخی از جدول history_bars در SQLite ابزار تاریخچهٔ ریپوی جداگانهٔ MetaTrader assistant استفاده می‌شود. نماد باید **دقیقاً XAUUSD_l** و timeframe برابر M15 باشد. مسیر زیر را با فایل واقعی روی کامپیوتر خودتان عوض کنید:
-
-~~~bash
-uv run --extra model python -m ramon.replay \
-  --db /absolute/path/to/history.sqlite3 \
-  --symbol XAUUSD_l --point 0.01 --fallback-spread 42 --stride 4
-~~~
-
-بازپخش روی ۲۰٪ آخر تاریخچه به ترتیب زمانی است؛ در اولین کندل **بعد از سیگنال** وارد می‌شود و در هر زمان فقط یک معامله فرض می‌کند. اگر اسپرد تاریخی ذخیره نشده باشد، fallback-spread ورودی استفاده می‌شود. وقتی حد سود و ضرر داخل یک کندل لمس شوند، زیان ابتدا شمرده می‌شود. خروجی شامل تعداد تصمیم‌ها، خرید، فروش، برد، باخت، خروج زمانی و مجموع R است.
-
-### مقایسهٔ Chronos با خط مبنای ثابت
-
-برای مقایسهٔ دو مدل روی همان ۲۰٪ آخر تاریخچه، با اسپرد **ثبت‌شده در هر کندل**، پس از دریافت شاخه ابتدا image ابزارها را از کد جدید بسازید. صرف `git switch` فایل‌های برنامهٔ نصب‌شده در کانتینر در حال اجرا را به‌روز نمی‌کند. این مسیر سرویس زندهٔ `model` را راه‌اندازی مجدد نمی‌کند:
-
-~~~bash
-docker compose --profile tools build tools
-docker compose --profile tools run --rm --no-deps tools -m ramon.compare \
-  --db /data/ramon_history.sqlite3 \
-  --symbol XAUUSD_l --model autogluon/chronos-2-small --stride 4
-~~~
-
-خط مبنا فقط میانگین تغییر چهار قیمت بسته‌شدن اخیر را تا افق چهار کندل ادامه می‌دهد و هیچ پارامتری را روی دورهٔ آزمون یاد نمی‌گیرد. هر دو از تابع تصمیم و بازپخش یکسان استفاده می‌کنند؛ موقعیت‌هایشان جداگانه پیش می‌رود و ممکن است تعداد یا زمان معاملات یکسان نباشد. گزارش شامل دوره، پوشش اسپرد، تعداد معاملات، R خالص، افت سرمایه و محدودیت‌های مقایسه است. `start_mt5_time` و `end_mt5_time` ساعت خام سرور MT5 هستند. اگر اختلاف ساعت UTC از دادهٔ معاملات همان نماد در فاصلهٔ یک روزِ مرز دوره ثبت شده و نمونه‌ها با هم سازگار باشند، `start_utc` یا `end_utc` به‌همراه اختلاف ساعت و تعداد نمونه‌ها اضافه می‌شود؛ در غیر این صورت UTC حدس زده نمی‌شود. هیچ فایل یا مدل زنده‌ای را عوض نمی‌کند.
-
-برای بررسی سریع تایم‌استمپ‌ها بدون بارگذاری Chronos یا اجرای دوبارهٔ مقایسه، پس از ساخت image ابزارها اجرا کنید:
-
-~~~bash
-docker compose --profile tools run --rm --no-deps tools -m ramon.compare \
-  --db /data/ramon_history.sqlite3 --symbol XAUUSD_l --time-only
-~~~
-
-فرمان در صورت نبود اسپرد تاریخی در هر یک از کندل‌های دورهٔ آزمون متوقف می‌شود؛ باید دادهٔ اسپرد واقعی MT5 را وارد کنید. کمیسیون، سوآپ و کارمزد به R تبدیل و از معاملات بستهٔ ثبت‌شده تخمین زده می‌شوند. اگر دادهٔ کامل این اقلام موجود نباشد، خروجی صریحاً **فقط پس از اسپرد** است و دربارهٔ سود خالص پس از همهٔ هزینه‌ها نتیجه نمی‌دهد. برای فرض هزینهٔ معلوم می‌توانید `--cost-r 0.05` را وارد کنید؛ این مقدار نمونهٔ فرضی است و باید از حساب خودتان به‌دست آید. لغزش، تیک، گپ، اخبار، حجم و خروج دقیق EA با کندل M15 بازسازی نمی‌شوند. تعداد معاملهٔ کمتر از ۲۰ در هر یک از دو روش برای مقایسهٔ عملکرد ناکافی گزارش می‌شود.
-
-اگر خطای تعداد کندل یا اسپرد ناقص دیدید، در MT5 از **File → Open Data Folder** پوشهٔ همان ترمینال را باز کنید، فایل `mt5/ExportRamonHistory.mq5` را در `MQL5/Scripts` آن قرار دهید، در MetaEditor با F7 کامپایل کنید و اسکریپت را یک بار روی نمودار اجرا کنید (پیش‌فرض: ۱۰٬۰۰۰ کندل بستهٔ `XAUUSD_l/M15`). تا زمانی که در Experts پیام `Ramon history export complete` نیامده، فایل CSV ساخته نشده است. برای پیدا کردن فایل در Wine:
-
-~~~bash
-find "$HOME/.mt5" "$HOME/.wine" -type f -iname 'Ramon*History*.csv' -print 2>/dev/null
-~~~
-
-مسیر CSV پیدا‌شده را در متغیر `CSV` بگذارید؛ اگر مسیر پیش‌فرض درست است، فرمان‌های زیر آماده‌اند. شرط `if` اجازه نمی‌دهد در صورت نبود CSV، import اجرا شود:
-
-~~~bash
-CSV="$HOME/.mt5/drive_c/users/$USER/AppData/Roaming/MetaQuotes/Terminal/Common/Files/Ramon_XAUUSD_l_M15_History.csv"
-if [[ -f "$CSV" ]]; then
-  mkdir -p data/imports
-  cp -- "$CSV" data/imports/Ramon_XAUUSD_l_M15_History.csv
-  docker compose --profile tools run --rm --no-deps tools -m ramon.import_history \
-    /data/imports/Ramon_XAUUSD_l_M15_History.csv \
-    --db /data/ramon_history.sqlite3 --symbol XAUUSD_l
-else
-  printf 'CSV not found: %s\n' "$CSV"
-fi
-~~~
-
-واردکردن داده، کندل‌های هم‌زمان را به‌روزرسانی می‌کند و معاملات ثبت‌شده را حذف نمی‌کند. اسپرد کندل تاریخی MT5 تقریب اجرای bid/ask است؛ اسپرد واقعی تیک اجرای سفارش و لغزش را بازسازی نمی‌کند.
-
-### گزارش مسیر تصمیم تا نتیجهٔ واقعی
-
-این گزارش فقط‌خواندنی، تصمیم ذخیره‌شده و معاملهٔ بسته‌شده را با `sample_key` به‌طور دقیق به هم وصل می‌کند. برای هر معامله، پیش‌بینی Chronos و علت تصمیم پایه/نهایی، قیمت‌های Bid/Ask در لحظهٔ تصمیم، زمان تا بازشدن معامله، سود ناخالص، کارمزدهای ثبت‌شده و نتیجهٔ خالص را نشان می‌دهد. اگر چهار کندل آیندهٔ M15 به‌طور پیوسته ثبت شده باشند، خطای پیش‌بینی نسبت به قیمت بسته‌شدن Bid در افق ثبت‌شده محاسبه می‌شود. خروجی جمع‌بندی و تعداد موارد فاقد داده را نیز دارد:
-
-~~~bash
-docker compose --profile tools build tools
-docker compose --profile tools run --rm --no-deps tools -m ramon.decision_journey \
-  --db /data/ramon_history.sqlite3 --symbol XAUUSD_l --limit 20
-~~~
-
-برای همهٔ معاملات `--limit 0` و برای خروجی قابل پردازش `--json` را اضافه کنید. سرویس زندهٔ `model` برای این گزارش راه‌اندازی مجدد نمی‌شود. SQLite فعلی قیمت دقیق پرشدن سفارش را نگه نمی‌دارد؛ بنابراین لغزش قیمت، اجرای واقعی نسبت به قیمت پیشنهادی و علت اجرا نشدن سیگنال‌های بدون معامله در این گزارش **نامعلوم** هستند. قیمت‌های لحظهٔ تصمیم را قیمت اجرای واقعی فرض نکنید. معاملات قدیمی بدون ثبت کامل کارمزد یا شناسهٔ تصمیم نیز به‌صورت ناقص و مشخص گزارش می‌شوند.
-
-این بازپخش، تیک واقعی، لغزش، کمیسیون، محدودیت حجم، مارجین، خبر و قطع ارتباط را به‌طور کامل بازسازی نمی‌کند. برای قضاوت دربارهٔ سودآوری باید آن را با دادهٔ دقیق‌تر کارگزار و نتایج **معاملات واقعی سنتی با ریسک محدود** تکمیل کرد. هدف محصول به تصمیم و اجرای واقعی می‌رسد؛ ارزیابی تاریخی ابزار سنجش و جلوگیری از تغییرهای کورکورانه است.
-
-## یادگیری روزانهٔ کنترل‌شده
-
-سرویس زنده هر بار که یک کندل M15 جدید بسته می‌شود، تاریخچهٔ موجود در درخواست را در `data/ramon_history.sqlite3` به‌صورت deduplicated ذخیره می‌کند. job روزانه از **کل تاریخچهٔ تا آن روز** یک challenger تازه از base ثابت Chronos‑2 می‌سازد؛ فقط دادهٔ همان روز به تنهایی fine-tune نمی‌شود.
-
-وقتی حداقل ۴۰۰۰ کندل بسته‌شده موجود باشد، اجرای دستی چرخه:
-
-~~~bash
-bash scripts/daily_learning.sh
-~~~
-
-اگر داده کمتر از حداقل باشد job با `waiting_for_history` خارج می‌شود. ارزیابی روزانه به چهار کندل M1 واقعی و بسته‌شده در مرز بسته‌شدن M15، اسپرد ثبت‌شده و افق بدون وقفه نیاز دارد؛ اگر پوشش کافی نباشد، پیش از آموزش `waiting_for_evaluation_context` گزارش می‌شود. مدل incumbent و challenger روی دادهٔ ثابت یکسان ارزیابی می‌شوند و آموزش نیز از همان snapshot استفاده می‌کند. هزینهٔ اضافی پیش‌فرض `0.1R` در هر معامله است (`--roundtrip-cost-r`)، جدا از اسپرد؛ این یک فرض پژوهشی است و از اجرای واقعی کالیبره نشده است. اسکریپت روزانه Chronos را خودکار فعال نمی‌کند؛ گزینهٔ `--auto-promote` فقط در اجرای مستقیم ابزار وجود دارد. replay شامل خروج‌های واقعی EA و معاملات RANGE نیست و عبور از گیت آن تأیید سودآوری زنده محسوب نمی‌شود.
-
-
-برای فعال‌کردن اجرای روزانه با systemd user timer:
-
-~~~bash
-bash scripts/install_daily_learning_timer.sh
-~~~
-
-timer پیش‌فرض ساعت 03:15 زمان محلی سیستم اجرا می‌شود و در صورت خاموش بودن دستگاه با `Persistent=true` در اولین فرصت بعدی اجرا خواهد شد. وضعیت:
-
-~~~bash
-systemctl --user list-timers ramon-daily-learning.timer
-journalctl --user -u ramon-daily-learning.service -n 100 --no-pager
-~~~
-
-این چرخه «خودآموز» به معنی ارتقای اجباری روزانه نیست: هر روز challenger ساخته می‌شود، اما مدل زنده فقط در صورت عبور از گیت ارزیابی عوض می‌شود. این کار ریسک overfit به یک روز بازار را کمتر می‌کند.
-
-
-## آموزش Chronos‑2
-
-برای اجرای دستی LoRA حداقل ۴۰۰۰ کندل بسته‌شدهٔ M15 لازم است. این حداقل فنیِ فرمان آموزش است و **تضمین کافی بودن داده یا بهبود معامله نیست**. آموزش GPU مناسب می‌خواهد؛ برای آزمون اولیه می‌توان --device cpu را به‌کار برد، اما بسیار کندتر خواهد بود.
-
-~~~bash
-uv sync --extra model --extra train
-uv run --extra model --extra train python -m ramon.train \
-  --db /absolute/path/to/history.sqlite3 \
-  --symbol XAUUSD_l --device cuda \
-  --out ./runtime/chronos/checkpoint-001
-~~~
-
-طبق پیاده‌سازی، داده به ترتیب زمان تقسیم می‌شود: ۷۰٪ آموزش، ۱۰٪ اعتبارسنجی و ۲۰٪ تازه‌تر برای سنجش جداگانه کنار می‌ماند. checkpoint و manifest برای مسیر نسخه‌دار در نظر گرفته شده‌اند؛ اجرای واقعی آموزش و بازبارگذاری checkpoint هنوز باید تأیید شوند. سرویس زنده خودکار مدلش را عوض نمی‌کند. پس از تأیید ساخته‌شدن و بارگذاری checkpoint، برای مقایسهٔ دو مدل باید دوره، اسپرد و تنظیمات بازپخش یکسان باشند:
-
-~~~bash
-uv run --extra model python -m ramon.replay \
-  --db /absolute/path/to/history.sqlite3 --model autogluon/chronos-2-small
-
-uv run --extra model python -m ramon.replay \
-  --db /absolute/path/to/history.sqlite3 \
-  --model /absolute/path/to/checkpoint-001/model
-~~~
-
-اگر مدل جدید با معیارهای از پیش مشخص‌شده بهتر بود، می‌توان سرویس را با --model و مسیر checkpoint جدید **دوباره راه‌اندازی** کرد. امروزه معیار تصمیم‌گیری برای ارتقای خودکار، پایش پس از انتشار و بازگشت خودکار در کد وجود ندارند. بهبود روی گذشته دلیل کافی برای اعتماد به سود آینده نیست.
-
-## مسیر توسعه
-
-| مرحله | خروجی مورد انتظار | وضعیت |
-| --- | --- | --- |
-| ۱. اتصال واقعی روی دستگاه | نصب وزن مدل، پیش‌بینی واقعی، کامپایل MT5، /health و تصمیم روی نمودار DISARMED | کد و اسکریپت آماده؛ آزمون روی دستگاه کاربر باقی است |
-| ۲. ثبت نتایج | ثبت سیگنال‌های WAIT/BUY/SELL، قیمت لحظهٔ تصمیم، کوانتیل‌ها، edge/strength، sizing و dealهای واقعی ورود/خروج در CSV؛ پیوند معامله به آخرین signal bar | نسخهٔ اولیه در v0.15 پیاده‌سازی شد |
-| ۳. خط پایهٔ قابل سنجش | دادهٔ کامل XAUUSD_l، هزینه و لغزش نزدیک به واقعیت، دوره‌های زمانی جدا و اندازه‌گیری سود خالص، افت سرمایه و کیفیت پیش‌بینی | بازپخش اولیه آماده؛ ارزیابی کامل برنامه |
-| ۴. آزمایش واقعی سنتی | معاملهٔ محدود با گزارش روزانهٔ سود/زیان پس از هزینه، دلایل رد سفارش و کیفیت اتصال؛ بدون فرض سودآوری از روی بک‌تست | برنامه، پس از موفقیت مرحلهٔ ۱ |
-| ۵. آموزش از دادهٔ خودمان | LoRA دوره‌ای روی تاریخچه، مقایسهٔ checkpoint جدید با قبلی روی دادهٔ خارج از آموزش و ثبت نسخه‌ها | کد آموزش دستی نوشته شده؛ آزمون کامل، زمان‌بندی و انتخاب خودکار برنامه |
-| ۶. یادگیری از نتیجهٔ معامله | ساخت برچسب و پاداش از اجرا، هزینه، خروج و موقعیت‌های WAIT؛ سنجش کالیبراسیون و سیاست تصمیم در کنار پیش‌بینی قیمت | پژوهش و پیاده‌سازی آینده |
-| ۷. بهره‌برداری پایدار | محدودیت زیان روزانه، پایش سلامت و تأخیر مدل، توقف ورود هنگام خطا، گزارش، بازگشت نسخه و استقرار قابل تکرار | برنامه |
-
-پیش‌شرط ارتقای مدل در آینده باید قبل از دیدن نتیجهٔ دورهٔ آزمون تعریف شود: کیفیت پیش‌بینی، سود خالص پس از هزینه، افت سرمایه، تعداد نمونهٔ کافی و پایداری در چند دوره. اگر مدل جدید بدتر شد، نسخهٔ فعال عوض نشود. آموزش با نتایج واقعی به معنی تغییر وزن مدل بعد از هر معامله نیست؛ دادهٔ کم و رفتار متغیر بازار می‌توانند مدل را به نویز عادت دهند.
-
-## توسعه و صحت‌سنجی
-
-~~~bash
-uv sync --extra dev
-python -m compileall -q backend/ramon
-bash -n scripts/setup_local.sh
-~~~
-
-مجموعهٔ تست‌های خودکار قبلی عمداً حذف شده تا طراحی و پیاده‌سازی مجموعهٔ جدید از صفر انجام شود. بررسی نحوی Python و اسکریپت نصب به‌تنهایی اثبات صحت معاملات نیستند؛ فرمان preflight، کامپایل MetaEditor و بررسی نمودار نیز برای اعتبارسنجی دستگاه لازم‌اند.
-
-## منابع
-
-- [پروژهٔ رسمی Chronos و نمونهٔ استفاده از Chronos‑2](https://github.com/amazon-science/chronos-forecasting)
-- [مدل Chronos‑2 کوچک در Hugging Face](https://huggingface.co/autogluon/chronos-2-small)
-- [مستندات MetaEditor برای کامپایل خط فرمان](https://www.metatrader5.com/en/metaeditor/help/beginning/integration_ide)
-- [مستندات MT5 برای WebRequest](https://www.mql5.com/en/docs/network/webrequest)
-
-### Snapshot زنده داخل کندل M15
-
-از v0.19، Ramon به‌طور پیش‌فرض هر ۳۰ ثانیه (`SnapshotIntervalSeconds=30`) یک snapshot تازه از Bid/Ask می‌فرستد و تصمیم BUY/SELL/WAIT را دوباره محاسبه می‌کند؛ بنابراین برای دیدن فرصت جدید لازم نیست تا بسته‌شدن کندل بعدی ۱۵ دقیقه صبر کند. تاریخچهٔ Chronos همچنان فقط از کندل‌های کامل M15 تشکیل می‌شود. سرویس forecast یک context یکسان M15 را cache می‌کند، پس در فاصلهٔ بین دو کندل بسته‌شده inference سنگین Chronos تکرار نمی‌شود؛ فقط تصمیم با قیمت زندهٔ جدید به‌روزرسانی می‌شود. حداقل cadence قابل تنظیم ۱۰ ثانیه است. برای جلوگیری از ورود تکراری، در هر signal bar بسته‌شدهٔ M15 حداکثر یک سفارش موفق ارسال می‌شود.
-
-### داشبورد روی چارت و دکمهٔ Copy Diagnostic
-
-از v0.17، Ramon به‌جای متن سادهٔ Comment یک داشبورد روی خود چارت می‌سازد. داشبورد وضعیت ARMED/DISARMED، account lock و مجوزها، تصمیم و دلیل مدل، forecast low/median/high، BuyEdge/SellEdge، حداقل edge، uncertainty، signal strength، ATR، فاصلهٔ SL/TP، تعداد معاملات روز و بودجهٔ ریسک را نشان می‌دهد. شرط‌های EDGE و STRENGTH به‌صورت PASS/FAIL نمایش داده می‌شوند.
-
-از v0.15، پاسخ مدل قیمت دقیق `signal_bid/signal_ask` لحظهٔ تصمیم را هم برمی‌گرداند. پنل و diagnostic علاوه بر ارز حساب، بودجهٔ ریسک در واحد حساب، حجم پیشنهادی و زیان محاسبه‌شده تا SL با `OrderCalcProfit` را نشان می‌دهند. برای جلوگیری از فعال‌سازی تصادفی با تبدیل واحد اشتباه، `ConfirmMoneyUnitsPerUSD=false` پیش‌فرض است. از v0.16 اگر Live روشن باشد ولی این تأیید یا کنترل ارز حساب پاس نشود، اکسپرت از چارت حذف نمی‌شود؛ روی چارت می‌ماند و وضعیت `BLOCKED` نشان می‌دهد و هیچ سفارش جدیدی ارسال نمی‌کند. `ExpectedAccountCurrency` نیز در صورت پرشدن باید دقیقاً با `ACCOUNT_CURRENCY` برابر باشد.
-
-در v0.17 حالت حساب به‌صورت صریح با `AccountIsCent=true` پیکربندی می‌شود؛ این برچسب از `ACCOUNT_CURRENCY` حدس زده نمی‌شود. با `MoneyUnitsPerUSD=100`، داشبورد و diagnostic موجودی تقریبی دلاری، بودجهٔ ریسک دلاری، `MinExecutableRiskUSD` و وضعیت `TRADE BLOCKED: min lot > risk budget` را مستقیم نمایش می‌دهند. مقادیر دلاری تقریبی تبدیل مقادیر حساب با تنظیم تاییدشدهٔ `MoneyUnitsPerUSD` هستند.
-
-Ramon همچنین دو فایل پایدار در `FILE_COMMON` می‌سازد: `Ramon_Signals.csv` برای تمام WAIT/BUY/SELLهای پردازش‌شده و `Ramon_Trades.csv` برای dealهای واقعی ورود/خروج با حجم، قیمت، سود، کمیسیون و swap. این فایل‌ها پایهٔ دادهٔ نسخه‌های بعدی برای ارزیابی و آموزش هستند.
-
-دکمهٔ **COPY DIAGNOSTIC** ابتدا فایل تشخیصی را refresh می‌کند و سپس همان متن را در Clipboard ویندوز/Wine کپی می‌کند. دسترسی Clipboard از WinAPI استفاده می‌کند؛ بنابراین برای خودِ کپی باید در Properties اکسپرت، بخش Dependencies/Common گزینهٔ **Allow DLL imports** فعال باشد. اگر DLL import غیرفعال باشد، معامله و فایل diagnostic همچنان کار می‌کنند و فقط کپی Clipboard انجام نمی‌شود. این دکمه هیچ سفارشی ارسال نمی‌کند.
-
-
-
-
-### خطای ذخیرهٔ تاریخچه و دسترسی پوشهٔ data
-
-ذخیرهٔ تاریخچه برای یادگیری از v0.19 به بعد best-effort است و خرابی یا permission آن دیگر پاسخ `/decision` را به HTTP 503 تبدیل نمی‌کند. وضعیت `/health` فیلدهای `history_enabled`، `history_last_error` و `history_last_persisted_bar` را نشان می‌دهد. روی bind mount محلی، پوشه‌های `data/` و `checkpoints/` باید برای UID/GID کانتینر Ramon قابل‌نوشتن باشند.
-
-
-### Intrabar reversal confirmation
-
-از v0.20 اکسپرت علاوه بر snapshot سی‌ثانیه‌ای، چهار کندل M1 اخیر شامل کندل درحال‌تشکیل را در `micro_bars` به سرویس تصمیم می‌فرستد. این داده وارد ورودی اصلی Chronos نمی‌شود؛ Chronos همچنان فقط با close کندل‌های بسته‌شده M15 forecast می‌سازد.
-
-وقتی forecast جهت غالب BUY یا SELL دارد و **Edge اصلی حتماً PASS** است، Ramon می‌تواند strength کمتر از آستانهٔ اصلی 0.20 را فقط با تأیید حرکت کوتاه‌مدت بپذیرد. گیت پیش‌فرض intrabar شامل strength حداقل 0.05، حرکت 3–4 دقیقه‌ای حداقل 0.06×ATR، برگشت از extreme کوتاه‌مدت حداقل 0.08×ATR و چرخش آخرین قیمت در همان جهت است. در این حالت reason برابر `intrabar_reversal_up` یا `intrabar_reversal_down` می‌شود.
-
-این مسیر **هیچ‌کدام از کنترل‌های اجرای سفارش را دور نمی‌زند**: محدودیت spread، account lock، تعداد معاملات، minimum lot، margin و RiskGate بعد از تصمیم همچنان اعمال می‌شوند. بنابراین تأیید intrabar می‌تواند WAIT مدل را به BUY/SELL تبدیل کند، اما اگر حداقل لات از بودجهٔ ریسک بزرگ‌تر باشد سفارش همچنان باز نمی‌شود.
-
-
-### AI-first trend continuation
-
-از v0.21 مسیر Trend Continuation عمداً با EMA/RSI/MACD یا مجموعه‌ای از شرط‌های تکنیکال دست‌ساز ساخته نشده است. Chronos اکنون علاوه بر low/median/high انتهای افق، **مسیر median هر چهار گام آینده** را به Ramon می‌دهد. جهت Trend Continuation فقط از همین مسیر مدل استخراج می‌شود.
-
-Ramon از مسیر Chronos دو ویژگی قابل‌مشاهده می‌سازد: `AITrend MoveATR` برای اندازهٔ حرکت پیش‌بینی‌شده نسبت به ATR و `AITrend Consistency` برای اینکه چند گام متوالی مسیر مدل در یک جهت هستند. اگر مدل یک مسیر منسجم BUY/SELL پیش‌بینی کند، قیمت هنوز حداقل بخشی از edge لازم را داشته باشد و M1 بعد از pullback دوباره در همان جهت حرکت کند، reason می‌تواند `ai_trend_continuation_up` یا `ai_trend_continuation_down` شود.
-
-اصل معماری Ramon این است: **جهت و alpha از مدل AI؛ timing کوتاه‌مدت و کنترل‌های ریسک از کد قطعی.** کد قطعی اجازه ندارد بدون جهت Chronos یک Trend Continuation بسازد. محدودیت‌های spread، account lock، minimum lot، margin و RiskGate مستقل از alpha باقی می‌مانند. این جداسازی عمداً مانع تبدیل Ramon به یک ربات rule-based شبیه مجموعه‌ای از شرط‌های ثابت می‌شود.
-
-
-### Minimum-lot risk override
-
-از v0.22 بودجهٔ ترجیحی ریسک همچنان `RiskPerTradeUSD=0.06` است. پیش‌فرض امن فعلی `AllowMinLotRiskOverride=false` است؛ در نتیجه اگر ریسک minimum lot از این بودجه بیشتر باشد، ورود MAIN انجام نمی‌شود. فعال‌کردن override یک انتخاب صریح است و فقط minimum lot را تا سقف سخت `MaxExecutableRiskUSD=0.20` مجاز می‌کند.
-
-اگر زیان محاسبه‌شدهٔ minimum lot تا SL بین 0.06 و 0.20 دلار باشد، حجم فقط همان minimum lot انتخاب می‌شود؛ سقف 0.20 برای بزرگ‌کردن حجم استفاده نمی‌شود. اگر minimum lot بیش از 0.20 دلار ریسک داشته باشد، معامله همچنان block می‌شود. این مقادیر برآورد برنامه‌ریزی‌شده با `OrderCalcProfit` هستند و لغزش، gap و هزینه‌های اجرا می‌توانند زیان واقعی را بیشتر کنند.
-
-بنابراین ۰٫۰۶ دلار با تنظیمات پیش‌فرض سقف برنامه‌ریزی‌شدهٔ هر معامله است و سیگنال‌های بزرگ‌تر block می‌شوند. اگر override را آگاهانه روشن کنید، این عدد دوباره به بودجهٔ ترجیحی تبدیل می‌شود و سقف مطلق `MaxExecutableRiskUSD` خواهد بود. EA این سقف را روی قیمت لحظهٔ ارسال می‌سنجد؛ ریسک محاسبه‌شده از قیمت پرشدن و SL ممکن است تفاوت داشته باشد.
-
-مسیر SMALL نیز به‌صورت پیش‌فرض خاموش است (`EnableSmallProfitTrades=false`) و فقط با یک instance جداگانه و انتخاب صریح فعال می‌شود. تنظیمات فعلی برای بهره‌برداری MAIN طراحی شده‌اند.
-
-
-### Stable baseline v0.22
-
-قبل از شروع معماری چندمدلی، وضعیت کامل Ramon تا v0.22 روی شاخهٔ `stable/v0.22` ثابت شده است. این شاخه شامل Chronos-2، snapshot سی‌ثانیه‌ای، intrabar confirmation، AI-led trend continuation، یادگیری روزانه و minimum-lot risk override است و نقطهٔ rollback قبل از ensemble محسوب می‌شود.
-
-### Multi-model role architecture — v0.24
-
-Chronos جهت و ویژگی‌های پیش‌بینی را تولید می‌کند. Regime و Entry دو مدل لجستیک آموزش‌پذیر هستند و احتمال‌های آن‌ها به Meta داده می‌شود. وقتی بستهٔ معتبر فعال باشد، **Meta داور نهایی است**: احتمال حداقل `0.65` همراه مزیت مثبت Chronos → BUY/SELL؛ در غیر این صورت WAIT. تصمیم قوانین پایه در ناحیهٔ میانی جای Meta را نمی‌گیرد و `base_trade` نیز ورودی Meta نیست. کنترل‌های قطعی ریسک، اسپرد، مارجین و تک‌پوزیشن همچنان در MT5 اجرا می‌شوند.
-
-**حالت شروع:** تا زمان ارتقای اولین بسته، `/health` مقدار `ensemble_mode=bootstrap_chronos` و `ensemble_ready=false` می‌دهد؛ همان Chronos پایه برای جمع‌آوری تجربه فعال است. فایل‌های مستقل `regime.json/entry.json/meta.json` نسخهٔ 0.23 خودکار بارگذاری نمی‌شوند، چون ارزیابی آن‌ها با روش قدیمی بوده است. اگر اشاره‌گر بسته موجود ولی خراب یا ناسازگار باشد، ورود جدید WAIT می‌شود و دلیل در `ensemble_error` ثبت می‌شود.
-
-#### یادگیری از نتیجهٔ واقعی
-
-- هر تصمیم شناسهٔ ۱۶کاراکتری دارد. سفارش با comment شامل `Ramon:<sample_key>` ارسال می‌شود.
-- اکسپرت هنگام بازبودن پوزیشن هم snapshot می‌فرستد؛ مدیریت خروج پیش از درخواست شبکه اجرا می‌شود. ثبت داده اجازهٔ ورود دوم ایجاد نمی‌کند.
-- اکسپرت تاریخچهٔ ۳۰ روز اخیر **حساب REAL** را برای پوزیشن‌های بسته‌شدهٔ خودش بررسی می‌کند و نتیجه را به `/trades` می‌فرستد. در هر نوبت حداکثر یک درخواست با timeout یک‌ثانیه‌ای ارسال می‌شود؛ ارسال ناموفق در نوبت بعد تکرار و پس از restart از تاریخچه بازیابی می‌شود.
-- سود خالص برابر مجموع profit، commission، swap و fee ثبت‌شده روی dealهای پوزیشن است. SL، TP، خروج زمانی و خروج دستی از نتیجهٔ واقعی کارگزار منعکس می‌شوند؛ برگشت قیمت بعد از برخورد SL برچسب ضرر را به سود تبدیل نمی‌کند.
-- معیار `net_r` سود خالص تقسیم بر ریسک اولیه است. ریسک از قیمت پرشدن deal و SL سفارش اولیه با `OrderCalcProfit` بازسازی می‌شود. واحد سود و ریسک یکی است؛ حساب سنتی به اشتباه ۱۰۰ برابر شمرده نمی‌شود. هزینه‌هایی که کارگزار فقط به‌شکل عملیات جداگانهٔ حساب و بدون اتصال به پوزیشن ثبت کند در این مجموع قابل انتساب نیستند.
-- پوزیشن نیمه‌بسته، reversal یا ترکیب چند شناسهٔ تصمیم، comment حذف‌شده توسط کارگزار، SL اولیهٔ نامعلوم، و نمونهٔ فاقد اتصال معتبر وارد آموزش نمی‌شود. معاملات قبل از v0.24 قابل اتصال خودکار نیستند.
-- Entry و Meta از **همان label سود خالص مثبتِ معاملهٔ واقعی** استفاده می‌کنند، ولی ویژگی‌ها و پنجره‌های آموزش آن‌ها متفاوت است. برای WAIT اجرا‌نشده سود فرضی ساخته نمی‌شود؛ این روش یادگیری تقویتی یا اثبات کیفیت فرصت‌های اجرا‌نشده نیست.
-
-#### جداسازی زمانی و ارزیابی
-
-1. ۵۰٪ اول معاملات برای آموزش Entry؛ Regime فقط برچسب‌هایی را می‌بیند که پیش از شروع پنجرهٔ Meta کامل شده باشند.
-2. ۳۰٪ بعدی برای آموزش Meta با خروجی مدل‌های پایهٔ **ثابت و آموزش‌دیده فقط روی گذشته**. پس از آموزش Meta، مدل‌های پایه دوباره روی کل داده refit نمی‌شوند.
-3. ۲۰٪ آخر برای ارزیابی نهایی. هر نمونه‌ای که زمان بسته‌شدن/کامل‌شدن برچسبش وارد پنجرهٔ بعد شود حذف می‌شود. timestamp داده و معامله هر دو زمان کارگزار هستند.
-4. پس از هر ارزیابی، مرز آخرین نتیجهٔ مشاهده‌شده ذخیره می‌شود؛ اجرای بعدی باید حداقل ۲۰ نمونهٔ holdout تازه داشته باشد. آستانهٔ معامله روی holdout جست‌وجو نمی‌شود.
-
-پیش‌فرض حداقل **۵۰۰ معاملهٔ واقعی بسته‌شده و قابل اتصال از یک checkpoint یکسان Chronos** است؛ ۵۰۰ snapshot کافی نیست. هر پنجرهٔ آموزش نیز به حداقل ۴۰ نمونه و ۱۰ نمونه از هر کلاس نیاز دارد. با سقف پیش‌فرض چهار ورود در روز، گردآوری ۵۰۰ معامله حداقل ۱۲۵ روزِ دارای چهار معامله طول می‌کشد؛ ارتقای فوری مدل‌ها انتظار نمی‌رود. مقدار حداقل از CLI `--minimum-samples` قابل تنظیم است، ولی کاهش آن جای شواهد معتبر را نمی‌گیرد.
-
-ارتقا به حداقل ۲۰ معاملهٔ پذیرفته‌شده در holdout، balanced accuracy حداقل 0.52، net-R مثبت، بهبود حداقل 0.5R نسبت به مدل فعال **و** تصمیم پایهٔ Chronos، سقف drawdown برابر 8R و عدم افت کیفیت احتمال نسبت به مدل فعال نیاز دارد. برای ارزیابی ارزش مدل‌های اضافی، نتیجهٔ یک مدل ساده با فقط ویژگی‌های Chronos نیز در `chronos_features_only_ablation` گزارش می‌شود. این مقایسه فعلاً گزارش است، نه گیت ارتقای جداگانه.
-
-ارزیابی روی **فرصت‌هایی است که واقعاً معامله شده‌اند**؛ کیفیت تصمیم‌های WAIT و فرصت‌های تازه‌ای که مدل بعدی ممکن است ایجاد کند از این داده اثبات نمی‌شود. این گزارش backtest کامل مسیر آیندهٔ استراتژی یا تضمین سود نیست.
-
-#### نسخه‌بندی، سازگاری و بازگشت
-
-هر تلاش آموزشی سه فایل مدل و manifest شامل هش‌ها، نسخهٔ schema، checkpoint Chronos، مرزهای زمانی و گزارش ارزیابی را در مسیر جدید `checkpoints/ensemble/versions/<bundle_id>/` می‌نویسد. فقط بستهٔ کاملِ پذیرفته‌شده با تعویض اتمیک `active.json` فعال می‌شود. بستهٔ قبلی حذف نمی‌شود. فایل خراب، بردار وزن نامعتبر و checkpoint ناسازگار رد می‌شوند.
-
-job روزانه برای جلوگیری از دو نویسندهٔ همزمان قفل دارد؛ شکست آموزش Chronos مانع تلاش آموزش نقش‌ها نمی‌شود. Chronos challenger همچنان آموزش و ارزیابی می‌شود، اما در این مسیر **خودکار جایگزین نمی‌شود** تا checkpoint تولیدکنندهٔ ویژگی‌های معاملات ثابت بماند. تعویض Chronos به ارزیابی و دادهٔ سازگار با همان checkpoint نیاز دارد. سرویس تنها پس از تغییر واقعی اشاره‌گر مدل restart می‌شود.
-
-بازگشت به بستهٔ نقشِ قبلیِ پذیرفته‌شده:
-
-~~~bash
-docker compose --profile tools run --rm tools -m ramon.bundles \
-  --root /checkpoints/ensemble --bundle PREVIOUS_BUNDLE_ID \
-  --chronos-model SAME_CHRONOS_CHECKPOINT
-docker compose up -d --force-recreate model
-~~~
-
-شناسهٔ قبلی در `active.json` با نام `previous_bundle_id` نگهداری می‌شود. برای برگشت کامل کد به قبل از معماری چندمدلی، شاخهٔ `stable/v0.22` همچنان موجود است. دادهٔ فعلی را پیش از هر rollback نگه دارید.
-
-#### نصب v0.24
-
-~~~bash
-git pull --ff-only
-docker compose build model
-docker compose up -d model
-bash scripts/setup_local.sh --mt5-only
-curl -fsS http://127.0.0.1:8012/health
-~~~
-
-اکسپرت کامپایل‌شدهٔ جدید را روی چارت بارگذاری کنید و نسخهٔ 0.24 را در diagnostic بررسی کنید. server و EA باید با هم به‌روز شوند تا شناسهٔ تصمیم و نتیجهٔ معامله وصل شوند. برنامهٔ زمان‌بندی روزانه، اگر قبلاً نصب نشده باشد، با `bash scripts/install_daily_learning_timer.sh` نصب می‌شود. خروجی diagnostic شامل `DecisionID`، `Saved`، `Bundle` و `TradeLearning` است. تست‌های Python اجرای زندهٔ Chronos یا کامپایل/اجرای MT5 را تأیید نمی‌کنند.
-
-### گزارش عملکرد و اطلاعات هر معامله (EA 0.28)
+Useful diagnostics:
 
 ```bash
-bash scripts/analyze_ramon.sh --all
+docker compose logs --tail=200 django
+docker compose logs --tail=200 worker
+docker compose logs --tail=100 redis timescaledb
 ```
 
-گزارش فقط دیتابیس را می‌خواند و اکنون مدل Chronos، revision در صورت دسترسی، bundle مدل‌های نقش‌محور و نسخهٔ EA هنگام ورود را تفکیک می‌کند. مشخصات bundle و انتهای بازه‌های آموزش/اعتبارسنجی در زمان تصمیم ذخیره می‌شوند؛ مدل فعال فعلی به سوابق قدیمی نسبت داده نمی‌شود. تفاوت عملکرد نسخه‌ها به‌تنهایی اثبات بهبود مدل نیست؛ شرایط بازار و تعداد نمونه‌ها نیز متفاوت‌اند.
+The health endpoint confirms that the Django process responds; it does not prove that the EA is connected or that trading decisions work.
 
-بخش `ROLE BUNDLE PERFORMANCE AT ENTRY` نتیجهٔ Chronos bootstrap و معاملات هر bundle **فعال هنگام ورود** را جدا نشان می‌دهد. اگر هنوز هیچ معاملهٔ بسته‌شده‌ای با bundle فعال ثبت نشده باشد، این موضوع صریح نمایش داده می‌شود. دادهٔ مبهم یا ناسازگار در گروه جدا باقی می‌ماند. بخش `EXACT STORED ENTRY SIZING` برای معاملات دارای اطلاعات دقیق، تعداد دفعاتی را که ریسک محاسبه‌شده از قیمت پرشدن از بودجهٔ ترجیحی یا سقف برنامه‌ریزی‌شده بیشتر بوده است نشان می‌دهد. این بخش‌ها صرفاً گزارش هستند و رفتار معامله را تغییر نمی‌دهند.
+## Django endpoints
 
-`profit_units + commission_units + swap_units + fee_units = net_units`: اجزای مالی با علامت اصلی بروکر و مجموع تمام dealهای ورود و خروج گزارش می‌شوند. این هزینه‌ها قبلاً در net بودند و دوباره کسر نمی‌شوند. اسپرد و لغزش در قیمت اجرای معامله منعکس‌اند؛ هزینه‌های جداگانهٔ حساب که به پوزیشن متصل نشده‌اند قابل انتساب نیستند. ارسال دوبارهٔ معامله رکورد تکراری ایجاد نمی‌کند و اطلاعات قدیمیِ فاقد اجزا صفر فرض نمی‌شوند.
+All EA API endpoints require `Authorization: Bearer <RAMON_EA_BEARER_TOKEN>`.
 
-خروج زمان‌دار جدید با `maximum_hold_bars` و شناسهٔ deal خروج ثبت می‌شود. `DEAL_REASON_EXPERT` قدیمی بدون جزئیات، `UNKNOWN expert trigger` باقی می‌ماند. این برچسب علت آخرین deal خروج است؛ نتیجهٔ یک پوزیشن با چند خروج جزئی همچنان مجموع همهٔ خروج‌هاست.
+- `GET /healthz` — process health only.
+- `GET /api/ea/v1/handshake` — protocol handshake; trading authorization is always false.
+- `POST /api/ea/v1/heartbeat` — EA instance and terminal status.
+- `POST /api/ea/v1/events` — idempotent event ingestion.
+- `GET /api/ea/v1/status` — recent EA heartbeat status.
 
-زمان تولید گزارش UTC است. برای dealهای جدید، اختلاف ساعت بروکر با UTC در زمان وقوع ثبت و برای ورود و خروج جداگانه استفاده می‌شود. ساعت و منطقهٔ زمانی سیستم میزبان MT5 باید درست باشند. اختلاف روی مضرب ۱۵ دقیقه با حداکثر ۳۰ ثانیه خطای نمونه‌برداری پذیرفته می‌شود؛ دادهٔ نامعتبر ثبت نمی‌شود. اطلاعات در `Terminal/Common/Files/RamonTelemetry`، به تفکیک سرور، حساب و deal، نگهداری می‌شود تا با راه‌اندازی مجدد از بین نرود. پاک‌کردن این پوشه می‌تواند جزئیاتِ هنوز ارسال‌نشده را از دست بدهد. زمان معامله‌های قدیمی بدون offset با `BROKER[UTC offset unknown]` مشخص می‌شود؛ زمان دریافت سرور جای زمان اجرای معامله قرار نمی‌گیرد. زمان‌های آموزش تاریخی فعلاً با برچسب broker نمایش داده می‌شوند.
+There is **no active Django decision endpoint yet**. Do not point the EA's `ModelUrl` at Django until that endpoint and its request/response contract have been implemented and tested.
 
-برای دریافت همهٔ فیلدهای جدید باید هم سرویس Python و هم EA به‌روز شوند:
+## Repository map
 
-```bash
-git pull --ff-only
-docker compose build model
-docker compose up -d model
-bash scripts/setup_local.sh --mt5-only
-```
+- `backend/django_bridge/ea_bridge/` — Django EA API, authentication, models, migrations, and tests.
+- `backend/django_bridge/ramon_django/` — Django project settings and URL routing.
+- `backend/django_bridge/ramon_pipeline/` — ingestion, buffering, persistence, worker orchestration, and legacy strategy/risk contracts still used by parts of the pipeline.
+- `backend/django_bridge/ramon_pipeline/signalflow/` — new modular opportunity, timing, risk, and learning stages.
+- `mt5/` — EA source and MT5 research/telemetry utilities.
+- `docs/ramon-django-pipeline/` — staged architecture and implementation plan.
+- `docs/` — research and historical audit material; treat documents as records of their stated snapshot, not necessarily current runtime truth.
 
-کامپایل موفق و نسخهٔ `0.28` روی نمودار را بررسی کنید. پس از بارگذاری مجدد EA، سوابق بسته‌شدهٔ ۳۰ روز اخیر به‌تدریج دوباره ارسال می‌شوند؛ ریز هزینهٔ آنها از تاریخچهٔ بروکر بازیابی می‌شود، اما نسخهٔ EA و علت دقیق خروج قدیمی حدس زده نمی‌شوند. تنظیمات ریسک و قواعد ورود/خروج تغییری نکرده‌اند.
+## Data safety
 
-برای خواندن کپی دیتابیس بدون Docker:
+`docker compose down` stops services but preserves named database and Redis volumes. Do not use `docker compose down -v` unless you explicitly intend to delete persistent data. Keep `.env`, account identifiers, tokens, and trading records private. Keep the API bound to loopback unless a separately secured deployment is deliberately configured.
 
-```bash
-uv run python -m ramon.report --db /path/to/ramon_history.sqlite3 --all
-```
+## Next implementation milestone
 
-
-### Clean learning labels after EA 0.28 baseline
-
-The immutable pre-change baseline is kept on `stable/ramon-v0.28`. Account-performance
-reporting still includes every closed position, but supervised role-model training now
-uses only `LEARNABLE` outcomes. Desktop/mobile/web manual exits are
-`CENSORED_MANUAL`, broker stop-outs are `CENSORED_STOP_OUT`, and legacy
-`DEAL_REASON_EXPERT` rows without an exact recorded trigger are
-`CENSORED_AMBIGUOUS_EXPERT`. New EA 0.28 maximum-hold exits already persist
-`maximum_hold_bars`, so they remain learnable. No entry threshold, SL/TP distance,
-risk sizing, BUY/SELL enablement, or live execution rule is changed by this patch.
-
-`bash scripts/analyze_ramon.sh --all` now prints label-quality coverage and marks each
-trade's label status. UTC event-time telemetry remains the source of truth for new
-execution timestamps; legacy broker times are never guessed.
-
-### بررسی دلیل ورود و وضعیت آموزش
-
-پس از دریافت این تغییرات، سرویس را بازسازی کنید؛ EA همچنان با نسخهٔ ۰٫۲۸ سازگار است:
-
-```bash
-docker compose build model
-docker compose up -d model
-bash scripts/audit_ramon.sh --trade-number 29
-```
-
-شمارهٔ معامله مطابق ترتیب گزارش `--all` است و با ورود سوابق قدیمی ممکن است عوض شود.
-برای بررسی مجدد، از `--trade-key` با شناسه‌ای که ابزار چاپ می‌کند استفاده کنید.
-این ابزار دیتابیس و checkpointها را فقط می‌خواند؛ آموزش، فعال‌سازی مدل یا معامله اجرا نمی‌کند.
-خروجی شامل سلامت سرویس، وضعیت timer، bundle روی دیسک، آخرین تلاش آموزش، تعداد دقیق
-نمونه‌های قابل‌آموزش با همان query مربی و اطلاعات تصمیم متصل به معامله است.
-مقدار `LEARNABLE` صرفاً کیفیت علت خروج را نشان می‌دهد؛ schema، مدل، جهت و فاصلهٔ زمانی
-ورود تا تصمیم نیز برای ورود به مجموعهٔ آموزشی بررسی می‌شوند. حد پیش‌فرض اولین مرحله
-۵۰۰ نمونه است؛ عبور از آن به‌تنهایی مدل را فعال نمی‌کند و شروط تفکیک زمانی، کلاس‌ها و
-اعتبارسنجی همچنان اعمال می‌شوند. وضعیت آخرین تلاش آموزش، وضعیت همین لحظه فرض نمی‌شود.
-
-از این نسخه، دلیل تصمیم پایه و نهایی و آستانه‌های زمان تصمیم در `model_metadata`
-ذخیره می‌شوند. دلیل ورود قدیمی که در دیتابیس ثبت نشده `UNKNOWN_LEGACY` می‌ماند.
-مسیر `ai_trend_continuation` در کد فعلی شرط حداقل `signal_strength` ندارد؛ بنابراین
-قدرت پایین به‌تنهایی اثبات خطای اجرا نیست. ریسک حداقل حجم هم در EA از قدرت سیگنال
-مشتق نمی‌شود؛ برای بررسی افزایش ریسک، دادهٔ حجم و minimum-lot override لازم است.
-
-اسکریپت به‌صورت اختیاری `Ramon_Signals.csv` را در prefixهای رایج Wine پیدا می‌کند و مسیر
-انتخاب‌شده را چاپ می‌کند. برای انتخاب دقیق فایل ترمینال موردنظر:
-
-```bash
-RAMON_SIGNAL_CSV='/path/to/Ramon_Signals.csv' bash scripts/audit_ramon.sh --trade-number 29
-```
-
-CSV قدیمی شناسهٔ تصمیم ندارد؛ ردیف‌های با فاصلهٔ حداکثر ۹۰ ثانیه از زمان تصمیم بروکر
-صرفاً «نامزد تطبیق» هستند و اثبات اجرای معامله نیستند. دادهٔ اصلی تغییر نمی‌کند.
-اگر فایل موجود نباشد، بررسی دیتابیس و وضعیت آموزش همچنان انجام می‌شود.
-
-نسخه‌های EA ممکن است ردیف‌های جدید را زیر سرستون قدیمی CSV نوشته باشند. ابزار تعداد
-ستون‌ها را بررسی می‌کند؛ قالب ۶۲ ستونی شناخته‌شده، پس از بررسی نوع فیلدها، با برچسب
-`RECONSTRUCTED_KNOWN_LAYOUT` بازسازی می‌شود. این برچسب استنباط قالب را نشان می‌دهد،
-نه تطبیق قطعی معامله. در قالب نامعتبر، اعداد با `UNKNOWN` نمایش داده می‌شوند و ردیف خام
-برای بررسی باقی می‌ماند؛ قیمت‌ها دیگر به‌اشتباه به‌عنوان قدرت سیگنال یا ریسک گزارش نمی‌شوند.
-
-اصلاح گزارش: `intrabar_move_atr` از قبل نسبت به جهت معامله محاسبه شده و برای SELL
-دوباره منفی نمی‌شود. `ai_trend_score` نیز اندازهٔ غیرمنفی حرکت است؛ جهت روند قدیمی در
-این ویژگی ذخیره نشده و گزارش آن را با ضرب در علامت معامله بازسازی نمی‌کند.
-این اصلاح به مقایسهٔ ویژگی‌ها مربوط است؛ جمع سود و زیان و سیاست معامله تغییری ندارند.
-
-برای بررسی کپی دیتابیس بدون Docker:
-
-```bash
-uv run python -m ramon.audit --db /path/to/ramon_history.sqlite3 \
-  --ensemble-dir /path/to/checkpoints/ensemble \
-  --chronos-model autogluon/chronos-2-small --trade-number 29
-```
-
-### Loss controls v0.34 (feature/loss-control-v1)
-
-- The 12-completed-bar / 3-ATR trend-conflict veto now survives an active Meta
-  bundle. Meta probabilities are still recorded; the final decision stays WAIT.
-- The EA checks the latest two fully closed positions for its current account,
-  symbol and opening magic directly in MT5 history before placing a new order.
-  Two same-direction, net-negative positions whose final exit reason is SL block
-  that direction for 1,800 seconds after the latest close. At exactly 1,800 seconds
-  the cooldown expires. This is elapsed broker time, not candle-boundary counting.
-- Manual closes, TP, non-negative SL outcomes and opposite-direction closes break
-  the streak. Partial deals count once per fully closed position; open positions
-  and other robots are excluded. Net includes deal profit, commission, swap and fee.
-  Unreadable history blocks new entry, while existing-position management runs first.
-- Learning upload order and training labels no longer control cooldown. The old
-  server-side database gate is removed because its history can be incomplete.
-  Deploy **both** server and EA v0.34 together; an older EA with this server does
-  not implement the local cooldown.
-- Default preferred risk remains $0.06 and the minimum-lot planned-risk cap $0.12.
-  Existing MT5 Inputs may retain old values. Chronos weights, strength thresholds,
-  SL/TP distances, training labels and observe-only profit protection are unchanged.
-
-Validation includes Python regressions for both-direction Meta vetoes and a C++
-API adapter executing the actual MQL cooldown functions against synthetic deal
-history (manual/partial exits, fees, other robots, expiry, restart and history
-errors). This does not replace MetaEditor compilation or terminal validation.
-
-### Conservative weak-intrabar entry policy
-
-By default, a confirmed intrabar reversal with forecast strength below
-`minimum_strength` (0.20) returns `WAIT / insufficient_model_strength`.
-Intrabar telemetry remains available, and the same weak signal cannot fall
-through into an AI continuation entry. `Settings(allow_weak_intrabar_entries=True)`
-explicitly restores the experimental legacy behavior for controlled comparisons.
-This policy is a conservative trial, not evidence of improved profitability;
-evaluate prospectively with fixed settings before drawing performance conclusions.
-Updating source does not update an already running model container. This policy
-was deployed on 2026-10-02 for the user-authorized cent-account trial; live health
-confirmed `allow_weak_intrabar_entries=false` and `minimum_strength=0.2`.
-
-### MAIN range-reversal cent-account trial
-
-The user-authorized range trial is enabled with `RAMON_RANGE_LIVE_ENABLED=1`
-in Compose and `EnableRangeMain=true` in EA 0.54.1. It supplements primary WAIT
-signals only when entry-time range/reversal criteria pass. The server requires
-an explicit capability flag from the new EA; older EAs retain normal behavior.
-Range trades use boundary stops, midpoint targets, a 30-minute timeout, existing
-account/risk gates and a 5-minute post-close cooldown. They are tagged `:R` and
-recorded under `range-reversal-v1`, separately from Chronos training labels.
-See `docs/range-shadow.md` for experimental rules and limitations. Profitability
-has not been validated. Reload the compiled EA to activate its capability flag.
-
-EA 0.54.2 adds a live USD high-impact news guard for both MAIN strategies:
-new entries pause from 15 minutes before through 15 minutes after the nearest
-high-impact USD event, and managed positions are closed from 5 minutes before
-through that post-event window. Unknown or stale calendar data blocks entries.
-The dedicated high-impact timestamp is independent of the nearest displayed
-news event. Exit attempts use the broker and can still slip or fail; this is
-preventive protection, not a guaranteed loss cap. Reload the EA after installing
-its newly compiled binary. Diagnostics expose the guard policy.
-
-Weak Chronos entries (<0.20 strength) now require minimum model edge plus
-agreement of forecast direction, confirmed intrabar reversal, and confirmed
-AI model path. AI continuation cannot bypass this gate. Normal entries are
-blocked after >=3 ATR of aligned movement over the last 12 completed bars or
-current intrabar movement (`late_entry_extension`). This initial fixed threshold
-requires forward validation; range strategy remains independent. NewsGuard
-continues to govern both strategies in the EA.
-
-EA 0.54.8 restores mandatory direction confirmation for normal MAIN entries:
-strong as well as weak forecasts require aligned confirmed intrabar and AI model
-path observations. The EA independently rejects normal orders lacking either
-confirmation, including replies from an older service. RANGE retains its own
-boundary reversal rules, five-unit target/risk cap, and the general executable
-risk override remains USD 0.35. A normal direction veto may yield to a separately
-valid RANGE setup; it does not relax RANGE confirmation. Health reports
-`require_direction_confirmation=true`. Historical transport/accounting tests
-explicitly opt out when they provide no micro data; live service uses the strict
-default. Reload the EA after installing the new compiled binary.
-
-## فلوچارت زندهٔ تصمیم‌گیری
-
-با اجرای `./scripts/monitor_ramon.sh`، [داشبورد محلی](http://127.0.0.1:8013)
-مسیر پیش‌بینی، تأیید جهت، برگشت رنج، قفل‌های اجرا و مدیریت پوزیشن را نشان می‌دهد.
-هر مرحله قابل انتخاب است و مقدار شرط، دلیل توقف، زمان و منبع مشاهده را نمایش می‌دهد.
-مانیتور هر سه ثانیه تاریخچه و Diagnostic اکسپرت MAIN را فقط می‌خواند؛ دادهٔ قدیمی
-و اطلاعات ثبت‌نشده را جدا مشخص می‌کند و تصمیم یا معاملهٔ جدیدی ایجاد نمی‌کند.
-[راهنمای مانیتور](docs/decision-flow-monitor.md) و
-[گزارش پوشش بازار و قفل‌ها](docs/market-coverage-audit.md) جزئیات را توضیح می‌دهند.
-
-### سیاست حالت‌های بازار و اصلاح خروج ۰٫۵۴٫۹
-
-سرویس اکنون تشخیص چندشرطی بازار و واکنش محافظه‌کارانهٔ ورود را ثبت و اعمال می‌کند؛ جزئیات، حدود اعتبار و تفاوت با بازپخش در [market-state-policy.md](docs/market-state-policy.md) است. MAIN پاسخ‌های ضعف TP را فقط یک بار برای هر پاسخ تازه می‌شمارد، سقف `MaximumHoldBars` را اعمال می‌کند و گزینهٔ خاموشِ پیش‌فرض `EnableMainFastProfit` به مدیریت وصل شده است. فعال شدن این نسخه روی ترمینال به نصب و بارگذاری اکسپرت جدید و راه‌اندازی دوبارهٔ سرویس نیاز دارد.
-
-### ارزیابی آفلاین سیاست بازار
-
-گزارش این snapshot در [market-policy-evaluation.md](docs/market-policy-evaluation.md) و نتایج قابل بازتولید در [market-policy-evaluation.json](docs/market-policy-evaluation.json) ذخیره شده‌اند. فرمان زیر فقط پایگاه داده را می‌خواند و هیچ تصمیمی به MT5 نمی‌فرستد:
-
-```sh
-PYTHONPATH=src .venv/bin/python -m ramon.policy_replay \
-  --db data/ramon_history.sqlite3 \
-  --json-output /tmp/market-policy-evaluation.json \
-  --report-output /tmp/market-policy-evaluation.md
-```
-
-`--cost-r 0.1` یک سناریوی حساسیت به هزینهٔ اضافی ۰٫۱R در هر معامله است؛ هزینهٔ واقعی کارگزار نیست. محدودیت داده، پاسخ‌های تکراری، جداسازی زمانی و شبیه‌سازی ناقص خروج‌ها در گزارش مشخص‌اند. قفل زیان روزانه و افت سرمایه قابل تنظیم اضافه شده‌اند اما پیش‌فرض خاموش‌اند؛ برای فعال‌سازی باید درصدها تعیین و روی حساب آزمایشی بررسی شوند.
-
-### SMC_LOCAL — آزمایش پژوهشی پنج‌بخشی
-
-مدل محلی SMC با آموزش فقط روی گذشته، محافظ وقفه‌های M15، هزینهٔ معامله و مقایسه با چهار مدل پایه در [راهنمای پژوهش](docs/smc-local-lab.md) توضیح داده شده است. اجرای آن از اکسپرت و سرویس زنده مستقل است و مدل‌های هر بخش را فقط به صورت JSON ذخیره می‌کند.
-
-```bash
-.venv/bin/python -m ramon.smc_local_lab \
-  --db data/ramon_kaggle_m15.sqlite3 --symbol XAUUSD_KAGGLE \
-  --horizon 4 --stride 4 --train-stride 16 --cost-r 0.1 \
-  --output-dir data/smc_local_lab
-```
-
-خروجی نهایی `data/smc_local_lab/report.json` شامل PF، میانگین R، افت سرمایه، دلایل انتظار و نتیجهٔ شرط ورود به Shadow است. پایان موفق اجرا الزاماً به معنای سوددهی مدل نیست.
-
-### انتخاب معامله بر اساس بازده پس از هزینه
-
-آزمایش مستقل `ramon.trade_selector_lab` بازده فرضی خرید و فروش را یاد می‌گیرد و بین خرید، فروش و انتظار انتخاب می‌کند. تنظیمات فقط در اعتبارسنجی داخلیِ دادهٔ آموزش انتخاب می‌شوند؛ پنج بخش زمانیِ بیرونی برای ارزیابی‌اند. این آزمایش نیازی به تغییر EA یا داشبورد ندارد.
-
-[راهنمای اجرا و روش ارزیابی](docs/trade-selector-lab.md)
-
-### XGBoost پژوهشی و بررسی محدود دادهٔ تیک
-
-مدل درختی محلی از برچسب‌های بازده پس از هزینه و انتخاب تنظیمات فقط در گذشته استفاده می‌کند. وابستگی‌ها در محیط جدا نصب می‌شوند و مدل‌های خارجی pickle/joblib بارگذاری نمی‌شوند. بررسی اولیهٔ تیک هم تنها سه پنجرهٔ کوچک Bid/Ask را می‌خواند؛ هیچ تغییری در EA، سرویس زنده، داشبورد یا اسپرد فرضی نمی‌دهد.
-
-[روش و دستورهای اجرا](docs/xgboost-research.md)
-
-### اعتبار زمانی دادهٔ M1
-
-درخواست تصمیم دارای M1 باید `quote_time` داشته باشد. زمان شروع کندل‌ها باید با فاصلهٔ ۶۰ ثانیه افزایش یابد، آخرین کندل نباید در آینده باشد و حداکثر ۱۲۰ ثانیه از زمان شروع آن گذشته باشد. کندل جاری و در حال تشکیل در درخواست زنده مجاز است، چون EA آن را ارسال می‌کند؛ ارزیابی تاریخی فقط کندل‌های بسته‌شده را استفاده می‌کند. تمام مقایسه‌ها روی ساعت مشترک بروکر انجام می‌شوند.
-
-### Control dashboard
-
-The monitoring dashboard links to `/control`. This page previews changes to
-`MaxExecutableRiskUSD` (USD, 0.01–0.50) and atomically saves the requested value
-in `Ramon_Control.txt` beside the PRIMARY diagnostic in MT5 Common/Files.
-The updated `mt5/Ramon.mq5` must be compiled and reloaded for live application;
-an older EA continues using its fixed cap. The page distinguishes the saved
-request from the cap observed in a fresh diagnostic, so saving alone does not
-claim successful application. Reload/rebuild the monitor service to serve the
-new page. Docker's dashboard MT5 users mount must be writable (as configured
-in compose); the history database remains read-only.
-
-PRIMARY reads the control file at initialization and on every timer cycle.
-The default remains $0.35 if no control file exists at startup. Invalid files
-retain the last valid value. Raising the cap enables eligible minimum-lot
-exceptions but does not scale volume to the larger cap. Lowering it below the
-preferred risk budget limits normal sizing as well. A final pre-order risk
-check applies to PRIMARY entries, including Range; independent Range limits
-still apply. SMALL retains its separate limits. Existing positions and exit
-management are unchanged. The setting is shared by PRIMARY instances using
-the same MT5 Common/Files directory. Keep the dashboard on its configured
-localhost interface; it is a local control surface without account login.
+1. Define and validate the EA `/decision` request and response schema.
+2. Adapt incoming market/account data to the SignalFlow input contract.
+3. Wire Django to run opportunity detection, entry timing, and risk checks; return HOLD on invalid input or internal failure.
+4. Persist decision and outcome telemetry; do not claim adaptive learning until outcomes are durably stored and evaluated.
+5. Add unit and integration tests, including timeouts, malformed input, risk rejection, and unavailable Redis/database.
+6. Update `mt5/Ramon.mq5` to call Django on loopback and verify behavior on a demo account before any live rollout.
