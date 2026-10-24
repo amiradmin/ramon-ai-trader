@@ -1,6 +1,6 @@
 ﻿#property strict
-#property version "1.601"
-#define RAMON_EA_VERSION "0.60.1"
+#property version "1.606"
+#define RAMON_EA_VERSION "0.60.6"
 #property description "Independent Chronos-2 XAUUSD_o M15 bot; demo symbol; local model server required."
 
 #include <Trade/Trade.mqh>
@@ -23,6 +23,12 @@ long GlobalFree(long hMem);
 long lstrcpyW(long dst,const string src);
 #import
 
+input group "Django Bridge"
+input bool EnableDjangoBridge = true; // Telemetry only; never grants trading permission.
+input string DjangoHeartbeatUrl = "http://127.0.0.1:8017/api/ea/v1/heartbeat";
+input string DjangoBearerToken = ""; // Set locally in MT5; never commit/share this value.
+
+input group "Trading and General Settings"
 input string TradeSymbol = "XAUUSD_o";
 input string RequiredServerText = "LiteFinance";
 input bool AutoLockCurrentAccount = true; // Bind this EA session to the account active at OnInit.
@@ -41,9 +47,6 @@ input bool SmallOnlyMode = false; // Attach second EA instance on another M15 ch
 const ulong PrimaryMagicNumber = 26092212;
 const ulong SmallProfitMagicNumber = 26092213;
 input string ModelUrl = "http://127.0.0.1:8012/decision";
-input bool EnableDjangoBridge = false; // Telemetry only; never grants trading permission.
-input string DjangoHeartbeatUrl = "http://127.0.0.1:8016/api/ea/v1/heartbeat";
-input string DjangoBearerToken = ""; // Set locally in MT5; never commit/share this value.
 input double MoneyUnitsPerUSD = 100.0; // CENT account: 100 account units = 1 USD.
 input bool AccountIsCent = true; // Configured account mode; MT5 ACCOUNT_CURRENCY alone cannot identify CENT.
 input bool ConfirmMoneyUnitsPerUSD = false; // Must be true before live trading can arm.
