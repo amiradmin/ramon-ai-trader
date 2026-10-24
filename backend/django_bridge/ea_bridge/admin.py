@@ -1,14 +1,129 @@
+import json
+
 from django.contrib import admin
-from .models import EAEvent, EAHeartbeat
+
+from .models import EAEvent, EAHeartbeat, StrategyDecisionRecord
+
 
 @admin.register(EAHeartbeat)
 class EAHeartbeatAdmin(admin.ModelAdmin):
-    list_display = ("instance_id", "status", "symbol", "ea_version", "last_seen", "terminal_connected", "trade_allowed")
+    list_display = (
+        "instance_id", "status", "symbol", "ea_version", "last_seen",
+        "terminal_connected", "trade_allowed",
+    )
+    list_filter = ("status", "terminal_connected", "trade_allowed", "symbol")
     search_fields = ("instance_id", "account_login", "symbol", "server_name")
-    readonly_fields = ("last_seen",)
+    readonly_fields = ("last_seen", "payload")
+    list_per_page = 50
+    ordering = ("-last_seen",)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        # Heartbeats are ingested by the EA bridge; admin is for inspection.
+        return True
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
 
 @admin.register(EAEvent)
 class EAEventAdmin(admin.ModelAdmin):
-    list_display = ("received_at", "instance_id", "event_type", "event_id")
-    list_filter = ("event_type",)
-    search_fields = ("instance_id", "event_id")
+    """Read-only browser for EA snapshots and other telemetry events."""
+
+    list_display = (
+        "received_at",
+        "occurred_at",
+        "instance_id",
+        "event_type",
+        "payload_symbol",
+        "payload_timeframe",
+        "payload_market_value",
+        "event_id",
+        "payload_preview",
+    )
+    list_filter = ("event_type", "received_at")
+    search_fields = ("instance_id", "event_id", "event_type")
+    readonly_fields = (
+        "instance_id", "event_id", "event_type", "occurred_at",
+        "received_at", "payload",
+    )
+    date_hierarchy = "received_at"
+    list_per_page = 50
+    list_max_show_all = 200
+    ordering = ("-received_at",)
+    show_full_result_count = False
+
+    @staticmethod
+    def _payload_data(obj):
+        """Return the most useful mapping when the event wraps a snapshot."""
+        payload = obj.payload
+        if not isinstance(payload, dict):
+            return {}
+        for key in ("snapshot", "data", "market_snapshot"):
+            nested = payload.get(key)
+            if isinstance(nested, dict):
+                return nested
+        return payload
+
+    @classmethod
+    def _payload_value(cls, obj, *keys):
+        payload = cls._payload_data(obj)
+        for key in keys:
+            value = payload.get(key)
+            if value is not None and value != "":
+                return value
+        return "—"
+
+    @admin.display(description="Symbol", ordering="event_type")
+    def payload_symbol(self, obj):
+        return self._payload_value(obj, "symbol", "Symbol", "instrument")
+
+    @admin.display(description="Timeframe")
+    def payload_timeframe(self, obj):
+        return self._payload_value(obj, "timeframe", "time_frame", "period", "tf")
+
+    @admin.display(description="Price / Bid")
+    def payload_market_value(self, obj):
+        return self._payload_value(obj, "bid", "price", "close", "last", "ask")
+
+    @admin.display(description="Snapshot payload")
+    def payload_preview(self, obj):
+        try:
+            text = json.dumps(obj.payload, ensure_ascii=False, separators=(",", ":"))
+        except (TypeError, ValueError):
+            text = str(obj.payload)
+        return text[:180] + ("…" if len(text) > 180 else "")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        # Permit opening the detail page; all fields remain read-only.
+        return True
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(StrategyDecisionRecord)
+class StrategyDecisionRecordAdmin(admin.ModelAdmin):
+    list_display = ("created_at", "symbol", "action", "confidence", "rationale_code", "model_version")
+    list_filter = ("symbol", "action", "model_version", "created_at")
+    search_fields = ("decision_id", "symbol", "rationale_code", "model_version")
+    readonly_fields = (
+        "decision_id", "symbol", "action", "confidence", "rationale_code",
+        "model_version", "features", "created_at",
+    )
+    ordering = ("-created_at",)
+    list_per_page = 50
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return True
+
+    def has_delete_permission(self, request, obj=None):
+        return False

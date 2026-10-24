@@ -1,7 +1,7 @@
 ﻿#property strict
-#property version "1.601"
-#define RAMON_EA_VERSION "0.60.1"
-#property description "Independent Chronos-2 XAUUSD_o M15 bot; demo symbol; local model server required."
+#property version "1.604"
+#define RAMON_EA_VERSION "0.60.4"
+#property description "Django-hosted SignalFlow XAUUSD_o M15 EA; local Django decision API required."
 
 #include <Trade/Trade.mqh>
 #include "RamonResearchTelemetry.mqh"
@@ -40,9 +40,11 @@ input double V2MinimumMarginLevelPercent = 300.0;
 input bool SmallOnlyMode = false; // Attach second EA instance on another M15 chart for parallel SMALL trades.
 const ulong PrimaryMagicNumber = 26092212;
 const ulong SmallProfitMagicNumber = 26092213;
-input string ModelUrl = "http://127.0.0.1:8012/decision";
-input bool EnableDjangoBridge = false; // Telemetry only; never grants trading permission.
-input string DjangoHeartbeatUrl = "http://127.0.0.1:8016/api/ea/v1/heartbeat";
+input string ModelUrl = "http://127.0.0.1:8017/api/ea/v1/decision";
+input bool EnableDjangoBridge = true; // Telemetry only; never grants trading permission.
+input string DjangoHeartbeatUrl = "http://127.0.0.1:8017/api/ea/v1/heartbeat";
+input string DjangoEventsUrl = "http://127.0.0.1:8017/api/ea/v1/events";
+input int DjangoSnapshotIntervalSeconds = 15; // Observational snapshot cadence; never used for trading decisions.
 input string DjangoBearerToken = ""; // Set locally in MT5; never commit/share this value.
 input double MoneyUnitsPerUSD = 100.0; // CENT account: 100 account units = 1 USD.
 input bool AccountIsCent = true; // Configured account mode; MT5 ACCOUNT_CURRENCY alone cannot identify CENT.
@@ -140,6 +142,8 @@ datetime LastEntrySignalBar = 0;
 int LastSmallEntriesOnSignalBar = 0;
 string StatusLine = "Starting";
 datetime LastDjangoHeartbeatAttempt = 0;
+datetime LastDjangoSnapshotAttempt = 0;
+long DjangoSnapshotSequence = 0;
 string DjangoBridgeStatus = "DISABLED";
 double LastDjangoHeartbeatLatencyMs = -1.0;
 string LastModelDecision = "NONE";
@@ -352,10 +356,7 @@ string ExperimentalReason = "NONE";
 
 bool IsAllowedModelUrl(const string url)
 {
-   return (
-      url=="http://127.0.0.1:8012/decision"
-      || url=="http://model:8012/decision"
-   );
+   return (url=="http://127.0.0.1:8017/api/ea/v1/decision");
 }
 
 bool AccountLockHealthy()
@@ -1830,7 +1831,13 @@ bool BuildRequest(string &payload,datetime &bar_time)
    payload+="],\"quote_time\":"+IntegerToString((long)tick.time)
       +",\"broker_utc_offset_seconds\":"+IntegerToString((int)BrokerUtcOffsetSeconds())
       +",\"account_is_cent\":"+(AccountIsCent ? "true" : "false")
-      +",\"range_execution_ready\":"+((EnableRangeMain && !SmallOnlyMode) ? "true" : "false")+"}";
+      +",\"range_execution_ready\":"+((EnableRangeMain && !SmallOnlyMode) ? "true" : "false")
+      +",\"account_balance\":"+DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),2)
+      +",\"risk_percent\":"+DoubleToString(MathMin(0.5,RiskPerTradeUSD*MoneyUnitsPerUSD/MathMax(1.0,AccountInfoDouble(ACCOUNT_BALANCE))*100.0),6)
+      +",\"point_value_per_lot\":"+DoubleToString(SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_VALUE)*SymbolInfoDouble(_Symbol,SYMBOL_POINT)/MathMax(SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_SIZE),SymbolInfoDouble(_Symbol,SYMBOL_POINT)),8)
+      +",\"volume_step\":"+DoubleToString(SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_STEP),8)
+      +",\"min_volume\":"+DoubleToString(SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN),8)
+      +",\"max_volume\":"+DoubleToString(SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MAX),8)+"}";
    return true;
 }
 
@@ -1840,6 +1847,7 @@ bool QueryModel(const string payload,string &reply)
    StringToCharArray(payload,request,0,WHOLE_ARRAY,CP_UTF8);
    ArrayResize(request,ArraySize(request)-1); // Remove terminal NUL from JSON body.
    string headers="Content-Type: application/json\r\n";
+   if(StringLen(DjangoBearerToken)>=32) headers+="Authorization: Bearer "+DjangoBearerToken+"\r\n";
    string response_headers="";
    ResetLastError();
    int code=WebRequest("POST",ModelUrl,headers,RequestTimeoutMs,request,response,response_headers);
@@ -5459,15 +5467,17 @@ void SendDjangoHeartbeatIfDue()
       DjangoBridgeStatus = "DISABLED";
       return;
    }
-   if(StringLen(DjangoBearerToken)<32)
-   {
-      DjangoBridgeStatus = "TOKEN NOT CONFIGURED";
-      return;
-   }
+   // Throttle all heartbeat diagnostics, including missing-token warnings.
    datetime now=TimeLocal();
    if(LastDjangoHeartbeatAttempt>0 && now-LastDjangoHeartbeatAttempt<30)
       return;
    LastDjangoHeartbeatAttempt=now;
+   if(StringLen(DjangoBearerToken)<32)
+   {
+      DjangoBridgeStatus = "TOKEN NOT CONFIGURED";
+      Print("Ramon Django heartbeat skipped: set DjangoBearerToken in EA Inputs to the same secret as RAMON_EA_BEARER_TOKEN in the backend .env (at least 32 characters).");
+      return;
+   }
 
    string instance_id=IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN))
       +"-"+_Symbol+"-"+IntegerToString((long)MagicNumber);
@@ -5499,14 +5509,104 @@ void SendDjangoHeartbeatIfDue()
    string headers="Content-Type: application/json\r\nAuthorization: Bearer "+DjangoBearerToken+"\r\n";
    ulong started=GetTickCount64();
    ResetLastError();
-   int code=WebRequest("POST",DjangoHeartbeatUrl,headers,250,request,response,response_headers);
+   int code=WebRequest("POST",DjangoHeartbeatUrl,headers,3000,request,response,response_headers);
    LastDjangoHeartbeatLatencyMs=(double)(GetTickCount64()-started);
    if(code==200)
+   {
       DjangoBridgeStatus="CONNECTED "+DoubleToString(LastDjangoHeartbeatLatencyMs,0)+"ms";
+      Print("Ramon Django heartbeat OK instance_id=",instance_id,
+         " latency_ms=",DoubleToString(LastDjangoHeartbeatLatencyMs,0));
+   }
    else if(code<0)
-      DjangoBridgeStatus="DISCONNECTED err="+IntegerToString(GetLastError());
+   {
+      int err=GetLastError();
+      DjangoBridgeStatus="DISCONNECTED err="+IntegerToString(err);
+      Print("Ramon Django heartbeat transport failure err=",err,
+         ". Check MT5 WebRequest URL allow-list and that Django is listening at ",DjangoHeartbeatUrl);
+   }
    else
+   {
       DjangoBridgeStatus="HTTP "+IntegerToString(code);
+      Print("Ramon Django heartbeat rejected HTTP=",code,
+         " response=",CharArrayToString(response,0,ArraySize(response),CP_UTF8),
+         ". HTTP 401 means token mismatch; HTTP 503 means backend token is not configured.");
+   }
+}
+
+// Periodic read-only EA snapshot. This endpoint only queues telemetry; it cannot
+// authorize trades or change execution/risk settings. Position management runs first.
+void SendDjangoSnapshotIfDue()
+{
+   if(!EnableDjangoBridge || StringLen(DjangoBearerToken)<32)
+      return;
+   int cadence=MathMax(5,DjangoSnapshotIntervalSeconds);
+   datetime now=TimeLocal();
+   if(LastDjangoSnapshotAttempt>0 && now-LastDjangoSnapshotAttempt<cadence)
+      return;
+   LastDjangoSnapshotAttempt=now;
+
+   MqlTick tick;
+   bool quote_ok=SymbolInfoTick(_Symbol,tick) && tick.bid>0.0 && tick.ask>=tick.bid;
+   int position_count=0;
+   double position_profit=0.0;
+   double position_volume=0.0;
+   for(int i=0;i<PositionsTotal();i++)
+   {
+      ulong ticket=PositionGetTicket(i);
+      if(ticket==0 || !PositionSelectByTicket(ticket)) continue;
+      if(PositionGetString(POSITION_SYMBOL)!=_Symbol) continue;
+      position_count++;
+      position_profit+=PositionGetDouble(POSITION_PROFIT);
+      position_volume+=PositionGetDouble(POSITION_VOLUME);
+   }
+   string instance_id=IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN))
+      +"-"+_Symbol+"-"+IntegerToString((long)MagicNumber);
+   DjangoSnapshotSequence++;
+   string event_id=instance_id+"-"+IntegerToString((long)TimeGMT())
+      +"-"+IntegerToString((long)GetTickCount64())+"-"+IntegerToString(DjangoSnapshotSequence);
+   string payload="{"
+      +"\"instance_id\":\""+JsonEscape(instance_id)+"\","
+      +"\"event_id\":\""+JsonEscape(event_id)+"\","
+      +"\"event_type\":\"SNAPSHOT\","
+      +"\"symbol\":\""+JsonEscape(_Symbol)+"\","
+      +"\"ea_version\":\""+RAMON_EA_VERSION+"\","
+      +"\"status\":\""+JsonEscape(StatusLine)+"\","
+      +"\"terminal_connected\":"+((bool)TerminalInfoInteger(TERMINAL_CONNECTED) ? "true" : "false")+","
+      +"\"trade_allowed\":"+(((bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) && (bool)MQLInfoInteger(MQL_TRADE_ALLOWED) && (bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED)) ? "true" : "false")+","
+      +"\"snapshot_sequence\":"+IntegerToString(DjangoSnapshotSequence)+","
+      +"\"observed_utc_epoch\":"+IntegerToString((long)TimeGMT())+","
+      +"\"bid\":"+(quote_ok ? DoubleToString(tick.bid,_Digits) : "null")+","
+      +"\"ask\":"+(quote_ok ? DoubleToString(tick.ask,_Digits) : "null")+","
+      +"\"spread_points\":"+(quote_ok ? IntegerToString((int)SymbolInfoInteger(_Symbol,SYMBOL_SPREAD)) : "null")+","
+      +"\"model_decision\":\""+JsonEscape(LastModelDecision)+"\","
+      +"\"model_reason\":\""+JsonEscape(LastModelReason)+"\","
+      +"\"forecast_low\":"+DoubleToString(LastForecastLow,8)+","
+      +"\"forecast_median\":"+DoubleToString(LastForecast,8)+","
+      +"\"forecast_high\":"+DoubleToString(LastForecastHigh,8)+","
+      +"\"atr\":"+DoubleToString(LastAtr,8)+","
+      +"\"signal_strength\":"+DoubleToString(LastSignalStrength,6)+","
+      +"\"buy_edge\":"+DoubleToString(LastBuyEdge,8)+","
+      +"\"sell_edge\":"+DoubleToString(LastSellEdge,8)+","
+      +"\"entry_probability\":"+DoubleToString(LastEntryProbability,6)+","
+      +"\"regime\":\""+JsonEscape(LastRegimeLabel)+"\","
+      +"\"account_balance\":"+DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),2)+","
+      +"\"account_equity\":"+DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY),2)+","
+      +"\"open_position_count\":"+IntegerToString(position_count)+","
+      +"\"open_position_volume\":"+DoubleToString(position_volume,8)+","
+      +"\"open_position_profit\":"+DoubleToString(position_profit,8)
+      +"}";
+
+   char request[],response[];
+   int n=StringToCharArray(payload,request,0,WHOLE_ARRAY,CP_UTF8);
+   if(n<=1) return;
+   ArrayResize(request,n-1);
+   string response_headers;
+   string headers="Content-Type: application/json\r\nAuthorization: Bearer "+DjangoBearerToken+"\r\n";
+   ResetLastError();
+   int code=WebRequest("POST",DjangoEventsUrl,headers,3000,request,response,response_headers);
+   if(code!=200)
+      Print("Ramon Django snapshot queue failed HTTP=",code," err=",GetLastError(),
+         " event_id=",event_id);
 }
 
 void OnTimer()
@@ -5539,6 +5639,7 @@ void OnTimer()
       LastPositionManagementTime=now;
       if(has_managed) ManageOpenPosition(); // Exits always run before network telemetry.
    }
+   SendDjangoSnapshotIfDue(); // Only after open-position management has had its chance to run.
    datetime closed=iTime(_Symbol,PERIOD_M15,1);
    if(closed<=0)
       return;

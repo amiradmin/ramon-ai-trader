@@ -1,0 +1,62 @@
+name: Ramon Django pipeline checks
+
+on:
+  pull_request:
+    paths:
+      - "backend/django_bridge/**"
+      - "docker-compose.yaml"
+      - "docs/ramon-django-pipeline/**"
+      - ".github/workflows/ramon-django-pipeline.yml"
+  push:
+    branches: ["feat/ramon-django-pipeline"]
+    paths:
+      - "backend/django_bridge/**"
+      - "docker-compose.yaml"
+      - ".github/workflows/ramon-django-pipeline.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  django-checks:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend/django_bridge
+    env:
+      DJANGO_SECRET_KEY: ci-only-not-a-secret
+      DJANGO_DB_PATH: /tmp/ramon-django-ci.sqlite3
+      RAMON_EA_BEARER_TOKEN: ci-test-token
+      RAMON_PIPELINE_INGEST_ENABLED: "0"
+      RAMON_REDIS_URL: redis://127.0.0.1:6379/0
+      RAMON_PG_PASSWORD: ci-only-not-a-secret
+      POSTGRES_PASSWORD: ci-only-not-a-secret
+      RAMON_LOG_DB_PASSWORD: ci-only-not-a-secret
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create CI-only Compose environment file
+        working-directory: .
+        run: |
+          cat > .env <<'EOF'
+          POSTGRES_DB=ramon
+          POSTGRES_USER=ramon
+          POSTGRES_PASSWORD=ci-only-not-a-secret
+          RAMON_EA_BEARER_TOKEN=ci-test-token
+          DJANGO_SECRET_KEY=ci-only-not-a-secret
+          EOF
+      - name: Validate consolidated Docker Compose
+        working-directory: .
+        run: docker compose -f docker-compose.yaml config --quiet
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/django_bridge/requirements.txt
+      - name: Install Django bridge dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Django system checks
+        run: python manage.py check
+      - name: Verify migrations match models
+        run: python manage.py makemigrations --check --dry-run
+      - name: Run Django and pipeline tests
+        run: python manage.py test --verbosity 2
