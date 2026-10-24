@@ -5467,15 +5467,17 @@ void SendDjangoHeartbeatIfDue()
       DjangoBridgeStatus = "DISABLED";
       return;
    }
-   if(StringLen(DjangoBearerToken)<32)
-   {
-      DjangoBridgeStatus = "TOKEN NOT CONFIGURED";
-      return;
-   }
+   // Throttle all heartbeat diagnostics, including missing-token warnings.
    datetime now=TimeLocal();
    if(LastDjangoHeartbeatAttempt>0 && now-LastDjangoHeartbeatAttempt<30)
       return;
    LastDjangoHeartbeatAttempt=now;
+   if(StringLen(DjangoBearerToken)<32)
+   {
+      DjangoBridgeStatus = "TOKEN NOT CONFIGURED";
+      Print("Ramon Django heartbeat skipped: set DjangoBearerToken in EA Inputs to the same secret as RAMON_EA_BEARER_TOKEN in the backend .env (at least 32 characters).");
+      return;
+   }
 
    string instance_id=IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN))
       +"-"+_Symbol+"-"+IntegerToString((long)MagicNumber);
@@ -5507,14 +5509,28 @@ void SendDjangoHeartbeatIfDue()
    string headers="Content-Type: application/json\r\nAuthorization: Bearer "+DjangoBearerToken+"\r\n";
    ulong started=GetTickCount64();
    ResetLastError();
-   int code=WebRequest("POST",DjangoHeartbeatUrl,headers,250,request,response,response_headers);
+   int code=WebRequest("POST",DjangoHeartbeatUrl,headers,3000,request,response,response_headers);
    LastDjangoHeartbeatLatencyMs=(double)(GetTickCount64()-started);
    if(code==200)
+   {
       DjangoBridgeStatus="CONNECTED "+DoubleToString(LastDjangoHeartbeatLatencyMs,0)+"ms";
+      Print("Ramon Django heartbeat OK instance_id=",instance_id,
+         " latency_ms=",DoubleToString(LastDjangoHeartbeatLatencyMs,0));
+   }
    else if(code<0)
-      DjangoBridgeStatus="DISCONNECTED err="+IntegerToString(GetLastError());
+   {
+      int err=GetLastError();
+      DjangoBridgeStatus="DISCONNECTED err="+IntegerToString(err);
+      Print("Ramon Django heartbeat transport failure err=",err,
+         ". Check MT5 WebRequest URL allow-list and that Django is listening at ",DjangoHeartbeatUrl);
+   }
    else
+   {
       DjangoBridgeStatus="HTTP "+IntegerToString(code);
+      Print("Ramon Django heartbeat rejected HTTP=",code,
+         " response=",CharArrayToString(response,0,ArraySize(response),CP_UTF8),
+         ". HTTP 401 means token mismatch; HTTP 503 means backend token is not configured.");
+   }
 }
 
 // Periodic read-only EA snapshot. This endpoint only queues telemetry; it cannot
@@ -5587,7 +5603,7 @@ void SendDjangoSnapshotIfDue()
    string response_headers;
    string headers="Content-Type: application/json\r\nAuthorization: Bearer "+DjangoBearerToken+"\r\n";
    ResetLastError();
-   int code=WebRequest("POST",DjangoEventsUrl,headers,250,request,response,response_headers);
+   int code=WebRequest("POST",DjangoEventsUrl,headers,3000,request,response,response_headers);
    if(code!=200)
       Print("Ramon Django snapshot queue failed HTTP=",code," err=",GetLastError(),
          " event_id=",event_id);
