@@ -52,6 +52,9 @@ class OpportunityDetector:
         self.fast_ema_period = fast_ema_period
         self.slow_ema_period = slow_ema_period
         self.atr_period = atr_period
+        # Per-process guard; signal_key is also returned for durable downstream
+        # deduplication across worker restarts.
+        self._last_signal_by_market: dict[tuple[str, str], str] = {}
 
     @staticmethod
     def _ema(values: Sequence[float], period: int) -> float:
@@ -220,7 +223,10 @@ class OpportunityDetector:
         last_timestamp = candles[-1].get("timestamp")
         symbol = str(market.get("symbol", "")).strip()
         timeframe = str(market.get("timeframe", "M15")).upper()
-        signal_key = f"{symbol}|{timeframe}|{last_timestamp or len(candles)}|{side}"
+        candle_identity = last_timestamp or "|".join(
+            f"{candles[-1][key]:.10g}" for key in ("open", "high", "low", "close")
+        )
+        signal_key = f"{symbol}|{timeframe}|{candle_identity}"
         return {
             "approved": True,
             "side": side,
@@ -327,12 +333,23 @@ class OpportunityDetector:
                     str(market.get("symbol", "")).strip(),
                     str(market.get("timeframe", "M15")).upper(),
                     str(market.get("timestamp", "legacy")),
-                    side,
                 )),
             }
 
         if not result.get("approved"):
             return result
+
+        identity = (
+            str(market.get("symbol", "")).strip(),
+            str(market.get("timeframe", "M15")).upper(),
+        )
+        if self._last_signal_by_market.get(identity) == result.get("signal_key"):
+            return self._rejected(
+                "DUPLICATE_SIGNAL",
+                signal_key=result.get("signal_key"),
+                market_regime=result.get("market_regime"),
+            )
+
         if self.use_statistical_forecasts or bool(market.get("use_statistical_forecasts", False)):
             forecast_result = self._evaluate_forecasts(market, str(result["side"]))
             result["forecasting"] = forecast_result
@@ -341,4 +358,7 @@ class OpportunityDetector:
             else:
                 # Forecast is a gate, not a score boost or an independent signal.
                 result["reason"] = "OPPORTUNITY_FOUND_WITH_FORECAST_CONFIRMATION"
+
+        if result.get("approved"):
+            self._last_signal_by_market[identity] = str(result.get("signal_key", ""))
         return result
