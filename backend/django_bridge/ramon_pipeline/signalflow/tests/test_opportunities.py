@@ -53,6 +53,20 @@ class OpportunityDetectorTests(TestCase):
         self.assertEqual(result["side"], "BUY")
         self.assertEqual(result["reason"], "OPPORTUNITY_FOUND")
 
+    def test_repeated_same_candle_signal_is_deduplicated(self):
+        detector = OpportunityDetector()
+        market = {
+            "symbol": "XAUUSD_o",
+            "timeframe": "M15",
+            "candles": bullish_pullback_candles(),
+        }
+        first = detector.evaluate(market)
+        second = detector.evaluate(market)
+        self.assertTrue(first["approved"], first)
+        self.assertFalse(second["approved"])
+        self.assertEqual(second["reason"], "DUPLICATE_SIGNAL")
+        self.assertEqual(first["signal_key"], second["signal_key"])
+
     def test_candle_strategy_accepts_a_confirmed_bullish_pullback(self):
         result = OpportunityDetector().evaluate({
             "symbol": "XAUUSD_o",
