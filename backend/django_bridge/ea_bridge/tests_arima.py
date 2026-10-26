@@ -46,12 +46,14 @@ class ArimaForecastTests(TestCase):
         self.assertTrue(math.isfinite(result.baseline_rmse))
         self.assertGreaterEqual(result.directional_accuracy, 0)
         self.assertLessEqual(result.directional_accuracy, 1)
+        self.assertGreaterEqual(result.convergence_warnings, 0)
         self.assertEqual(result.missing_intervals, 0)
         result_dict = result.as_dict()
         self.assertEqual(result_dict["model_order"], [1, 1, 1])
         self.assertEqual(result_dict["evaluation_method"], "rolling_one_step")
         self.assertIn("baseline_mae", result_dict)
         self.assertIn("baseline_rmse", result_dict)
+        self.assertIn("convergence_warnings", result_dict)
 
     def test_rejects_insufficient_candles(self):
         MarketBar.objects.filter(source="arima-test-ea").delete()

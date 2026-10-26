@@ -6,8 +6,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import timedelta
+import warnings
 
 import numpy as np
+from statsmodels.tools.sm_exceptions import ConvergenceWarning
 from statsmodels.tsa.arima.model import ARIMA
 
 from ea_bridge.models import MarketBar
@@ -57,6 +59,7 @@ class ArimaForecastResult:
     baseline_mae: float
     baseline_rmse: float
     directional_accuracy: float
+    convergence_warnings: int
     missing_intervals: int
 
     def as_dict(self) -> dict:
@@ -129,14 +132,23 @@ def forecast_market_bars(
     train = closes[:split]
     test = closes[split:]
     rolling_forecasts = []
+    convergence_warning_count = 0
     for target_index in range(split, len(closes)):
-        fitted = ARIMA(
-            closes[:target_index],
-            order=order,
-            enforce_stationarity=False,
-            enforce_invertibility=False,
-        ).fit()
-        rolling_forecasts.append(float(np.asarray(fitted.forecast(steps=1)).reshape(-1)[0]))
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", ConvergenceWarning)
+            fitted = ARIMA(
+                closes[:target_index],
+                order=order,
+                enforce_stationarity=False,
+                enforce_invertibility=False,
+            ).fit()
+            forecast = np.asarray(
+                fitted.forecast(steps=1), dtype=float
+            ).reshape(-1)
+        convergence_warning_count += sum(
+            issubclass(item.category, ConvergenceWarning) for item in caught
+        )
+        rolling_forecasts.append(float(forecast[0]))
 
     test_forecast = np.asarray(rolling_forecasts, dtype=float)
     errors = test - test_forecast
@@ -153,13 +165,18 @@ def forecast_market_bars(
     predicted_direction = np.sign(test_forecast - closes[split - 1 : -1])
     directional_accuracy = float(np.mean(actual_direction == predicted_direction))
 
-    final_fit = ARIMA(
-        closes,
-        order=order,
-        enforce_stationarity=False,
-        enforce_invertibility=False,
-    ).fit()
-    prediction = final_fit.get_forecast(steps=1)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", ConvergenceWarning)
+        final_fit = ARIMA(
+            closes,
+            order=order,
+            enforce_stationarity=False,
+            enforce_invertibility=False,
+        ).fit()
+        prediction = final_fit.get_forecast(steps=1)
+    convergence_warning_count += sum(
+        issubclass(item.category, ConvergenceWarning) for item in caught
+    )
     forecast_close = float(np.asarray(prediction.predicted_mean).reshape(-1)[0])
     interval_frame = prediction.conf_int(alpha=0.05)
     lower, upper = float(interval_frame[0][0]), float(interval_frame[0][1])
@@ -183,5 +200,6 @@ def forecast_market_bars(
         baseline_mae=baseline_mae,
         baseline_rmse=baseline_rmse,
         directional_accuracy=directional_accuracy,
+        convergence_warnings=convergence_warning_count,
         missing_intervals=missing_intervals,
     )
