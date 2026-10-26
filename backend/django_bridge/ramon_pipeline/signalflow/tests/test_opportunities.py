@@ -31,6 +31,19 @@ def bullish_pullback_candles():
     return make_candles(closes)
 
 
+def bearish_pullback_candles():
+    closes = [2050.0 - index * 0.5 for index in range(50)]
+    closes[-4] = closes[-5] + 1.0
+    closes[-3] = closes[-5] + 2.0
+    closes[-2] = closes[-5] + 1.0
+    closes[-1] = closes[-2] - 2.0
+    candles = make_candles(closes)
+    candles[-1]["open"] = closes[-2] + 0.3
+    candles[-1]["high"] = max(candles[-1]["open"], closes[-1]) + 0.4
+    candles[-1]["low"] = min(candles[-1]["open"], closes[-1]) - 0.4
+    return candles
+
+
 class OpportunityDetectorTests(TestCase):
     def test_legacy_market_signal_remains_supported_by_default(self):
         result = OpportunityDetector().evaluate(
@@ -54,6 +67,18 @@ class OpportunityDetectorTests(TestCase):
         self.assertTrue(result["signal_key"])
         self.assertIn("trend", result["score_components"])
 
+    def test_candle_strategy_accepts_a_confirmed_bearish_pullback(self):
+        result = OpportunityDetector().evaluate({
+            "symbol": "XAUUSD_o",
+            "timeframe": "M15",
+            "candles": bearish_pullback_candles(),
+        })
+        self.assertTrue(result["approved"], result)
+        self.assertEqual(result["side"], "SELL")
+        self.assertEqual(result["market_regime"], "BEARISH")
+        self.assertTrue(result["evidence"]["pullback_seen"])
+        self.assertTrue(result["evidence"]["continuation_candle"])
+
     def test_ranging_market_does_not_produce_an_opportunity(self):
         closes = [2000.0 + (index % 2) * 0.02 for index in range(50)]
         result = OpportunityDetector().evaluate({"candles": make_candles(closes)})
@@ -65,11 +90,13 @@ class OpportunityDetectorTests(TestCase):
     def test_missing_or_insufficient_candles_fail_closed(self):
         detector = OpportunityDetector()
         missing = detector.evaluate({"symbol": "XAUUSD_o", "candles": []})
-        malformed = detector.evaluate({"candles": [{"open": 1, "high": 2}]})
+        malformed_candles = bullish_pullback_candles()
+        del malformed_candles[10]["close"]
+        malformed = detector.evaluate({"candles": malformed_candles})
         self.assertFalse(missing["approved"])
         self.assertEqual(missing["reason"], "INSUFFICIENT_CANDLE_HISTORY")
         self.assertFalse(malformed["approved"])
-        self.assertEqual(malformed["reason"], "INSUFFICIENT_CANDLE_HISTORY")
+        self.assertEqual(malformed["reason"], "MISSING_OR_INVALID_OHLC")
 
     def test_non_chronological_candles_are_rejected(self):
         candles = bullish_pullback_candles()
