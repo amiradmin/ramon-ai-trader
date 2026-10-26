@@ -2,7 +2,35 @@ import json
 
 from django.contrib import admin
 
-from .models import EAEvent, EAHeartbeat, StrategyDecisionRecord
+from .models import (
+    EAEvent,
+    EAHeartbeat,
+    MarketBar,
+    OrderIntentRecord,
+    RiskVerdictRecord,
+    StrategyDecisionRecord,
+)
+
+
+@admin.register(MarketBar)
+class MarketBarAdmin(admin.ModelAdmin):
+    list_display = ("timestamp", "symbol", "timeframe", "open", "high", "low", "close", "volume", "source", "received_at")
+    list_filter = ("symbol", "timeframe", "source")
+    search_fields = ("symbol", "timeframe", "source")
+    readonly_fields = ("source", "symbol", "timeframe", "timestamp", "open", "high", "low", "close", "volume", "received_at")
+    date_hierarchy = "timestamp"
+    ordering = ("-timestamp",)
+    list_per_page = 100
+    show_full_result_count = False
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return True
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(EAHeartbeat)
@@ -21,7 +49,6 @@ class EAHeartbeatAdmin(admin.ModelAdmin):
         return False
 
     def has_change_permission(self, request, obj=None):
-        # Heartbeats are ingested by the EA bridge; admin is for inspection.
         return True
 
     def has_delete_permission(self, request, obj=None):
@@ -57,7 +84,6 @@ class EAEventAdmin(admin.ModelAdmin):
 
     @staticmethod
     def _payload_data(obj):
-        """Return the most useful mapping when the event wraps a snapshot."""
         payload = obj.payload
         if not isinstance(payload, dict):
             return {}
@@ -76,7 +102,7 @@ class EAEventAdmin(admin.ModelAdmin):
                 return value
         return "—"
 
-    @admin.display(description="Symbol", ordering="event_type")
+    @admin.display(description="Symbol")
     def payload_symbol(self, obj):
         return self._payload_value(obj, "symbol", "Symbol", "instrument")
 
@@ -100,7 +126,6 @@ class EAEventAdmin(admin.ModelAdmin):
         return False
 
     def has_change_permission(self, request, obj=None):
-        # Permit opening the detail page; all fields remain read-only.
         return True
 
     def has_delete_permission(self, request, obj=None):
@@ -116,6 +141,44 @@ class StrategyDecisionRecordAdmin(admin.ModelAdmin):
         "decision_id", "symbol", "action", "confidence", "rationale_code",
         "model_version", "features", "created_at",
     )
+    ordering = ("-created_at",)
+    list_per_page = 50
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return True
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(RiskVerdictRecord)
+class RiskVerdictRecordAdmin(admin.ModelAdmin):
+    list_display = ("created_at", "decision_id", "approved", "reason_code", "approved_volume")
+    list_filter = ("approved", "reason_code", "created_at")
+    search_fields = ("decision_id", "reason_code")
+    readonly_fields = ("decision_id", "approved", "reason_code", "approved_volume", "stop_loss", "take_profit", "details", "created_at")
+    ordering = ("-created_at",)
+    list_per_page = 50
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return True
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(OrderIntentRecord)
+class OrderIntentRecordAdmin(admin.ModelAdmin):
+    list_display = ("created_at", "intent_id", "decision_id", "instance_id", "symbol", "side", "volume", "state")
+    list_filter = ("state", "symbol", "side", "created_at")
+    search_fields = ("intent_id", "decision_id", "instance_id", "symbol", "broker_ticket")
+    readonly_fields = ("intent_id", "decision_id", "instance_id", "symbol", "side", "volume", "stop_loss", "take_profit", "state", "broker_ticket", "expires_at", "created_at", "updated_at")
     ordering = ("-created_at",)
     list_per_page = 50
 
