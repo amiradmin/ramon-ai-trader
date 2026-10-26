@@ -3,7 +3,7 @@ import json
 import logging
 import socket
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 
 from django.core.management.base import BaseCommand
 from django.db import close_old_connections, transaction
@@ -30,8 +30,12 @@ def _decode_event(fields):
         event_type = str(payload.get("event_type") or fields.get("kind") or "TELEMETRY").upper()
     occurred_raw = fields.get("occurred_at", "")
     occurred_at = parse_datetime(occurred_raw) if occurred_raw else None
-    if occurred_at is not None and occurred_at.tzinfo is None:
-        occurred_at = occurred_at.replace(tzinfo=timezone.utc)
+    if occurred_raw and occurred_at is None:
+        raise ValueError("occurred_at must be a valid ISO datetime")
+    if occurred_at is not None and (
+        occurred_at.tzinfo is None or occurred_at.utcoffset() is None
+    ):
+        raise ValueError("occurred_at must include a timezone")
     if not event_id or not instance_id:
         raise ValueError("event_id and source are required")
     return event_id, instance_id, event_type[:64], occurred_at, payload
@@ -48,9 +52,9 @@ class Command(BaseCommand):
         if kind == "market_bar" and all(key in payload for key in ("symbol", "timeframe", "timestamp", "open", "high", "low", "close")):
             bar_time = parse_datetime(str(payload["timestamp"]))
             if bar_time is None:
-                raise ValueError("market bar timestamp must be an ISO datetime")
-            if bar_time.tzinfo is None:
-                bar_time = bar_time.replace(tzinfo=timezone.utc)
+                raise ValueError("market bar timestamp must be a valid ISO datetime")
+            if bar_time.tzinfo is None or bar_time.utcoffset() is None:
+                raise ValueError("market bar timestamp must include a timezone")
             MarketBar.objects.get_or_create(
                 source=instance_id,
                 symbol=str(payload["symbol"])[:32],

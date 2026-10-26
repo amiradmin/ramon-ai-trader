@@ -63,6 +63,51 @@ class StreamPersistenceTests(TestCase):
         self.worker._persist(record)
         self.assertEqual(EAEvent.objects.filter(event_id="fill-001").count(), 1)
 
+    def test_execution_event_rejects_timezone_naive_timestamp(self):
+        record = {
+            "kind": "execution_event",
+            "source": "ea-test-1",
+            "event_id": "fill-naive-001",
+            "occurred_at": "2026-10-22T10:00:00",
+            "payload": json.dumps({"ticket": "123", "profit": 0.15}),
+        }
+        with self.assertRaisesRegex(ValueError, "occurred_at must include a timezone"):
+            self.worker._persist(record)
+        self.assertFalse(EAEvent.objects.filter(event_id="fill-naive-001").exists())
+
+    def test_execution_event_rejects_invalid_timestamp(self):
+        record = {
+            "kind": "execution_event",
+            "source": "ea-test-1",
+            "event_id": "fill-invalid-001",
+            "occurred_at": "not-a-timestamp",
+            "payload": json.dumps({"ticket": "123"}),
+        }
+        with self.assertRaisesRegex(ValueError, "valid ISO datetime"):
+            self.worker._persist(record)
+        self.assertFalse(EAEvent.objects.filter(event_id="fill-invalid-001").exists())
+
+    def test_market_bar_rejects_timezone_naive_timestamp(self):
+        record = {
+            "kind": "market_bar",
+            "source": "ea-test-1",
+            "event_id": "bar-naive-001",
+            "occurred_at": "2026-10-22T10:00:00+00:00",
+            "payload": json.dumps({
+                "symbol": "XAUUSD_o",
+                "timeframe": "m1",
+                "timestamp": "2026-10-22T10:00:00",
+                "open": "100",
+                "high": "102",
+                "low": "99",
+                "close": "101",
+                "volume": "3",
+            }),
+        }
+        with self.assertRaisesRegex(ValueError, "market bar timestamp must include a timezone"):
+            self.worker._persist(record)
+        self.assertEqual(MarketBar.objects.count(), 0)
+
     def test_market_bar_persistence_is_idempotent_and_normalized(self):
         record = {"kind": "market_bar", "source": "ea-test-1", "event_id": "bar-001",
                   "occurred_at": "2026-10-22T10:00:00+00:00",
