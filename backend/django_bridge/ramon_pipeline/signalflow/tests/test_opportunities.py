@@ -79,6 +79,19 @@ class OpportunityDetectorTests(TestCase):
         self.assertTrue(result["evidence"]["pullback_seen"])
         self.assertTrue(result["evidence"]["continuation_candle"])
 
+    def test_market_regime_change_from_trend_to_range_is_reflected(self):
+        detector = OpportunityDetector()
+        trending = detector.evaluate({
+            "symbol": "XAUUSD_o",
+            "timeframe": "M15",
+            "candles": bullish_pullback_candles(),
+        })
+        flat_closes = [2000.0 + (index % 2) * 0.02 for index in range(50)]
+        ranging = detector.evaluate({"candles": make_candles(flat_closes)})
+        self.assertEqual(trending["market_regime"], "BULLISH")
+        self.assertEqual(ranging["market_regime"], "RANGING")
+        self.assertFalse(ranging["approved"])
+
     def test_ranging_market_does_not_produce_an_opportunity(self):
         closes = [2000.0 + (index % 2) * 0.02 for index in range(50)]
         result = OpportunityDetector().evaluate({"candles": make_candles(closes)})
