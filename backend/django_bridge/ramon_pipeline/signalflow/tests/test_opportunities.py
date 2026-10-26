@@ -220,11 +220,7 @@ class OpportunityDetectorTests(TestCase):
         for index, candle in enumerate(candles, start=1):
             candle["timestamp"] = index
         result = OpportunityDetector().evaluate({"candles": candles})
-        self.assertNotEqual(
-            result["reason"],
-            "CANDLE_TIMESTAMPS_NOT_STRICTLY_INCREASING",
-            result,
-        )
+        self.assertTrue(result["approved"], result)
 
     def test_timestamp_representation_must_not_change_mid_history(self):
         candles = bullish_pullback_candles()
