@@ -149,9 +149,14 @@ class EntryTimer:
     def _evaluate_legacy(self, opportunity: Mapping[str, Any], market: Mapping[str, Any]) -> dict[str, Any]:
         try:
             quality = _number(market.get("entry_quality", 0.0), "entry_quality")
-            spread = _number(market.get("spread_points", float("inf")), "spread_points")
-        except _Invalid:
-            return self._result(REJECTED, "INVALID_ENTRY_METRICS", detail="entry_quality and spread_points must be finite numeric values", opportunity=opportunity)
+            raw_spread = market.get("spread_points", float("inf"))
+            if isinstance(raw_spread, bool):
+                raise ValueError("spread_points must be numeric")
+            spread = float(raw_spread)
+            if math.isnan(spread):
+                raise ValueError("spread_points must not be NaN")
+        except (_Invalid, TypeError, ValueError, OverflowError):
+            return self._result(REJECTED, "INVALID_ENTRY_METRICS", detail="entry_quality and spread_points must be numeric and not NaN", opportunity=opportunity)
         metrics = {"quality": quality, "spread_points": spread}
         if quality < self.minimum_quality or quality > 1.0:
             return self._result(DEFERRED, "ENTRY_QUALITY_TOO_LOW", opportunity=opportunity, **metrics,
