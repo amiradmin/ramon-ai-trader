@@ -214,3 +214,21 @@ class OpportunityDetectorTests(TestCase):
             })
         self.assertFalse(result["approved"])
         forecasts.assert_not_called()
+
+    def test_numeric_timestamps_are_compared_numerically(self):
+        candles = bullish_pullback_candles()
+        for index, candle in enumerate(candles, start=1):
+            candle["timestamp"] = index
+        result = OpportunityDetector().evaluate({"candles": candles})
+        self.assertTrue(result["approved"], result)
+
+    def test_timestamp_representation_must_not_change_mid_history(self):
+        candles = bullish_pullback_candles()
+        candles[20]["timestamp"] = 20
+        result = OpportunityDetector().evaluate({"candles": candles})
+        self.assertFalse(result["approved"])
+        self.assertEqual(result["reason"], "INCONSISTENT_CANDLE_TIMESTAMP_FORMAT")
+
+    def test_indicator_configuration_requires_sufficient_warmup_history(self):
+        with self.assertRaisesRegex(ValueError, "slow_ema_period"):
+            OpportunityDetector(minimum_candles=30, slow_ema_period=30)

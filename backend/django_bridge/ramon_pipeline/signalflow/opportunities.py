@@ -7,6 +7,7 @@ not yet been migrated. This module never submits orders or sizes positions.
 from __future__ import annotations
 
 import math
+from datetime import datetime
 from typing import Any, Mapping, Sequence
 
 
@@ -40,8 +41,12 @@ class OpportunityDetector:
             raise ValueError("minimum_candles must be at least 25")
         if not 2 <= fast_ema_period < slow_ema_period:
             raise ValueError("EMA periods must satisfy 2 <= fast < slow")
+        if minimum_candles < slow_ema_period + 5:
+            raise ValueError("minimum_candles must be at least slow_ema_period + 5")
         if atr_period < 2:
             raise ValueError("atr_period must be at least 2")
+        if minimum_candles < atr_period + 1:
+            raise ValueError("minimum_candles must be at least atr_period + 1")
         self.minimum_score = minimum_score
         self.use_statistical_forecasts = use_statistical_forecasts
         self.forecast_limit = forecast_limit
@@ -63,6 +68,28 @@ class OpportunityDetector:
         for value in values[1:]:
             result = alpha * float(value) + (1.0 - alpha) * result
         return result
+
+    @staticmethod
+    def _timestamp_order_key(value: Any) -> tuple[str, Any]:
+        """Normalize common timestamp forms without lexically sorting numbers.
+
+        Non-date labels (used by some test/replay adapters) retain lexical order.
+        Mixing timestamp representations is rejected by the caller.
+        """
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            if not math.isfinite(float(value)):
+                raise ValueError("timestamp must be finite")
+            return ("numeric", float(value))
+        text = str(value).strip()
+        try:
+            return ("numeric", float(text))
+        except ValueError:
+            pass
+        try:
+            normalized = text[:-1] + "+00:00" if text.endswith("Z") else text
+            return ("datetime", datetime.fromisoformat(normalized).timestamp())
+        except ValueError:
+            return ("label", text)
 
     @staticmethod
     def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
@@ -87,7 +114,7 @@ class OpportunityDetector:
             return None, "INSUFFICIENT_CANDLE_HISTORY"
 
         candles: list[dict[str, Any]] = []
-        previous_timestamp: str | None = None
+        previous_timestamp_key: tuple[str, Any] | None = None
         for index, raw_candle in enumerate(raw):
             if not isinstance(raw_candle, Mapping):
                 return None, "INVALID_CANDLE"
@@ -107,10 +134,17 @@ class OpportunityDetector:
 
             timestamp = raw_candle.get("timestamp")
             if timestamp is not None:
+                try:
+                    timestamp_key = self._timestamp_order_key(timestamp)
+                except (TypeError, ValueError, OverflowError):
+                    return None, "INVALID_CANDLE_TIMESTAMP"
+                if previous_timestamp_key is not None:
+                    if timestamp_key[0] != previous_timestamp_key[0]:
+                        return None, "INCONSISTENT_CANDLE_TIMESTAMP_FORMAT"
+                    if timestamp_key[1] <= previous_timestamp_key[1]:
+                        return None, "CANDLE_TIMESTAMPS_NOT_STRICTLY_INCREASING"
+                previous_timestamp_key = timestamp_key
                 timestamp = str(timestamp)
-                if previous_timestamp is not None and timestamp <= previous_timestamp:
-                    return None, "CANDLE_TIMESTAMPS_NOT_STRICTLY_INCREASING"
-                previous_timestamp = timestamp
             if (raw_candle.get("is_closed") is False or raw_candle.get("closed") is False) and index == len(raw) - 1:
                 return None, "LATEST_CANDLE_NOT_CLOSED"
             candles.append({**candle, "timestamp": timestamp})
