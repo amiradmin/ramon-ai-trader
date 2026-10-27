@@ -86,3 +86,42 @@ class OrderIntentRecord(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     class Meta:
         indexes = [models.Index(fields=["instance_id", "state", "created_at"], name="ea_ord_inst_state_2f2c11")]
+
+class EACommand(models.Model):
+    class Action(models.TextChoices):
+        NOOP = "NOOP", "No operation"
+        OPEN = "OPEN", "Open position"
+        CLOSE = "CLOSE", "Close position"
+        MODIFY_SLTP = "MODIFY_SLTP", "Modify stop loss/take profit"
+
+    class State(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        CLAIMED = "CLAIMED", "Claimed"
+        RECEIVED = "RECEIVED", "Received"
+        EXECUTING = "EXECUTING", "Executing"
+        EXECUTED = "EXECUTED", "Executed"
+        REJECTED = "REJECTED", "Rejected"
+        FAILED = "FAILED", "Failed"
+        EXPIRED = "EXPIRED", "Expired"
+        RECONCILIATION_REQUIRED = "RECONCILIATION_REQUIRED", "Reconciliation required"
+
+    command_id = models.CharField(max_length=128, unique=True)
+    instance_id = models.CharField(max_length=128, db_index=True)
+    account_login = models.CharField(max_length=32)
+    symbol = models.CharField(max_length=32, blank=True, default="")
+    action = models.CharField(max_length=16, choices=Action.choices)
+    payload = models.JSONField(default=dict)
+    decision_id = models.CharField(max_length=128, blank=True, default="")
+    risk_verdict_id = models.CharField(max_length=128, blank=True, default="")
+    execution_authorized = models.BooleanField(default=False)
+    state = models.CharField(max_length=32, choices=State.choices, default=State.PENDING, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(db_index=True)
+    claimed_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    result = models.JSONField(default=dict, blank=True)
+    class Meta:
+        indexes = [
+            models.Index(fields=["instance_id", "account_login", "state", "created_at"], name="ea_cmd_scope_state_idx"),
+            models.Index(fields=["state", "expires_at"], name="ea_cmd_state_exp_idx"),
+        ]
