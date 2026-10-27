@@ -14,7 +14,7 @@ from statsmodels.tools.sm_exceptions import ConvergenceWarning
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 
 from ea_bridge.models import MarketBar
-from ramon_pipeline.arima import TIMEFRAME_MINUTES, _interval_for
+from .arima import TIMEFRAME_MINUTES, _interval_for
 
 
 @dataclass(frozen=True)
