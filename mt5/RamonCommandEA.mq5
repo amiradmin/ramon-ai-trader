@@ -94,6 +94,49 @@ bool JsonBool(const string json, const string key, const bool fallback=false)
    return StringFind(tail,"true")==0;
 }
 
+
+string JsonObject(const string json, const string key)
+{
+   string needle="\"" + key + "\"";
+   int p=StringFind(json,needle);
+   if(p<0) return "";
+   p=StringFind(json,":",p+StringLen(needle));
+   if(p<0) return "";
+   p++;
+   while(p<StringLen(json) &&
+         (StringGetCharacter(json,p)==' ' ||
+          StringGetCharacter(json,p)=='\t' ||
+          StringGetCharacter(json,p)=='\r' ||
+          StringGetCharacter(json,p)=='\n'))
+      p++;
+   if(p>=StringLen(json) || StringGetCharacter(json,p)!='{') return "";
+
+   int begin=p;
+   int depth=0;
+   bool in_string=false;
+   bool escaped=false;
+
+   for(int i=p;i<StringLen(json);i++)
+   {
+      ushort c=StringGetCharacter(json,i);
+      if(in_string)
+      {
+         if(escaped) escaped=false;
+         else if(c=='\\') escaped=true;
+         else if(c=='\"') in_string=false;
+         continue;
+      }
+      if(c=='\"') in_string=true;
+      else if(c=='{') depth++;
+      else if(c=='}')
+      {
+         depth--;
+         if(depth==0) return StringSubstr(json,begin,i-begin+1);
+      }
+   }
+   return "";
+}
+
 string IsoUtc(datetime stamp)
 {
    MqlDateTime d;
@@ -103,11 +146,67 @@ string IsoUtc(datetime stamp)
 
 datetime UtcFromIso(string value)
 {
-   if(StringLen(value)<19) return 0;
-   string normalized=StringSubstr(value,0,19);
-   StringReplace(normalized,"-",".");
-   StringReplace(normalized,"T"," ");
-   return StringToTime(normalized);
+   // Accept only explicit UTC timestamps: ...Z or ...+00:00.
+   // StructToTime builds the UTC calendar fields without local-time parsing.
+   int n=StringLen(value);
+   if(n<20) return 0;
+
+   if(StringGetCharacter(value,4)!='-' ||
+      StringGetCharacter(value,7)!='-' ||
+      StringGetCharacter(value,10)!='T' ||
+      StringGetCharacter(value,13)!=':' ||
+      StringGetCharacter(value,16)!=':')
+      return 0;
+
+   bool utc_suffix=false;
+   if(StringSubstr(value,n-1,1)=="Z")
+      utc_suffix=true;
+   else if(n>=25 && StringSubstr(value,n-6,6)=="+00:00")
+      utc_suffix=true;
+   if(!utc_suffix) return 0;
+
+   // If fractional seconds exist, require digits after the decimal point.
+   if(n>20 && StringGetCharacter(value,19)=='.')
+   {
+      int suffix_start=(StringSubstr(value,n-1,1)=="Z") ? n-1 : n-6;
+      if(suffix_start<=20) return 0;
+      for(int i=20;i<suffix_start;i++)
+      {
+         ushort c=StringGetCharacter(value,i);
+         if(c<'0' || c>'9') return 0;
+      }
+   }
+   else
+   {
+      int expected=(StringSubstr(value,n-1,1)=="Z") ? 20 : 25;
+      if(n!=expected) return 0;
+   }
+
+   MqlDateTime d;
+   ZeroMemory(d);
+   d.year=(int)StringToInteger(StringSubstr(value,0,4));
+   d.mon=(int)StringToInteger(StringSubstr(value,5,2));
+   d.day=(int)StringToInteger(StringSubstr(value,8,2));
+   d.hour=(int)StringToInteger(StringSubstr(value,11,2));
+   d.min=(int)StringToInteger(StringSubstr(value,14,2));
+   d.sec=(int)StringToInteger(StringSubstr(value,17,2));
+
+   if(d.year<1970 || d.mon<1 || d.mon>12 || d.day<1 || d.day>31 ||
+      d.hour<0 || d.hour>23 || d.min<0 || d.min>59 ||
+      d.sec<0 || d.sec>59)
+      return 0;
+
+   datetime stamp=StructToTime(d);
+   if(stamp<=0) return 0;
+
+   // Reject normalized invalid dates such as February 31.
+   MqlDateTime check;
+   if(!TimeToStruct(stamp,check)) return 0;
+   if(check.year!=d.year || check.mon!=d.mon || check.day!=d.day ||
+      check.hour!=d.hour || check.min!=d.min || check.sec!=d.sec)
+      return 0;
+
+   return stamp;
 }
 
 string TfName(ENUM_TIMEFRAMES tf)
@@ -263,62 +362,162 @@ bool SafeOpen(const string command_json,const string command_id,ulong &ticket_ou
    return true;
 }
 
+bool LocalExecutionPermitted(string &reason)
+{
+   if(!EnableCommandExecution)
+   {
+      reason="LOCAL_EXECUTION_DISABLED";
+      return false;
+   }
+   if(AccountInfoInteger(ACCOUNT_TRADE_MODE)!=ACCOUNT_TRADE_MODE_DEMO)
+   {
+      reason="DEMO_ACCOUNT_REQUIRED";
+      return false;
+   }
+   if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) ||
+      !MQLInfoInteger(MQL_TRADE_ALLOWED))
+   {
+      reason="TERMINAL_OR_EA_TRADING_PERMISSION_DENIED";
+      return false;
+   }
+   reason="";
+   return true;
+}
+
+
 bool ProcessCommand(const string response)
 {
-   if(StringFind(response,"\"command\":null")>=0 || StringFind(response,"\"command\": null")>=0)
+   if(StringFind(response,"\"command\":null")>=0 ||
+      StringFind(response,"\"command\": null")>=0)
       return true;
-   string command_id=JsonString(response,"command_id","");
-   string action=JsonString(response,"action","");
-   string expires=JsonString(response,"expires_at","");
-   if(command_id=="" || action=="") return false;
-   if(command_id==LastCommandId) return AckCommand(command_id,"RECONCILIATION_REQUIRED","DUPLICATE_COMMAND_ID_REQUIRES_RECONCILIATION");
-   datetime expiry=UtcFromIso(expires);
-   if(expiry>0 && TimeGMT()>expiry)
+
+   string command=JsonObject(response,"command");
+   if(command=="") return false;
+
+   string command_id=JsonString(command,"command_id","");
+   string action=JsonString(command,"action","");
+   string expires=JsonString(command,"expires_at","");
+   string command_instance=JsonString(command,"instance_id","");
+   string command_account=JsonString(command,"account_login","");
+   string command_symbol=JsonString(command,"symbol","");
+   string payload=JsonObject(command,"payload");
+
+   if(command_id=="" || action=="" || payload=="")
+      return false;
+
+   string current_account=IntegerToString(
+      (long)AccountInfoInteger(ACCOUNT_LOGIN));
+
+   if(command_instance!=InstanceId || command_account!=current_account ||
+      command_symbol!=_Symbol)
    {
-      LastCommandId=command_id;
-      return AckCommand(command_id,"EXPIRED","COMMAND_EXPIRED_BEFORE_EXECUTION");
+      Print("RamonCommandEA: command scope mismatch; no trade submitted.");
+      return AckCommand(command_id,"REJECTED","COMMAND_SCOPE_MISMATCH");
    }
 
-   LastCommandId=command_id;
-   if(!JsonBool(response,"trading_authorization",false) || !JsonBool(response,"execution_authorized",false))
-      return AckCommand(command_id,"REJECTED","SERVER_AUTHORIZATION_MISSING");
-   if(!EnableCommandExecution)
-      return AckCommand(command_id,"REJECTED","LOCAL_EXECUTION_DISABLED");
+   if(command_id==LastCommandId)
+      return AckCommand(command_id,"RECONCILIATION_REQUIRED",
+                        "DUPLICATE_COMMAND_ID_REQUIRES_RECONCILIATION");
 
-   if(action=="NOOP") return AckCommand(command_id,"EXECUTED","NOOP");
+   datetime expiry=UtcFromIso(expires);
+   if(expiry<=0)
+   {
+      LastCommandId=command_id;
+      return AckCommand(command_id,"REJECTED","INVALID_COMMAND_EXPIRY");
+   }
+   if(TimeGMT()>expiry)
+   {
+      LastCommandId=command_id;
+      return AckCommand(command_id,"EXPIRED",
+                        "COMMAND_EXPIRED_BEFORE_EXECUTION");
+   }
+
+   if(!JsonBool(response,"trading_authorization",false) ||
+      !JsonBool(command,"execution_authorized",false))
+   {
+      LastCommandId=command_id;
+      return AckCommand(command_id,"REJECTED",
+                        "SERVER_AUTHORIZATION_MISSING");
+   }
+
+   string guard_reason="";
+   if(!LocalExecutionPermitted(guard_reason))
+   {
+      LastCommandId=command_id;
+      return AckCommand(command_id,"REJECTED",guard_reason);
+   }
+
+   if(action=="NOOP")
+   {
+      LastCommandId=command_id;
+      return AckCommand(command_id,"EXECUTED","NOOP");
+   }
+
    if(action=="OPEN")
    {
       ulong ticket=0;
       string reason="";
-      if(!SafeOpen(response,command_id,ticket,reason))
+      if(!SafeOpen(payload,command_id,ticket,reason))
+      {
+         LastCommandId=command_id;
          return AckCommand(command_id,"REJECTED",reason);
+      }
+      LastCommandId=command_id;
       return AckCommand(command_id,"EXECUTED",reason,ticket);
    }
+
    if(action=="CLOSE")
    {
-      ulong ticket=(ulong)JsonNumber(response,"position_ticket",0);
-      if(ticket==0 || !PositionSelectByTicket(ticket) || PositionGetString(POSITION_SYMBOL)!=_Symbol)
-         return AckCommand(command_id,"REJECTED","POSITION_NOT_FOUND_OR_SYMBOL_MISMATCH");
+      ulong ticket=(ulong)JsonNumber(payload,"position_ticket",0);
+      if(ticket==0 || !PositionSelectByTicket(ticket) ||
+         PositionGetString(POSITION_SYMBOL)!=command_symbol)
+      {
+         LastCommandId=command_id;
+         return AckCommand(command_id,"REJECTED",
+                           "POSITION_NOT_FOUND_OR_SYMBOL_MISMATCH");
+      }
       if(!Trade.PositionClose(ticket))
-         return AckCommand(command_id,"FAILED","BROKER_CLOSE_FAILED_"+IntegerToString((int)Trade.ResultRetcode()),ticket);
+      {
+         LastCommandId=command_id;
+         return AckCommand(command_id,"FAILED",
+             "BROKER_CLOSE_FAILED_"+IntegerToString((int)Trade.ResultRetcode()),
+             ticket);
+      }
+      LastCommandId=command_id;
       return AckCommand(command_id,"EXECUTED","BROKER_CLOSE_ACCEPTED",ticket);
    }
+
    if(action=="MODIFY_SLTP")
    {
-      ulong ticket=(ulong)JsonNumber(response,"position_ticket",0);
-      double sl=JsonNumber(response,"stop_loss",0);
-      double tp=JsonNumber(response,"take_profit",0);
-      if(ticket==0 || !PositionSelectByTicket(ticket) || PositionGetString(POSITION_SYMBOL)!=_Symbol)
-         return AckCommand(command_id,"REJECTED","POSITION_NOT_FOUND_OR_SYMBOL_MISMATCH");
+      ulong ticket=(ulong)JsonNumber(payload,"position_ticket",0);
+      double sl=JsonNumber(payload,"stop_loss",0);
+      double tp=JsonNumber(payload,"take_profit",0);
+      if(ticket==0 || !PositionSelectByTicket(ticket) ||
+         PositionGetString(POSITION_SYMBOL)!=command_symbol)
+      {
+         LastCommandId=command_id;
+         return AckCommand(command_id,"REJECTED",
+                           "POSITION_NOT_FOUND_OR_SYMBOL_MISMATCH");
+      }
       if(sl<0 || tp<0 || (sl==0 && tp==0))
+      {
+         LastCommandId=command_id;
          return AckCommand(command_id,"REJECTED","INVALID_SLTP");
+      }
       if(!Trade.PositionModify(ticket,sl,tp))
-         return AckCommand(command_id,"FAILED","BROKER_MODIFY_FAILED_"+IntegerToString((int)Trade.ResultRetcode()),ticket);
+      {
+         LastCommandId=command_id;
+         return AckCommand(command_id,"FAILED",
+             "BROKER_MODIFY_FAILED_"+IntegerToString((int)Trade.ResultRetcode()),
+             ticket);
+      }
+      LastCommandId=command_id;
       return AckCommand(command_id,"EXECUTED","BROKER_MODIFY_ACCEPTED",ticket);
    }
+
+   LastCommandId=command_id;
    return AckCommand(command_id,"REJECTED","UNKNOWN_ACTION");
 }
-
 void PollCommands()
 {
    string body="{\"instance_id\":\""+JsonEscape(InstanceId)+"\","
