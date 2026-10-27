@@ -1,11 +1,12 @@
 """Conservative Django-hosted decision API for Ramon EA."""
-import hashlib, json, math
+import hashlib, json, math, time
 from django.conf import settings
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 from .auth import BearerTokenRequired
 from .models import StrategyDecisionRecord
+from ramon_pipeline.signalflow.entry_timing import EntryTimer
 from ramon_pipeline.signalflow.pipeline import SignalFlowPipeline
 
 def _num(v, name):
@@ -71,13 +72,24 @@ def decision(request):
         symbol=str(p.get("symbol","")).strip()[:32]; bars=p.get("bars")
         if not symbol or str(p.get("timeframe","")).upper()!="M15" or not isinstance(bars,list) or not 128<=len(bars)<=512:
             raise ValueError("symbol, M15 timeframe, and 128-512 completed bars are required")
-        closes=[]; highs=[]; lows=[]
+        closes=[]; highs=[]; lows=[]; bar_times=[]
         for b in bars:
             if not isinstance(b,dict): raise ValueError("bar entries must be objects")
+            stamp=_num(b["time"],"bar time")
+            if stamp<=0 or not stamp.is_integer(): raise ValueError("bar time must be a positive integer Unix timestamp")
+            bar_times.append(int(stamp))
             closes.append(_num(b["close"],"close")); highs.append(_num(b["high"],"high")); lows.append(_num(b["low"],"low"))
-            if highs[-1]<lows[-1]: raise ValueError("bar high must be >= low")
-        bar_time=int(bars[-1]["time"]); bid=_num(p["bid"],"bid"); ask=_num(p["ask"],"ask"); point=_num(p["point"],"point")
-        if bid<=0 or ask<bid or point<=0 or bar_time<=0: raise ValueError("invalid quote or bar timestamp")
+            if lows[-1]<=0 or highs[-1]<lows[-1] or not lows[-1]<=closes[-1]<=highs[-1]:
+                raise ValueError("bar OHLC values are inconsistent")
+        if any(b<=a for a,b in zip(bar_times,bar_times[1:])):
+            raise ValueError("bar timestamps must be strictly increasing")
+        if any(b-a>8*900 for a,b in zip(bar_times,bar_times[1:])):
+            raise ValueError("bar timestamp gap exceeds eight M15 intervals")
+        bar_time=bar_times[-1]; bid=_num(p["bid"],"bid"); ask=_num(p["ask"],"ask"); point=_num(p["point"],"point")
+        now=int(time.time())
+        if bid<=0 or ask<bid or point<=0: raise ValueError("invalid quote")
+        if bar_time>now+60: raise ValueError("latest bar timestamp is in the future")
+        if now-bar_time>3*900: raise ValueError("latest closed M15 bar is stale")
         ranges=[max(highs[i]-lows[i],abs(highs[i]-closes[i-1]),abs(lows[i]-closes[i-1])) for i in range(1,len(bars))]
         atr=sum(ranges[-14:])/min(14,len(ranges))
         if not math.isfinite(atr) or atr<=0: raise ValueError("invalid ATR")
@@ -85,15 +97,22 @@ def decision(request):
         direction="BUY" if fast>slow else "SELL" if fast<slow else "HOLD"
         setup=min(1.0,abs(fast-slow)/(atr*.8)); quality=min(1.0,abs(closes[-1]-closes[-5])/(atr*1.5))
         spread=(ask-bid)/point
+        risk_guard_fields=("stop_level_points","take_profit_points","daily_loss_percent","open_risk_percent")
+        risk_guards_complete=all(p.get(name) is not None for name in risk_guard_fields)
         market={"symbol":symbol,"timeframe":"M15","bars":bars,"last_bar_closed":True,
+          "latest_bar_time":bar_time,"bid":bid,"ask":ask,"point":point,
           "trend":direction,"setup_score":setup,"entry_quality":quality,"spread_points":spread,
           "account_balance":_num(p.get("account_balance",0),"account_balance"),"risk_percent":_num(p.get("risk_percent",0),"risk_percent"),
           "stop_loss_points":atr*1.5/point,"point_value_per_lot":_num(p.get("point_value_per_lot",0),"point_value_per_lot"),
           "volume_step":_num(p.get("volume_step",0),"volume_step"),"min_volume":_num(p.get("min_volume",0),"min_volume"),
           "max_volume":_num(p.get("max_volume",0),"max_volume")}
-        result=SignalFlowPipeline().run(market); action=result["action"] if result["approved"] else "WAIT"
-        reason="SIGNALFLOW_APPROVED" if result["approved"] else next((s.get("reason","SIGNALFLOW_REJECTED") for s in
-          (result["stages"]["opportunities"],result["stages"]["entry_timing"],result["stages"]["risk_management"]) if not s.get("approved",False)),"SIGNALFLOW_REJECTED")
+        for name in risk_guard_fields:
+            market[name]=_num(p[name],name) if p.get(name) is not None else None
+        result=SignalFlowPipeline(entry_timer=EntryTimer(require_quote=True)).run(market)
+        action=result["action"] if result["approved"] and risk_guards_complete else "WAIT"
+        reason=("RISK_INPUTS_INCOMPLETE" if not risk_guards_complete else
+          "SIGNALFLOW_APPROVED" if result["approved"] else next((s.get("reason","SIGNALFLOW_REJECTED") for s in
+          (result["stages"]["opportunities"],result["stages"]["entry_timing"],result["stages"]["risk_management"]) if not s.get("approved",False)),"SIGNALFLOW_REJECTED"))
         key=hashlib.sha256(f"{symbol}:{bar_time}:django-signalflow-v1".encode()).hexdigest()[:16]
         confidence=max(0.0,min(1.0,float(result["stages"]["opportunities"].get("score",min(setup,quality)))))
         median=closes[-1]+(atr*.1 if action=="BUY" else -atr*.1 if action=="SELL" else 0)
@@ -131,7 +150,7 @@ def decision(request):
         response = _compat(
           record.action, record.rationale_code, key, bar_time, bid, ask,
           atr, median, spread, confidence,
-          bool(result["stages"]["risk_management"].get("approved")),
+          bool(result["stages"]["risk_management"].get("approved") and risk_guards_complete),
         )
         response["decision_record_created"] = created
         response["stages"] = result["stages"]

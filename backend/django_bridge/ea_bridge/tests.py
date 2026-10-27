@@ -1,4 +1,5 @@
 import json
+import time
 from unittest.mock import Mock, patch
 from django.test import TestCase, override_settings
 from .models import EAEvent, MarketBar
@@ -126,11 +127,13 @@ class DjangoDecisionApiTests(TestCase):
     headers={"HTTP_AUTHORIZATION":"Bearer test-token"}
     def payload(self):
         bars=[]
+        now=int(time.time())
         for i in range(256):
             c=2300+i*.08
-            bars.append({"time":1790000000+i*900,"open":c-.03,"high":c+.12,"low":c-.12,"close":c})
+            bars.append({"time":now-(256-i)*900,"open":c-.03,"high":c+.12,"low":c-.12,"close":c})
         return {"symbol":"XAUUSD_o","timeframe":"M15","bid":2320.30,"ask":2320.35,"point":.01,"bars":bars,
-          "account_balance":10000,"risk_percent":.06,"point_value_per_lot":1,"volume_step":.01,"min_volume":.01,"max_volume":100}
+          "account_balance":10000,"risk_percent":.06,"point_value_per_lot":1,"volume_step":.01,"min_volume":.01,"max_volume":100,
+          "stop_level_points":0,"take_profit_points":1000,"daily_loss_percent":0,"open_risk_percent":0}
     @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
     def test_complete_contract_and_audit(self):
         r=self.client.post(self.url,data=json.dumps(self.payload()),content_type="application/json",**self.headers)
@@ -160,6 +163,50 @@ class DjangoDecisionApiTests(TestCase):
     def test_can_be_disabled(self):
         r=self.client.post(self.url,data=json.dumps(self.payload()),content_type="application/json",**self.headers)
         self.assertEqual(r.status_code,503)
+    @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
+    def test_rejects_unordered_bar_timestamps(self):
+        p=self.payload()
+        p["bars"][10]["time"]=p["bars"][9]["time"]
+        r=self.client.post(self.url,data=json.dumps(p),content_type="application/json",**self.headers)
+        self.assertEqual(r.status_code,400)
+        self.assertIn("strictly increasing",r.json()["error"])
+
+    @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
+    def test_rejects_future_latest_bar(self):
+        p = self.payload()
+        p["bars"][-1]["time"] = int(time.time()) + 120
+        r = self.client.post(
+            self.url,
+            data=json.dumps(p),
+            content_type="application/json",
+            **self.headers,
+        )
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("future", r.json()["error"])
+
+    @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
+    def test_rejects_stale_latest_bar(self):
+        p=self.payload()
+        old=int(time.time())-7200
+        for i,bar in enumerate(p["bars"]):
+            bar["time"]=old-(len(p["bars"])-1-i)*900
+        r=self.client.post(self.url,data=json.dumps(p),content_type="application/json",**self.headers)
+        self.assertEqual(r.status_code,400)
+        self.assertIn("stale",r.json()["error"])
+
+    @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
+    def test_missing_risk_guards_never_produce_buy_or_sell(self):
+        p=self.payload()
+        p.pop("daily_loss_percent")
+        r=self.client.post(self.url,data=json.dumps(p),content_type="application/json",**self.headers)
+        self.assertEqual(r.status_code,200,r.content)
+        b=r.json()
+        self.assertEqual(b["decision"],"WAIT")
+        self.assertEqual(b["reason"],"RISK_INPUTS_INCOMPLETE")
+        self.assertFalse(b["risk_approved_advisory_only"])
+        self.assertFalse(b["trading_authorization"])
+        self.assertFalse(b["execution_enabled"])
+
     @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
     def test_rejects_insufficient_bars(self):
         p=self.payload(); p["bars"]=p["bars"][:10]
