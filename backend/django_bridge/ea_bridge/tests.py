@@ -144,7 +144,14 @@ class DjangoDecisionApiTests(TestCase):
           "stop_distance","target_distance","target_tp1","target_tp2","target_tp3","legacy_target_price"):
             self.assertIn(k,b)
         from .models import StrategyDecisionRecord
-        self.assertTrue(StrategyDecisionRecord.objects.filter(decision_id=b["sample_key"]).exists())
+        record = StrategyDecisionRecord.objects.get(decision_id=b["sample_key"])
+        self.assertEqual(record.features["opportunity_input_path"], "completed_ohlc_structural")
+        opportunity = record.features["stages"]["opportunities"]
+        self.assertTrue(any(check["name"] == "data_valid" for check in opportunity["checks"]))
+        self.assertTrue(any(
+            check["name"] == "bar_complete" and check["passed"] is True
+            for check in opportunity["checks"]
+        ))
     @override_settings(EA_BEARER_TOKEN="wrong-token",RAMON_DJANGO_DECISION_ENABLED=True)
     def test_rejects_wrong_token(self):
         r=self.client.post(self.url,data=json.dumps(self.payload()),content_type="application/json",**self.headers)

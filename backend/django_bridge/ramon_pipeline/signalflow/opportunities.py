@@ -765,6 +765,7 @@ class OpportunityDetector:
         if market.get("last_bar_closed") is False:
             _check(checks, "bar_complete", False, "the newest candle is still forming")
             return done(DEFERRED, "LAST_BAR_NOT_CLOSED", detail="the newest candle is still forming")
+        _check(checks, "bar_complete", True, "accepted as completed by the Django decision endpoint contract")
 
         t = len(bars.close) - 1
         ind = _compute_indicators(bars, config)
