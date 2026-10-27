@@ -26,16 +26,12 @@ class EACommandApiTests(TestCase):
     @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_EXECUTION_ENABLED=False)
     def test_command_polling_is_disabled_by_default(self):
         EACommand.objects.create(
-            command_id="cmd-disabled",
-            instance_id=self.scope["instance_id"],
-            account_login=self.scope["account_login"],
-            symbol="XAUUSD_o",
+            command_id="cmd-disabled", instance_id=self.scope["instance_id"],
+            account_login=self.scope["account_login"], symbol="XAUUSD_o",
             action=EACommand.Action.OPEN,
             payload={"direction": "BUY", "volume": "0.01", "stop_loss": 2300, "take_profit": 2310},
-            decision_id="decision-test",
-            risk_verdict_id="risk-test",
-            execution_authorized=True,
-            expires_at=timezone.now() + timedelta(minutes=1),
+            decision_id="decision-test", risk_verdict_id="risk-test",
+            execution_authorized=True, expires_at=timezone.now() + timedelta(minutes=1),
         )
         response = self.post_json(self.next_url, self.scope)
         self.assertEqual(response.status_code, 200)
@@ -48,35 +44,23 @@ class EACommandApiTests(TestCase):
     def test_poll_claims_only_authorized_unexpired_command_for_exact_account(self):
         now = timezone.now()
         command = EACommand.objects.create(
-            command_id="cmd-ready",
-            instance_id=self.scope["instance_id"],
-            account_login=self.scope["account_login"],
-            symbol="XAUUSD_o",
+            command_id="cmd-ready", instance_id=self.scope["instance_id"],
+            account_login=self.scope["account_login"], symbol="XAUUSD_o",
             action=EACommand.Action.OPEN,
             payload={"direction": "BUY", "volume": "0.01", "stop_loss": 2300, "take_profit": 2310},
-            decision_id="decision-test",
-            risk_verdict_id="risk-test",
-            execution_authorized=True,
-            expires_at=now + timedelta(minutes=1),
+            decision_id="decision-test", risk_verdict_id="risk-test",
+            execution_authorized=True, expires_at=now + timedelta(minutes=1),
         )
         EACommand.objects.create(
-            command_id="cmd-other-account",
-            instance_id=self.scope["instance_id"],
-            account_login="different-account",
-            symbol="XAUUSD_o",
-            action=EACommand.Action.OPEN,
+            command_id="cmd-other-account", instance_id=self.scope["instance_id"],
+            account_login="different-account", symbol="XAUUSD_o", action=EACommand.Action.OPEN,
             payload={"direction": "BUY", "volume": "0.01", "stop_loss": 2300, "take_profit": 2310},
-            execution_authorized=True,
-            expires_at=now + timedelta(minutes=1),
+            execution_authorized=True, expires_at=now + timedelta(minutes=1),
         )
         EACommand.objects.create(
-            command_id="cmd-not-authorized",
-            instance_id=self.scope["instance_id"],
-            account_login=self.scope["account_login"],
-            symbol="XAUUSD_o",
-            action=EACommand.Action.OPEN,
-            payload={},
-            execution_authorized=False,
+            command_id="cmd-not-authorized", instance_id=self.scope["instance_id"],
+            account_login=self.scope["account_login"], symbol="XAUUSD_o",
+            action=EACommand.Action.OPEN, payload={}, execution_authorized=False,
             expires_at=now + timedelta(minutes=1),
         )
         response = self.post_json(self.next_url, self.scope)
@@ -90,13 +74,9 @@ class EACommandApiTests(TestCase):
     @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
     def test_expired_pending_command_is_marked_expired(self):
         command = EACommand.objects.create(
-            command_id="cmd-expired",
-            instance_id=self.scope["instance_id"],
-            account_login=self.scope["account_login"],
-            symbol="XAUUSD_o",
-            action=EACommand.Action.NOOP,
-            payload={},
-            execution_authorized=True,
+            command_id="cmd-expired", instance_id=self.scope["instance_id"],
+            account_login=self.scope["account_login"], symbol="XAUUSD_o",
+            action=EACommand.Action.NOOP, payload={}, execution_authorized=True,
             expires_at=timezone.now() - timedelta(seconds=1),
         )
         response = self.post_json(self.next_url, self.scope)
@@ -108,15 +88,10 @@ class EACommandApiTests(TestCase):
     @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
     def test_ack_is_scoped_and_terminal_duplicate_is_idempotent(self):
         command = EACommand.objects.create(
-            command_id="cmd-ack",
-            instance_id=self.scope["instance_id"],
-            account_login=self.scope["account_login"],
-            symbol="XAUUSD_o",
-            action=EACommand.Action.NOOP,
-            payload={},
-            execution_authorized=False,
-            state=EACommand.State.CLAIMED,
-            expires_at=timezone.now() + timedelta(minutes=1),
+            command_id="cmd-ack", instance_id=self.scope["instance_id"],
+            account_login=self.scope["account_login"], symbol="XAUUSD_o",
+            action=EACommand.Action.NOOP, payload={}, execution_authorized=False,
+            state=EACommand.State.CLAIMED, expires_at=timezone.now() + timedelta(minutes=1),
         )
         ack = dict(self.scope, command_id=command.command_id, state="EXECUTED",
                    result={"broker_deal": "deal-123", "confirmed": True})
@@ -130,13 +105,9 @@ class EACommandApiTests(TestCase):
     @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
     def test_ack_cannot_access_command_for_another_account(self):
         EACommand.objects.create(
-            command_id="cmd-private",
-            instance_id=self.scope["instance_id"],
-            account_login="actual-account",
-            symbol="XAUUSD_o",
-            action=EACommand.Action.NOOP,
-            payload={},
-            expires_at=timezone.now() + timedelta(minutes=1),
+            command_id="cmd-private", instance_id=self.scope["instance_id"],
+            account_login="actual-account", symbol="XAUUSD_o",
+            action=EACommand.Action.NOOP, payload={}, expires_at=timezone.now() + timedelta(minutes=1),
         )
         response = self.post_json(self.ack_url, dict(
             self.scope, command_id="cmd-private", state="EXECUTED", result={}
@@ -146,19 +117,15 @@ class EACommandApiTests(TestCase):
     @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
     def test_rejects_invalid_transition_from_claimed_to_pending(self):
         EACommand.objects.create(
-            command_id="cmd-transition",
-            instance_id=self.scope["instance_id"],
-            account_login=self.scope["account_login"],
-            symbol="XAUUSD_o",
-            action=EACommand.Action.NOOP,
-            payload={},
-            state=EACommand.State.CLAIMED,
+            command_id="cmd-transition", instance_id=self.scope["instance_id"],
+            account_login=self.scope["account_login"], symbol="XAUUSD_o",
+            action=EACommand.Action.NOOP, payload={}, state=EACommand.State.CLAIMED,
             expires_at=timezone.now() + timedelta(minutes=1),
         )
         response = self.post_json(self.ack_url, dict(
             self.scope, command_id="cmd-transition", state="PENDING", result={}
         ))
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 409)
 
     @override_settings(EA_BEARER_TOKEN="wrong-token", RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
     def test_rejects_unauthenticated_poll(self):
