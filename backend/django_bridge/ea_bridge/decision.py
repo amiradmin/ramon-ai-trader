@@ -102,6 +102,6 @@ def decision(request):
         response=_compat(record.action,record.rationale_code,key,bar_time,bid,ask,atr,median,spread,confidence,
           bool(result["stages"]["risk_management"].get("approved")))
         response["decision_record_created"]=created; response["stages"]=result["stages"]
-        return JsonResponse(response)
+        return JsonResponse(response, json_dumps_params={"separators": (",", ":")})
     except (KeyError,TypeError,ValueError,OverflowError,json.JSONDecodeError) as exc:
         return JsonResponse({"ok":False,"error":str(exc)},status=400)
