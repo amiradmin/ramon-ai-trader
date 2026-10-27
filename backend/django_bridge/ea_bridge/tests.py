@@ -145,6 +145,12 @@ class DjangoDecisionApiTests(TestCase):
             self.assertIn(k,b)
         from .models import StrategyDecisionRecord
         self.assertTrue(StrategyDecisionRecord.objects.filter(decision_id=b["sample_key"]).exists())
+        self.assertIn("regime", b["stages"]["opportunities"])
+        self.assertIn("components", b["stages"]["opportunities"])
+        self.assertIsNotNone(b["stages"]["opportunities"].get("signal_bar_time"))
+        record=StrategyDecisionRecord.objects.get(decision_id=b["sample_key"])
+        self.assertEqual(record.features["pipeline_input_mode"],"completed_bars_structural")
+        self.assertEqual(record.model_version,"django-signalflow-structural-v2")
     @override_settings(EA_BEARER_TOKEN="wrong-token",RAMON_DJANGO_DECISION_ENABLED=True)
     def test_rejects_wrong_token(self):
         r=self.client.post(self.url,data=json.dumps(self.payload()),content_type="application/json",**self.headers)
