@@ -145,6 +145,28 @@ class DjangoDecisionApiTests(TestCase):
             self.assertIn(k,b)
         from .models import StrategyDecisionRecord
         self.assertTrue(StrategyDecisionRecord.objects.filter(decision_id=b["sample_key"]).exists())
+    @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
+    def test_structural_signalflow_receives_candles_and_refreshes_same_bar_quote(self):
+        payload=self.payload()
+        first=self.client.post(self.url,data=json.dumps(payload),content_type="application/json",**self.headers)
+        self.assertEqual(first.status_code,200,first.content)
+        first_body=first.json()
+        self.assertIn("checks",first_body["stages"]["opportunities"])
+        self.assertIn("signalflow_contract_version",first_body)
+        self.assertTrue(first_body["decision_record_created"])
+
+        # A new tick in the same completed candle must update the audit row and quote,
+        # not return the decision frozen by the first request.
+        payload["bid"] += 0.20
+        payload["ask"] += 0.20
+        second=self.client.post(self.url,data=json.dumps(payload),content_type="application/json",**self.headers)
+        self.assertEqual(second.status_code,200,second.content)
+        second_body=second.json()
+        self.assertEqual(second_body["sample_key"],first_body["sample_key"])
+        self.assertFalse(second_body["decision_record_created"])
+        self.assertAlmostEqual(second_body["signal_bid"],payload["bid"])
+        self.assertAlmostEqual(second_body["signal_ask"],payload["ask"])
+
     @override_settings(EA_BEARER_TOKEN="wrong-token",RAMON_DJANGO_DECISION_ENABLED=True)
     def test_rejects_wrong_token(self):
         r=self.client.post(self.url,data=json.dumps(self.payload()),content_type="application/json",**self.headers)
