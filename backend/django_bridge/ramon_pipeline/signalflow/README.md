@@ -25,8 +25,9 @@ closed trade ─────► learning ──► validated, de-duplicated outc
 | `tests/` | One test module per stage plus `test_pipeline.py` and `test_common.py` |
 
 Import from the package: `from ramon_pipeline.signalflow import SignalFlowPipeline, OpportunityDetector, ...`.
-The older shims `ramon_pipeline.arima` / `ramon_pipeline.sarima` and the Redis stream code in
-`ramon_pipeline/pipeline.py` are unrelated to this package and unchanged.
+The backward-compatible shims `ramon_pipeline.arima` / `ramon_pipeline.sarima` re-export the
+forecast functions from `signalflow.forecasting`; existing management commands and tests can keep
+using their old import paths. The Redis stream code in `ramon_pipeline/pipeline.py` remains separate.
 
 ## Result contract (every stage)
 
