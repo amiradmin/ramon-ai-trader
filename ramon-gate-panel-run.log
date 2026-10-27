@@ -1,0 +1,3 @@
+02e8:fixme:uxtheme:SetPreferredAppMode 0: stub
+02ec:fixme:kernelbase:AppPolicyGetThreadInitializationType FFFFFFFFFFFFFFFA, 00007E45808EFF50
+02e8:fixme:kernelbase:AppPolicyGetProcessTerminationMethod FFFFFFFFFFFFFFFA, 00007FFFFE4FFEE0
