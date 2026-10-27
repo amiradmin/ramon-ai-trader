@@ -38,6 +38,15 @@ string AccountLoginText()
    return IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN));
 }
 
+string IsoUtc(const datetime stamp)
+{
+   MqlDateTime parts;
+   TimeToStruct(stamp, parts);
+   return StringFormat("%04d-%02d-%02dT%02d:%02d:%02dZ",
+                       parts.year, parts.mon, parts.day,
+                       parts.hour, parts.min, parts.sec);
+}
+
 string MakeEventId(const string kind, const datetime stamp)
 {
    g_event_sequence++;
@@ -89,7 +98,7 @@ bool SendHeartbeat()
       + "\"symbol\":\"" + JsonEscape(_Symbol) + "\","
       + "\"ea_version\":\"0.10.0\","
       + "\"status\":\"" + status + "\","
-      + "\"terminal_connected\":" + (bool)TerminalInfoInteger(TERMINAL_CONNECTED) ? "true" : "false"
+      + "\"terminal_connected\":" + (((bool)TerminalInfoInteger(TERMINAL_CONNECTED)) ? "true" : "false")
       + ",\"trade_allowed\":false,"
       + "\"telemetry_only\":true,"
       + "\"command_polling_enabled\":false,"
@@ -119,7 +128,6 @@ bool SendMarketSnapshot()
       return false;
 
    MqlRates bars[2];
-   ArraySetAsSeries(bars, true);
    if(CopyRates(_Symbol, PERIOD_M15, 1, 1, bars) != 1)
    {
       Print("Ramon Django telemetry waiting for a completed M15 candle.");
@@ -127,12 +135,12 @@ bool SendMarketSnapshot()
    }
 
    datetime bar_time = bars[0].time;
-   string event_id = MakeEventId("SNAPSHOT", TimeCurrent());
+   string event_id = MakeEventId("SNAPSHOT", (datetime)(GetTickCount64() / 1000));
    string payload = "{"
       + "\"instance_id\":\"" + JsonEscape(InstanceId) + "\","
       + "\"event_id\":\"" + JsonEscape(event_id) + "\","
       + "\"event_type\":\"MARKET_SNAPSHOT\","
-      + "\"occurred_at\":\"" + TimeToString(TimeGMT(), TIME_DATE|TIME_SECONDS) + "Z\","
+      + "\"occurred_at\":\"" + IsoUtc(TimeGMT()) + "\","
       + "\"symbol\":\"" + JsonEscape(_Symbol) + "\","
       + "\"timeframe\":\"M15\","
       + "\"quote_time\":" + IntegerToString((long)tick.time) + ","
