@@ -8,7 +8,6 @@ input string ApiBaseUrl = "http://127.0.0.1:8017/api/ea/v1";
 input string DjangoBearerToken = "";       // Set locally in MT5; never commit a real token.
 input string InstanceId = "ramon-command-ea-1";
 input bool EnableCommandExecution = false; // Must remain false until demo validation is complete.
-input bool DemoAccountsOnly = true;        // This EA refuses real accounts.
 input int TimerSeconds = 15;
 input int BarsToSend = 128;
 input int RequestTimeoutMs = 5000;
@@ -222,7 +221,7 @@ bool AckCommand(const string command_id,const string state,const string detail,c
 bool SafeOpen(const string command_json,const string command_id,ulong &ticket_out,string &reason)
 {
    if(!EnableCommandExecution) { reason="LOCAL_EXECUTION_DISABLED"; return false; }
-   if(DemoAccountsOnly && AccountInfoInteger(ACCOUNT_TRADE_MODE)!=ACCOUNT_TRADE_MODE_DEMO)
+   if(AccountInfoInteger(ACCOUNT_TRADE_MODE)!=ACCOUNT_TRADE_MODE_DEMO)
    { reason="DEMO_ACCOUNT_REQUIRED"; return false; }
    if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) || !MQLInfoInteger(MQL_TRADE_ALLOWED))
    { reason="TERMINAL_TRADE_PERMISSION_DENIED"; return false; }
@@ -281,7 +280,7 @@ bool ProcessCommand(const string response)
    }
 
    LastCommandId=command_id;
-   if(!JsonBool(response,"trading_authorization",false) || !JsonBool(response,"execution_authorized",true))
+   if(!JsonBool(response,"trading_authorization",false) || !JsonBool(response,"execution_authorized",false))
       return AckCommand(command_id,"REJECTED","SERVER_AUTHORIZATION_MISSING");
    if(!EnableCommandExecution)
       return AckCommand(command_id,"REJECTED","LOCAL_EXECUTION_DISABLED");
@@ -358,8 +357,8 @@ int OnInit()
    if(!EventSetTimer(MathMax(5,TimerSeconds)))
       return INIT_FAILED;
    Trade.SetAsyncMode(false);
-   Print("RamonCommandEA initialized in ",EnableCommandExecution ? "COMMAND MODE" : "TELEMETRY-ONLY MODE",
-         ". DemoAccountsOnly=",DemoAccountsOnly);
+   Print("RamonCommandEA initialized in ",EnableCommandExecution ? "DEMO COMMAND MODE" : "TELEMETRY-ONLY MODE",
+         ". Live accounts are always rejected.");
    return INIT_SUCCEEDED;
 }
 
