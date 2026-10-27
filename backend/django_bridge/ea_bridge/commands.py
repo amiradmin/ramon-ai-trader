@@ -105,6 +105,7 @@ def next_command(request):
                 "payload": command.payload,
                 "decision_id": command.decision_id,
                 "risk_verdict_id": command.risk_verdict_id,
+                "execution_authorized": command.execution_authorized,
                 "created_at": command.created_at.isoformat(),
                 "expires_at": command.expires_at.isoformat(),
             },
