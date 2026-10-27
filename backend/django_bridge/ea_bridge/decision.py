@@ -95,7 +95,7 @@ def decision(request):
         reason="SIGNALFLOW_APPROVED" if result["approved"] else next((s.get("reason","SIGNALFLOW_REJECTED") for s in
           (result["stages"]["opportunities"],result["stages"]["entry_timing"],result["stages"]["risk_management"]) if not s.get("approved",False)),"SIGNALFLOW_REJECTED")
         key=hashlib.sha256(f"{symbol}:{bar_time}:django-signalflow-v1".encode()).hexdigest()[:16]
-        confidence=max(0.0,min(1.0,min(setup,quality)))
+        confidence=max(0.0,min(1.0,float(result["stages"]["opportunities"].get("score",min(setup,quality)))))
         median=closes[-1]+(atr*.1 if action=="BUY" else -atr*.1 if action=="SELL" else 0)
         features = {
           "ema20": fast,
