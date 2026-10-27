@@ -1,0 +1,115 @@
+"""Authenticated telemetry ingestion for the dedicated command EA.
+
+Telemetry is observational only and never grants trading authorization.
+"""
+import json
+from decimal import Decimal, InvalidOperation
+
+from django.conf import settings
+from django.db import transaction
+from django.http import JsonResponse
+from django.utils.dateparse import parse_datetime
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
+
+from .auth import BearerTokenRequired
+from .models import EAHeartbeat, MarketBar
+
+
+def _body(request):
+    limit = getattr(settings, "EA_MAX_BODY_BYTES", 65536)
+    if len(request.body) > limit:
+        raise ValueError("request body too large")
+    value = json.loads(request.body or b"{}")
+    if not isinstance(value, dict):
+        raise ValueError("JSON object required")
+    return value
+
+
+def _decimal(value, name):
+    try:
+        result = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        raise ValueError(f"{name} must be numeric")
+    if not result.is_finite():
+        raise ValueError(f"{name} must be finite")
+    return result
+
+
+@csrf_exempt
+@require_POST
+def telemetry(request):
+    denied = BearerTokenRequired.reject_if_invalid(request)
+    if denied:
+        return denied
+    try:
+        p = _body(request)
+        instance_id = str(p.get("instance_id", "")).strip()
+        account_login = str(p.get("account_login", "")).strip()
+        symbol = str(p.get("symbol", "")).strip()
+        timeframe = str(p.get("timeframe", "")).strip()
+        quote = p.get("quote", {})
+        bars = p.get("bars", [])
+        if not instance_id or len(instance_id) > 128:
+            raise ValueError("valid instance_id required")
+        if not account_login or len(account_login) > 32:
+            raise ValueError("valid account_login required")
+        if not symbol or len(symbol) > 32 or not timeframe or len(timeframe) > 16:
+            raise ValueError("valid symbol and timeframe required")
+        if not isinstance(quote, dict) or not isinstance(bars, list) or len(bars) > 512:
+            raise ValueError("quote object and at most 512 bars required")
+        bid = _decimal(quote.get("bid"), "quote.bid")
+        ask = _decimal(quote.get("ask"), "quote.ask")
+        point = _decimal(quote.get("point"), "quote.point")
+        if bid <= 0 or ask < bid or point <= 0:
+            raise ValueError("invalid quote values")
+        normalized_bars = []
+        for index, bar in enumerate(bars):
+            if not isinstance(bar, dict) or bar.get("closed") is not True:
+                raise ValueError(f"bars[{index}] must be a completed candle")
+            stamp = parse_datetime(str(bar.get("timestamp", "")))
+            if stamp is None or stamp.tzinfo is None:
+                raise ValueError(f"bars[{index}].timestamp must include timezone")
+            o = _decimal(bar.get("open"), f"bars[{index}].open")
+            h = _decimal(bar.get("high"), f"bars[{index}].high")
+            lo = _decimal(bar.get("low"), f"bars[{index}].low")
+            c = _decimal(bar.get("close"), f"bars[{index}].close")
+            vol = _decimal(bar.get("volume", 0), f"bars[{index}].volume")
+            if min(o, h, lo, c) <= 0 or vol < 0 or h < max(o, c, lo) or lo > min(o, c, h):
+                raise ValueError(f"bars[{index}] has invalid OHLCV values")
+            normalized_bars.append((stamp, o, h, lo, c, vol))
+        account = p.get("account", {})
+        positions = p.get("positions", [])
+        if not isinstance(account, dict) or not isinstance(positions, list) or len(positions) > 500:
+            raise ValueError("account object and positions array required")
+    except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return JsonResponse({"ok": False, "error": str(exc)}, status=400)
+
+    with transaction.atomic():
+        for stamp, o, h, lo, c, vol in normalized_bars:
+            MarketBar.objects.update_or_create(
+                source=instance_id, symbol=symbol, timeframe=timeframe, timestamp=stamp,
+                defaults={"open": o, "high": h, "low": lo, "close": c, "volume": vol},
+            )
+        EAHeartbeat.objects.update_or_create(
+            instance_id=instance_id,
+            defaults={
+                "account_login": account_login,
+                "symbol": symbol,
+                "status": "TELEMETRY_OK",
+                "terminal_connected": True,
+                "trade_allowed": bool(p.get("terminal_trade_allowed", False)),
+                "payload": {
+                    "protocol_version": p.get("protocol_version", "ramon-ea-command-v1"),
+                    "quote": {"bid": str(bid), "ask": str(ask), "point": str(point)},
+                    "quote_time": p.get("quote_time"),
+                    "account": account,
+                    "positions": positions,
+                    "last_command_id": str(p.get("last_command_id", ""))[:128],
+                },
+            },
+        )
+    return JsonResponse({
+        "ok": True, "stored_bars": len(normalized_bars),
+        "telemetry_only": True, "trading_authorization": False,
+    })
