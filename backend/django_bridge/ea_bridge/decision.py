@@ -85,23 +85,55 @@ def decision(request):
         direction="BUY" if fast>slow else "SELL" if fast<slow else "HOLD"
         setup=min(1.0,abs(fast-slow)/(atr*.8)); quality=min(1.0,abs(closes[-1]-closes[-5])/(atr*1.5))
         spread=(ask-bid)/point
-        market={"trend":direction,"setup_score":setup,"entry_quality":quality,"spread_points":spread,
-          "account_balance":_num(p.get("account_balance",0),"account_balance"),"risk_percent":_num(p.get("risk_percent",0),"risk_percent"),
-          "stop_loss_points":atr*1.5/point,"point_value_per_lot":_num(p.get("point_value_per_lot",0),"point_value_per_lot"),
-          "volume_step":_num(p.get("volume_step",0),"volume_step"),"min_volume":_num(p.get("min_volume",0),"min_volume"),
+        # Feed the real completed candle series and live quote to SignalFlow.
+        # Presence of "bars" selects the structural path; the legacy trend/setup
+        # fields remain only for backward compatibility with other callers.
+        market={"symbol":symbol,"timeframe":"M15","bars":bars,"latest_bar_time":bar_time,
+          "bid":bid,"ask":ask,"point":point,"trend":direction,"setup_score":setup,
+          "entry_quality":quality,"spread_points":spread,
+          "account_balance":_num(p.get("account_balance",0),"account_balance"),
+          "risk_percent":_num(p.get("risk_percent",0),"risk_percent"),
+          "stop_loss_points":atr*1.5/point,
+          "point_value_per_lot":_num(p.get("point_value_per_lot",0),"point_value_per_lot"),
+          "volume_step":_num(p.get("volume_step",0),"volume_step"),
+          "min_volume":_num(p.get("min_volume",0),"min_volume"),
           "max_volume":_num(p.get("max_volume",0),"max_volume")}
-        result=SignalFlowPipeline().run(market); action=result["action"] if result["approved"] else "WAIT"
-        reason="SIGNALFLOW_APPROVED" if result["approved"] else next((s.get("reason","SIGNALFLOW_REJECTED") for s in
-          (result["stages"]["opportunities"],result["stages"]["entry_timing"],result["stages"]["risk_management"]) if not s.get("approved",False)),"SIGNALFLOW_REJECTED")
-        key=hashlib.sha256(f"{symbol}:{bar_time}:django-signalflow-v1".encode()).hexdigest()[:16]
-        confidence=max(0.0,min(1.0,min(setup,quality)))
+        result=SignalFlowPipeline().run(market)
+        action=result["action"] if result["approved"] else "WAIT"
+        stages=result["stages"]
+        rejected_stage=result.get("rejected_by")
+        reason=result["reason"] if result["approved"] else next(
+          (stages[name].get("reason","SIGNALFLOW_REJECTED")
+           for name in ("opportunities","entry_timing","risk_management")
+           if not stages[name].get("approved",False)),
+          "SIGNALFLOW_REJECTED")
+        # One durable record per completed candle, but refresh it on subsequent ticks:
+        # quote-aware timing must not be frozen by the first request on that candle.
+        key=hashlib.sha256(f"{symbol}:M15:{bar_time}:django-signalflow-v2".encode()).hexdigest()[:16]
+        opportunity_score=stages["opportunities"].get("score",setup)
+        confidence=max(0.0,min(1.0,_num(opportunity_score,"opportunity score")))
         median=closes[-1]+(atr*.1 if action=="BUY" else -atr*.1 if action=="SELL" else 0)
-        record,created=StrategyDecisionRecord.objects.get_or_create(decision_id=key,defaults={"symbol":symbol,"action":action,
-          "confidence":confidence,"rationale_code":reason,"model_version":"django-signalflow-technical-v1",
-          "features":{"ema20":fast,"ema50":slow,"atr":atr,"setup_score":setup,"entry_quality":quality,"spread_points":spread,"approved":result["approved"]}})
+        record,created=StrategyDecisionRecord.objects.update_or_create(
+          decision_id=key,
+          defaults={"symbol":symbol,"action":action,"confidence":confidence,
+            "rationale_code":reason,"model_version":"django-signalflow-structural-v2",
+            "features":{"ema20":fast,"ema50":slow,"atr":atr,"setup_score":setup,
+              "entry_quality":quality,"spread_points":spread,"approved":result["approved"],
+              "rejected_by":rejected_stage,"signalflow_action":result["action"],
+              "opportunity_score":confidence}})
+        risk=stages["risk_management"]
         response=_compat(record.action,record.rationale_code,key,bar_time,bid,ask,atr,median,spread,confidence,
-          bool(result["stages"]["risk_management"].get("approved")))
-        response["decision_record_created"]=created; response["stages"]=result["stages"]
+          bool(risk.get("approved")))
+        response["decision_record_created"]=created
+        response["stages"]=stages
+        response["signalflow_action"]=result["action"]
+        response["signalflow_approved"]=bool(result["approved"])
+        response["signalflow_rejected_by"]=rejected_stage
+        response["signalflow_contract_version"]=result.get("contract_version")
+        response["risk_volume"]=risk.get("volume",0.0)
+        response["stop_loss_price"]=risk.get("stop_price")
+        response["stop_loss_points"]=risk.get("stop_points")
+        response["stop_distance"]=risk.get("stop_points",0.0)*point if risk.get("stop_points") else atr*1.5
         return JsonResponse(response)
     except (KeyError,TypeError,ValueError,OverflowError,json.JSONDecodeError) as exc:
         return JsonResponse({"ok":False,"error":str(exc)},status=400)
