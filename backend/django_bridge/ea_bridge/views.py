@@ -2,11 +2,11 @@ import json
 import logging
 from datetime import datetime, timezone
 from django.conf import settings
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 from .auth import BearerTokenRequired
-from .models import EAEvent, EAHeartbeat
+from .models import EAEvent, EAHeartbeat, StrategyDecisionRecord
 
 log = logging.getLogger(__name__)
 
@@ -103,3 +103,29 @@ def events(request):
     except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         return JsonResponse({"ok": False, "error": str(exc)}, status=400)
     return JsonResponse({"ok": True, "accepted": created, "event_id": row.event_id})
+
+
+@require_GET
+def dashboard(request):
+    """Render the original read-only Ramon opportunity dashboard."""
+    from django.shortcuts import render
+    return render(request, "ea_bridge/ramon_opportunity_risk_dashboard.html")
+
+
+@require_GET
+def dashboard_data(request):
+    """Read-only JSON feed for the local Ramon dashboard."""
+    rows = StrategyDecisionRecord.objects.order_by("-created_at")[:50]
+    decisions = []
+    for row in rows:
+        decisions.append({
+            "decision_id": row.decision_id,
+            "symbol": row.symbol,
+            "action": row.action,
+            "confidence": row.confidence,
+            "rationale_code": row.rationale_code,
+            "model_version": row.model_version,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "features": row.features if isinstance(row.features, dict) else {},
+        })
+    return JsonResponse({"ok": True, "decisions": decisions})

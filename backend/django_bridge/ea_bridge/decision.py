@@ -96,12 +96,42 @@ def decision(request):
         key=hashlib.sha256(f"{symbol}:{bar_time}:django-signalflow-v1".encode()).hexdigest()[:16]
         confidence=max(0.0,min(1.0,min(setup,quality)))
         median=closes[-1]+(atr*.1 if action=="BUY" else -atr*.1 if action=="SELL" else 0)
-        record,created=StrategyDecisionRecord.objects.get_or_create(decision_id=key,defaults={"symbol":symbol,"action":action,
-          "confidence":confidence,"rationale_code":reason,"model_version":"django-signalflow-technical-v1",
-          "features":{"ema20":fast,"ema50":slow,"atr":atr,"setup_score":setup,"entry_quality":quality,"spread_points":spread,"approved":result["approved"]}})
-        response=_compat(record.action,record.rationale_code,key,bar_time,bid,ask,atr,median,spread,confidence,
-          bool(result["stages"]["risk_management"].get("approved")))
-        response["decision_record_created"]=created; response["stages"]=result["stages"]
+        features = {
+          "ema20": fast,
+          "ema50": slow,
+          "atr": atr,
+          "setup_score": setup,
+          "entry_quality": quality,
+          "spread_points": spread,
+          "approved": bool(result["approved"]),
+          "stages": result["stages"],
+          "market_snapshot": {
+            "symbol": symbol,
+            "timeframe": "M15",
+            "bar_time": bar_time,
+            "bid": bid,
+            "ask": ask,
+            "point": point,
+          },
+        }
+        record, created = StrategyDecisionRecord.objects.update_or_create(
+          decision_id=key,
+          defaults={
+            "symbol": symbol,
+            "action": action,
+            "confidence": confidence,
+            "rationale_code": reason,
+            "model_version": "django-signalflow-technical-v1",
+            "features": features,
+          },
+        )
+        response = _compat(
+          record.action, record.rationale_code, key, bar_time, bid, ask,
+          atr, median, spread, confidence,
+          bool(result["stages"]["risk_management"].get("approved")),
+        )
+        response["decision_record_created"] = created
+        response["stages"] = result["stages"]
         return JsonResponse(response, json_dumps_params={"separators": (",", ":")})
     except (KeyError,TypeError,ValueError,OverflowError,json.JSONDecodeError) as exc:
         return JsonResponse({"ok":False,"error":str(exc)},status=400)

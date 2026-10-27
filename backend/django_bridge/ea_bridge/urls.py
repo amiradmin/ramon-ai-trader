@@ -8,4 +8,6 @@ urlpatterns = [
     path("events", views.events, name="ea-events"),
     path("decision", decision_views.decision, name="ea-decision"),
     path("status", views.status, name="ea-status"),
+    path("dashboard", views.dashboard, name="ramon-dashboard"),
+    path("dashboard-data", views.dashboard_data, name="ramon-dashboard-data"),
 ]

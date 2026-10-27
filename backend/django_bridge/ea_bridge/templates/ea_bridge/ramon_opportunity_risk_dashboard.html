@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RAMON | Trading Opportunities</title>
+<style>
+:root{--bg:#0a0e14;--panel:#111823;--panel2:#151f2c;--line:#263244;--text:#edf3fb;--muted:#8c9bb0;--green:#42d6a0;--red:#ff7185;--amber:#f4c56a;--blue:#7eaaff}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 15% -10%,#182941 0,transparent 40%),var(--bg);color:var(--text);font:14px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif}
+.wrap{max-width:1440px;margin:auto;padding:28px}.top{display:flex;justify-content:space-between;align-items:center;gap:18px;flex-wrap:wrap;margin-bottom:26px}.brand{display:flex;align-items:center;gap:12px}.logo{width:42px;height:42px;border-radius:13px;background:linear-gradient(135deg,#5b8cff,#52e0b2);display:grid;place-items:center;color:#07111b;font-weight:900;font-size:19px}.eyebrow{color:var(--green);font-size:11px;letter-spacing:2px;font-weight:800}.title{font-size:26px;line-height:1.2;font-weight:800;margin:3px 0}.sub{color:var(--muted);font-size:12px}.status{border:1px solid #315243;background:#10271f;color:var(--green);padding:8px 12px;border-radius:99px;font-size:12px;display:flex;align-items:center;gap:8px}.dot{width:7px;height:7px;border-radius:50%;background:currentColor;box-shadow:0 0 12px currentColor}
+.notice{border:1px solid #55492e;background:#211d14;color:#e8d6a7;padding:12px 15px;border-radius:12px;margin-bottom:18px;font-size:12px}
+.grid{display:grid;gap:15px}.stats{grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:18px}.card{background:linear-gradient(145deg,rgba(21,31,44,.96),rgba(15,22,32,.96));border:1px solid var(--line);border-radius:16px;padding:18px;min-width:0}.stat-label{font-size:12px;color:var(--muted)}.stat-value{font-size:27px;font-weight:800;letter-spacing:-.8px;margin:8px 0 3px}.stat-foot{font-size:11px;color:var(--muted)}.positive{color:var(--green)}.negative{color:var(--red)}.amber{color:var(--amber)}.blue{color:var(--blue)}
+.section-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:25px 0 12px}.section-head h2{font-size:16px;margin:0}.section-head p{margin:3px 0 0;color:var(--muted);font-size:12px}.filters{display:flex;gap:8px;flex-wrap:wrap}.filters select,.filters input,.btn{background:#0d141e;color:var(--text);border:1px solid var(--line);border-radius:9px;padding:9px 11px;font:inherit;font-size:12px}.btn{cursor:pointer}.btn:hover{border-color:var(--blue)}.table-wrap{overflow-x:auto}.table{width:100%;border-collapse:collapse;min-width:900px}.table th{text-align:left;color:var(--muted);font-weight:600;font-size:11px;letter-spacing:.5px;text-transform:uppercase;padding:12px 10px;border-bottom:1px solid var(--line)}.table td{padding:14px 10px;border-bottom:1px solid #202b39;vertical-align:middle}.table tr:last-child td{border-bottom:0}.symbol{font-weight:800}.small{font-size:11px;color:var(--muted)}.pill{display:inline-flex;align-items:center;gap:6px;border-radius:99px;padding:4px 8px;font-size:10px;font-weight:800;letter-spacing:.4px}.pill.buy{background:#123328;color:var(--green)}.pill.sell{background:#3a2028;color:var(--red)}.pill.watch{background:#382f1c;color:var(--amber)}.pill.ready{background:#18304b;color:#9bc5ff}.details{display:none;background:#0c131d}.details.open{display:table-row}.details td{padding:0 14px 16px}.detail-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;padding:15px 0}.detail-box{background:#121d2a;border:1px solid #243247;border-radius:10px;padding:11px}.detail-box label{display:block;color:var(--muted);font-size:10px;margin-bottom:4px}.detail-box strong{font-size:13px}.expand{border:1px solid var(--line);background:#121d2a;color:var(--blue);border-radius:8px;padding:5px 9px;cursor:pointer}.lower{grid-template-columns:1.2fr .8fr}.risk-list{display:grid;gap:14px}.risk-row{display:flex;justify-content:space-between;gap:15px;align-items:center}.risk-row span{color:var(--muted);font-size:12px}.risk-row strong{font-size:13px}.bar{height:7px;border-radius:9px;background:#273244;overflow:hidden;margin-top:7px}.bar i{display:block;height:100%;border-radius:9px;background:linear-gradient(90deg,#4d8dff,#43d6a0)}.timeline{display:grid;gap:13px}.event{display:grid;grid-template-columns:66px 12px 1fr;gap:10px;align-items:start}.event time{color:var(--muted);font-size:11px;padding-top:2px}.event .line{height:100%;position:relative}.event .line:before{content:"";position:absolute;top:5px;left:3px;width:6px;height:6px;border-radius:50%;background:var(--blue)}.event .line:after{content:"";position:absolute;top:16px;bottom:-12px;left:5px;width:2px;background:#2a394e}.event:last-child .line:after{display:none}.event strong{font-size:12px}.event p{margin:3px 0 0;color:var(--muted);font-size:11px}.footer{color:#69788c;font-size:11px;text-align:center;padding:24px 0 6px}
+@media(max-width:900px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.lower{grid-template-columns:1fr}.detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.wrap{padding:17px}}
+@media(max-width:480px){.stats{grid-template-columns:1fr 1fr}.stat-value{font-size:22px}.card{padding:14px}.title{font-size:22px}.detail-grid{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="top">
+  <div class="brand"><div class="logo">R</div><div><div class="eyebrow">RAMON · SMART TRADER</div><div class="title">Opportunity & Risk Desk</div><div class="sub">XAUUSD · M15 · Decision overview</div></div></div>
+  <div class="status"><span class="dot"></span><span id="connection">DJANGO · DECISION FEED</span></div>
+</header>
+<div class="notice"><strong>Read-only decision monitor:</strong> values come from saved Django decisions. Unprovided prices and risk settings are shown as unavailable. Pipeline approval does not prove that a broker order was executed.</div>
+<div id="status" class="card" role="status" aria-live="polite" style="margin-bottom:18px">Loading the latest Django decision…</div>
+
+<div class="grid stats">
+  <div class="card"><div class="stat-label">Saved decisions</div><div class="stat-value" id="statDecisions">—</div><div class="stat-foot">Latest 50 records available from Django</div></div>
+  <div class="card"><div class="stat-label">Accepted setups</div><div class="stat-value positive" id="statSetups">—</div><div class="stat-foot">Among saved decisions shown</div></div>
+  <div class="card"><div class="stat-label">Latest entry quality</div><div class="stat-value" id="statEntryQuality">Unavailable</div><div class="stat-foot">Actual pipeline output</div></div>
+  <div class="card"><div class="stat-label">Latest risk stage</div><div class="stat-value blue" id="statRisk">Unavailable</div><div class="stat-foot">Does not indicate broker execution</div></div>
+</div>
+
+<div class="section-head"><div><h2>Opportunity scanner</h2><p>Review the setup, planned entry window, invalidation and trade management.</p></div>
+<div class="filters"><select id="sideFilter" aria-label="Filter direction"><option value="all">All directions</option><option value="BUY">Buy</option><option value="SELL">Sell</option><option value="WATCH">Watch</option></select><select id="stateFilter" aria-label="Filter status"><option value="all">All statuses</option><option value="READY">Ready</option><option value="CONDITIONAL">Conditional</option><option value="WAIT">Wait</option></select><button class="btn" id="reset">Reset filters</button></div></div>
+
+<div class="card table-wrap" style="padding:8px 14px">
+<table class="table">
+<thead><tr><th>Market / setup</th><th>Direction</th><th>Entry time (UTC)</th><th>Market quote</th><th>Stop loss</th><th>Target</th><th>R:R</th><th>State</th><th>Details</th></tr></thead>
+<tbody id="opportunities"><tr><td colspan="9">Loading saved decisions…</td></tr></tbody>
+</table>
+</div>
+
+<div class="section-head"><div><h2>Risk management</h2><p>Pre-trade checks and sizing framework.</p></div></div>
+<div class="grid lower">
+  <div class="card"><h3 style="font-size:14px;margin:0 0 18px">Risk controls</h3><div class="risk-list">
+    <div><div class="risk-row"><span>Risk budget (latest decision)</span><strong id="riskBudget">Unavailable</strong></div><div class="bar"><i id="riskBar" style="width:0%"></i></div></div>
+    <div><div class="risk-row"><span>Daily loss limit</span><strong id="dailyLossLimit">Unavailable</strong></div><div class="bar"><i style="width:0%"></i></div></div>
+    <div class="risk-row"><span>Reward-to-risk gate</span><strong id="rrGate">Unavailable</strong></div>
+    <div class="risk-row"><span>Stop-loss check</span><strong id="stopRequired">Unavailable</strong></div>
+    <div class="risk-row"><span>Spread (latest decision)</span><strong id="spreadStatus">Unavailable</strong></div>
+    <div class="risk-row"><span>News guard</span><strong id="newsGuard">Unavailable</strong></div>
+    <div class="risk-row"><span>Duplicate-position check</span><strong id="duplicateCheck">Unavailable</strong></div>
+  </div><p class="small" style="margin:18px 0 0">Position size should be calculated from account equity, allowed risk, entry-to-stop distance, tick value and contract specifications. Never infer lot size from the risk percentage alone.</p></div>
+  <div class="card"><h3 style="font-size:14px;margin:0 0 18px">Entry-time workflow</h3><div class="timeline">
+    <div class="event"><time>On scan</time><div class="line"></div><div><strong>Detect opportunity</strong><p>Record symbol, timeframe, direction, model score and setup reasons.</p></div></div>
+    <div class="event"><time>Candle close</time><div class="line"></div><div><strong>Confirm entry trigger</strong><p>Use the closed candle; validate signal freshness and avoid look-ahead.</p></div></div>
+    <div class="event"><time>Pre-order</time><div class="line"></div><div><strong>Run risk gates</strong><p>Check SL/TP, R:R, spread, news, exposure and daily drawdown.</p></div></div>
+    <div class="event"><time>After fill</time><div class="line"></div><div><strong>Manage and log</strong><p>Track fill price, slippage, stop/target updates and outcome.</p></div></div>
+  </div></div>
+</div>
+<div class="footer">RAMON · Django decision feed · Read-only · UTC timestamps</div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const esc = value => String(value ?? "Unavailable").replace(/[&<>"']/g, c => ({
+  "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+}[c]));
+const val = (obj, ...keys) => {
+  for (const key of keys) {
+    if (obj && obj[key] !== undefined && obj[key] !== null && obj[key] !== "") {
+      return obj[key];
+    }
+  }
+  return "Unavailable";
+};
+const fmt = value => {
+  if (typeof value === "number") {
+    return Number.isFinite(value)
+      ? value.toLocaleString(undefined, {maximumFractionDigits: 5})
+      : "Unavailable";
+  }
+  if (value && typeof value === "object") return JSON.stringify(value);
+  return String(value ?? "Unavailable");
+};
+const stage = (decision, name) =>
+  ((decision.features || {}).stages || {})[name] || {};
+const market = decision => (decision.features || {}).market_snapshot || {};
+const direction = decision => {
+  const opportunity = stage(decision, "opportunities");
+  const timing = stage(decision, "entry_timing");
+  const side = val(opportunity, "side", "direction");
+  const candidate = side === "Unavailable" ? val(timing, "side") : side;
+  return ["BUY", "SELL"].includes(candidate) ? candidate : "WATCH";
+};
+const stateOf = decision =>
+  decision.features?.approved === true ? "READY" : "WAIT";
+const utc = value => {
+  if (!value) return "Unavailable";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toISOString().replace("T", " ").replace(".000Z", " UTC");
+};
+const pill = (side, state) => {
+  const sideClass = side === "BUY" ? "buy" : side === "SELL" ? "sell" : "watch";
+  const stateClass = state === "READY" ? "ready" : "watch";
+  const arrow = side === "BUY" ? "▲ " : side === "SELL" ? "▼ " : "◉ ";
+  return `<span class="pill ${sideClass}">${arrow}${esc(side)}</span>
+    <span class="pill ${stateClass}">${esc(state)}</span>`;
+};
+const detailBox = (label, value, explanation) =>
+  `<div class="detail-box"><label>${esc(label)}</label><strong>${esc(fmt(value))}</strong><div class="small">${esc(explanation || "")}</div></div>`;
+
+function renderDecisionRow(decision, index) {
+  const features = decision.features || {};
+  const opportunity = stage(decision, "opportunities");
+  const timing = stage(decision, "entry_timing");
+  const risk = stage(decision, "risk_management");
+  const quote = market(decision);
+  const side = direction(decision);
+  const state = stateOf(decision);
+  const id = `decision-detail-${index}`;
+  const bid = val(quote, "bid");
+  const ask = val(quote, "ask");
+  const quoteText = bid === "Unavailable" && ask === "Unavailable"
+    ? "Unavailable" : `Bid ${fmt(bid)} / Ask ${fmt(ask)}`;
+  const setupName = val(opportunity, "reason", "status");
+  const stop = val(risk, "stop_price");
+  const target = val(risk, "take_profit_price", "target_price");
+  const rr = val(risk, "reward_risk");
+  const setupExplanation = val(opportunity, "explanation");
+  const entryExplanation = val(timing, "explanation");
+  const riskExplanation = val(risk, "explanation");
+
+  return `
+    <tr class="opportunity" data-side="${esc(side)}" data-state="${esc(state)}">
+      <td><div class="symbol">${esc(decision.symbol)}</div>
+          <div class="small">${esc(val(quote, "timeframe"))} · ${esc(setupName)}</div></td>
+      <td>${pill(side, state)}</td>
+      <td>${esc(utc(decision.created_at))}<div class="small">${esc(val(timing, "timing"))}</div></td>
+      <td>${esc(quoteText)}</td>
+      <td>${esc(fmt(stop))}</td>
+      <td>${esc(fmt(target))}</td>
+      <td>${esc(fmt(rr))}</td>
+      <td><span class="pill ${state === "READY" ? "ready" : "watch"}">${esc(state)}</span></td>
+      <td><button class="expand" data-id="${id}" type="button">View</button></td>
+    </tr>
+    <tr class="details" id="${id}"><td colspan="9"><div class="detail-grid">
+      ${detailBox("Decision ID", decision.decision_id, `Model: ${val(decision, "model_version")}`)}
+      ${detailBox("Opportunity", val(opportunity, "status"), setupExplanation)}
+      ${detailBox("Entry timing", val(timing, "status"), entryExplanation)}
+      ${detailBox("Risk management", val(risk, "status"), riskExplanation)}
+      ${detailBox("Final decision", decision.action, val(decision, "rationale_code"))}
+      ${detailBox("Setup score", val(opportunity, "score", "setup_score"), "Model output; not a probability unless defined by the model")}
+      ${detailBox("Entry quality", val(timing, "quality"), `Spread: ${fmt(val(timing, "spread_points"))} points`)}
+      ${detailBox("Risk checks", val(risk, "checks"), "Only checks returned by the pipeline are shown")}
+    </div></td></tr>`;
+}
+
+function renderRisk(decision) {
+  const risk = stage(decision, "risk_management");
+  const timing = stage(decision, "entry_timing");
+  const checks = Array.isArray(risk.checks) ? risk.checks : [];
+  const check = name => checks.find(item => item && item.name === name);
+  const stopCheck = check("stop");
+  const rrCheck = check("reward_risk");
+  const dailyCheck = check("daily_loss");
+  const newsCheck = check("news_guard");
+  const duplicateCheck = check("duplicate_position");
+  $("riskBudget").textContent = fmt(val(risk, "risk_budget"));
+  $("dailyLossLimit").textContent = dailyCheck ? dailyCheck.detail : "Unavailable";
+  $("rrGate").textContent = rrCheck ? rrCheck.detail : "Unavailable";
+  $("stopRequired").textContent = stopCheck
+    ? `${stopCheck.passed === true ? "Passed" : "Failed"} · ${fmt(stopCheck.detail)}`
+    : "Unavailable";
+  $("spreadStatus").textContent = fmt(val(timing, "spread_points")) === "Unavailable"
+    ? "Unavailable" : `${fmt(timing.spread_points)} points`;
+  $("newsGuard").textContent = newsCheck ? newsCheck.detail : "Unavailable";
+  $("duplicateCheck").textContent = duplicateCheck ? duplicateCheck.detail : "Unavailable";
+  $("riskBar").style.width = "0%";
+}
+
+function filterRows() {
+  const sideFilter = $("sideFilter").value;
+  const stateFilter = $("stateFilter").value;
+  document.querySelectorAll(".opportunity").forEach(row => {
+    const matchSide = sideFilter === "all" || row.dataset.side === sideFilter;
+    const matchState = stateFilter === "all" || row.dataset.state === stateFilter;
+    row.style.display = matchSide && matchState ? "" : "none";
+    const detail = $(row.querySelector(".expand").dataset.id);
+    if (!(matchSide && matchState)) detail.classList.remove("open");
+  });
+}
+$("sideFilter").addEventListener("change", filterRows);
+$("stateFilter").addEventListener("change", filterRows);
+$("reset").addEventListener("click", () => {
+  $("sideFilter").value = "all";
+  $("stateFilter").value = "all";
+  filterRows();
+});
+$("opportunities").addEventListener("click", event => {
+  const button = event.target.closest(".expand");
+  if (!button) return;
+  const detail = $(button.dataset.id);
+  detail.classList.toggle("open");
+  button.textContent = detail.classList.contains("open") ? "Hide" : "View";
+});
+
+async function refresh() {
+  const connection = $("connection");
+  try {
+    const response = await fetch("/api/ea/v1/dashboard-data", {cache: "no-store"});
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    if (!data.ok || !Array.isArray(data.decisions)) {
+      throw new Error("Unexpected dashboard data format");
+    }
+    const decisions = data.decisions;
+    connection.textContent = "DJANGO · FEED CONNECTED";
+
+    $("statDecisions").textContent = fmt(decisions.length);
+    $("statSetups").textContent = fmt(decisions.filter(d =>
+      stage(d, "opportunities").approved === true).length);
+
+    if (!decisions.length) {
+      $("status").innerHTML = "<strong>No saved decisions yet.</strong> Waiting for a decision record from Django.";
+      $("opportunities").innerHTML = '<tr><td colspan="9">No saved decisions available.</td></tr>';
+      $("statEntryQuality").textContent = "Unavailable";
+      $("statRisk").textContent = "Unavailable";
+      ["riskBudget", "dailyLossLimit", "rrGate", "stopRequired", "spreadStatus", "newsGuard", "duplicateCheck"]
+        .forEach(id => $(id).textContent = "Unavailable");
+      return;
+    }
+
+    const latest = decisions[0];
+    const latestFeatures = latest.features || {};
+    const latestTiming = stage(latest, "entry_timing");
+    const latestRisk = stage(latest, "risk_management");
+    const approved = latestFeatures.approved === true;
+    const action = val(latest, "action");
+    $("status").innerHTML = `
+      <div class="brand">
+        <span class="pill ${approved ? "ready" : "watch"}">${esc(action)}</span>
+        <strong>${esc(latest.symbol)}</strong>
+        <span class="small">Confidence: ${esc(fmt(latest.confidence))}</span>
+      </div>
+      <p><strong>Final decision:</strong> ${approved ? "Approved by pipeline" : "Not approved"}
+      · <strong>Reason:</strong> ${esc(val(latest, "rationale_code"))}</p>
+      <div class="small">Decision ${esc(latest.decision_id)} · Saved ${esc(utc(latest.created_at))}
+      · Approval does not confirm broker execution.</div>`;
+
+    $("statEntryQuality").textContent = fmt(val(latestTiming, "quality"));
+    $("statRisk").textContent = fmt(val(latestRisk, "status"));
+    $("opportunities").innerHTML = decisions.map(renderDecisionRow).join("");
+    renderRisk(latest);
+    filterRows();
+  } catch (error) {
+    connection.textContent = "DJANGO · FEED ERROR";
+    $("status").innerHTML = `<span class="negative">Could not load decision data: ${esc(error.message)}</span>`;
+  }
+}
+refresh();
+setInterval(refresh, 10000);
+</script>
+</body>
+</html>
