@@ -85,7 +85,8 @@ def decision(request):
         direction="BUY" if fast>slow else "SELL" if fast<slow else "HOLD"
         setup=min(1.0,abs(fast-slow)/(atr*.8)); quality=min(1.0,abs(closes[-1]-closes[-5])/(atr*1.5))
         spread=(ask-bid)/point
-        market={"trend":direction,"setup_score":setup,"entry_quality":quality,"spread_points":spread,
+        market={"symbol":symbol,"timeframe":"M15","bars":bars,"last_bar_closed":True,
+          "trend":direction,"setup_score":setup,"entry_quality":quality,"spread_points":spread,
           "account_balance":_num(p.get("account_balance",0),"account_balance"),"risk_percent":_num(p.get("risk_percent",0),"risk_percent"),
           "stop_loss_points":atr*1.5/point,"point_value_per_lot":_num(p.get("point_value_per_lot",0),"point_value_per_lot"),
           "volume_step":_num(p.get("volume_step",0),"volume_step"),"min_volume":_num(p.get("min_volume",0),"min_volume"),
@@ -105,6 +106,8 @@ def decision(request):
           "spread_points": spread,
           "approved": bool(result["approved"]),
           "stages": result["stages"],
+          "opportunity_input_path": "completed_ohlc_structural",
+          "structural_candle_count": len(bars),
           "market_snapshot": {
             "symbol": symbol,
             "timeframe": "M15",
