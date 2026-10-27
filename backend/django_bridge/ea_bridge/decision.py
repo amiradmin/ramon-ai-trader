@@ -85,20 +85,31 @@ def decision(request):
         direction="BUY" if fast>slow else "SELL" if fast<slow else "HOLD"
         setup=min(1.0,abs(fast-slow)/(atr*.8)); quality=min(1.0,abs(closes[-1]-closes[-5])/(atr*1.5))
         spread=(ask-bid)/point
-        market={"trend":direction,"setup_score":setup,"entry_quality":quality,"spread_points":spread,
+        # Feed the actual completed candles and live quote into SignalFlow's structural path.
+        # The legacy trend/setup fields remain available for diagnostics, but are not used when bars exist.
+        market={"symbol":symbol,"timeframe":"M15",
+          "bars":[{"time":int(b["time"]),"high":_num(b["high"],"high"),"low":_num(b["low"],"low"),"close":_num(b["close"],"close")} for b in bars],
+          "latest_bar_time":bar_time,"bid":bid,"ask":ask,"point":point,
+          "trend":direction,"setup_score":setup,"spread_points":spread,
           "account_balance":_num(p.get("account_balance",0),"account_balance"),"risk_percent":_num(p.get("risk_percent",0),"risk_percent"),
           "stop_loss_points":atr*1.5/point,"point_value_per_lot":_num(p.get("point_value_per_lot",0),"point_value_per_lot"),
           "volume_step":_num(p.get("volume_step",0),"volume_step"),"min_volume":_num(p.get("min_volume",0),"min_volume"),
           "max_volume":_num(p.get("max_volume",0),"max_volume")}
-        result=SignalFlowPipeline().run(market); action=result["action"] if result["approved"] else "WAIT"
+        result=SignalFlowPipeline().run(market)
+        action=result["action"] if result["approved"] else "WAIT"
         reason="SIGNALFLOW_APPROVED" if result["approved"] else next((s.get("reason","SIGNALFLOW_REJECTED") for s in
           (result["stages"]["opportunities"],result["stages"]["entry_timing"],result["stages"]["risk_management"]) if not s.get("approved",False)),"SIGNALFLOW_REJECTED")
-        key=hashlib.sha256(f"{symbol}:{bar_time}:django-signalflow-v1".encode()).hexdigest()[:16]
-        confidence=max(0.0,min(1.0,min(setup,quality)))
+        # One auditable record per completed candle, refreshed when the live quote changes.
+        key=hashlib.sha256(f"{symbol}:{bar_time}:django-signalflow-v2".encode()).hexdigest()[:16]
+        opportunity=result["stages"]["opportunities"]
+        timing=result["stages"]["entry_timing"]
+        confidence=max(0.0,min(1.0,float(opportunity.get("score",0.0))))
         median=closes[-1]+(atr*.1 if action=="BUY" else -atr*.1 if action=="SELL" else 0)
-        record,created=StrategyDecisionRecord.objects.get_or_create(decision_id=key,defaults={"symbol":symbol,"action":action,
-          "confidence":confidence,"rationale_code":reason,"model_version":"django-signalflow-technical-v1",
-          "features":{"ema20":fast,"ema50":slow,"atr":atr,"setup_score":setup,"entry_quality":quality,"spread_points":spread,"approved":result["approved"]}})
+        record,created=StrategyDecisionRecord.objects.update_or_create(decision_id=key,defaults={"symbol":symbol,"action":action,
+          "confidence":confidence,"rationale_code":reason,"model_version":"django-signalflow-structural-v2",
+          "features":{"pipeline_input_mode":"completed_bars_structural","ema20":fast,"ema50":slow,"atr":atr,
+            "setup_score_legacy_diagnostic":setup,"spread_points":spread,"opportunity_score":opportunity.get("score",0.0),
+            "entry_quality":timing.get("quality"),"approved":result["approved"],"rejected_by":result.get("rejected_by")}})
         response=_compat(record.action,record.rationale_code,key,bar_time,bid,ask,atr,median,spread,confidence,
           bool(result["stages"]["risk_management"].get("approved")))
         response["decision_record_created"]=created; response["stages"]=result["stages"]
