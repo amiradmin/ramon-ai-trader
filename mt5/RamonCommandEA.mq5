@@ -249,11 +249,15 @@ string BuildBarsJson()
    int count=MathMax(1,MathMin(BarsToSend,512));
    int copied=CopyRates(_Symbol,_Period,1,count,rates); // start at 1: omit the still-forming candle
    if(copied<=0) return "[]";
+   datetime server_now=TimeTradeServer();
+   datetime utc_now=TimeGMT();
+   if(server_now<=0 || utc_now<=0) return "[]";
+   long server_utc_offset=(long)(server_now-utc_now);
    string out="[";
    for(int i=copied-1;i>=0;i--)
    {
       if(i<copied-1) out+=",";
-      datetime utc=rates[i].time-(TimeCurrent()-TimeGMT());
+      datetime utc=(datetime)((long)rates[i].time-server_utc_offset);
       out+="{\"timestamp\":\""+IsoUtc(utc)+"\","
          +"\"open\":"+DoubleToString(rates[i].open,_Digits)+","
          +"\"high\":"+DoubleToString(rates[i].high,_Digits)+","
@@ -469,6 +473,10 @@ string BuildTelemetry()
    if(!SymbolInfoTick(_Symbol,tick) || tick.bid<=0 || tick.ask<tick.bid) return "";
    double point=SymbolInfoDouble(_Symbol,SYMBOL_POINT);
    if(point<=0) return "";
+   datetime server_now=TimeTradeServer();
+   datetime utc_now=TimeGMT();
+   if(server_now<=0 || utc_now<=0) return "";
+   long server_utc_offset=(long)(server_now-utc_now);
    string account="{\"currency\":\""+JsonEscape(AccountInfoString(ACCOUNT_CURRENCY))+"\","
       +"\"balance\":"+DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),2)+","
       +"\"equity\":"+DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY),2)+","
@@ -479,7 +487,7 @@ string BuildTelemetry()
       +"\"account_login\":\""+IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN))+"\","
       +"\"symbol\":\""+JsonEscape(_Symbol)+"\",\"timeframe\":\""+TfName(_Period)+"\","
       +"\"quote\":{\"bid\":"+DoubleToString(tick.bid,_Digits)+",\"ask\":"+DoubleToString(tick.ask,_Digits)+",\"point\":"+DoubleToString(point,_Digits)+"},"
-      +"\"quote_time\":\""+IsoUtc(tick.time-(TimeCurrent()-TimeGMT()))+"\","
+      +"\"quote_time\":\""+IsoUtc((datetime)((long)tick.time-server_utc_offset))+"\","
       +"\"terminal_trade_allowed\":"+((bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) && (bool)MQLInfoInteger(MQL_TRADE_ALLOWED) ? "true":"false")+","
       +"\"account\":"+account+",\"positions\":"+BuildPositionsJson()+","
       +"\"last_command_id\":\""+JsonEscape(LastCommandId)+"\",\"bars\":"+BuildBarsJson()+"}";
