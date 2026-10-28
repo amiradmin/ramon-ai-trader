@@ -284,6 +284,13 @@ string BuildDecisionBarsJson()
    datetime utc_now=TimeGMT();
    if(server_now<=0 || utc_now<=0) return "[]";
    long server_utc_offset=(long)(server_now-utc_now);
+   Print("RAMON TIME DEBUG: server_now=",TimeToString(server_now,TIME_DATE|TIME_SECONDS),
+         " utc_now=",TimeToString(utc_now,TIME_DATE|TIME_SECONDS),
+         " offset_seconds=",server_utc_offset,
+         " newest_raw_bar=",TimeToString(rates[0].time,TIME_DATE|TIME_SECONDS),
+         " newest_converted_bar=",
+         TimeToString((datetime)((long)rates[0].time-server_utc_offset),TIME_DATE|TIME_SECONDS));
+
 
    string out="[";
    for(int i=copied-1;i>=0;i--)
