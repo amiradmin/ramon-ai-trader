@@ -1,11 +1,13 @@
 """Conservative Django-hosted decision API for Ramon EA."""
-import hashlib, json, math, time
+import hashlib, json, math, time, logging
 from django.conf import settings
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 from .auth import BearerTokenRequired
 from .models import StrategyDecisionRecord
+
+logger = logging.getLogger(__name__)
 from ramon_pipeline.signalflow.entry_timing import EntryTimer
 from ramon_pipeline.signalflow.pipeline import SignalFlowPipeline
 
@@ -156,4 +158,5 @@ def decision(request):
         response["stages"] = result["stages"]
         return JsonResponse(response, json_dumps_params={"separators": (",", ":")})
     except (KeyError,TypeError,ValueError,OverflowError,json.JSONDecodeError) as exc:
+        logger.warning("Ramon decision request rejected: %s", exc)
         return JsonResponse({"ok":False,"error":str(exc)},status=400)
