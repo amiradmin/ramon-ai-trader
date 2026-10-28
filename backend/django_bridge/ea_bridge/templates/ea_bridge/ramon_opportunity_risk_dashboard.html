@@ -177,11 +177,14 @@ function renderStructuralChecklist(decision) {
     ];
     const chips = [];
     found.forEach(item => {
+      const source = item.metrics && typeof item.metrics === "object"
+        ? {...item, ...item.metrics}
+        : item;
       const values = groups.map(group => {
         const key = group.keys.find(candidate =>
-          item[candidate] !== undefined && item[candidate] !== null && item[candidate] !== ""
+          source[candidate] !== undefined && source[candidate] !== null && source[candidate] !== ""
         );
-        return key ? {label:group.label, value:item[key]} : null;
+        return key ? {label:group.label, value:source[key]} : null;
       }).filter(Boolean);
       if (!values.length) return;
       const prefix = item.name ? `<b>${esc(item.name)}</b>` : "";
