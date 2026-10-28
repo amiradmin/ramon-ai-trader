@@ -9,6 +9,7 @@ input string DjangoBearerToken = "";       // Set locally in MT5; never commit a
 input string InstanceId = "ramon-command-ea-1";
 input bool EnableCommandExecution = false; // Must remain false until demo validation is complete.
 input int TimerSeconds = 15;
+input int DecisionIntervalSeconds = 30; // Django decision requests, independent of telemetry polling.
 input int BarsToSend = 128;
 input int RequestTimeoutMs = 5000;
 input int MaxSpreadPoints = 80;
@@ -17,6 +18,7 @@ input double MaxRiskMoney = 5.0;           // Account-currency risk ceiling per 
 CTrade Trade;
 string LastCommandId = "";
 datetime LastTelemetryAttempt = 0;
+datetime LastDecisionAttempt = 0;
 bool Busy = false;
 
 string JsonEscape(string value)
@@ -260,6 +262,183 @@ string BuildBarsJson()
          +"\"volume\":"+DoubleToString((double)rates[i].tick_volume,0)+",\"closed\":true}";
    }
    return out+"]";
+}
+
+
+string BuildDecisionBarsJson()
+{
+   if(_Period!=PERIOD_M15) return "[]";
+   MqlRates rates[];
+   ArraySetAsSeries(rates,true);
+   int count=MathMax(128,MathMin(BarsToSend,512));
+   int copied=CopyRates(_Symbol,PERIOD_M15,1,count,rates); // completed candles only
+   if(copied<128) return "[]";
+
+   // MqlRates timestamps use broker-server time. Use the estimated current
+   // server/GMT offset, not TimeCurrent(), which can freeze at the last quote.
+   datetime server_now=TimeTradeServer();
+   datetime utc_now=TimeGMT();
+   if(server_now<=0 || utc_now<=0) return "[]";
+   long server_utc_offset=(long)(server_now-utc_now);
+
+   string out="[";
+   for(int i=copied-1;i>=0;i--)
+   {
+      if(i<copied-1) out+=",";
+      datetime utc=(datetime)((long)rates[i].time-server_utc_offset);
+      out+="{\"time\":"+IntegerToString((long)utc)+","
+         +"\"open\":"+DoubleToString(rates[i].open,_Digits)+","
+         +"\"high\":"+DoubleToString(rates[i].high,_Digits)+","
+         +"\"low\":"+DoubleToString(rates[i].low,_Digits)+","
+         +"\"close\":"+DoubleToString(rates[i].close,_Digits)+"}";
+   }
+   return out+"]";
+}
+
+double CalculateDailyLossPercent()
+{
+   double balance=AccountInfoDouble(ACCOUNT_BALANCE);
+   datetime server_now=TimeTradeServer();
+   if(balance<=0 || server_now<=0) return 100.0;
+
+   MqlDateTime day;
+   TimeToStruct(server_now,day);
+   day.hour=0; day.min=0; day.sec=0;
+   datetime day_start=StructToTime(day);
+   if(day_start<=0 || !HistorySelect(day_start,server_now)) return 100.0;
+
+   double realized=0.0;
+   for(int i=0;i<HistoryDealsTotal();i++)
+   {
+      ulong deal=HistoryDealGetTicket(i);
+      if(deal==0) continue;
+      ENUM_DEAL_ENTRY entry=(ENUM_DEAL_ENTRY)HistoryDealGetInteger(deal,DEAL_ENTRY);
+      if(entry!=DEAL_ENTRY_OUT && entry!=DEAL_ENTRY_OUT_BY && entry!=DEAL_ENTRY_INOUT)
+         continue;
+      realized+=HistoryDealGetDouble(deal,DEAL_PROFIT)
+               +HistoryDealGetDouble(deal,DEAL_SWAP)
+               +HistoryDealGetDouble(deal,DEAL_COMMISSION)
+               +HistoryDealGetDouble(deal,DEAL_FEE);
+   }
+   return MathMax(0.0,-realized)/balance*100.0;
+}
+
+double CalculateOpenRiskPercent()
+{
+   double balance=AccountInfoDouble(ACCOUNT_BALANCE);
+   if(balance<=0) return 100.0;
+   double risk_money=0.0;
+
+   for(int i=0;i<PositionsTotal();i++)
+   {
+      ulong ticket=PositionGetTicket(i);
+      if(ticket==0) continue;
+      double sl=PositionGetDouble(POSITION_SL);
+      double volume=PositionGetDouble(POSITION_VOLUME);
+      double entry=PositionGetDouble(POSITION_PRICE_OPEN);
+      ENUM_POSITION_TYPE side=(ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+
+      // A position without a stop loss has unbounded/unknown risk; fail closed.
+      if(sl<=0 || volume<=0 || entry<=0) return 100.0;
+      ENUM_ORDER_TYPE order_type=(side==POSITION_TYPE_BUY ? ORDER_TYPE_BUY : ORDER_TYPE_SELL);
+      double pnl_at_sl=0.0;
+      if(!OrderCalcProfit(order_type,PositionGetString(POSITION_SYMBOL),
+                          volume,entry,sl,pnl_at_sl))
+         return 100.0;
+      if(pnl_at_sl<0) risk_money+=MathAbs(pnl_at_sl);
+   }
+   return risk_money/balance*100.0;
+}
+
+double CalculateDecisionTakeProfitPoints()
+{
+   double point=SymbolInfoDouble(_Symbol,SYMBOL_POINT);
+   if(point<=0) return 0.0;
+
+   MqlRates rates[];
+   ArraySetAsSeries(rates,true);
+   if(CopyRates(_Symbol,PERIOD_M15,1,16,rates)<16) return 0.0;
+
+   double total_range=0.0;
+   for(int i=0;i<14;i++)
+   {
+      double previous_close=rates[i+1].close;
+      double tr=MathMax(rates[i].high-rates[i].low,
+                MathMax(MathAbs(rates[i].high-previous_close),
+                        MathAbs(rates[i].low-previous_close)));
+      total_range+=tr;
+   }
+   double atr=total_range/14.0;
+   double stop_level=(double)SymbolInfoInteger(_Symbol,SYMBOL_TRADE_STOPS_LEVEL);
+   return MathMax(stop_level+1.0,2.0*atr/point);
+}
+
+void RequestDjangoDecision()
+{
+   if(_Period!=PERIOD_M15)
+   {
+      Print("RamonCommandEA: Django decisions require an M15 chart.");
+      return;
+   }
+
+   string bars=BuildDecisionBarsJson();
+   if(StringLen(bars)<3 || bars=="[]")
+   {
+      Print("RamonCommandEA: decision skipped; need at least 128 completed M15 bars and valid server time.");
+      return;
+   }
+
+   MqlTick tick;
+   if(!SymbolInfoTick(_Symbol,tick) || tick.bid<=0 || tick.ask<tick.bid)
+   {
+      Print("RamonCommandEA: decision skipped; quote is invalid.");
+      return;
+   }
+
+   double point=SymbolInfoDouble(_Symbol,SYMBOL_POINT);
+   double balance=AccountInfoDouble(ACCOUNT_BALANCE);
+   double tick_size=SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_SIZE);
+   double tick_value=SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_VALUE);
+   double point_value_per_lot=(tick_size>0 ? tick_value*point/tick_size : 0.0);
+   double risk_percent=(balance>0 ? MaxRiskMoney/balance*100.0 : 0.0);
+   double take_profit_points=CalculateDecisionTakeProfitPoints();
+   double daily_loss_percent=CalculateDailyLossPercent();
+   double open_risk_percent=CalculateOpenRiskPercent();
+
+   string body="{\"protocol_version\":\"ramon-django-decision-v1\","
+      +"\"instance_id\":\""+JsonEscape(InstanceId)+"\","
+      +"\"account_login\":\""+IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN))+"\","
+      +"\"symbol\":\""+JsonEscape(_Symbol)+"\",\"timeframe\":\"M15\","
+      +"\"bid\":"+DoubleToString(tick.bid,_Digits)+","
+      +"\"ask\":"+DoubleToString(tick.ask,_Digits)+","
+      +"\"point\":"+DoubleToString(point,10)+","
+      +"\"bars\":"+bars+","
+      +"\"account_balance\":"+DoubleToString(balance,2)+","
+      +"\"risk_percent\":"+DoubleToString(risk_percent,8)+","
+      +"\"point_value_per_lot\":"+DoubleToString(point_value_per_lot,8)+","
+      +"\"volume_step\":"+DoubleToString(SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_STEP),8)+","
+      +"\"min_volume\":"+DoubleToString(SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN),8)+","
+      +"\"max_volume\":"+DoubleToString(SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MAX),8)+","
+      +"\"stop_level_points\":"+DoubleToString((double)SymbolInfoInteger(_Symbol,SYMBOL_TRADE_STOPS_LEVEL),2)+","
+      +"\"take_profit_points\":"+DoubleToString(take_profit_points,2)+","
+      +"\"daily_loss_percent\":"+DoubleToString(daily_loss_percent,8)+","
+      +"\"open_risk_percent\":"+DoubleToString(open_risk_percent,8)+"}";
+
+   string response;
+   if(!PostJson("/decision",body,response))
+   {
+      Print("RamonCommandEA: Django decision request failed; no local decision or order generated.");
+      return;
+   }
+
+   string decision=JsonString(response,"decision","UNKNOWN");
+   string reason=JsonString(response,"reason","NO_REASON");
+   string sample_key=JsonString(response,"sample_key","");
+   Print("RamonCommandEA Django decision: ",decision,
+         " reason=",reason,
+         " sample_key=",sample_key,
+         " trading_authorization=",JsonBool(response,"trading_authorization",false),
+         ". EA does not execute decision responses; broker execution remains command-only.");
 }
 
 string BuildPositionsJson()
@@ -539,6 +718,13 @@ void OnTimer()
       string response;
       if(!PostJson("/telemetry",body,response))
          Print("RamonCommandEA: telemetry delivery failed.");
+   }
+   datetime local_now=TimeLocal();
+   int decision_interval=MathMax(30,DecisionIntervalSeconds);
+   if(LastDecisionAttempt==0 || local_now-LastDecisionAttempt>=decision_interval)
+   {
+      LastDecisionAttempt=local_now;
+      RequestDjangoDecision();
    }
    PollCommands();
    Busy=false;
