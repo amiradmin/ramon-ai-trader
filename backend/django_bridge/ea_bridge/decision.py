@@ -5,7 +5,8 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 from .auth import BearerTokenRequired
-from .models import StrategyDecisionRecord
+from django.utils import timezone
+from .models import StrategyDecisionRecord, EAHeartbeat
 
 logger = logging.getLogger(__name__)
 from ramon_pipeline.signalflow.entry_timing import EntryTimer
@@ -101,6 +102,49 @@ def decision(request):
         direction="BUY" if fast>slow else "SELL" if fast<slow else "HOLD"
         setup=min(1.0,abs(fast-slow)/(atr*.8)); quality=min(1.0,abs(closes[-1]-closes[-5])/(atr*1.5))
         spread=(ask-bid)/point
+        # Strict API-only account-state validation. Legacy SignalFlow callers are unchanged.
+        instance_id = str(p.get("instance_id", "")).strip()
+        account_login = str(p.get("account_login", "")).strip()
+        account_state_reason = "ACCOUNT_IDENTITY_MISSING"
+
+        heartbeat = None
+        if instance_id and account_login:
+            heartbeat = EAHeartbeat.objects.filter(instance_id=instance_id).first()
+
+        if heartbeat is not None:
+            age = (timezone.now() - heartbeat.last_seen).total_seconds()
+            snapshot = heartbeat.payload if isinstance(heartbeat.payload, dict) else {}
+            account_snapshot = snapshot.get("account", {})
+            positions_snapshot = snapshot.get("positions", [])
+
+            if age < 0 or age > 90:
+                account_state_reason = "ACCOUNT_TELEMETRY_STALE"
+            elif heartbeat.account_login != account_login:
+                account_state_reason = "ACCOUNT_LOGIN_MISMATCH"
+            elif heartbeat.symbol != symbol:
+                account_state_reason = "ACCOUNT_SYMBOL_MISMATCH"
+            elif heartbeat.status != "TELEMETRY_OK" or not heartbeat.terminal_connected:
+                account_state_reason = "ACCOUNT_TELEMETRY_NOT_READY"
+            elif not isinstance(account_snapshot, dict) or not isinstance(positions_snapshot, list):
+                account_state_reason = "ACCOUNT_SNAPSHOT_INVALID"
+            else:
+                try:
+                    snapshot_balance = _num(account_snapshot["balance"], "telemetry balance")
+                    request_balance = _num(p["account_balance"], "request balance")
+                except (KeyError, TypeError, ValueError, OverflowError):
+                    account_state_reason = "ACCOUNT_BALANCE_UNAVAILABLE"
+                else:
+                    if snapshot_balance <= 0 or request_balance <= 0:
+                        account_state_reason = "ACCOUNT_BALANCE_INVALID"
+                    elif abs(snapshot_balance - request_balance) > 0.01:
+                        account_state_reason = "ACCOUNT_BALANCE_MISMATCH"
+                    elif positions_snapshot:
+                        # Current telemetry lacks enough broker metadata to independently
+                        # calculate the risk of every open position.
+                        account_state_reason = "OPEN_POSITION_RISK_UNVERIFIED"
+                    else:
+                        account_state_reason = "DAILY_LOSS_BASELINE_UNAVAILABLE"
+
         risk_guard_fields=("stop_level_points","take_profit_points","daily_loss_percent","open_risk_percent")
         risk_guards_complete=all(p.get(name) is not None for name in risk_guard_fields)
         market={"symbol":symbol,"timeframe":"M15","bars":bars,"last_bar_closed":True,
@@ -115,8 +159,20 @@ def decision(request):
         result=SignalFlowPipeline(entry_timer=EntryTimer(require_quote=True)).run(market)
         action=result["action"] if result["approved"] and risk_guards_complete else "WAIT"
         reason=("RISK_INPUTS_INCOMPLETE" if not risk_guards_complete else
-          "SIGNALFLOW_APPROVED" if result["approved"] else next((s.get("reason","SIGNALFLOW_REJECTED") for s in
-          (result["stages"]["opportunities"],result["stages"]["entry_timing"],result["stages"]["risk_management"]) if not s.get("approved",False)),"SIGNALFLOW_REJECTED"))
+          account_state_reason if account_state_reason != "DAILY_LOSS_BASELINE_UNAVAILABLE"
+          or not heartbeat else
+          "DAILY_LOSS_BASELINE_UNAVAILABLE" if not result["approved"] else
+          "SIGNALFLOW_APPROVED" if result["approved"] else
+          next((s.get("reason","SIGNALFLOW_REJECTED") for s in
+          (result["stages"]["opportunities"],result["stages"]["entry_timing"],result["stages"]["risk_management"])
+          if not s.get("approved",False)),"SIGNALFLOW_REJECTED"))
+
+        # Daily loss is not yet independently verifiable from server-side history.
+        # Never let client-supplied daily_loss_percent authorize a directional result.
+        if account_state_reason or not heartbeat:
+            action = "WAIT"
+            if risk_guards_complete:
+                reason = account_state_reason
         key=hashlib.sha256(f"{symbol}:{bar_time}:django-signalflow-v1".encode()).hexdigest()[:16]
         confidence=max(0.0,min(1.0,float(result["stages"]["opportunities"].get("score",min(setup,quality)))))
         median=closes[-1]+(atr*.1 if action=="BUY" else -atr*.1 if action=="SELL" else 0)
@@ -154,7 +210,7 @@ def decision(request):
         response = _compat(
           record.action, record.rationale_code, key, bar_time, bid, ask,
           atr, median, spread, confidence,
-          bool(result["stages"]["risk_management"].get("approved") and risk_guards_complete),
+          bool(result["stages"]["risk_management"].get("approved") and risk_guards_complete and not account_state_reason),
         )
         response["decision_record_created"] = created
         response["stages"] = result["stages"]

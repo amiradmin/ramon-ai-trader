@@ -125,13 +125,33 @@ class StreamPersistenceTests(TestCase):
 class DjangoDecisionApiTests(TestCase):
     url="/api/ea/v1/decision"
     headers={"HTTP_AUTHORIZATION":"Bearer test-token"}
+
+    def setUp(self):
+        from .models import EAHeartbeat
+        EAHeartbeat.objects.create(
+            instance_id="ea-decision-test",
+            account_login="12345678",
+            symbol="XAUUSD_o",
+            status="TELEMETRY_OK",
+            terminal_connected=True,
+            trade_allowed=False,
+            payload={
+                "account": {"balance": "10000", "equity": "10000",
+                            "margin": "0", "free_margin": "10000",
+                            "currency": "USD"},
+                "positions": [],
+                "quote": {"bid": "2320.30", "ask": "2320.35", "point": "0.01"},
+            },
+        )
+
     def payload(self):
         bars=[]
         now=int(time.time())
         for i in range(256):
             c=2300+i*.08
             bars.append({"time":now-(256-i)*900,"open":c-.03,"high":c+.12,"low":c-.12,"close":c})
-        return {"symbol":"XAUUSD_o","timeframe":"M15","bid":2320.30,"ask":2320.35,"point":.01,"bars":bars,
+        return {"instance_id":"ea-decision-test","account_login":"12345678",
+          "symbol":"XAUUSD_o","timeframe":"M15","bid":2320.30,"ask":2320.35,"point":.01,"bars":bars,
           "account_balance":10000,"risk_percent":.06,"point_value_per_lot":1,"volume_step":.01,"min_volume":.01,"max_volume":100,
           "stop_level_points":0,"take_profit_points":1000,"daily_loss_percent":0,"open_risk_percent":0}
     @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
@@ -221,6 +241,43 @@ class DjangoDecisionApiTests(TestCase):
         self.assertFalse(b["risk_approved_advisory_only"])
         self.assertFalse(b["trading_authorization"])
         self.assertFalse(b["execution_enabled"])
+
+    @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
+    def test_client_daily_loss_zero_does_not_authorize_without_server_baseline(self):
+        r=self.client.post(self.url,data=json.dumps(self.payload()),content_type="application/json",**self.headers)
+        self.assertEqual(r.status_code,200,r.content)
+        b=r.json()
+        self.assertEqual(b["decision"],"WAIT")
+        self.assertEqual(b["reason"],"DAILY_LOSS_BASELINE_UNAVAILABLE")
+        self.assertFalse(b["trading_authorization"])
+        self.assertFalse(b["execution_enabled"])
+
+    @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
+    def test_rejects_account_login_mismatch(self):
+        p=self.payload()
+        p["account_login"]="99999999"
+        r=self.client.post(self.url,data=json.dumps(p),content_type="application/json",**self.headers)
+        self.assertEqual(r.status_code,200,r.content)
+        self.assertEqual(r.json()["decision"],"WAIT")
+        self.assertEqual(r.json()["reason"],"ACCOUNT_LOGIN_MISMATCH")
+
+    @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
+    def test_rejects_balance_mismatch(self):
+        p=self.payload()
+        p["account_balance"]=9999
+        r=self.client.post(self.url,data=json.dumps(p),content_type="application/json",**self.headers)
+        self.assertEqual(r.status_code,200,r.content)
+        self.assertEqual(r.json()["decision"],"WAIT")
+        self.assertEqual(r.json()["reason"],"ACCOUNT_BALANCE_MISMATCH")
+
+    @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
+    def test_rejects_missing_instance_identity(self):
+        p=self.payload()
+        p.pop("instance_id")
+        r=self.client.post(self.url,data=json.dumps(p),content_type="application/json",**self.headers)
+        self.assertEqual(r.status_code,200,r.content)
+        self.assertEqual(r.json()["decision"],"WAIT")
+        self.assertEqual(r.json()["reason"],"ACCOUNT_IDENTITY_MISSING")
 
     @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
     def test_rejects_insufficient_bars(self):
