@@ -172,6 +172,21 @@ class DjangoDecisionApiTests(TestCase):
         self.assertIn("strictly increasing",r.json()["error"])
 
     @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
+    def test_accepts_session_gap_with_ordered_fresh_bars(self):
+        p = self.payload()
+        # Simulate a multi-hour market closure earlier in the history.
+        for bar in p["bars"][:21]:
+            bar["time"] -= 4 * 3600
+
+        r = self.client.post(
+            self.url,
+            data=json.dumps(p),
+            content_type="application/json",
+            **self.headers,
+        )
+        self.assertEqual(r.status_code, 200, r.content)
+
+    @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
     def test_rejects_future_latest_bar(self):
         p = self.payload()
         p["bars"][-1]["time"] = int(time.time()) + 120

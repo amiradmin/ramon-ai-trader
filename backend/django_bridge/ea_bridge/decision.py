@@ -85,12 +85,14 @@ def decision(request):
                 raise ValueError("bar OHLC values are inconsistent")
         if any(b<=a for a,b in zip(bar_times,bar_times[1:])):
             raise ValueError("bar timestamps must be strictly increasing")
-        if any(b-a>8*900 for a,b in zip(bar_times,bar_times[1:])):
-            raise ValueError("bar timestamp gap exceeds eight M15 intervals")
         bar_time=bar_times[-1]; bid=_num(p["bid"],"bid"); ask=_num(p["ask"],"ask"); point=_num(p["point"],"point")
         now=int(time.time())
         if bid<=0 or ask<bid or point<=0: raise ValueError("invalid quote")
-        if bar_time>now+60: raise ValueError("latest bar timestamp is in the future")
+        if bar_time>now+60:
+            raise ValueError(
+                f"latest bar timestamp is in the future: "
+                f"bar_time={bar_time}, now={now}, ahead_seconds={bar_time-now}"
+            )
         if now-bar_time>3*900: raise ValueError("latest closed M15 bar is stale")
         ranges=[max(highs[i]-lows[i],abs(highs[i]-closes[i-1]),abs(lows[i]-closes[i-1])) for i in range(1,len(bars))]
         atr=sum(ranges[-14:])/min(14,len(ranges))
