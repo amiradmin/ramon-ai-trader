@@ -435,8 +435,17 @@ def _weighted_score(components: Mapping[str, float]) -> float:
 # Result helpers
 # ---------------------------------------------------------------------------
 
-def _check(checks: list[dict[str, Any]], name: str, passed: bool, detail: str) -> bool:
-    checks.append({"name": name, "passed": passed, "detail": detail})
+def _check(
+    checks: list[dict[str, Any]],
+    name: str,
+    passed: bool,
+    detail: str,
+    metrics: Mapping[str, Any] | None = None,
+) -> bool:
+    check = {"name": name, "passed": passed, "detail": detail}
+    if metrics:
+        check.update({"metrics": dict(metrics)})
+    checks.append(check)
     return passed
 
 
@@ -760,12 +769,12 @@ class OpportunityDetector:
         except InvalidMarketData as exc:
             _check(checks, "data_valid", False, exc.detail)
             return done(REJECTED, exc.reason, detail=exc.detail)
-        _check(checks, "data_valid", True, f"{len(bars.close)} completed bars")
+        _check(checks, "data_valid", True, f"{len(bars.close)} completed bars", metrics={"value": len(bars.close), "threshold": config.min_bars, "factor": "completed bars"})
 
         if market.get("last_bar_closed") is False:
-            _check(checks, "bar_complete", False, "the newest candle is still forming")
+            _check(checks, "bar_complete", False, "the newest candle is still forming", metrics={"value": 0, "threshold": 1, "factor": "closed candle (0/1)"})
             return done(DEFERRED, "LAST_BAR_NOT_CLOSED", detail="the newest candle is still forming")
-        _check(checks, "bar_complete", True, "accepted as completed by the Django decision endpoint contract")
+        _check(checks, "bar_complete", True, "accepted as completed by the Django decision endpoint contract", metrics={"value": 1, "threshold": 1, "factor": "closed candle (0/1)"})
 
         t = len(bars.close) - 1
         ind = _compute_indicators(bars, config)
@@ -807,12 +816,12 @@ class OpportunityDetector:
             f"{regime.label} (ADX {regime.adx:.1f}, EMA bias {regime.ema_bias}, structure {regime.structure})"
         )
         if regime.label == "RANGING":
-            _check(checks, "regime", False, regime_text)
+            _check(checks, "regime", False, regime_text, metrics={"value": round(regime.adx, 2), "threshold": config.adx_ranging, "factor": "ADX; ranging threshold"})
             return finish(REJECTED, "MARKET_RANGING", f"market is ranging: {regime_text}")
         if regime.label == "UNCERTAIN":
-            _check(checks, "regime", False, regime_text)
+            _check(checks, "regime", False, regime_text, metrics={"value": round(regime.adx, 2), "threshold": config.adx_trending, "factor": "ADX; trend threshold"})
             return finish(DEFERRED, "MARKET_UNCERTAIN", f"trend signals conflict or are unconfirmed: {regime_text}")
-        _check(checks, "regime", True, regime_text)
+        _check(checks, "regime", True, regime_text, metrics={"value": round(regime.adx, 2), "threshold": config.adx_trending, "factor": "ADX; trend threshold"})
 
         sign = 1 if regime.label == "BULLISH" else -1
         side = "BUY" if sign > 0 else "SELL"
@@ -821,19 +830,19 @@ class OpportunityDetector:
         opposite = "BEARISH" if sign > 0 else "BULLISH"
         if previous.label == opposite:
             detail = f"regime was {previous.label} {config.regime_lookback} bars ago; reversal not yet established"
-            _check(checks, "regime_stability", False, detail)
+            _check(checks, "regime_stability", False, detail, metrics={"value": config.regime_lookback, "threshold": config.regime_lookback, "factor": "regime lookback (bars)"})
             return finish(DEFERRED, "REGIME_REVERSAL_UNCONFIRMED", detail, side)
-        _check(checks, "regime_stability", True, f"regime {config.regime_lookback} bars ago was {previous.label}")
+        _check(checks, "regime_stability", True, f"regime {config.regime_lookback} bars ago was {previous.label}", metrics={"value": config.regime_lookback, "threshold": config.regime_lookback, "factor": "regime lookback (bars)"})
 
         # 2. Volatility -----------------------------------------------------
         vol_text = f"ATR is {atr_ratio:.2f}x its recent median"
         if atr_ratio < config.atr_ratio_min:
-            _check(checks, "volatility", False, vol_text + " (too quiet)")
+            _check(checks, "volatility", False, vol_text + " (too quiet)", metrics={"value": round(atr_ratio, 3), "threshold": f"{config.atr_ratio_min:.2f}–{config.atr_ratio_max:.2f}", "factor": "ATR / recent ATR median"})
             return finish(REJECTED, "VOLATILITY_TOO_LOW", vol_text + ", too quiet to trade", side)
         if atr_ratio > config.atr_ratio_max:
-            _check(checks, "volatility", False, vol_text + " (spike)")
+            _check(checks, "volatility", False, vol_text + " (spike)", metrics={"value": round(atr_ratio, 3), "threshold": f"{config.atr_ratio_min:.2f}–{config.atr_ratio_max:.2f}", "factor": "ATR / recent ATR median"})
             return finish(DEFERRED, "VOLATILITY_SPIKE", vol_text + ", wait for volatility to settle", side)
-        _check(checks, "volatility", True, vol_text)
+        _check(checks, "volatility", True, vol_text, metrics={"value": round(atr_ratio, 3), "threshold": f"{config.atr_ratio_min:.2f}–{config.atr_ratio_max:.2f}", "factor": "ATR / recent ATR median"})
 
         # 3. Pullback geometry, oriented so "up" is the trade direction ---------
         if sign > 0:
@@ -863,9 +872,9 @@ class OpportunityDetector:
         impulse_atr = impulse / atr
         if impulse_atr < config.min_impulse_atr:
             detail = f"impulse leg is {impulse_atr:.1f} ATR, below the {config.min_impulse_atr:.1f} ATR minimum"
-            _check(checks, "impulse", False, detail)
+            _check(checks, "impulse", False, detail, metrics={"value": round(impulse_atr, 3), "threshold": config.min_impulse_atr, "factor": "impulse leg (ATR)"})
             return finish(REJECTED, "IMPULSE_TOO_SMALL", detail, side)
-        _check(checks, "impulse", True, f"impulse leg of {impulse_atr:.1f} ATR")
+        _check(checks, "impulse", True, f"impulse leg of {impulse_atr:.1f} ATR", metrics={"value": round(impulse_atr, 3), "threshold": config.min_impulse_atr, "factor": "impulse leg (ATR)"})
 
         window = o_low[ih + 1:]
         pullback_low = min(window)
@@ -873,13 +882,13 @@ class OpportunityDetector:
         retracement = (o_high[ih] - pullback_low) / impulse
         if pullback_low <= o_low[il] or retracement > config.max_retracement:
             detail = f"pullback retraced {retracement:.0%} of the impulse; the trend structure is broken"
-            _check(checks, "pullback_depth", False, detail)
+            _check(checks, "pullback_depth", False, detail, metrics={"value": round(retracement * 100, 2), "threshold": f"{config.min_retracement * 100:.1f}–{config.max_retracement * 100:.1f}%", "factor": "impulse retracement (%)"})
             return finish(REJECTED, "PULLBACK_TOO_DEEP", detail, side)
         if retracement < config.min_retracement:
             detail = f"pullback retraced only {retracement:.0%} (minimum {config.min_retracement:.0%})"
-            _check(checks, "pullback_depth", False, detail)
+            _check(checks, "pullback_depth", False, detail, metrics={"value": round(retracement * 100, 2), "threshold": f"{config.min_retracement * 100:.1f}–{config.max_retracement * 100:.1f}%", "factor": "impulse retracement (%)"})
             return finish(DEFERRED, "PULLBACK_NOT_DEEP_ENOUGH", detail, side)
-        _check(checks, "pullback_depth", True, f"pullback retraced {retracement:.0%} of the impulse")
+        _check(checks, "pullback_depth", True, f"pullback retraced {retracement:.0%} of the impulse", metrics={"value": round(retracement * 100, 2), "threshold": f"{config.min_retracement * 100:.1f}–{config.max_retracement * 100:.1f}%", "factor": "impulse retracement (%)"})
 
         support = config.support_tolerance_atr * atr
         if any(o_close[j] < o_ema_slow[j] - support for j in range(ih + 1, t + 1)):
@@ -891,39 +900,39 @@ class OpportunityDetector:
         zone_gap_atr = max(0.0, pullback_low - o_ema_fast[ip]) / atr
         if zone_gap_atr > config.zone_tolerance_atr:
             detail = f"pullback stopped {zone_gap_atr:.2f} ATR above the fast EMA zone"
-            _check(checks, "value_zone", False, detail)
+            _check(checks, "value_zone", False, detail, metrics={"value": round(zone_gap_atr, 3), "threshold": config.zone_tolerance_atr, "factor": "gap to fast EMA zone (ATR)"})
             return finish(DEFERRED, "PULLBACK_NOT_IN_VALUE_ZONE", detail, side)
-        _check(checks, "value_zone", True, "pullback reached the fast EMA zone")
+        _check(checks, "value_zone", True, "pullback reached the fast EMA zone", metrics={"value": round(zone_gap_atr, 3), "threshold": config.zone_tolerance_atr, "factor": "gap to fast EMA zone (ATR)"})
         components["pullback"] = _pullback_component(retracement, zone_gap_atr, config)
 
         bars_since_low = t - ip
         if bars_since_low > config.max_bars_since_pullback_low:
             detail = f"pullback low was {bars_since_low} bars ago without a confirmed resumption"
-            _check(checks, "freshness", False, detail)
+            _check(checks, "freshness", False, detail, metrics={"value": bars_since_low, "threshold": config.max_bars_since_pullback_low, "factor": "bars since pullback low"})
             return finish(REJECTED, "SETUP_STALE", detail, side)
         resumed = bars_since_low >= 1 and o_close[t] > o_ema_fast[t] and o_close[t] > o_close[t - 1]
         if not resumed:
             detail = "pullback has not turned: waiting for a close back above the fast EMA and the prior close"
-            _check(checks, "resumption", False, detail)
+            _check(checks, "resumption", False, detail, metrics={"value": round(o_close[t], 5), "threshold": round(o_ema_fast[t], 5), "factor": "close vs fast EMA; prior-close confirmation also required"})
             return finish(DEFERRED, "AWAITING_RESUMPTION", detail, side)
-        _check(checks, "resumption", True, f"closed back above the fast EMA {bars_since_low} bar(s) after the pullback low")
+        _check(checks, "resumption", True, f"closed back above the fast EMA {bars_since_low} bar(s) after the pullback low", metrics={"value": round(o_close[t], 5), "threshold": round(o_ema_fast[t], 5), "factor": "close vs fast EMA"})
 
         rsi_dir = ind.rsi[t] if sign > 0 else 100.0 - ind.rsi[t]
         bounce_atr = (o_close[t] - pullback_low) / atr
         components["momentum"] = _momentum_component(rsi_dir, bounce_atr)
         if rsi_dir > config.rsi_overbought:
             detail = f"momentum is overextended (RSI {rsi_dir:.0f} in the trade direction)"
-            _check(checks, "momentum", False, detail)
+            _check(checks, "momentum", False, detail, metrics={"value": round(rsi_dir, 2), "threshold": config.rsi_overbought, "factor": "directional RSI"})
             return finish(DEFERRED, "MOMENTUM_OVEREXTENDED", detail, side)
-        _check(checks, "momentum", True, f"RSI {rsi_dir:.0f} in the trade direction")
+        _check(checks, "momentum", True, f"RSI {rsi_dir:.0f} in the trade direction", metrics={"value": round(rsi_dir, 2), "threshold": config.rsi_overbought, "factor": "directional RSI"})
 
         # 4. Score threshold ----------------------------------------------------
         score = _weighted_score(components)
         if score < self.minimum_score:
             detail = f"setup score {score:.2f} is below the minimum {self.minimum_score:.2f}"
-            _check(checks, "score", False, detail)
+            _check(checks, "score", False, detail, metrics={"value": round(score, 4), "threshold": self.minimum_score, "factor": "weighted setup score (0–1)"})
             return finish(REJECTED, "SETUP_SCORE_TOO_LOW", detail, side)
-        _check(checks, "score", True, f"setup score {score:.2f} >= {self.minimum_score:.2f}")
+        _check(checks, "score", True, f"setup score {score:.2f} >= {self.minimum_score:.2f}", metrics={"value": round(score, 4), "threshold": self.minimum_score, "factor": "weighted setup score (0–1)"})
 
         # 5. Duplicate suppression: one signal per impulse/pullback ----------------
         anchor_time = bars.times[ih]
