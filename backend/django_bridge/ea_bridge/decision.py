@@ -110,6 +110,7 @@ def decision(request):
         server_daily_loss_percent = None
         daily_baseline_day = ""
         daily_baseline_balance = None
+        daily_current_equity = None
 
         heartbeat = None
         if instance_id and account_login:
@@ -145,6 +146,7 @@ def decision(request):
                         raise ValueError("invalid broker day")
                     snapshot_balance = _num(account_snapshot["balance"], "telemetry balance")
                     snapshot_equity = _num(account_snapshot["equity"], "telemetry equity")
+                    daily_current_equity = snapshot_equity
                     request_balance = _num(p["account_balance"], "request balance")
                 except (KeyError, TypeError, ValueError, OverflowError):
                     account_state_reason = "ACCOUNT_BALANCE_UNAVAILABLE"
@@ -227,6 +229,14 @@ def decision(request):
             "bid": bid,
             "ask": ask,
             "point": point,
+          },
+          "daily_risk": {
+            "baseline_available": server_daily_loss_percent is not None,
+            "broker_day": daily_baseline_day,
+            "opening_balance": daily_baseline_balance,
+            "current_equity": daily_current_equity,
+            "loss_percent": server_daily_loss_percent,
+            "source": "SERVER_BASELINE_EQUITY_DRAWDOWN" if server_daily_loss_percent is not None else "UNAVAILABLE_FAIL_CLOSED",
           },
         }
         record, created = StrategyDecisionRecord.objects.update_or_create(
