@@ -59,7 +59,7 @@ flowchart TD
 | backend/ramon/preflight.py | آزمایش بارگذاری مدل و یک پیش‌بینی واقعی، بدون سفارش |
 | backend/ramon/history.py و replay.py | خواندن تاریخچه و ارزیابی ترتیبی آفلاین |
 | backend/ramon/train.py | ساخت checkpoint جدید با LoRA و ثبت تقسیم داده |
-| Dockerfile و compose.yaml | اجرای مدل و ابزارهای پیش‌بینی/بازپخش/آموزش در کانتینر CPU |
+| Dockerfile و docker-compose.yaml | اجرای مدل و ابزارهای پیش‌بینی/بازپخش/آموزش در کانتینر CPU |
 | Dockerfile.mt5 و scripts/mt5_container.sh | محیط اختیاری MT5 با Wine و صفحهٔ نصب در مرورگر محلی |
 | scripts/setup_local.sh | نصب محلی جایگزین، آزمایش مدل و کامپایل اکسپرت در Ubuntu/Wine |
 | tests/ | مجموعهٔ تست قدیمی عمداً حذف شده است؛ طراحی تست‌های جدید از ابتدا انجام می‌شود |
