@@ -10,7 +10,8 @@ class EATelemetryTests(TestCase):
     def payload(self):
         return {
             "protocol_version": "ramon-ea-command-v1",
-            "ea_version": "1.00",
+            "ea_version": "1.02",
+            "account_trade_mode": 0,
             "instance_id": "ea-telemetry-test",
             "account_login": "12345",
             "symbol": "XAUUSD_o",
