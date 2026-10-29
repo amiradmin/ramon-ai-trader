@@ -285,7 +285,7 @@ def decision(request):
                 stop_loss_value = None
                 take_profit_value = None
                 verdict_reason = "RISK_VERDICT_INCOMPLETE"
-        RiskVerdictRecord.objects.create(
+        verdict = RiskVerdictRecord.objects.create(
             decision_id=key,
             approved=risk_approved,
             reason_code=verdict_reason[:128],
@@ -304,10 +304,29 @@ def decision(request):
                 "risk_stage": risk_stage,
             },
         )
+        command = None
+        command_created = False
+        command_reason = "RISK_VERDICT_NOT_APPROVED" if not risk_approved else "COMMAND_CREATION_DISABLED"
+        if risk_approved:
+            from .command_producer import create_open_command
+            command, command_created, command_reason = create_open_command(
+                decision=record,
+                verdict=verdict,
+                instance_id=instance_id,
+                account_login=account_login,
+                server_name=server_name,
+            )
+            if command is not None:
+                verdict.details["command_created"] = True
+                verdict.save(update_fields=["details"])
         response = _compat(
-          record.action, record.rationale_code, key, bar_time, bid, ask,
-          atr, median, spread, confidence, risk_approved,
+          record.action, record.rationale_code, key, bar_time, bid, ask, atr, median,
+          spread, confidence, risk_approved,
         )
+        response["command_created"] = command_created
+        response["command_available"] = command is not None
+        response["command_reason"] = command_reason
+        response["command_id"] = command.command_id if command is not None else ""
         response["decision_record_created"] = created
         response["risk_inputs_complete"] = risk_guards_complete
         response["missing_risk_inputs"] = ",".join(missing_risk_inputs)
