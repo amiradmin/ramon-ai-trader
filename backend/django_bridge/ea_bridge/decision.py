@@ -6,7 +6,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 from .auth import BearerTokenRequired
 from django.utils import timezone
-from .models import StrategyDecisionRecord, EAHeartbeat
+from .models import AccountDailyBaseline, StrategyDecisionRecord, EAHeartbeat
 
 logger = logging.getLogger(__name__)
 from ramon_pipeline.signalflow.entry_timing import EntryTimer
@@ -105,7 +105,12 @@ def decision(request):
         # Strict API-only account-state validation. Legacy SignalFlow callers are unchanged.
         instance_id = str(p.get("instance_id", "")).strip()
         account_login = str(p.get("account_login", "")).strip()
+        server_name = str(p.get("server_name", "")).strip()
         account_state_reason = "ACCOUNT_IDENTITY_MISSING"
+        server_daily_loss_percent = None
+        daily_baseline_day = ""
+        daily_baseline_balance = None
+        daily_current_equity = None
 
         heartbeat = None
         if instance_id and account_login:
@@ -116,25 +121,37 @@ def decision(request):
             snapshot = heartbeat.payload if isinstance(heartbeat.payload, dict) else {}
             account_snapshot = snapshot.get("account", {})
             positions_snapshot = snapshot.get("positions", [])
+            broker_day_raw = snapshot.get("broker_day")
+            snapshot_server_name = str(snapshot.get("server_name", "")).strip()
 
             if age < 0 or age > 90:
                 account_state_reason = "ACCOUNT_TELEMETRY_STALE"
             elif heartbeat.account_login != account_login:
                 account_state_reason = "ACCOUNT_LOGIN_MISMATCH"
+            elif not server_name or heartbeat.server_name != server_name or snapshot_server_name != server_name:
+                account_state_reason = "ACCOUNT_SERVER_MISMATCH"
             elif heartbeat.symbol != symbol:
                 account_state_reason = "ACCOUNT_SYMBOL_MISMATCH"
             elif heartbeat.status != "TELEMETRY_OK" or not heartbeat.terminal_connected:
                 account_state_reason = "ACCOUNT_TELEMETRY_NOT_READY"
             elif not isinstance(account_snapshot, dict) or not isinstance(positions_snapshot, list):
                 account_state_reason = "ACCOUNT_SNAPSHOT_INVALID"
+            elif not isinstance(broker_day_raw, str):
+                account_state_reason = "DAILY_LOSS_BASELINE_UNAVAILABLE"
             else:
                 try:
+                    from datetime import date
+                    broker_day = date.fromisoformat(broker_day_raw)
+                    if broker_day.isoformat() != broker_day_raw:
+                        raise ValueError("invalid broker day")
                     snapshot_balance = _num(account_snapshot["balance"], "telemetry balance")
+                    snapshot_equity = _num(account_snapshot["equity"], "telemetry equity")
+                    daily_current_equity = snapshot_equity
                     request_balance = _num(p["account_balance"], "request balance")
                 except (KeyError, TypeError, ValueError, OverflowError):
                     account_state_reason = "ACCOUNT_BALANCE_UNAVAILABLE"
                 else:
-                    if snapshot_balance <= 0 or request_balance <= 0:
+                    if snapshot_balance <= 0 or snapshot_equity <= 0 or request_balance <= 0:
                         account_state_reason = "ACCOUNT_BALANCE_INVALID"
                     elif abs(snapshot_balance - request_balance) > 0.01:
                         account_state_reason = "ACCOUNT_BALANCE_MISMATCH"
@@ -143,7 +160,23 @@ def decision(request):
                         # calculate the risk of every open position.
                         account_state_reason = "OPEN_POSITION_RISK_UNVERIFIED"
                     else:
-                        account_state_reason = "DAILY_LOSS_BASELINE_UNAVAILABLE"
+                        baseline = AccountDailyBaseline.objects.filter(
+                            account_login=account_login,
+                            server_name=server_name,
+                            broker_day=broker_day,
+                        ).first()
+                        if baseline is None or baseline.opening_balance <= 0:
+                            account_state_reason = "DAILY_LOSS_BASELINE_UNAVAILABLE"
+                        else:
+                            daily_baseline_day = broker_day.isoformat()
+                            daily_baseline_balance = float(baseline.opening_balance)
+                            # Equity drawdown from the server-recorded opening balance
+                            # includes both realized and current floating losses.
+                            server_daily_loss_percent = max(
+                                0.0,
+                                (daily_baseline_balance - snapshot_equity) / daily_baseline_balance * 100.0,
+                            )
+                            account_state_reason = ""
 
         risk_guard_fields=("stop_level_points","take_profit_points","daily_loss_percent","open_risk_percent")
         missing_risk_inputs=[name for name in risk_guard_fields if p.get(name) is None]
@@ -157,23 +190,24 @@ def decision(request):
           "max_volume":_num(p.get("max_volume",0),"max_volume")}
         for name in risk_guard_fields:
             market[name]=_num(p[name],name) if p.get(name) is not None else None
+        # The client value is required for protocol compatibility, but never used to
+        # authorize trading. The daily-loss guard receives only the server-derived value.
+        market["daily_loss_percent"] = server_daily_loss_percent
         result=SignalFlowPipeline(entry_timer=EntryTimer(require_quote=True)).run(market)
-        action=result["action"] if result["approved"] and risk_guards_complete else "WAIT"
-        reason=("RISK_INPUTS_INCOMPLETE" if not risk_guards_complete else
-          account_state_reason if account_state_reason != "DAILY_LOSS_BASELINE_UNAVAILABLE"
-          or not heartbeat else
-          "DAILY_LOSS_BASELINE_UNAVAILABLE" if not result["approved"] else
-          "SIGNALFLOW_APPROVED" if result["approved"] else
-          next((s.get("reason","SIGNALFLOW_REJECTED") for s in
-          (result["stages"]["opportunities"],result["stages"]["entry_timing"],result["stages"]["risk_management"])
-          if not s.get("approved",False)),"SIGNALFLOW_REJECTED"))
-
-        # Daily loss is not yet independently verifiable from server-side history.
-        # Never let client-supplied daily_loss_percent authorize a directional result.
-        if account_state_reason or not heartbeat:
+        if not risk_guards_complete:
             action = "WAIT"
-            if risk_guards_complete:
-                reason = account_state_reason
+            reason = "RISK_INPUTS_INCOMPLETE"
+        elif account_state_reason:
+            action = "WAIT"
+            reason = account_state_reason
+        elif result["approved"]:
+            action = result["action"]
+            reason = "SIGNALFLOW_APPROVED"
+        else:
+            action = "WAIT"
+            reason = next((s.get("reason","SIGNALFLOW_REJECTED") for s in
+              (result["stages"]["opportunities"],result["stages"]["entry_timing"],result["stages"]["risk_management"])
+              if not s.get("approved",False)),"SIGNALFLOW_REJECTED")
         key=hashlib.sha256(f"{symbol}:{bar_time}:django-signalflow-v1".encode()).hexdigest()[:16]
         confidence=max(0.0,min(1.0,float(result["stages"]["opportunities"].get("score",min(setup,quality)))))
         median=closes[-1]+(atr*.1 if action=="BUY" else -atr*.1 if action=="SELL" else 0)
@@ -195,6 +229,14 @@ def decision(request):
             "bid": bid,
             "ask": ask,
             "point": point,
+          },
+          "daily_risk": {
+            "baseline_available": server_daily_loss_percent is not None,
+            "broker_day": daily_baseline_day,
+            "opening_balance": daily_baseline_balance,
+            "current_equity": daily_current_equity,
+            "loss_percent": server_daily_loss_percent,
+            "source": "SERVER_BASELINE_EQUITY_DRAWDOWN" if server_daily_loss_percent is not None else "UNAVAILABLE_FAIL_CLOSED",
           },
         }
         record, created = StrategyDecisionRecord.objects.update_or_create(
@@ -219,6 +261,11 @@ def decision(request):
         response["risk_inputs_received"] = ",".join(
           name for name in risk_guard_fields if name not in missing_risk_inputs
         )
+        response["daily_baseline_available"] = server_daily_loss_percent is not None
+        response["daily_baseline_day"] = daily_baseline_day
+        response["daily_baseline_balance"] = daily_baseline_balance
+        response["server_daily_loss_percent"] = server_daily_loss_percent
+        response["daily_loss_source"] = "SERVER_BASELINE_EQUITY_DRAWDOWN" if server_daily_loss_percent is not None else "UNAVAILABLE_FAIL_CLOSED"
         response["stages"] = result["stages"]
         return JsonResponse(response, json_dumps_params={"separators": (",", ":")})
     except (KeyError,TypeError,ValueError,OverflowError,json.JSONDecodeError) as exc:

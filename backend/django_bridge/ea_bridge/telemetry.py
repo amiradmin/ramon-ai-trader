@@ -3,17 +3,19 @@
 Telemetry is observational only and never grants trading authorization.
 """
 import json
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.conf import settings
 from django.db import transaction
+from django.utils import timezone
 from django.http import JsonResponse
 from django.utils.dateparse import parse_datetime
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from .auth import BearerTokenRequired
-from .models import EAHeartbeat, MarketBar
+from .models import AccountDailyBaseline, EAHeartbeat, MarketBar
 
 
 def _body(request):
@@ -82,10 +84,60 @@ def telemetry(request):
         positions = p.get("positions", [])
         if not isinstance(account, dict) or not isinstance(positions, list) or len(positions) > 500:
             raise ValueError("account object and positions array required")
+        server_name = str(p.get("server_name", "")).strip()[:128]
+        broker_day = None
+        broker_day_raw = p.get("broker_day")
+        if broker_day_raw not in (None, ""):
+            if not isinstance(broker_day_raw, str):
+                raise ValueError("broker_day must be YYYY-MM-DD")
+            try:
+                broker_day = date.fromisoformat(broker_day_raw)
+            except ValueError:
+                raise ValueError("broker_day must be YYYY-MM-DD") from None
+            if broker_day.isoformat() != broker_day_raw:
+                raise ValueError("broker_day must be YYYY-MM-DD")
+        account_balance = None
+        if broker_day is not None and server_name:
+            account_balance = _decimal(account.get("balance"), "account.balance")
+            if account_balance <= 0:
+                raise ValueError("account.balance must be positive for daily risk tracking")
     except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         return JsonResponse({"ok": False, "error": str(exc)}, status=400)
 
     with transaction.atomic():
+        # Establish a baseline only across an observed, continuous broker-day rollover.
+        # A missed rollover leaves the new day unbaselined and therefore fail-closed.
+        previous = EAHeartbeat.objects.select_for_update().filter(instance_id=instance_id).first()
+        if previous is not None and broker_day is not None and server_name and account_balance is not None:
+            previous_payload = previous.payload if isinstance(previous.payload, dict) else {}
+            previous_account = previous_payload.get("account", {})
+            previous_day_raw = previous_payload.get("broker_day")
+            previous_server = str(previous_payload.get("server_name", "")).strip()
+            gap = (timezone.now() - previous.last_seen).total_seconds()
+            try:
+                previous_day = date.fromisoformat(previous_day_raw) if isinstance(previous_day_raw, str) else None
+                previous_balance = _decimal(previous_account.get("balance"), "previous account.balance") if isinstance(previous_account, dict) else Decimal("0")
+            except (ValueError, TypeError):
+                previous_day, previous_balance = None, Decimal("0")
+            if (
+                previous.account_login == account_login
+                and previous.server_name == server_name
+                and previous_server == server_name
+                and previous_day is not None
+                and broker_day == previous_day + timedelta(days=1)
+                and 0 <= gap <= 90
+                and previous_balance > 0
+            ):
+                AccountDailyBaseline.objects.get_or_create(
+                    account_login=account_login,
+                    server_name=server_name,
+                    broker_day=broker_day,
+                    defaults={
+                        "opening_balance": previous_balance,
+                        "source_instance_id": instance_id,
+                    },
+                )
+
         for stamp, o, h, lo, c, vol in normalized_bars:
             MarketBar.objects.update_or_create(
                 source=instance_id, symbol=symbol, timeframe=timeframe, timestamp=stamp,
@@ -95,6 +147,7 @@ def telemetry(request):
             instance_id=instance_id,
             defaults={
                 "account_login": account_login,
+                "server_name": server_name,
                 "symbol": symbol,
                 "status": "TELEMETRY_OK",
                 "terminal_connected": True,
@@ -103,6 +156,9 @@ def telemetry(request):
                     "protocol_version": p.get("protocol_version", "ramon-ea-command-v1"),
                     "quote": {"bid": str(bid), "ask": str(ask), "point": str(point)},
                     "quote_time": p.get("quote_time"),
+                    "server_name": server_name,
+                    "broker_day": broker_day.isoformat() if broker_day else None,
+                    "broker_time": p.get("broker_time"),
                     "account": account,
                     "positions": positions,
                     "last_command_id": str(p.get("last_command_id", ""))[:128],

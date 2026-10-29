@@ -1,8 +1,10 @@
 import json
 import time
+from datetime import date, timedelta
 from unittest.mock import Mock, patch
 from django.test import TestCase, override_settings
-from .models import EAEvent, MarketBar
+from django.utils import timezone
+from .models import AccountDailyBaseline, EAEvent, EAHeartbeat, MarketBar, StrategyDecisionRecord
 from ramon_pipeline.management.commands.consume_ramon_streams import Command
 
 
@@ -122,6 +124,95 @@ class StreamPersistenceTests(TestCase):
         self.assertEqual(bar.timeframe, "M1")
         self.assertEqual(str(bar.close), "101.0000000000")
 
+class ServerDailyBaselineTelemetryTests(TestCase):
+    url = "/api/ea/v1/telemetry"
+    headers = {"HTTP_AUTHORIZATION": "Bearer test-token"}
+
+    def _payload(self, broker_day):
+        return {
+            "protocol_version": "ramon-ea-command-v1",
+            "instance_id": "baseline-rollover-ea",
+            "account_login": "98765432",
+            "server_name": "LiteFinance-MT5-Demo",
+            "broker_day": broker_day.isoformat(),
+            "broker_time": int(time.time()),
+            "symbol": "XAUUSD_o",
+            "timeframe": "M15",
+            "quote": {"bid": 2320.30, "ask": 2320.35, "point": 0.01},
+            "account": {"balance": 10100, "equity": 10100, "margin": 0, "free_margin": 10100, "currency": "USD"},
+            "positions": [],
+            "bars": [],
+        }
+
+    @override_settings(EA_BEARER_TOKEN="test-token")
+    def test_continuous_rollover_records_previous_balance_as_immutable_baseline(self):
+        yesterday = date.today() - timedelta(days=1)
+        EAHeartbeat.objects.create(
+            instance_id="baseline-rollover-ea",
+            account_login="98765432",
+            server_name="LiteFinance-MT5-Demo",
+            symbol="XAUUSD_o",
+            status="TELEMETRY_OK",
+            terminal_connected=True,
+            payload={
+                "server_name": "LiteFinance-MT5-Demo",
+                "broker_day": yesterday.isoformat(),
+                "account": {"balance": "10000.00", "equity": "10000.00"},
+                "positions": [],
+            },
+        )
+        EAHeartbeat.objects.filter(instance_id="baseline-rollover-ea").update(
+            last_seen=timezone.now() - timedelta(seconds=10)
+        )
+        response = self.client.post(
+            self.url,
+            data=json.dumps(self._payload(date.today())),
+            content_type="application/json",
+            **self.headers,
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        baseline = AccountDailyBaseline.objects.get(
+            account_login="98765432",
+            server_name="LiteFinance-MT5-Demo",
+            broker_day=date.today(),
+        )
+        self.assertEqual(str(baseline.opening_balance), "10000.00")
+        self.assertEqual(baseline.source_instance_id, "baseline-rollover-ea")
+
+    @override_settings(EA_BEARER_TOKEN="test-token")
+    def test_missed_rollover_does_not_invent_a_baseline(self):
+        yesterday = date.today() - timedelta(days=1)
+        EAHeartbeat.objects.create(
+            instance_id="baseline-rollover-ea",
+            account_login="98765432",
+            server_name="LiteFinance-MT5-Demo",
+            symbol="XAUUSD_o",
+            status="TELEMETRY_OK",
+            terminal_connected=True,
+            payload={
+                "server_name": "LiteFinance-MT5-Demo",
+                "broker_day": yesterday.isoformat(),
+                "account": {"balance": "10000.00", "equity": "10000.00"},
+                "positions": [],
+            },
+        )
+        EAHeartbeat.objects.filter(instance_id="baseline-rollover-ea").update(
+            last_seen=timezone.now() - timedelta(minutes=5)
+        )
+        response = self.client.post(
+            self.url,
+            data=json.dumps(self._payload(date.today())),
+            content_type="application/json",
+            **self.headers,
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertFalse(AccountDailyBaseline.objects.filter(
+            account_login="98765432",
+            server_name="LiteFinance-MT5-Demo",
+            broker_day=date.today(),
+        ).exists())
+
+
 class DjangoDecisionApiTests(TestCase):
     url="/api/ea/v1/decision"
     headers={"HTTP_AUTHORIZATION":"Bearer test-token"}
@@ -131,11 +222,14 @@ class DjangoDecisionApiTests(TestCase):
         EAHeartbeat.objects.create(
             instance_id="ea-decision-test",
             account_login="12345678",
+            server_name="LiteFinance-MT5-Demo",
             symbol="XAUUSD_o",
             status="TELEMETRY_OK",
             terminal_connected=True,
             trade_allowed=False,
             payload={
+                "server_name": "LiteFinance-MT5-Demo",
+                "broker_day": date.today().isoformat(),
                 "account": {"balance": "10000", "equity": "10000",
                             "margin": "0", "free_margin": "10000",
                             "currency": "USD"},
@@ -151,6 +245,7 @@ class DjangoDecisionApiTests(TestCase):
             c=2300+i*.08
             bars.append({"time":now-(256-i)*900,"open":c-.03,"high":c+.12,"low":c-.12,"close":c})
         return {"instance_id":"ea-decision-test","account_login":"12345678",
+          "server_name":"LiteFinance-MT5-Demo",
           "symbol":"XAUUSD_o","timeframe":"M15","bid":2320.30,"ask":2320.35,"point":.01,"bars":bars,
           "account_balance":10000,"risk_percent":.06,"point_value_per_lot":1,"volume_step":.01,"min_volume":.01,"max_volume":100,
           "stop_level_points":0,"take_profit_points":1000,"daily_loss_percent":0,"open_risk_percent":0}
@@ -263,6 +358,32 @@ class DjangoDecisionApiTests(TestCase):
         self.assertEqual(b["reason"],"DAILY_LOSS_BASELINE_UNAVAILABLE")
         self.assertFalse(b["trading_authorization"])
         self.assertFalse(b["execution_enabled"])
+
+    @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
+    def test_server_baseline_equity_drawdown_overrides_client_zero(self):
+        p = self.payload()
+        AccountDailyBaseline.objects.create(
+            account_login="12345678",
+            server_name="LiteFinance-MT5-Demo",
+            broker_day=date.today(),
+            opening_balance="10000.00",
+            source_instance_id="ea-decision-test",
+        )
+        heartbeat = EAHeartbeat.objects.get(instance_id="ea-decision-test")
+        heartbeat.payload["account"]["equity"] = "9600"
+        heartbeat.save(update_fields=["payload"])
+        p["daily_loss_percent"] = 0
+        r = self.client.post(self.url, data=json.dumps(p), content_type="application/json", **self.headers)
+        self.assertEqual(r.status_code, 200, r.content)
+        body = r.json()
+        self.assertEqual(body["decision"], "WAIT")
+        self.assertTrue(body["daily_baseline_available"])
+        self.assertEqual(body["daily_baseline_day"], date.today().isoformat())
+        self.assertAlmostEqual(body["server_daily_loss_percent"], 4.0, places=4)
+        self.assertEqual(body["daily_loss_source"], "SERVER_BASELINE_EQUITY_DRAWDOWN")
+        audit = StrategyDecisionRecord.objects.get(decision_id=body["sample_key"])
+        self.assertAlmostEqual(audit.features["daily_risk"]["loss_percent"], 4.0, places=4)
+        self.assertEqual(audit.features["daily_risk"]["source"], "SERVER_BASELINE_EQUITY_DRAWDOWN")
 
     @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
     def test_rejects_account_login_mismatch(self):
