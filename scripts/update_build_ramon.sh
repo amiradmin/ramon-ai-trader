@@ -20,7 +20,7 @@ info() { printf '\n[%s] %s\n' "$(date '+%H:%M:%S')" "$*"; }
 command -v git >/dev/null || die "git is required"
 command -v docker >/dev/null || die "docker is required"
 command -v curl >/dev/null || die "curl is required"
-command -v wine >/dev/null || die "wine is required to compile MQL5 on this host"
+command -v wine >/dev/null || die "wine is required to compile MQL5 on this host"\ncommand -v winepath >/dev/null || die "winepath is required to convert the EA path for MetaEditor"
 
 [[ -d "$REPO_DIR/.git" ]] || die "Repository not found at $REPO_DIR. Clone it first or set RAMON_REPO_DIR."
 cd "$REPO_DIR"
@@ -93,7 +93,7 @@ cp "$EA_SOURCE" "$EA_TARGET"
 rm -f "${EA_TARGET%.mq5}.log"
 export WINEPREFIX
 set +e
-compile_arg="/compile:\"$EA_TARGET\""\ntimeout 180s wine "$METAEDITOR" "$compile_arg" /log
+WINDOWS_EA_TARGET="$(winepath -w "$EA_TARGET")"\ncompile_arg="/compile:\"$WINDOWS_EA_TARGET\""\ntimeout 180s wine "$METAEDITOR" "$compile_arg" /log
 compile_status=$?
 set -e
 LOG_FILE="${EA_TARGET%.mq5}.log"
