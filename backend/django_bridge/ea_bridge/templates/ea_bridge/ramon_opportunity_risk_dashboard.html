@@ -269,7 +269,7 @@ function renderStructuralChecklist(decision) {
     ? `Latest opportunity: <strong>${esc(val(opportunity,"reason"))}</strong> · ${esc(val(opportunity,"explanation"))}`
     : "This decision was not evaluated from candle structure. The checklist is intentionally not marked as passed.";
   $("structuralChecklist").innerHTML = items.map(item =>
-    `<div class="structural-item ${item.css === "wait" ? "waiting" : ""}"><span class="structural-mark ${item.css}">${esc(item.label)}</span><div class="structural-copy"><strong>${esc(item.title)}</strong><p>${esc(item.detail)}</p>${item.metrics || ""}</div></div>`
+    `<div class="structural-item ${item.css === "wait" ? "waiting" : item.css === "blocked" ? "blocked" : ""}"><span class="structural-mark ${item.css}">${esc(item.label)}</span><div class="structural-copy"><strong>${esc(item.title)}</strong><p>${esc(item.detail)}</p>${item.metrics || ""}</div></div>`
   ).join("");
   if (!structural) {
     $("structuralChecklist").insertAdjacentHTML("afterbegin",
