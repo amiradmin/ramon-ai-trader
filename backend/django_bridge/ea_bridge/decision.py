@@ -112,6 +112,7 @@ def decision(request):
         daily_baseline_day = ""
         daily_baseline_balance = None
         daily_current_equity = None
+        account_snapshot_balance = None
 
         heartbeat = None
         if instance_id and account_login:
@@ -147,6 +148,7 @@ def decision(request):
                         raise ValueError("invalid broker day")
                     snapshot_balance = _num(account_snapshot["balance"], "telemetry balance")
                     snapshot_equity = _num(account_snapshot["equity"], "telemetry equity")
+                    account_snapshot_balance = snapshot_balance
                     daily_current_equity = snapshot_equity
                     request_balance = _num(p["account_balance"], "request balance")
                 except (KeyError, TypeError, ValueError, OverflowError):
@@ -231,6 +233,11 @@ def decision(request):
             "ask": ask,
             "point": point,
           },
+          "account_snapshot": {
+            "balance": account_snapshot_balance,
+            "equity": daily_current_equity,
+            "broker_day": daily_baseline_day,
+          },
           "daily_risk": {
             "baseline_available": server_daily_loss_percent is not None,
             "broker_day": daily_baseline_day,
@@ -285,7 +292,7 @@ def decision(request):
                 stop_loss_value = None
                 take_profit_value = None
                 verdict_reason = "RISK_VERDICT_INCOMPLETE"
-        RiskVerdictRecord.objects.create(
+        verdict = RiskVerdictRecord.objects.create(
             decision_id=key,
             approved=risk_approved,
             reason_code=verdict_reason[:128],
@@ -304,10 +311,29 @@ def decision(request):
                 "risk_stage": risk_stage,
             },
         )
+        command = None
+        command_created = False
+        command_reason = "RISK_VERDICT_NOT_APPROVED" if not risk_approved else "COMMAND_CREATION_DISABLED"
+        if risk_approved:
+            from .command_producer import create_open_command
+            command, command_created, command_reason = create_open_command(
+                decision=record,
+                verdict=verdict,
+                instance_id=instance_id,
+                account_login=account_login,
+                server_name=server_name,
+            )
+            if command is not None:
+                verdict.details["command_created"] = True
+                verdict.save(update_fields=["details"])
         response = _compat(
-          record.action, record.rationale_code, key, bar_time, bid, ask,
-          atr, median, spread, confidence, risk_approved,
+          record.action, record.rationale_code, key, bar_time, bid, ask, atr, median,
+          spread, confidence, risk_approved,
         )
+        response["command_created"] = command_created
+        response["command_available"] = bool(command is not None and command.state == "PENDING" and command.expires_at > timezone.now())
+        response["command_reason"] = command_reason
+        response["command_id"] = command.command_id if command is not None else ""
         response["decision_record_created"] = created
         response["risk_inputs_complete"] = risk_guards_complete
         response["missing_risk_inputs"] = ",".join(missing_risk_inputs)
