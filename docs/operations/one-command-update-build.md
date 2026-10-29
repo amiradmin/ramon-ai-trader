@@ -9,8 +9,8 @@ bash scripts/update_build_ramon.sh
 
 The script fast-forwards the selected Git branch, validates the single `docker-compose.yaml`, rebuilds and starts the Django/worker/Redis/TimescaleDB stack, applies forward migrations, runs Django checks, waits for `/healthz`, and compiles and installs both versioned EAs:
 
-- `mt5/RamonCommandEA_v1.02.mq5` -> `RamonCommandEA_v1.02.ex5`
-- `mt5/Ramon_v0.62.6.mq5` -> `Ramon_v0.62.6.ex5`
+- `mt5/RamonCommandEA_v1.03.mq5` -> `RamonCommandEA_v1.03.ex5`
+- `mt5/Ramon_v0.62.7.mq5` -> `Ramon_v0.62.7.ex5`
 
 The binaries and sources are installed under the active terminal's `MQL5/Experts` directory. Existing files are copied to `~/.local/share/ramon-ea-backups/<timestamp>/` before replacement. Each build requires MetaEditor's exact `Result: 0 errors, 0 warnings` summary and a non-empty output `.ex5`.
 
