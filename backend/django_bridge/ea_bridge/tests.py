@@ -161,6 +161,12 @@ class DjangoDecisionApiTests(TestCase):
         self.assertIn(b["decision"],("BUY","SELL","WAIT")); self.assertEqual(len(b["sample_key"]),16)
         self.assertEqual(b["signal_bar_time"],self.payload()["bars"][-1]["time"])
         self.assertFalse(b["trading_authorization"]); self.assertFalse(b["execution_enabled"])
+        self.assertTrue(b["risk_inputs_complete"])
+        self.assertEqual(b["missing_risk_inputs"], "")
+        self.assertEqual(
+            set(b["risk_inputs_received"].split(",")),
+            {"stop_level_points", "take_profit_points", "daily_loss_percent", "open_risk_percent"},
+        )
         for k in ("base_decision","base_reason","ensemble_ready","regime_probability","news_source","news_source_ready",
           "news_source_age_seconds","signal_bid","signal_ask","forecast_low","forecast_median","forecast_high","atr",
           "intrabar_confirmed","intrabar_direction","ai_trend_confirmed","ai_trend_direction","spread_points",
@@ -238,6 +244,12 @@ class DjangoDecisionApiTests(TestCase):
         b=r.json()
         self.assertEqual(b["decision"],"WAIT")
         self.assertEqual(b["reason"],"RISK_INPUTS_INCOMPLETE")
+        self.assertFalse(b["risk_inputs_complete"])
+        self.assertEqual(b["missing_risk_inputs"], "daily_loss_percent")
+        self.assertEqual(
+            set(b["risk_inputs_received"].split(",")),
+            {"stop_level_points", "take_profit_points", "open_risk_percent"},
+        )
         self.assertFalse(b["risk_approved_advisory_only"])
         self.assertFalse(b["trading_authorization"])
         self.assertFalse(b["execution_enabled"])
