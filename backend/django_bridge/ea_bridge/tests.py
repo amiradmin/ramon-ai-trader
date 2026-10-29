@@ -1,5 +1,6 @@
 import json
 import time
+from decimal import Decimal
 from datetime import date, timedelta
 from unittest.mock import Mock, patch
 from django.test import TestCase, override_settings
@@ -318,9 +319,9 @@ class DjangoDecisionApiTests(TestCase):
         verdict = RiskVerdictRecord.objects.filter(decision_id=body["sample_key"]).latest("created_at")
         self.assertTrue(verdict.approved)
         self.assertEqual(verdict.reason_code, "RISK_APPROVED_ADVISORY_ONLY")
-        self.assertEqual(verdict.approved_volume, "0.1")
-        self.assertEqual(verdict.stop_loss, "2319.0")
-        self.assertEqual(verdict.take_profit, "2330.35")
+        self.assertEqual(verdict.approved_volume, Decimal("0.1"))
+        self.assertEqual(verdict.stop_loss, Decimal("2319.0"))
+        self.assertEqual(verdict.take_profit, Decimal("2330.35"))
         self.assertFalse(verdict.details["execution_authorized"])
         self.assertFalse(verdict.details["command_created"])
 
