@@ -14,6 +14,32 @@ class EAHeartbeat(models.Model):
     class Meta:
         indexes = [models.Index(fields=["-last_seen"], name="ea_bridge_e_last_se_4b6f70_idx")]
 
+
+class AccountDailyBaseline(models.Model):
+    """Immutable server-recorded opening balance for one broker account/day.
+
+    Created only on a continuous, authenticated telemetry observation across a
+    broker-day rollover. Missing rollover observations deliberately leave the day
+    unbaselined, so the decision API remains fail-closed.
+    """
+    account_login = models.CharField(max_length=32)
+    server_name = models.CharField(max_length=128)
+    broker_day = models.DateField()
+    opening_balance = models.DecimalField(max_digits=24, decimal_places=2)
+    source_instance_id = models.CharField(max_length=128)
+    captured_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["account_login", "server_name", "broker_day"],
+                name="ea_daily_baseline_account_day_uniq",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["account_login", "server_name", "-broker_day"], name="ea_daily_base_lookup_idx"),
+        ]
+
 class EAEvent(models.Model):
     instance_id = models.CharField(max_length=128, db_index=True)
     event_id = models.CharField(max_length=128, unique=True)
