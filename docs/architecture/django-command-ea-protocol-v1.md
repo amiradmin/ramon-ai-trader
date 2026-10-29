@@ -4,7 +4,7 @@
 
 The Django command model and authenticated `commands/next` and `commands/ack` endpoints are implemented in `main`. Regression tests cover disabled-by-default behavior, account scoping, expiry, acknowledgement idempotency, state transitions, and bearer authentication. The production `mt5/RamonCommandEA.mq5` contains command polling and guarded broker-execution code, but the server setting deliberately remains fail-closed and no strategy-to-command producer exists. Therefore, a BUY/SELL decision is still advisory and cannot become an executable command through the normal pipeline.
 
-The decision endpoint now records a separate `RiskVerdictRecord` for audit. A risk verdict is not an order intent and always records `execution_authorized=false`; command creation remains unimplemented. Keep execution disabled until risk-verdict semantics, account-aware position sizing, command creation, duplicate/timeout reconciliation, MetaEditor compilation, and demo-account tests are complete. Static source checks or passing Django tests do not prove that broker execution is safe.
+The decision endpoint now records a separate `RiskVerdictRecord` for audit. A risk verdict is not an order intent and always records `execution_authorized=false`; command creation remains unimplemented. The runtime setting `RAMON_EA_COMMAND_EXECUTION_ENABLED` is now wired through Django and Compose but defaults to `0`. Keep it at `0` until risk-verdict semantics, account-aware position sizing, command creation, duplicate/timeout reconciliation, MetaEditor compilation, and demo-account tests are complete. Static source checks or passing Django tests do not prove that broker execution is safe.
 
 ## Goals
 
