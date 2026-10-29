@@ -682,15 +682,39 @@ bool ProcessCommand(const string response)
 
    if(action=="OPEN")
    {
-      ulong ticket=0;
-      string reason="";
-      if(!SafeOpen(payload,command_id,ticket,reason))
+      if(!AckCommand(command_id,"EXECUTING","LOCAL_GUARDS_PASSED"))
+      {
+         Print("RamonCommandEA: could not record execution start; no order submitted.");
+         return false;
+      }
+      if(TimeGMT()>expiry)
       {
          LastCommandId=command_id;
-         return AckCommand(command_id,"REJECTED",reason);
+         return AckCommand(command_id,"EXPIRED","COMMAND_EXPIRED_BEFORE_BROKER_SUBMISSION");
+      }
+
+      ulong ticket=0;
+      string reason="";
+      bool executed=SafeOpen(payload,command_id,ticket,reason);
+      uint retcode=0;
+      ulong deal=0;
+      double fill_price=0.0;
+      double fill_volume=0.0;
+      if(StringFind(reason,"BROKER_")==0)
+      {
+         retcode=Trade.ResultRetcode();
+         deal=Trade.ResultDeal();
+         fill_price=Trade.ResultPrice();
+         fill_volume=Trade.ResultVolume();
       }
       LastCommandId=command_id;
-      return AckCommand(command_id,"EXECUTED",reason,ticket);
+      if(executed)
+         return AckCommand(command_id,"EXECUTED",reason,ticket,retcode,deal,fill_price,fill_volume);
+      if(StringFind(reason,"BROKER_RESULT_RECONCILIATION_REQUIRED_")==0)
+         return AckCommand(command_id,"RECONCILIATION_REQUIRED",reason,ticket,retcode,deal,fill_price,fill_volume);
+      if(StringFind(reason,"BROKER_REJECTED_")==0)
+         return AckCommand(command_id,"FAILED",reason,ticket,retcode,deal,fill_price,fill_volume);
+      return AckCommand(command_id,"REJECTED",reason);
    }
 
    if(action=="CLOSE")
@@ -703,15 +727,31 @@ bool ProcessCommand(const string response)
          return AckCommand(command_id,"REJECTED",
                            "POSITION_NOT_FOUND_OR_SYMBOL_MISMATCH");
       }
-      if(!Trade.PositionClose(ticket))
+      if(!AckCommand(command_id,"EXECUTING","LOCAL_POSITION_CHECK_PASSED"))
+      {
+         Print("RamonCommandEA: could not record close start; no close submitted.");
+         return false;
+      }
+      if(TimeGMT()>expiry)
       {
          LastCommandId=command_id;
-         return AckCommand(command_id,"FAILED",
-             "BROKER_CLOSE_FAILED_"+IntegerToString((int)Trade.ResultRetcode()),
-             ticket);
+         return AckCommand(command_id,"EXPIRED","COMMAND_EXPIRED_BEFORE_BROKER_SUBMISSION",ticket);
       }
+      bool submitted=Trade.PositionClose(ticket);
+      uint retcode=Trade.ResultRetcode();
+      ulong deal=Trade.ResultDeal();
+      double fill_price=Trade.ResultPrice();
+      double fill_volume=Trade.ResultVolume();
       LastCommandId=command_id;
-      return AckCommand(command_id,"EXECUTED","BROKER_CLOSE_ACCEPTED",ticket);
+      if(submitted && retcode==TRADE_RETCODE_DONE)
+         return AckCommand(command_id,"EXECUTED","BROKER_CLOSE_DONE",ticket,retcode,deal,fill_price,fill_volume);
+      if(retcode==TRADE_RETCODE_DONE_PARTIAL || retcode==TRADE_RETCODE_PLACED)
+         return AckCommand(command_id,"RECONCILIATION_REQUIRED",
+             "BROKER_CLOSE_REQUIRES_RECONCILIATION_"+IntegerToString((int)retcode),
+             ticket,retcode,deal,fill_price,fill_volume);
+      return AckCommand(command_id,"FAILED",
+          "BROKER_CLOSE_FAILED_"+IntegerToString((int)retcode),
+          ticket,retcode,deal,fill_price,fill_volume);
    }
 
    if(action=="MODIFY_SLTP")
@@ -731,15 +771,33 @@ bool ProcessCommand(const string response)
          LastCommandId=command_id;
          return AckCommand(command_id,"REJECTED","INVALID_SLTP");
       }
-      if(!Trade.PositionModify(ticket,sl,tp))
+      if(!AckCommand(command_id,"EXECUTING","LOCAL_POSITION_CHECK_PASSED"))
+      {
+         Print("RamonCommandEA: could not record modify start; no modification submitted.");
+         return false;
+      }
+      if(TimeGMT()>expiry)
       {
          LastCommandId=command_id;
-         return AckCommand(command_id,"FAILED",
-             "BROKER_MODIFY_FAILED_"+IntegerToString((int)Trade.ResultRetcode()),
-             ticket);
+         return AckCommand(command_id,"EXPIRED","COMMAND_EXPIRED_BEFORE_BROKER_SUBMISSION",ticket);
       }
+      bool submitted=Trade.PositionModify(ticket,sl,tp);
+      uint retcode=Trade.ResultRetcode();
+      ulong deal=Trade.ResultDeal();
+      double fill_price=Trade.ResultPrice();
+      double fill_volume=Trade.ResultVolume();
       LastCommandId=command_id;
-      return AckCommand(command_id,"EXECUTED","BROKER_MODIFY_ACCEPTED",ticket);
+      if(submitted && (retcode==TRADE_RETCODE_DONE || retcode==TRADE_RETCODE_NO_CHANGES))
+         return AckCommand(command_id,"EXECUTED",
+             retcode==TRADE_RETCODE_NO_CHANGES ? "BROKER_MODIFY_NO_CHANGES" : "BROKER_MODIFY_DONE",
+             ticket,retcode,deal,fill_price,fill_volume);
+      if(retcode==TRADE_RETCODE_DONE_PARTIAL || retcode==TRADE_RETCODE_PLACED)
+         return AckCommand(command_id,"RECONCILIATION_REQUIRED",
+             "BROKER_MODIFY_REQUIRES_RECONCILIATION_"+IntegerToString((int)retcode),
+             ticket,retcode,deal,fill_price,fill_volume);
+      return AckCommand(command_id,"FAILED",
+          "BROKER_MODIFY_FAILED_"+IntegerToString((int)retcode),
+          ticket,retcode,deal,fill_price,fill_volume);
    }
 
    LastCommandId=command_id;
