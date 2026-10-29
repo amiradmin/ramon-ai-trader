@@ -86,6 +86,12 @@ def telemetry(request):
         if not isinstance(account, dict) or not isinstance(positions, list) or len(positions) > 500:
             raise ValueError("account object and positions array required")
         server_name = str(p.get("server_name", "")).strip()[:128]
+        account_trade_mode_raw = p.get("account_trade_mode")
+        account_trade_mode = None
+        if account_trade_mode_raw is not None:
+            if type(account_trade_mode_raw) is not int or account_trade_mode_raw not in (0, 1, 2):
+                raise ValueError("account_trade_mode must be integer 0 (demo), 1 (contest), or 2 (real)")
+            account_trade_mode = account_trade_mode_raw
         broker_day = None
         broker_day_raw = p.get("broker_day")
         if broker_day_raw not in (None, ""):
