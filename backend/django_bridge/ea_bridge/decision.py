@@ -324,7 +324,7 @@ def decision(request):
           spread, confidence, risk_approved,
         )
         response["command_created"] = command_created
-        response["command_available"] = command is not None
+        response["command_available"] = bool(command is not None and command.state == "PENDING" and command.expires_at > timezone.now())
         response["command_reason"] = command_reason
         response["command_id"] = command.command_id if command is not None else ""
         response["decision_record_created"] = created
