@@ -14,6 +14,7 @@ input int BarsToSend = 128;
 input int RequestTimeoutMs = 5000;
 input int MaxSpreadPoints = 80;
 input double MaxRiskMoney = 5.0;           // Account-currency risk ceiling per OPEN command.
+input ulong MagicNumber = 26092214;        // Distinct identifier for Django-command orders.
 
 CTrade Trade;
 string LastCommandId = "";
@@ -510,9 +511,20 @@ string BuildTelemetry()
       +"\"last_command_id\":\""+JsonEscape(LastCommandId)+"\",\"bars\":"+BuildBarsJson()+"}";
 }
 
-bool AckCommand(const string command_id,const string state,const string detail,const ulong ticket=0)
+bool AckCommand(const string command_id,const string state,const string detail,
+                const ulong ticket=0,const uint broker_retcode=0,
+                const ulong deal_ticket=0,const double fill_price=0.0,
+                const double fill_volume=0.0)
 {
-   string result="{\"detail\":\""+JsonEscape(detail)+"\",\"broker_ticket\":\""+IntegerToString((long)ticket)+"\"}";
+   string description=(broker_retcode==0 ? "" : Trade.ResultRetcodeDescription());
+   string result="{\"detail\":\""+JsonEscape(detail)+"\","
+      +"\"broker_ticket\":\""+IntegerToString((long)ticket)+"\","
+      +"\"broker_order\":\""+IntegerToString((long)Trade.ResultOrder())+"\","
+      +"\"broker_deal\":\""+IntegerToString((long)deal_ticket)+"\","
+      +"\"retcode\":"+IntegerToString((long)broker_retcode)+","
+      +"\"retcode_description\":\""+JsonEscape(description)+"\","
+      +"\"fill_price\":"+DoubleToString(fill_price,_Digits)+","
+      +"\"fill_volume\":"+DoubleToString(fill_volume,8)+"}";
    string body="{\"command_id\":\""+JsonEscape(command_id)+"\","
       +"\"instance_id\":\""+JsonEscape(InstanceId)+"\","
       +"\"account_login\":\""+IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN))+"\","
@@ -557,13 +569,24 @@ bool SafeOpen(const string command_json,const string command_id,ulong &ticket_ou
    if(!OrderCalcProfit(order_type,_Symbol,volume,entry,sl,loss) || loss>=0 || MathAbs(loss)>MaxRiskMoney)
    { reason="RISK_LIMIT_OR_CALCULATION_FAILED"; return false; }
 
-   bool ok=false;
-   if(side=="BUY") ok=Trade.Buy(volume,_Symbol,0,sl,tp,"RamonCmd:"+command_id);
-   else ok=Trade.Sell(volume,_Symbol,0,sl,tp,"RamonCmd:"+command_id);
-   if(!ok) { reason="BROKER_REJECTED_"+IntegerToString((int)Trade.ResultRetcode()); return false; }
+   bool submitted=false;
+   if(side=="BUY") submitted=Trade.Buy(volume,_Symbol,0,sl,tp,"RamonCmd:"+command_id);
+   else submitted=Trade.Sell(volume,_Symbol,0,sl,tp,"RamonCmd:"+command_id);
+
+   uint retcode=Trade.ResultRetcode();
    ticket_out=Trade.ResultOrder();
-   reason="BROKER_ACCEPTED";
-   return true;
+   if(submitted && retcode==TRADE_RETCODE_DONE)
+   {
+      reason="BROKER_DONE";
+      return true;
+   }
+   if(retcode==TRADE_RETCODE_DONE_PARTIAL || retcode==TRADE_RETCODE_PLACED)
+   {
+      reason="BROKER_RESULT_RECONCILIATION_REQUIRED_"+IntegerToString((int)retcode);
+      return false;
+   }
+   reason="BROKER_REJECTED_"+IntegerToString((int)retcode);
+   return false;
 }
 
 bool LocalExecutionPermitted(string &reason)
