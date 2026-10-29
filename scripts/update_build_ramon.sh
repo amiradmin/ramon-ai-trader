@@ -97,8 +97,15 @@ rm -f "$LOG_FILE" "$EX5_TARGET"
 export WINEPREFIX
 set +e
 WINDOWS_EA_TARGET="$(winepath -w "$EA_TARGET")"
-compile_arg="/compile:\"$WINDOWS_EA_TARGET\""
-timeout 180s wine "$METAEDITOR" "$compile_arg" /log
+[[ -n "$WINDOWS_EA_TARGET" ]] || die "winepath returned an empty Windows source path."
+# EA_TARGET is under the standard MT5 data path and contains no spaces. Do not
+# embed literal quote characters in the /compile argument: under Wine they can
+# be passed through as part of the switch and MetaEditor may exit 0 without
+# compiling or writing the expected .log/.ex5 files.
+[[ "$WINDOWS_EA_TARGET" != *" "* ]] || die "The converted EA source path contains spaces; use a no-space staging path before compiling: $WINDOWS_EA_TARGET"
+info "MetaEditor executable: $METAEDITOR"
+info "Windows source path: $WINDOWS_EA_TARGET"
+timeout 180s wine "$METAEDITOR" "/compile:$WINDOWS_EA_TARGET" /log
 compile_status=$?
 set -e
 [[ -f "$LOG_FILE" ]] || die "MetaEditor produced no log (exit=$compile_status). Previous files, if any, are backed up in $BACKUP_DIR."

@@ -21,9 +21,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Validate one-command update script syntax
+      - name: Validate one-command update script and compiler invocation
         shell: bash
-        run: bash -n scripts/update_build_ramon.sh
+        run: |
+          set -euo pipefail
+          bash -n scripts/update_build_ramon.sh
+          grep -Fq 'wine "$METAEDITOR" "/compile:$WINDOWS_EA_TARGET" /log' scripts/update_build_ramon.sh || {
+            echo "FAIL: Wine MetaEditor must receive the unquoted no-space /compile:<Windows path> argument." >&2
+            exit 1
+          }
+          if grep -Fq 'compile_arg="/compile:\\"$WINDOWS_EA_TARGET\\""' scripts/update_build_ramon.sh; then
+            echo "FAIL: do not embed literal quote characters in the Wine /compile argument." >&2
+            exit 1
+          fi
       - name: Check safety-critical source contracts
         shell: bash
         run: |
