@@ -283,7 +283,7 @@ class DjangoDecisionApiTests(TestCase):
         self.assertFalse(verdict.details["execution_authorized"])
         self.assertFalse(verdict.details["command_created"])
         if not verdict.approved:
-            self.assertEqual(str(verdict.approved_volume), "0")
+            self.assertEqual(verdict.approved_volume, 0)
     @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
     def test_same_bar_record_refreshes_when_quote_changes(self):
         payload = self.payload()
