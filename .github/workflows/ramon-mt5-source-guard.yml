@@ -87,10 +87,28 @@ jobs:
           Write-Output "MetaEditor located at $metaEditor (installer exit code $installExitCode)"
 
           $terminalRoot = Split-Path $metaEditor
-          $mql5Root = Join-Path $terminalRoot "MQL5"
-          if (-not (Test-Path (Join-Path $mql5Root "Include\Trade\Trade.mqh"))) {
-            throw "MetaTrader standard MQL5 include library is missing under $mql5Root"
+          $terminalExe = Join-Path $terminalRoot "terminal64.exe"
+          if (Test-Path $terminalExe) {
+            $terminalProcess = Start-Process -FilePath $terminalExe -ArgumentList "/portable" -PassThru
+            Start-Sleep -Seconds 25
+            if (-not $terminalProcess.HasExited) {
+              Stop-Process -Id $terminalProcess.Id -Force -ErrorAction SilentlyContinue
+            }
           }
+
+          $mql5Roots = @((Join-Path $terminalRoot "MQL5"))
+          $terminalDataRoot = Join-Path $env:APPDATA "MetaQuotes\Terminal"
+          if (Test-Path $terminalDataRoot) {
+            $mql5Roots += Get-ChildItem $terminalDataRoot -Directory -ErrorAction SilentlyContinue |
+              ForEach-Object { Join-Path $_.FullName "MQL5" }
+          }
+          $mql5Root = $mql5Roots |
+            Where-Object { Test-Path (Join-Path $_ "Include\Trade\Trade.mqh") } |
+            Select-Object -First 1
+          if (-not $mql5Root) {
+            throw "MetaTrader standard MQL5 include library was not initialized by the terminal"
+          }
+          Write-Output "Using MQL5 include root $mql5Root"
           $expertDir = Join-Path $mql5Root "Experts\RamonCI"
           New-Item -ItemType Directory -Force -Path $expertDir | Out-Null
 
