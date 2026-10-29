@@ -1,6 +1,8 @@
 import json
 from datetime import timedelta
 
+from .command_producer import _is_demo_account
+
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
