@@ -56,7 +56,13 @@ class Command(BaseCommand):
             raise CommandError("--opening-balance must be a positive decimal amount") from None
         if not opening_balance.is_finite() or opening_balance <= 0:
             raise CommandError("--opening-balance must be a positive finite decimal amount")
-        opening_balance = opening_balance.quantize(Decimal("0.01"))
+        # AccountDailyBaseline.opening_balance has max_digits=24 and decimal_places=2.
+        if opening_balance.adjusted() > 21:
+            raise CommandError("--opening-balance exceeds the supported precision")
+        try:
+            opening_balance = opening_balance.quantize(Decimal("0.01"))
+        except InvalidOperation:
+            raise CommandError("--opening-balance exceeds the supported precision") from None
 
         lookup = {
             "account_login": account_login,
@@ -65,7 +71,7 @@ class Command(BaseCommand):
         }
         try:
             with transaction.atomic():
-                baseline, created = AccountDailyBaseline.objects.get_or_create(
+                _, created = AccountDailyBaseline.objects.get_or_create(
                     **lookup,
                     defaults={
                         "opening_balance": opening_balance,
