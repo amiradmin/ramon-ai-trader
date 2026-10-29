@@ -97,8 +97,8 @@ export WINEPREFIX
 set +e
 WINDOWS_EA_TARGET="$(winepath -w "$EA_TARGET")"
 WINDOWS_LOG_FILE="$(winepath -w "$LOG_FILE")"
-compile_arg="/compile:\\"$WINDOWS_EA_TARGET\\""
-log_arg="/log:\\"$WINDOWS_LOG_FILE\\""
+compile_arg="/compile:\"$WINDOWS_EA_TARGET\""
+log_arg="/log:\"$WINDOWS_LOG_FILE\""
 timeout 180s wine "$METAEDITOR" "$compile_arg" "$log_arg"
 compile_status=$?
 set -e
