@@ -87,7 +87,11 @@ jobs:
           Write-Output "MetaEditor located at $metaEditor (installer exit code $installExitCode)"
 
           $terminalRoot = Split-Path $metaEditor
-          $expertDir = Join-Path $terminalRoot "MQL5\Experts\RamonCI"
+          $mql5Root = Join-Path $terminalRoot "MQL5"
+          if (-not (Test-Path (Join-Path $mql5Root "Include\Trade\Trade.mqh"))) {
+            throw "MetaTrader standard MQL5 include library is missing under $mql5Root"
+          }
+          $expertDir = Join-Path $mql5Root "Experts\RamonCI"
           New-Item -ItemType Directory -Force -Path $expertDir | Out-Null
 
           $sources = Get-ChildItem "mt5" -Filter "RamonCommandEA*.mq5" -File
@@ -103,7 +107,7 @@ jobs:
             if (Test-Path $logPath) { Remove-Item $logPath -Force }
             if (Test-Path $ex5Path) { Remove-Item $ex5Path -Force }
 
-            $arguments = '/compile:"' + $target + '" /log'
+            $arguments = '/compile:"' + $target + '" /include:"' + $mql5Root + '" /log'
             $compileProcess = Start-Process -FilePath $metaEditor -ArgumentList $arguments -Wait -PassThru
             if (-not (Test-Path $logPath)) {
               throw "MetaEditor did not create a compilation log for $($source.Name); process exit code $($compileProcess.ExitCode)"
