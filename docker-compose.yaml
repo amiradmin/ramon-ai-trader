@@ -1,17 +1,116 @@
-
-name: ramon-ai-trader-bridge
+name: ramon
 
 services:
+  django:
+    build:
+      context: .
+      dockerfile: backend/django_bridge/Dockerfile
+    container_name: ramon-django
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    environment:
+      DJANGO_SETTINGS_MODULE: ramon_django.settings
+      DJANGO_DEBUG: "0"
+      DJANGO_ALLOWED_HOSTS: "127.0.0.1,localhost,django"
+      DJANGO_DB_ENGINE: postgresql
+      DJANGO_DB_HOST: timescaledb
+      DJANGO_DB_PORT: "5432"
+      DJANGO_DB_NAME: ${POSTGRES_DB:-ramon}
+      DJANGO_DB_USER: ${POSTGRES_USER:-ramon}
+      DJANGO_DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      RAMON_REDIS_URL: redis://redis:6379/0
+      RAMON_DJANGO_DECISION_ENABLED: "1"
+      RAMON_PIPELINE_INGEST_ENABLED: "1"
+    ports:
+      - "127.0.0.1:8017:8016"
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ramon_backend
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8016/healthz', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/django_bridge/Dockerfile
+    container_name: ramon-worker
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    environment:
+      DJANGO_SETTINGS_MODULE: ramon_django.settings
+      DJANGO_DEBUG: "0"
+      DJANGO_ALLOWED_HOSTS: "127.0.0.1,localhost,django"
+      DJANGO_DB_ENGINE: postgresql
+      DJANGO_DB_HOST: timescaledb
+      DJANGO_DB_PORT: "5432"
+      DJANGO_DB_NAME: ${POSTGRES_DB:-ramon}
+      DJANGO_DB_USER: ${POSTGRES_USER:-ramon}
+      DJANGO_DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      RAMON_REDIS_URL: redis://redis:6379/0
+      RAMON_REDIS_CONSUMER: ramon-worker-1
+      RAMON_PIPELINE_INGEST_ENABLED: "1"
+    command:
+      - python
+      - manage.py
+      - consume_ramon_streams
+      - --count
+      - "100"
+      - --block-ms
+      - "1000"
+    depends_on:
+      django:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    networks:
+      - ramon_backend
+
+  redis:
+    image: redis:7-alpine
+    container_name: ramon-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - ramon_backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
   timescaledb:
     image: timescale/timescaledb:latest-pg17
+    container_name: ramon-timescaledb
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ramon_django
-      POSTGRES_USER: ramon_django
-      POSTGRES_PASSWORD: ${RAMON_PG_PASSWORD:?Set RAMON_PG_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-ramon}
+      POSTGRES_USER: ${POSTGRES_USER:-ramon}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     volumes:
       - timescale_data:/var/lib/postgresql/data
-      - ./backend/django_bridge/001-timescaledb.sql:/docker-entrypoint-initdb.d/001-timescaledb.sql:ro
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - ramon_backend
     healthcheck:
       test:
         - CMD-SHELL
@@ -20,57 +119,11 @@ services:
       timeout: 5s
       retries: 10
       start_period: 20s
-    networks:
-      - backend
-
-  django-bridge:
-    build:
-      context: .
-      dockerfile: backend/django_bridge/Dockerfile
-    image: ramon-django-bridge:local
-    init: true
-    restart: unless-stopped
-    depends_on:
-      timescaledb:
-        condition: service_healthy
-    environment:
-      DJANGO_ALLOWED_HOSTS: "127.0.0.1,localhost,django-bridge"
-      DJANGO_DEBUG: "0"
-      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY in .env}
-      RAMON_EA_BEARER_TOKEN: ${RAMON_EA_BEARER_TOKEN:?Set RAMON_EA_BEARER_TOKEN in .env}
-      DJANGO_DB_ENGINE: postgresql
-      DJANGO_DB_NAME: ramon_django
-      DJANGO_DB_USER: ramon_django
-      DJANGO_DB_PASSWORD: ${RAMON_PG_PASSWORD:?Set RAMON_PG_PASSWORD in .env}
-      DJANGO_DB_HOST: timescaledb
-      DJANGO_DB_PORT: "5432"
-    ports:
-      - "127.0.0.1:8016:8016"
-    volumes:
-      # Preserve the old SQLite database volume for rollback/recovery.
-      - type: volume
-        source: ramon_django_data
-        target: /legacy-data
-        read_only: true
-    healthcheck:
-      test:
-        - CMD
-        - python
-        - -c
-        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8016/healthz', timeout=3).read()"
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    networks:
-      - backend
 
 networks:
-  backend:
-    name: ramon-ai-trader-bridge_backend
+  ramon_backend:
+    driver: bridge
 
 volumes:
   timescale_data:
-    name: ramon-ai-trader-bridge_timescale_data
-  ramon_django_data:
-    name: ramon-ai-trader-bridge_ramon_django_data
+  redis_data:
