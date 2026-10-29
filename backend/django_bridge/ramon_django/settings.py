@@ -48,6 +48,8 @@ EA_BEARER_TOKEN = os.environ.get("RAMON_EA_BEARER_TOKEN", "")
 EA_MAX_BODY_BYTES = int(os.environ.get("RAMON_EA_MAX_BODY_BYTES", "65536"))
 RAMON_PIPELINE_INGEST_ENABLED = os.environ.get("RAMON_PIPELINE_INGEST_ENABLED", "0") == "1"
 RAMON_DJANGO_DECISION_ENABLED = os.environ.get("RAMON_DJANGO_DECISION_ENABLED", "1") == "1"
+# Command delivery is an explicit opt-in; never enable it by default.
+RAMON_EA_COMMAND_EXECUTION_ENABLED = os.environ.get("RAMON_EA_COMMAND_EXECUTION_ENABLED", "0") == "1"
 RAMON_REDIS_URL = os.environ.get("RAMON_REDIS_URL", "redis://127.0.0.1:6379/0")
 RAMON_REDIS_MARKET_MAXLEN = int(os.environ.get("RAMON_REDIS_MARKET_MAXLEN", "100000"))
 RAMON_REDIS_CONSUMER = os.environ.get("RAMON_REDIS_CONSUMER", "ramon-worker-1")
