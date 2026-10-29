@@ -65,11 +65,22 @@ Every stage result contains `approved` (bool) and `reason` (stable code), plus:
 * **Thresholds are untuned priors** (`OpportunityConfig`, `EntryTimingConfig`, `RiskConfig`).
   Validate them out-of-sample before trusting them.
 
-## Wiring status
+## Django decision integration
 
-The Django decision endpoint (`ea_bridge/decision.py`) still sends only `trend` / `setup_score`, so it
-uses the legacy path. To use the structural path add `bars`, `symbol`, `timeframe`, `bid`, `ask` and
-`point` to its market dict. Durable outcome storage needs a store implementing `add`, `get`, `all`.
+The Django decision endpoint (`ea_bridge/decision.py`) passes validated completed M15 candles
+(oldest first), the symbol/timeframe, current bid/ask/point, and account-sizing inputs into
+`SignalFlowPipeline`. Because the `bars` field is present, opportunities use the structural path;
+legacy `trend` and `setup_score` values remain diagnostics only.
+
+The endpoint persists one `StrategyDecisionRecord` per symbol/completed-bar timestamp and refreshes
+that record when the quote changes within the same candle. The record captures the structural stage
+results and market snapshot for audit. The endpoint is advisory: `trading_authorization=False` and
+`execution_enabled=False`; EA authorization gates remain authoritative. Daily-loss baseline and
+account-state checks fail closed. Statistical forecasting remains opt-in and off by default.
+
+Durable outcome storage for the learning module still needs a store implementing `add`, `get`, and
+`all`. The structural thresholds are untuned priors and require out-of-sample and forward validation;
+passing tests does not establish profitability.
 
 ## Tests
 

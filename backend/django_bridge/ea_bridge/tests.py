@@ -277,6 +277,31 @@ class DjangoDecisionApiTests(TestCase):
             check["name"] == "bar_complete" and check["passed"] is True
             for check in opportunity["checks"]
         ))
+        self.assertEqual(record.model_version, "django-signalflow-structural-v2")
+    @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
+    def test_same_bar_record_refreshes_when_quote_changes(self):
+        payload = self.payload()
+        first = self.client.post(
+            self.url, data=json.dumps(payload), content_type="application/json", **self.headers
+        )
+        self.assertEqual(first.status_code, 200, first.content)
+        first_key = first.json()["sample_key"]
+
+        payload["bid"] += 0.02
+        payload["ask"] += 0.02
+        second = self.client.post(
+            self.url, data=json.dumps(payload), content_type="application/json", **self.headers
+        )
+        self.assertEqual(second.status_code, 200, second.content)
+        self.assertEqual(second.json()["sample_key"], first_key)
+
+        from .models import StrategyDecisionRecord
+        self.assertEqual(StrategyDecisionRecord.objects.filter(decision_id=first_key).count(), 1)
+        record = StrategyDecisionRecord.objects.get(decision_id=first_key)
+        self.assertEqual(record.features["market_snapshot"]["bid"], payload["bid"])
+        self.assertEqual(record.features["market_snapshot"]["ask"], payload["ask"])
+        self.assertEqual(record.model_version, "django-signalflow-structural-v2")
+
     @override_settings(EA_BEARER_TOKEN="wrong-token",RAMON_DJANGO_DECISION_ENABLED=True)
     def test_rejects_wrong_token(self):
         r=self.client.post(self.url,data=json.dumps(self.payload()),content_type="application/json",**self.headers)
