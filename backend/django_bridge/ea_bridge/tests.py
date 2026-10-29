@@ -236,6 +236,7 @@ class DjangoDecisionApiTests(TestCase):
                             "currency": "USD"},
                 "positions": [],
                 "quote": {"bid": "2320.30", "ask": "2320.35", "point": "0.01"},
+                "quote_time": timezone.now().isoformat(),
             },
         )
 
