@@ -103,6 +103,27 @@ class EACommandApiTests(TestCase):
         self.assertTrue(response.json()["duplicate"])
 
     @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
+    def test_execution_can_be_marked_reconciliation_required(self):
+        command = EACommand.objects.create(
+            command_id="cmd-reconcile", instance_id=self.scope["instance_id"],
+            account_login=self.scope["account_login"], symbol="XAUUSD_o",
+            action=EACommand.Action.OPEN, payload={"side": "BUY"},
+            state=EACommand.State.EXECUTING,
+            expires_at=timezone.now() + timedelta(minutes=1),
+        )
+        payload = dict(
+            self.scope, command_id=command.command_id,
+            state="RECONCILIATION_REQUIRED",
+            result={"retcode": 10010, "detail": "partial fill"},
+        )
+        response = self.post_json(self.ack_url, payload)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["state"], "RECONCILIATION_REQUIRED")
+        command.refresh_from_db()
+        self.assertEqual(command.state, EACommand.State.RECONCILIATION_REQUIRED)
+        self.assertEqual(command.result["retcode"], 10010)
+
+    @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
     def test_ack_cannot_access_command_for_another_account(self):
         EACommand.objects.create(
             command_id="cmd-private", instance_id=self.scope["instance_id"],
