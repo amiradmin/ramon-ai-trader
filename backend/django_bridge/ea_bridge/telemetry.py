@@ -166,6 +166,7 @@ def telemetry(request):
                     "quote": {"bid": str(bid), "ask": str(ask), "point": str(point)},
                     "quote_time": p.get("quote_time"),
                     "server_name": server_name,
+                    "account_trade_mode": account_trade_mode,
                     "broker_day": broker_day.isoformat() if broker_day else None,
                     "broker_time": p.get("broker_time"),
                     "account": account,
