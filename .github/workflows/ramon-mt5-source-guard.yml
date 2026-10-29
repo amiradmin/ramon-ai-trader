@@ -5,11 +5,13 @@ on:
     paths:
       - "mt5/RamonCommandEA*.mq5"
       - ".github/workflows/ramon-mt5-source-guard.yml"
+      - "scripts/update_build_ramon.sh"
   push:
     branches: ["main"]
     paths:
       - "mt5/RamonCommandEA*.mq5"
       - ".github/workflows/ramon-mt5-source-guard.yml"
+      - "scripts/update_build_ramon.sh"
 
 permissions:
   contents: read
@@ -19,6 +21,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Validate one-command update script syntax
+        shell: bash
+        run: bash -n scripts/update_build_ramon.sh
       - name: Check safety-critical source contracts
         shell: bash
         run: |
