@@ -18,6 +18,15 @@ from ramon_pipeline.signalflow.risk_management import RiskConfig
 from .models import AccountDailyBaseline, EACommand, EAHeartbeat, RiskVerdictRecord, StrategyDecisionRecord
 
 
+def _is_demo_account(snapshot):
+    """Only an explicit integer trade-mode value from broker telemetry counts as demo."""
+    return (
+        isinstance(snapshot, dict)
+        and type(snapshot.get("account_trade_mode")) is int
+        and snapshot.get("account_trade_mode") == 0
+    )
+
+
 def _decimal(value, field):
     try:
         number = Decimal(str(value))
