@@ -26,10 +26,26 @@ jobs:
         run: |
           set -euo pipefail
           bash -n scripts/update_build_ramon.sh
-          grep -Fq 'wine "$METAEDITOR" "/compile:$WINDOWS_EA_TARGET" /log' scripts/update_build_ramon.sh || {
-            echo "FAIL: Wine MetaEditor must receive the unquoted no-space /compile:<Windows path> argument." >&2
+          grep -Fq 'mt5/RamonCommandEA_v1.02.mq5' scripts/update_build_ramon.sh || {
+            echo "FAIL: deployment script must compile the pinned command EA source." >&2
             exit 1
           }
+          grep -Fq 'mt5/Ramon_v0.62.6.mq5' scripts/update_build_ramon.sh || {
+            echo "FAIL: deployment script must compile the pinned strategy EA source." >&2
+            exit 1
+          }
+          grep -Fq 'RamonResearchTelemetry.mqh' scripts/update_build_ramon.sh || {
+            echo "FAIL: strategy include dependency must be checked before compilation." >&2
+            exit 1
+          }
+          if grep -Eq 'docker compose[^\n]*down[[:space:]]+-v|docker volume rm|docker system prune' scripts/update_build_ramon.sh; then
+            echo "FAIL: deployment script must not delete Docker volumes or prune resources." >&2
+            exit 1
+          fi
+          if ! grep -Fq 'wine "$METAEDITOR" "/compile:$WINDOWS_EA_TARGET" /log' scripts/update_build_ramon.sh && ! grep -Fq 'wine "$METAEDITOR" "/compile:$winpath" /log' scripts/update_build_ramon.sh; then
+            echo "FAIL: Wine MetaEditor must receive the unquoted no-space /compile:<Windows path> argument." >&2
+            exit 1
+          fi
           if grep -Fq 'compile_arg="/compile:\\"$WINDOWS_EA_TARGET\\""' scripts/update_build_ramon.sh; then
             echo "FAIL: do not embed literal quote characters in the Wine /compile argument." >&2
             exit 1
