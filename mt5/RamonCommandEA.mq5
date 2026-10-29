@@ -419,6 +419,7 @@ void RequestDjangoDecision()
    string body="{\"protocol_version\":\"ramon-django-decision-v1\","
       +"\"instance_id\":\""+JsonEscape(InstanceId)+"\","
       +"\"account_login\":\""+IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN))+"\","
+      +"\"server_name\":\""+JsonEscape(AccountInfoString(ACCOUNT_SERVER))+"\","
       +"\"symbol\":\""+JsonEscape(_Symbol)+"\",\"timeframe\":\"M15\","
       +"\"bid\":"+DoubleToString(tick.bid,_Digits)+","
       +"\"ask\":"+DoubleToString(tick.ask,_Digits)+","
@@ -486,6 +487,11 @@ string BuildTelemetry()
    datetime utc_now=TimeGMT();
    if(server_now<=0 || utc_now<=0) return "";
    long server_utc_offset=(long)(server_now-utc_now);
+   MqlDateTime broker_date;
+   if(!TimeToStruct(server_now,broker_date)) return "";
+   string broker_day=StringFormat("%04d-%02d-%02d",broker_date.year,broker_date.mon,broker_date.day);
+   string server_name=AccountInfoString(ACCOUNT_SERVER);
+   if(server_name=="") return "";
    string account="{\"currency\":\""+JsonEscape(AccountInfoString(ACCOUNT_CURRENCY))+"\","
       +"\"balance\":"+DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),2)+","
       +"\"equity\":"+DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY),2)+","
@@ -494,6 +500,8 @@ string BuildTelemetry()
    return "{\"protocol_version\":\"ramon-ea-command-v1\","
       +"\"instance_id\":\""+JsonEscape(InstanceId)+"\","
       +"\"account_login\":\""+IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN))+"\","
+      +"\"server_name\":\""+JsonEscape(server_name)+"\","
+      +"\"broker_day\":\""+broker_day+"\",\"broker_time\":"+IntegerToString((long)server_now)+","
       +"\"symbol\":\""+JsonEscape(_Symbol)+"\",\"timeframe\":\""+TfName(_Period)+"\","
       +"\"quote\":{\"bid\":"+DoubleToString(tick.bid,_Digits)+",\"ask\":"+DoubleToString(tick.ask,_Digits)+",\"point\":"+DoubleToString(point,_Digits)+"},"
       +"\"quote_time\":\""+IsoUtc((datetime)((long)tick.time-server_utc_offset))+"\","
