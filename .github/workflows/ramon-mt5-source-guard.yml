@@ -26,11 +26,11 @@ jobs:
         run: |
           set -euo pipefail
           bash -n scripts/update_build_ramon.sh
-          grep -Fq 'mt5/RamonCommandEA_v1.02.mq5' scripts/update_build_ramon.sh || {
+          grep -Fq 'mt5/RamonCommandEA_v1.03.mq5' scripts/update_build_ramon.sh || {
             echo "FAIL: deployment script must compile the pinned command EA source." >&2
             exit 1
           }
-          grep -Fq 'mt5/Ramon_v0.62.6.mq5' scripts/update_build_ramon.sh || {
+          grep -Fq 'mt5/Ramon_v0.62.7.mq5' scripts/update_build_ramon.sh || {
             echo "FAIL: deployment script must compile the pinned strategy EA source." >&2
             exit 1
           }
