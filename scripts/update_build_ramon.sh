@@ -93,7 +93,9 @@ cp "$EA_SOURCE" "$EA_TARGET"
 rm -f "${EA_TARGET%.mq5}.log"
 export WINEPREFIX
 set +e
-WINDOWS_EA_TARGET="$(winepath -w "$EA_TARGET")"\ncompile_arg="/compile:\"$WINDOWS_EA_TARGET\""\ntimeout 180s wine "$METAEDITOR" "$compile_arg" /log
+WINDOWS_EA_TARGET="$(winepath -w "$EA_TARGET")"
+compile_arg="/compile:\"$WINDOWS_EA_TARGET\""
+timeout 180s wine "$METAEDITOR" "$compile_arg" /log
 compile_status=$?
 set -e
 LOG_FILE="${EA_TARGET%.mq5}.log"
