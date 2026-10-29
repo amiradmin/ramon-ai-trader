@@ -2,7 +2,7 @@
 
 ## Scope
 
-This version adds diagnostic output for decision polling and successful Django decision HTTP responses. It does not change the Django decision policy, risk gates, command payload, or broker execution behavior.
+This version adds diagnostic output for decision polling and successful Django decision HTTP responses, and now reports the broker account trade mode and EA version in telemetry. Strategy decisions and risk authorization remain in Django. See [the demo-only activation runbook](operations/demo-trading-activation.md) before enabling command execution.
 
 Safety defaults must remain:
 - `EnableCommandExecution=false`
@@ -10,7 +10,7 @@ Safety defaults must remain:
 - Telemetry must send `server_name` and broker-local `broker_day` (`YYYY-MM-DD`); the decision request must send the same `server_name` so Django can validate the account and use its server-side daily-risk baseline.
 - Live-account order execution is not enabled by this diagnostic build.
 
-Before the local build, the GitHub MT5 source-guard workflow checks the default-off execution flag, empty token default, broker identity/day fields, and fail-closed authorization checks. Passing that static check is not a substitute for MetaEditor compilation.
+Before the local build, the GitHub MT5 source-guard workflow checks the default-off execution flag, empty token default, broker identity/day fields, and fail-closed authorization checks. Passing that static check is not a substitute for MetaEditor compilation. This checklist is the telemetry/diagnostic phase; demo order acceptance is covered separately by the demo-only activation runbook.
 
 ## Build
 
@@ -38,4 +38,5 @@ HTTP failures should include the endpoint path, status/error code, and the exist
 - [ ] Decision poll starts at the expected interval.
 - [ ] HTTP status and Django decision/reason can be correlated in the Experts log.
 - [ ] Django continues to return `WAIT` whenever account state, identity, telemetry freshness, or server-side risk baselines are unverified.
-- [ ] No broker order is placed during this test.
+- [ ] No broker order is placed while `EnableCommandExecution=false`.
+- [ ] For an actual guarded demo-order test, complete the separate [demo-only activation runbook](operations/demo-trading-activation.md).
