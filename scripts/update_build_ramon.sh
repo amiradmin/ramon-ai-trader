@@ -91,15 +91,14 @@ done
 
 info "Installing the exact repository source for RamonCommandEA v1.02"
 cp "$EA_SOURCE" "$EA_TARGET"
-rm -f "${EA_TARGET%.mq5}.log"
 LOG_FILE="${EA_TARGET%.mq5}.log"
+EX5_TARGET="${EA_TARGET%.mq5}.ex5"
+rm -f "$LOG_FILE" "$EX5_TARGET"
 export WINEPREFIX
 set +e
 WINDOWS_EA_TARGET="$(winepath -w "$EA_TARGET")"
-WINDOWS_LOG_FILE="$(winepath -w "$LOG_FILE")"
 compile_arg="/compile:\"$WINDOWS_EA_TARGET\""
-log_arg="/log:\"$WINDOWS_LOG_FILE\""
-timeout 180s wine "$METAEDITOR" "$compile_arg" "$log_arg"
+timeout 180s wine "$METAEDITOR" "$compile_arg" /log
 compile_status=$?
 set -e
 [[ -f "$LOG_FILE" ]] || die "MetaEditor produced no log (exit=$compile_status). Previous files, if any, are backed up in $BACKUP_DIR."
