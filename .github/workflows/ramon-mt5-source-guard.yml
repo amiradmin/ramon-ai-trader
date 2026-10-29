@@ -42,10 +42,10 @@ jobs:
             echo "FAIL: deployment script must not delete Docker volumes or prune resources." >&2
             exit 1
           fi
-          grep -Fq 'wine "$METAEDITOR" "/compile:$WINDOWS_EA_TARGET" /log' scripts/update_build_ramon.sh || {
+          if ! grep -Fq 'wine "$METAEDITOR" "/compile:$WINDOWS_EA_TARGET" /log' scripts/update_build_ramon.sh && ! grep -Fq 'wine "$METAEDITOR" "/compile:$winpath" /log' scripts/update_build_ramon.sh; then
             echo "FAIL: Wine MetaEditor must receive the unquoted no-space /compile:<Windows path> argument." >&2
             exit 1
-          }
+          fi
           if grep -Fq 'compile_arg="/compile:\\"$WINDOWS_EA_TARGET\\""' scripts/update_build_ramon.sh; then
             echo "FAIL: do not embed literal quote characters in the Wine /compile argument." >&2
             exit 1
