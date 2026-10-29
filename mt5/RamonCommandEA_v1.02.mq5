@@ -1,6 +1,7 @@
 #property strict
 #property version   "1.02"
-#property description "RamonCommandEA v1.02: Django telemetry + HTTP diagnostics"
+#property description "RamonCommandEA v1.02: Django telemetry + guarded demo execution"
+#define RAMON_COMMAND_EA_VERSION "1.02"
 
 #include <Trade/Trade.mqh>
 
