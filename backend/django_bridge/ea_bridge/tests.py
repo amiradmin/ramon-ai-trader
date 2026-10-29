@@ -4,7 +4,7 @@ from datetime import date, timedelta
 from unittest.mock import Mock, patch
 from django.test import TestCase, override_settings
 from django.utils import timezone
-from .models import AccountDailyBaseline, EAEvent, EAHeartbeat, MarketBar, StrategyDecisionRecord
+from .models import AccountDailyBaseline, EAEvent, EAHeartbeat, MarketBar, RiskVerdictRecord, StrategyDecisionRecord
 from ramon_pipeline.management.commands.consume_ramon_streams import Command
 
 
@@ -278,6 +278,12 @@ class DjangoDecisionApiTests(TestCase):
             for check in opportunity["checks"]
         ))
         self.assertEqual(record.model_version, "django-signalflow-structural-v2")
+        verdict = RiskVerdictRecord.objects.filter(decision_id=b["sample_key"]).latest("created_at")
+        self.assertEqual(verdict.approved, b["risk_approved_advisory_only"])
+        self.assertFalse(verdict.details["execution_authorized"])
+        self.assertFalse(verdict.details["command_created"])
+        if not verdict.approved:
+            self.assertEqual(str(verdict.approved_volume), "0")
     @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
     def test_same_bar_record_refreshes_when_quote_changes(self):
         payload = self.payload()
@@ -382,6 +388,10 @@ class DjangoDecisionApiTests(TestCase):
         b=r.json()
         self.assertEqual(b["decision"],"WAIT")
         self.assertEqual(b["reason"],"DAILY_LOSS_BASELINE_UNAVAILABLE")
+        verdict = RiskVerdictRecord.objects.filter(decision_id=b["sample_key"]).latest("created_at")
+        self.assertFalse(verdict.approved)
+        self.assertEqual(verdict.reason_code, "DAILY_LOSS_BASELINE_UNAVAILABLE")
+        self.assertFalse(verdict.details["execution_authorized"])
         self.assertFalse(b["trading_authorization"])
         self.assertFalse(b["execution_enabled"])
 
