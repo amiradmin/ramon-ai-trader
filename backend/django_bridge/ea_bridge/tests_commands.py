@@ -9,6 +9,16 @@ from django.utils import timezone
 from .models import EACommand
 
 
+class DemoAccountGateTests(TestCase):
+    def test_only_explicit_integer_demo_mode_is_accepted(self):
+        self.assertTrue(_is_demo_account({"account_trade_mode": 0}))
+        self.assertFalse(_is_demo_account({}))
+        self.assertFalse(_is_demo_account({"account_trade_mode": None}))
+        self.assertFalse(_is_demo_account({"account_trade_mode": 2}))
+        self.assertFalse(_is_demo_account({"account_trade_mode": False}))
+        self.assertFalse(_is_demo_account(None))
+
+
 class EACommandEndpointTests(TestCase):
     headers = {"HTTP_AUTHORIZATION": "Bearer test-token"}
     next_url = "/api/ea/v1/commands/next"
