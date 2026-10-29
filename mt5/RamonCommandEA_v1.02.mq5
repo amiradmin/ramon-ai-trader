@@ -425,6 +425,7 @@ void RequestDjangoDecision()
    string body="{\"protocol_version\":\"ramon-django-decision-v1\","
       +"\"instance_id\":\""+JsonEscape(InstanceId)+"\","
       +"\"account_login\":\""+IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN))+"\","
+      // Match the broker identity sent in telemetry for Django account-state validation.
       +"\"server_name\":\""+JsonEscape(AccountInfoString(ACCOUNT_SERVER))+"\","
       +"\"symbol\":\""+JsonEscape(_Symbol)+"\",\"timeframe\":\"M15\","
       +"\"bid\":"+DoubleToString(tick.bid,_Digits)+","
