@@ -10,7 +10,7 @@ TERMINAL_ID="${RAMON_MT5_TERMINAL_ID:-D0E8209F77C8CF37AD8BF550E51FF075}"
 EXPERTS_DIR="$WINEPREFIX/drive_c/users/amir/AppData/Roaming/MetaQuotes/Terminal/$TERMINAL_ID/MQL5/Experts"
 COMPOSE_FILE=docker-compose.yaml
 HEALTH_URL="${RAMON_HEALTH_URL:-http://127.0.0.1:8017/healthz}"
-EA_SOURCES=(mt5/RamonCommandEA_v1.02.mq5 mt5/Ramon_v0.62.6.mq5)
+EA_SOURCES=(mt5/RamonCommandEA_v1.03.mq5 mt5/Ramon_v0.62.7.mq5)
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 info() { printf '\n[%s] %s\n' "$(date '+%H:%M:%S')" "$*"; }
@@ -83,7 +83,7 @@ compile_install() {
   base="$(basename "$source")"; target="$EXPERTS_DIR/$base"
   log_file="${target%.mq5}.log"; ex5="${target%.mq5}.ex5"
   cp "$source" "$target"
-  if [[ "$base" == Ramon_v0.62.6.mq5 ]]; then cp "$TELEMETRY_INCLUDE" "$EXPERTS_DIR/RamonResearchTelemetry.mqh"; fi
+  if [[ "$base" == Ramon_v0.62.7.mq5 ]]; then cp "$TELEMETRY_INCLUDE" "$EXPERTS_DIR/RamonResearchTelemetry.mqh"; fi
   rm -f "$log_file" "$ex5"
   winpath="$(WINEPREFIX="$WINEPREFIX" winepath -w "$target")"
   [[ -n "$winpath" ]] || die "winepath returned an empty path for $target"
@@ -107,5 +107,5 @@ compile_install() {
 
 for source in "${EA_SOURCES[@]}"; do compile_install "$source"; done
 printf '\nDEPLOYMENT CHECKS PASSED\nDjango: %s\nExperts: %s\nBackups: %s\n' "$HEALTH_URL" "$EXPERTS_DIR" "$BACKUP_DIR"
-printf 'Installed binaries: RamonCommandEA_v1.02.ex5 and Ramon_v0.62.6.ex5\n'
+printf 'Installed binaries: RamonCommandEA_v1.03.ex5 and Ramon_v0.62.7.ex5\n'
 printf 'No EA was attached and no trades were placed. Server command flags are not changed.\n'
