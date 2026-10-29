@@ -491,6 +491,7 @@ string BuildTelemetry()
    datetime utc_now=TimeGMT();
    if(server_now<=0 || utc_now<=0) return "";
    long server_utc_offset=(long)(server_now-utc_now);
+   // The risk baseline key uses the broker's calendar day, not local PC or UTC date.
    MqlDateTime broker_day_parts;
    TimeToStruct(server_now,broker_day_parts);
    string broker_day_text=StringFormat("%04d-%02d-%02d",
