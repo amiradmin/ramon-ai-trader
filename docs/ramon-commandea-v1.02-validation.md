@@ -7,6 +7,7 @@ This version adds diagnostic output for decision polling and successful Django d
 Safety defaults must remain:
 - `EnableCommandExecution=false`
 - Django remains the authoritative decision-maker.
+- Telemetry must send `server_name` and broker-local `broker_day` (`YYYY-MM-DD`); the decision request must send the same `server_name` so Django can validate the account and use its server-side daily-risk baseline.
 - Live-account order execution is not enabled by this diagnostic build.
 
 ## Build
