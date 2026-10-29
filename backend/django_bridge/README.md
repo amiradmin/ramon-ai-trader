@@ -20,10 +20,10 @@ RAMON_EA_BEARER_TOKEN=<a-long-random-token>
 POSTGRES_DB=ramon
 POSTGRES_USER=ramon
 POSTGRES_PASSWORD=<a-strong-database-password>
-RAMON_PIPELINE_INGEST_ENABLED=1
+RAMON_PIPELINE_INGEST_ENABLED=0
 ```
 
-Keep `RAMON_PIPELINE_INGEST_ENABLED=0` while validating the services. Set it to `1` when ready for the EA events endpoint to queue events through Redis. With the setting disabled, the legacy endpoint writes events directly to the database instead of using Redis.
+Keep `RAMON_PIPELINE_INGEST_ENABLED=0` during validation; this is also the Compose default for both Django and the worker. After verifying Redis, worker persistence, duplicate-event handling, and retry behavior, explicitly set it to `1` in the local `.env` to opt in to Redis-stream ingestion. With the setting disabled, the legacy endpoint writes events directly to the database instead of using Redis. Never commit `.env` or secrets.
 
 From the repository root:
 
