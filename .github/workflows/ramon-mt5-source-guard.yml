@@ -1,0 +1,61 @@
+name: Ramon MT5 command EA source guard
+
+on:
+  pull_request:
+    paths:
+      - "mt5/RamonCommandEA*.mq5"
+      - ".github/workflows/ramon-mt5-source-guard.yml"
+  push:
+    branches: ["main"]
+    paths:
+      - "mt5/RamonCommandEA*.mq5"
+      - ".github/workflows/ramon-mt5-source-guard.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  command-ea-safety-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check safety-critical source contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          sources=(mt5/RamonCommandEA*.mq5)
+          if (( ${#sources[@]} == 0 )); then
+            echo "No RamonCommandEA source files found" >&2
+            exit 1
+          fi
+
+          for source in "${sources[@]}"; do
+            echo "Checking ${source}"
+            grep -Eq 'input bool EnableCommandExecution[[:space:]]*=[[:space:]]*false;' "$source" || {
+              echo "FAIL: command execution must default to false: ${source}" >&2
+              exit 1
+            }
+            grep -Eq 'input string DjangoBearerToken[[:space:]]*=[[:space:]]*"";' "$source" || {
+              echo "FAIL: bearer token must not be hard-coded: ${source}" >&2
+              exit 1
+            }
+            grep -q 'server_name' "$source" || {
+              echo "FAIL: broker server identity field is missing: ${source}" >&2
+              exit 1
+            }
+            grep -q 'broker_day' "$source" || {
+              echo "FAIL: broker-local day field is missing: ${source}" >&2
+              exit 1
+            }
+            grep -q 'JsonBool(response,"trading_authorization",false)' "$source" || {
+              echo "FAIL: missing fail-closed server trading-authorization check: ${source}" >&2
+              exit 1
+            }
+            grep -q 'JsonBool(command,"execution_authorized",false)' "$source" || {
+              echo "FAIL: missing fail-closed command execution-authorization check: ${source}" >&2
+              exit 1
+            }
+          done
+
+          echo "Static safety contract passed. This does not replace MetaEditor compilation or demo validation."
