@@ -146,7 +146,8 @@ def decision(request):
                         account_state_reason = "DAILY_LOSS_BASELINE_UNAVAILABLE"
 
         risk_guard_fields=("stop_level_points","take_profit_points","daily_loss_percent","open_risk_percent")
-        risk_guards_complete=all(p.get(name) is not None for name in risk_guard_fields)
+        missing_risk_inputs=[name for name in risk_guard_fields if p.get(name) is None]
+        risk_guards_complete=not missing_risk_inputs
         market={"symbol":symbol,"timeframe":"M15","bars":bars,"last_bar_closed":True,
           "latest_bar_time":bar_time,"bid":bid,"ask":ask,"point":point,
           "trend":direction,"setup_score":setup,"entry_quality":quality,"spread_points":spread,
@@ -213,6 +214,11 @@ def decision(request):
           bool(result["stages"]["risk_management"].get("approved") and risk_guards_complete and not account_state_reason),
         )
         response["decision_record_created"] = created
+        response["risk_inputs_complete"] = risk_guards_complete
+        response["missing_risk_inputs"] = ",".join(missing_risk_inputs)
+        response["risk_inputs_received"] = ",".join(
+          name for name in risk_guard_fields if name not in missing_risk_inputs
+        )
         response["stages"] = result["stages"]
         return JsonResponse(response, json_dumps_params={"separators": (",", ":")})
     except (KeyError,TypeError,ValueError,OverflowError,json.JSONDecodeError) as exc:
