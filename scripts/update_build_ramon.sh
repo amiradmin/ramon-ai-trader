@@ -110,8 +110,13 @@ compile_status=$?
 set -e
 [[ -f "$LOG_FILE" ]] || die "MetaEditor produced no log (exit=$compile_status). Previous files, if any, are backed up in $BACKUP_DIR."
 cat "$LOG_FILE"
-if [[ "$compile_status" -ne 0 ]] || ! grep -Eiq '0 errors,[[:space:]]*0 warnings' "$LOG_FILE"; then
-  die "EA compilation did not report zero errors and zero warnings. Inspect $LOG_FILE; backup: $BACKUP_DIR"
+# MetaEditor under Wine may emit UTF-16-style logs containing NUL bytes.
+# Strip NULs for matching, and require the exact Result summary so "10 errors"
+# can never accidentally pass by containing the substring "0 errors".
+if [[ "$compile_status" -ne 0 ]] || ! tr -d '\\000' < "$LOG_FILE" | grep -Eiq '^[[:space:]]*Result:[[:space:]]*0 errors,[[:space:]]*0 warnings([,[:space:]]|$)'; then
+  info "Compiler summary lines (NUL bytes removed):"
+  tr -d '\\000' < "$LOG_FILE" | grep -Ei 'Result:|error|warning' || true
+  die "EA compilation did not report an exact zero-error, zero-warning Result summary. Inspect $LOG_FILE; backup: $BACKUP_DIR"
 fi
 [[ -s "${EA_TARGET%.mq5}.ex5" ]] || die "Compilation log succeeded but EX5 is missing. Backup: $BACKUP_DIR"
 
