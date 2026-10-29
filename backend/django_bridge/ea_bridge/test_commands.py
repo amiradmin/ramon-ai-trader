@@ -119,11 +119,11 @@ class EACommandApiTests(TestCase):
         EACommand.objects.create(
             command_id="cmd-transition", instance_id=self.scope["instance_id"],
             account_login=self.scope["account_login"], symbol="XAUUSD_o",
-            action=EACommand.Action.NOOP, payload={}, state=EACommand.State.CLAIMED,
+            action=EACommand.Action.NOOP, payload={}, state=EACommand.State.EXECUTING,
             expires_at=timezone.now() + timedelta(minutes=1),
         )
         response = self.post_json(self.ack_url, dict(
-            self.scope, command_id="cmd-transition", state="PENDING", result={}
+            self.scope, command_id="cmd-transition", state="RECEIVED", result={}
         ))
         self.assertEqual(response.status_code, 409)
 
