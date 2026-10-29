@@ -50,6 +50,7 @@ def telemetry(request):
         account_login = str(p.get("account_login", "")).strip()
         symbol = str(p.get("symbol", "")).strip()
         timeframe = str(p.get("timeframe", "")).strip()
+        ea_version = str(p.get("ea_version", "")).strip()[:32]
         quote = p.get("quote", {})
         bars = p.get("bars", [])
         if not instance_id or len(instance_id) > 128:
@@ -149,11 +150,13 @@ def telemetry(request):
                 "account_login": account_login,
                 "server_name": server_name,
                 "symbol": symbol,
+                "ea_version": ea_version,
                 "status": "TELEMETRY_OK",
                 "terminal_connected": True,
                 "trade_allowed": bool(p.get("terminal_trade_allowed", False)),
                 "payload": {
                     "protocol_version": p.get("protocol_version", "ramon-ea-command-v1"),
+                    "ea_version": ea_version,
                     "quote": {"bid": str(bid), "ask": str(ask), "point": str(point)},
                     "quote_time": p.get("quote_time"),
                     "server_name": server_name,
