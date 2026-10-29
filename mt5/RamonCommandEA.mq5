@@ -1,6 +1,7 @@
 #property strict
 #property version   "1.00"
 #property description "Ramon Django command EA: telemetry + guarded demo execution"
+#define RAMON_COMMAND_EA_VERSION "1.00"
 
 #include <Trade/Trade.mqh>
 
@@ -498,6 +499,7 @@ string BuildTelemetry()
       +"\"margin\":"+DoubleToString(AccountInfoDouble(ACCOUNT_MARGIN),2)+","
       +"\"free_margin\":"+DoubleToString(AccountInfoDouble(ACCOUNT_MARGIN_FREE),2)+"}";
    return "{\"protocol_version\":\"ramon-ea-command-v1\","
+      +"\"ea_version\":\""+RAMON_COMMAND_EA_VERSION+"\","
       +"\"instance_id\":\""+JsonEscape(InstanceId)+"\","
       +"\"account_login\":\""+IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN))+"\","
       +"\"server_name\":\""+JsonEscape(server_name)+"\","
