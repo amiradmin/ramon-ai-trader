@@ -1,27 +1,28 @@
 # One-command Ramon update and build
 
-From the existing local clone, run:
+From the existing local clone:
 
 ```bash
 cd ~/Documents/Presentation/ramon-ai-trader-bridge
 bash scripts/update_build_ramon.sh
 ```
 
-The script fast-forward pulls `origin/main`, validates the repository's single
-`docker-compose.yaml`, rebuilds and starts the Compose services, applies forward
-Django migrations, runs Django's system check, waits for `/healthz`, and compiles
-the repository's current `mt5/RamonCommandEA_v1.02.mq5` into the configured
-active MT5 terminal's `MQL5/Experts` directory using MetaEditor under Wine.
+The script fast-forwards the selected Git branch, validates the single `docker-compose.yaml`, rebuilds and starts the Django/worker/Redis/TimescaleDB stack, applies forward migrations, runs Django checks, waits for `/healthz`, and compiles and installs both versioned EAs:
+
+- `mt5/RamonCommandEA_v1.02.mq5` -> `RamonCommandEA_v1.02.ex5`
+- `mt5/Ramon_v0.62.6.mq5` -> `Ramon_v0.62.6.ex5`
+
+The binaries and sources are installed under the active terminal's `MQL5/Experts` directory. Existing files are copied to `~/.local/share/ramon-ea-backups/<timestamp>/` before replacement. Each build requires MetaEditor's exact `Result: 0 errors, 0 warnings` summary and a non-empty output `.ex5`.
 
 ## Prerequisites
 
-- Run it from a clean `main` checkout. It refuses to overwrite uncommitted work.
-- A local `.env` file must already exist. The script never creates or prints secrets.
-- Docker Compose, curl, Wine, and the MetaEditor executable must be installed.
-- By default, the active terminal ID is
-  `D0E8209F77C8CF37AD8BF550E51FF075` and the Wine prefix is `~/.mt5`.
+- A clean checkout on the configured branch (default `main`).
+- A pre-existing local `.env`; the script never creates or prints secrets.
+- Docker Compose, curl, Wine, winepath, timeout, and MetaEditor.
+- By default, Wine prefix `~/.mt5` and terminal ID `D0E8209F77C8CF37AD8BF550E51FF075`.
+- The real `RamonResearchTelemetry.mqh` dependency used by the strategy EA. The script looks in `mt5/`, the active Experts directory, and the terminal tree; if it cannot find the source, it stops before replacing the EAs. It will not invent a placeholder.
 
-Optional environment overrides:
+Optional overrides:
 
 ```bash
 RAMON_REPO_DIR="$HOME/Documents/Presentation/ramon-ai-trader-bridge" \
@@ -31,27 +32,11 @@ RAMON_MT5_TERMINAL_ID="D0E8209F77C8CF37AD8BF550E51FF075" \
 bash scripts/update_build_ramon.sh
 ```
 
-If MetaEditor is installed in a nonstandard location, set `RAMON_METAEDITOR`
-to its exact executable path. Set `RAMON_HEALTH_URL` only if the local health
-endpoint is intentionally different.
+Use `RAMON_METAEDITOR` if MetaEditor is installed in a nonstandard location, and `RAMON_HEALTH_URL` only if the health endpoint intentionally differs.
 
-## Safety and scope
+## Failure and safety behavior
 
-- The script does **not** run `docker compose down`, remove volumes, reset the
-  database, enable EA command execution, change `.env` trading flags, attach an
-  EA to a chart, or place trades.
-- It backs up any existing v1.02 source and binary before replacing/compiling
-  them. Compilation must report zero errors and zero warnings.
-- If a step fails, it stops and prints the relevant health/log/compile evidence.
-- It compiles and installs only the repository's current command EA.
-  `Ramon_v0.62.x.mq5` strategy sources are not present in this repository, so the
-  script will not invent, overwrite, or compile those local files. They must be
-  added to GitHub and reviewed before an automated build can include them.
-- The strategy EA versions previously found in the local terminal contain
-  `EnableLiveTrading=true` and a Django decision API call. Do not run them beside
-  the command EA until the exact source has been reviewed and the execution
-  architecture is reconciled. Django must remain the only strategy/risk brain.
-- A successful build is not authorization to enable trading. Keep
-  `EnableCommandExecution=false` and both server command flags disabled until
-  the demo-only activation checklist in
-  [demo-trading-activation.md](demo-trading-activation.md) is satisfied.
+- Stops at the first failed prerequisite, migration, health check, compiler result, or missing output binary.
+- Never runs `docker compose down`, removes volumes, resets the database, changes `.env` execution flags, attaches EAs to charts, or places trades.
+- Does not claim that successful compilation proves strategy correctness or demo readiness.
+- Django remains the intended authoritative strategy/risk service; deployment does not enable server-side command creation or execution.
