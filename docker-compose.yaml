@@ -22,7 +22,7 @@ services:
       DJANGO_DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       RAMON_REDIS_URL: redis://redis:6379/0
       RAMON_DJANGO_DECISION_ENABLED: "1"
-      RAMON_PIPELINE_INGEST_ENABLED: "1"
+      RAMON_PIPELINE_INGEST_ENABLED: "0"
     ports:
       - "127.0.0.1:8017:8016"
     depends_on:
@@ -64,7 +64,7 @@ services:
       DJANGO_DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       RAMON_REDIS_URL: redis://redis:6379/0
       RAMON_REDIS_CONSUMER: ramon-worker-1
-      RAMON_PIPELINE_INGEST_ENABLED: "1"
+      RAMON_PIPELINE_INGEST_ENABLED: "0"
     command:
       - python
       - manage.py
