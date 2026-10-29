@@ -59,3 +59,85 @@ jobs:
           done
 
           echo "Static safety contract passed. This does not replace MetaEditor compilation or demo validation."
+
+  compile-mql5:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install MetaTrader 5 and MetaEditor
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP "mt5setup.exe"
+          Invoke-WebRequest -Uri "https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe" -OutFile $installer
+          $installProcess = Start-Process -FilePath $installer -ArgumentList "/auto" -Wait -PassThru
+          $installExitCode = $installProcess.ExitCode
+          $metaEditor = @(
+            "C:\Program Files\MetaTrader 5\metaeditor64.exe",
+            "C:\Program Files (x86)\MetaTrader 5\metaeditor64.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+          if (-not $metaEditor) {
+            $metaEditor = Get-ChildItem "C:\Program Files", "C:\Program Files (x86)" -Filter "metaeditor64.exe" -File -Recurse -ErrorAction SilentlyContinue |
+              Select-Object -First 1 -ExpandProperty FullName
+          }
+          if (-not $metaEditor) {
+            throw "MetaEditor executable was not found after installation (installer exit code $installExitCode)"
+          }
+          Write-Output "MetaEditor located at $metaEditor (installer exit code $installExitCode)"
+
+          $terminalRoot = Split-Path $metaEditor
+          $terminalExe = Join-Path $terminalRoot "terminal64.exe"
+          if (Test-Path $terminalExe) {
+            $terminalProcess = Start-Process -FilePath $terminalExe -ArgumentList "/portable" -PassThru
+            Start-Sleep -Seconds 25
+            if (-not $terminalProcess.HasExited) {
+              Stop-Process -Id $terminalProcess.Id -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+          $mql5Roots = @((Join-Path $terminalRoot "MQL5"))
+          $terminalDataRoot = Join-Path $env:APPDATA "MetaQuotes\Terminal"
+          if (Test-Path $terminalDataRoot) {
+            $mql5Roots += Get-ChildItem $terminalDataRoot -Directory -ErrorAction SilentlyContinue |
+              ForEach-Object { Join-Path $_.FullName "MQL5" }
+          }
+          $mql5Root = $mql5Roots |
+            Where-Object { Test-Path (Join-Path $_ "Include\Trade\Trade.mqh") } |
+            Select-Object -First 1
+          if (-not $mql5Root) {
+            throw "MetaTrader standard MQL5 include library was not initialized by the terminal"
+          }
+          Write-Output "Using MQL5 include root $mql5Root"
+          $expertDir = Join-Path $mql5Root "Experts\RamonCI"
+          New-Item -ItemType Directory -Force -Path $expertDir | Out-Null
+
+          $sources = Get-ChildItem "mt5" -Filter "RamonCommandEA*.mq5" -File
+          if (-not $sources) {
+            throw "No RamonCommandEA source files found"
+          }
+
+          foreach ($source in $sources) {
+            $target = Join-Path $expertDir $source.Name
+            Copy-Item $source.FullName $target -Force
+            $logPath = [System.IO.Path]::ChangeExtension($target, ".log")
+            $ex5Path = [System.IO.Path]::ChangeExtension($target, ".ex5")
+            if (Test-Path $logPath) { Remove-Item $logPath -Force }
+            if (Test-Path $ex5Path) { Remove-Item $ex5Path -Force }
+
+            $arguments = '/compile:"' + $target + '" /include:"' + $mql5Root + '" /log'
+            $compileProcess = Start-Process -FilePath $metaEditor -ArgumentList $arguments -Wait -PassThru
+            if (-not (Test-Path $logPath)) {
+              throw "MetaEditor did not create a compilation log for $($source.Name); process exit code $($compileProcess.ExitCode)"
+            }
+
+            $compileLog = Get-Content -Path $logPath -Raw
+            Write-Output "===== $($source.Name) compiler log ====="
+            Write-Output $compileLog
+            if ($compileLog -notmatch "Result:\s*0 errors,\s*0 warnings") {
+              throw "Compilation did not report zero errors and zero warnings for $($source.Name)"
+            }
+            if (-not (Test-Path $ex5Path)) {
+              throw "Compilation log reported success but the EX5 file is missing for $($source.Name)"
+            }
+          }
