@@ -5,7 +5,7 @@ from datetime import date, timedelta
 from unittest.mock import Mock, patch
 from django.test import TestCase, override_settings
 from django.utils import timezone
-from .models import AccountDailyBaseline, EAEvent, EAHeartbeat, MarketBar, RiskVerdictRecord, StrategyDecisionRecord
+from .models import AccountDailyBaseline, EACommand, EAEvent, EAHeartbeat, MarketBar, RiskVerdictRecord, StrategyDecisionRecord
 from ramon_pipeline.management.commands.consume_ramon_streams import Command
 
 
@@ -285,7 +285,7 @@ class DjangoDecisionApiTests(TestCase):
         self.assertFalse(verdict.details["command_created"])
         if not verdict.approved:
             self.assertEqual(verdict.approved_volume, 0)
-    @override_settings(EA_BEARER_TOKEN="test-token", RAMON_DJANGO_DECISION_ENABLED=True)
+    @override_settings(EA_BEARER_TOKEN="test-token", RAMON_DJANGO_DECISION_ENABLED=True, RAMON_EA_COMMAND_CREATION_ENABLED=False, RAMON_EA_COMMAND_EXECUTION_ENABLED=False)
     @patch("ea_bridge.decision.SignalFlowPipeline.run")
     def test_approved_risk_verdict_remains_non_executable(self, run_pipeline):
         AccountDailyBaseline.objects.create(
@@ -324,6 +324,67 @@ class DjangoDecisionApiTests(TestCase):
         self.assertEqual(verdict.take_profit, Decimal("2330.35"))
         self.assertFalse(verdict.details["execution_authorized"])
         self.assertFalse(verdict.details["command_created"])
+
+    @override_settings(
+        EA_BEARER_TOKEN="test-token",
+        RAMON_DJANGO_DECISION_ENABLED=True,
+        RAMON_EA_COMMAND_CREATION_ENABLED=True,
+        RAMON_EA_COMMAND_EXECUTION_ENABLED=True,
+    )
+    @patch("ea_bridge.decision.SignalFlowPipeline.run")
+    def test_command_is_created_once_only_after_approved_risk_and_fresh_demo_permissions(self, run_pipeline):
+        AccountDailyBaseline.objects.create(
+            account_login="12345678",
+            server_name="LiteFinance-MT5-Demo",
+            broker_day=date.today(),
+            opening_balance="10000.00",
+            source_instance_id="ea-decision-test",
+        )
+        heartbeat = EAHeartbeat.objects.get(instance_id="ea-decision-test")
+        heartbeat.trade_allowed = True
+        heartbeat.save(update_fields=["trade_allowed"])
+        run_pipeline.return_value = {
+            "approved": True,
+            "action": "BUY",
+            "reason": "SIGNALFLOW_APPROVED",
+            "stages": {
+                "opportunities": {"approved": True, "score": 0.9, "checks": []},
+                "entry_timing": {"approved": True, "checks": []},
+                "risk_management": {
+                    "approved": True, "reason": "RISK_APPROVED", "volume": 0.1,
+                    "stop_price": 2319.0, "stop_points": 130.0, "checks": [],
+                },
+            },
+        }
+        payload = self.payload()
+        first = self.client.post(
+            self.url, data=json.dumps(payload), content_type="application/json", **self.headers
+        )
+        self.assertEqual(first.status_code, 200, first.content)
+        body = first.json()
+        self.assertTrue(body["command_created"], body)
+        self.assertTrue(body["command_available"], body)
+        self.assertEqual(body["command_reason"], "COMMAND_CREATED")
+        command = EACommand.objects.get(command_id=body["command_id"])
+        self.assertEqual(command.action, EACommand.Action.OPEN)
+        self.assertEqual(command.instance_id, "ea-decision-test")
+        self.assertEqual(command.account_login, "12345678")
+        self.assertEqual(command.symbol, "XAUUSD_o")
+        self.assertEqual(command.payload["side"], "BUY")
+        self.assertEqual(command.payload["volume"], 0.1)
+        self.assertTrue(command.execution_authorized)
+        verdict = RiskVerdictRecord.objects.filter(decision_id=body["sample_key"]).latest("created_at")
+        self.assertFalse(verdict.details["execution_authorized"])
+        self.assertTrue(verdict.details["command_created"])
+
+        second = self.client.post(
+            self.url, data=json.dumps(payload), content_type="application/json", **self.headers
+        )
+        self.assertEqual(second.status_code, 200, second.content)
+        self.assertFalse(second.json()["command_created"])
+        self.assertTrue(second.json()["command_available"])
+        self.assertEqual(second.json()["command_id"], body["command_id"])
+        self.assertEqual(EACommand.objects.count(), 1)
 
     @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
     def test_same_bar_record_refreshes_when_quote_changes(self):
