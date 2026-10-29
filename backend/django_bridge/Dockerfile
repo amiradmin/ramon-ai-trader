@@ -2,8 +2,14 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY backend/django_bridge/requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
+ARG PIP_INDEX_URL=https://mirror-pypi.runflare.com/simple
+RUN pip install --no-cache-dir \
+    --index-url "${PIP_INDEX_URL}" \
+    --timeout 120 \
+    --retries 10 \
+    -r /app/requirements.txt
 COPY backend/django_bridge/ /app/
+RUN DJANGO_SETTINGS_MODULE=ramon_django.settings python manage.py collectstatic --noinput
 RUN mkdir -p /app/data && useradd --create-home --uid 10001 appuser && chown -R appuser:appuser /app
 USER appuser
 EXPOSE 8016

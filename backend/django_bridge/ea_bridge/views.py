@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import datetime, timezone
 from django.conf import settings
 from django.http import JsonResponse
@@ -7,6 +8,7 @@ from django.views.decorators.http import require_GET, require_POST
 from .auth import BearerTokenRequired
 from .models import EAEvent, EAHeartbeat
 
+log = logging.getLogger(__name__)
 
 def _body(request):
     if len(request.body) > settings.EA_MAX_BODY_BYTES:
@@ -47,15 +49,10 @@ def heartbeat(request):
         if not instance_id:
             return JsonResponse({"ok": False, "error": "instance_id required"}, status=400)
         row, _ = EAHeartbeat.objects.update_or_create(instance_id=instance_id, defaults={
-            "account_login": str(p.get("account_login", ""))[:32],
-            "server_name": str(p.get("server_name", ""))[:128],
-            "symbol": str(p.get("symbol", ""))[:32],
-            "ea_version": str(p.get("ea_version", ""))[:32],
-            "status": str(p.get("status", "UNKNOWN"))[:64],
-            "terminal_connected": bool(p.get("terminal_connected", False)),
-            "trade_allowed": bool(p.get("trade_allowed", False)),
-            "payload": p,
-        })
+            "account_login": str(p.get("account_login", ""))[:32], "server_name": str(p.get("server_name", ""))[:128],
+            "symbol": str(p.get("symbol", ""))[:32], "ea_version": str(p.get("ea_version", ""))[:32],
+            "status": str(p.get("status", "UNKNOWN"))[:64], "terminal_connected": bool(p.get("terminal_connected", False)),
+            "trade_allowed": bool(p.get("trade_allowed", False)), "payload": p})
     except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         return JsonResponse({"ok": False, "error": str(exc)}, status=400)
     return JsonResponse({"ok": True, "instance_id": row.instance_id, "received_at": row.last_seen.isoformat()})
@@ -74,7 +71,34 @@ def events(request):
         if not instance_id or not event_id or not event_type:
             return JsonResponse({"ok": False, "error": "instance_id, event_id and event_type required"}, status=400)
         occurred = p.get("occurred_at")
-        occurred_at = datetime.fromisoformat(occurred.replace("Z", "+00:00")) if isinstance(occurred, str) and occurred else None
+        occurred_at = datetime.fromisoformat(occurred.replace("Z", "+00:00")) if isinstance(occurred, str) and occurred else datetime.now(timezone.utc)
+        if occurred_at.tzinfo is None or occurred_at.utcoffset() is None:
+            return JsonResponse({"ok": False, "error": "occurred_at must include a timezone"}, status=400)
+
+        # Opt-in rollout: the old durable DB ingestion remains the default.
+        # When enabled, return success only after Redis accepted the event.
+        if settings.RAMON_PIPELINE_INGEST_ENABLED:
+            from ramon_pipeline.django_adapter import build_pipeline
+            from ramon_pipeline.schemas import Envelope, EventKind
+            upper = event_type.upper()
+            if upper in {"MARKET_BAR", "BAR", "OHLCV"}:
+                kind = EventKind.MARKET_BAR
+            elif upper in {"MARKET_TICK", "TICK", "QUOTE"}:
+                kind = EventKind.MARKET_TICK
+            elif upper.startswith(("EXECUTION", "ORDER_", "TRADE_", "POSITION_", "FILL", "DEAL_")) or upper in {"FILL", "REJECTED", "CLOSED"}:
+                kind = EventKind.EXECUTION_EVENT
+            else:
+                kind = EventKind.TELEMETRY
+            envelope = Envelope(kind=kind, source=instance_id, payload=p, event_id=event_id, occurred_at=occurred_at)
+            try:
+                stream_id = build_pipeline().accept(envelope)
+            except Exception:
+                log.exception("Ramon Redis ingestion unavailable; event not acknowledged event_id=%s", event_id)
+                response = JsonResponse({"ok": False, "error": "ingestion temporarily unavailable; retry event"}, status=503)
+                response["Retry-After"] = "2"
+                return response
+            return JsonResponse({"ok": True, "accepted": True, "queued": True, "event_id": event_id, "stream_id": stream_id})
+
         row, created = EAEvent.objects.get_or_create(event_id=event_id, defaults={"instance_id": instance_id, "event_type": event_type, "occurred_at": occurred_at, "payload": p})
     except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         return JsonResponse({"ok": False, "error": str(exc)}, status=400)
