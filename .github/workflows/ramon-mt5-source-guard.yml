@@ -62,6 +62,7 @@ jobs:
 
   compile-mql5:
     runs-on: windows-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: Install MetaTrader 5 and MetaEditor
@@ -70,10 +71,7 @@ jobs:
           $installer = Join-Path $env:RUNNER_TEMP "mt5setup.exe"
           Invoke-WebRequest -Uri "https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe" -OutFile $installer
           $installProcess = Start-Process -FilePath $installer -ArgumentList "/auto" -Wait -PassThru
-          if ($installProcess.ExitCode -ne 0) {
-            throw "MetaTrader 5 installer failed with exit code $($installProcess.ExitCode)"
-          }
-
+          $installExitCode = $installProcess.ExitCode
           $metaEditor = @(
             "C:\Program Files\MetaTrader 5\metaeditor64.exe",
             "C:\Program Files (x86)\MetaTrader 5\metaeditor64.exe"
@@ -84,8 +82,9 @@ jobs:
               Select-Object -First 1 -ExpandProperty FullName
           }
           if (-not $metaEditor) {
-            throw "MetaEditor executable was not found after installation"
+            throw "MetaEditor executable was not found after installation (installer exit code $installExitCode)"
           }
+          Write-Output "MetaEditor located at $metaEditor (installer exit code $installExitCode)"
 
           $terminalRoot = Split-Path $metaEditor
           $expertDir = Join-Path $terminalRoot "MQL5\Experts\RamonCI"
