@@ -34,6 +34,29 @@ jobs:
             echo "FAIL: do not embed literal quote characters in the Wine /compile argument." >&2
             exit 1
           fi
+          grep -Fq "tr -d" scripts/update_build_ramon.sh || {
+            echo "FAIL: compiler log validation must normalize NUL-padded logs." >&2
+            exit 1
+          }
+          grep -Fq "Result:[[:space:]]*0 errors,[[:space:]]*0 warnings" scripts/update_build_ramon.sh || {
+            echo "FAIL: compiler summary must be anchored and require exact zero errors and warnings." >&2
+            exit 1
+          }
+          accepts_zero_summary() {
+            tr -d '\000' | grep -Eiq '^[[:space:]]*Result:[[:space:]]*0 errors,[[:space:]]*0 warnings([,[:space:]]|$)'
+          }
+          printf 'R\000e\000s\000u\000l\000t\000: 0 errors, 0 warnings, 1 ms' | accepts_zero_summary || {
+            echo "FAIL: zero-error summary with NUL padding was not accepted." >&2
+            exit 1
+          }
+          if printf '%s\n' 'Result: 10 errors, 0 warnings, 1 ms' | accepts_zero_summary; then
+            echo "FAIL: validator accepted a nonzero error count." >&2
+            exit 1
+          fi
+          if printf '%s\n' 'Result: 0 errors, 1 warnings, 1 ms' | accepts_zero_summary; then
+            echo "FAIL: validator accepted a nonzero warning count." >&2
+            exit 1
+          fi
       - name: Check safety-critical source contracts
         shell: bash
         run: |
