@@ -20,7 +20,8 @@ info() { printf '\n[%s] %s\n' "$(date '+%H:%M:%S')" "$*"; }
 command -v git >/dev/null || die "git is required"
 command -v docker >/dev/null || die "docker is required"
 command -v curl >/dev/null || die "curl is required"
-command -v wine >/dev/null || die "wine is required to compile MQL5 on this host"\ncommand -v winepath >/dev/null || die "winepath is required to convert the EA path for MetaEditor"
+command -v wine >/dev/null || die "wine is required to compile MQL5 on this host"
+command -v winepath >/dev/null || die "winepath is required to convert the EA path for MetaEditor"
 
 [[ -d "$REPO_DIR/.git" ]] || die "Repository not found at $REPO_DIR. Clone it first or set RAMON_REPO_DIR."
 cd "$REPO_DIR"
@@ -91,14 +92,16 @@ done
 info "Installing the exact repository source for RamonCommandEA v1.02"
 cp "$EA_SOURCE" "$EA_TARGET"
 rm -f "${EA_TARGET%.mq5}.log"
+LOG_FILE="${EA_TARGET%.mq5}.log"
 export WINEPREFIX
 set +e
 WINDOWS_EA_TARGET="$(winepath -w "$EA_TARGET")"
+WINDOWS_LOG_FILE="$(winepath -w "$LOG_FILE")"
 compile_arg="/compile:\"$WINDOWS_EA_TARGET\""
-timeout 180s wine "$METAEDITOR" "$compile_arg" /log
+log_arg="/log:\"$WINDOWS_LOG_FILE\""
+timeout 180s wine "$METAEDITOR" "$compile_arg" "$log_arg"
 compile_status=$?
 set -e
-LOG_FILE="${EA_TARGET%.mq5}.log"
 [[ -f "$LOG_FILE" ]] || die "MetaEditor produced no log (exit=$compile_status). Previous files, if any, are backed up in $BACKUP_DIR."
 cat "$LOG_FILE"
 if [[ "$compile_status" -ne 0 ]] || ! grep -Eiq '0 errors,[[:space:]]*0 warnings' "$LOG_FILE"; then
