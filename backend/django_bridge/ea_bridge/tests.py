@@ -285,7 +285,8 @@ class DjangoDecisionApiTests(TestCase):
         if not verdict.approved:
             self.assertEqual(verdict.approved_volume, 0)
     @override_settings(EA_BEARER_TOKEN="test-token", RAMON_DJANGO_DECISION_ENABLED=True)
-    def test_approved_risk_verdict_remains_non_executable(self):
+    @patch("ea_bridge.decision.SignalFlowPipeline.run")
+    def test_approved_risk_verdict_remains_non_executable(self, run_pipeline):
         AccountDailyBaseline.objects.create(
             account_login="12345678",
             server_name="LiteFinance-MT5-Demo",
@@ -293,23 +294,35 @@ class DjangoDecisionApiTests(TestCase):
             opening_balance="10000.00",
             source_instance_id="ea-decision-test",
         )
+        run_pipeline.return_value = {
+            "approved": True,
+            "action": "BUY",
+            "reason": "SIGNALFLOW_APPROVED",
+            "stages": {
+                "opportunities": {"approved": True, "score": 0.9, "checks": []},
+                "entry_timing": {"approved": True, "checks": []},
+                "risk_management": {
+                    "approved": True, "reason": "RISK_APPROVED", "volume": 0.1,
+                    "stop_price": 2319.0, "stop_points": 130.0, "checks": [],
+                },
+            },
+        }
         payload = self.payload()
         response = self.client.post(
             self.url, data=json.dumps(payload), content_type="application/json", **self.headers
         )
         self.assertEqual(response.status_code, 200, response.content)
         body = response.json()
+        self.assertEqual(body["decision"], "BUY")
+        self.assertTrue(body["risk_approved_advisory_only"])
         verdict = RiskVerdictRecord.objects.filter(decision_id=body["sample_key"]).latest("created_at")
-        self.assertEqual(verdict.approved, body["risk_approved_advisory_only"])
+        self.assertTrue(verdict.approved)
+        self.assertEqual(verdict.reason_code, "RISK_APPROVED_ADVISORY_ONLY")
+        self.assertEqual(verdict.approved_volume, "0.1")
+        self.assertEqual(verdict.stop_loss, "2319.0")
+        self.assertEqual(verdict.take_profit, "2330.35")
         self.assertFalse(verdict.details["execution_authorized"])
         self.assertFalse(verdict.details["command_created"])
-        if verdict.approved:
-            self.assertIn(body["decision"], ("BUY", "SELL"))
-            self.assertGreater(verdict.approved_volume, 0)
-            self.assertIsNotNone(verdict.stop_loss)
-            self.assertIsNotNone(verdict.take_profit)
-        else:
-            self.assertEqual(verdict.approved_volume, 0)
 
     @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
     def test_same_bar_record_refreshes_when_quote_changes(self):
