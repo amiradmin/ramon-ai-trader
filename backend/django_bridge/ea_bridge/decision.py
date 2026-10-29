@@ -246,7 +246,7 @@ def decision(request):
             "action": action,
             "confidence": confidence,
             "rationale_code": reason,
-            "model_version": "django-signalflow-technical-v1",
+            "model_version": "django-signalflow-structural-v2",
             "features": features,
           },
         )
