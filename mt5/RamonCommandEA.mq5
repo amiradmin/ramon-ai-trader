@@ -445,8 +445,10 @@ void RequestDjangoDecision()
    string decision=JsonString(response,"decision","UNKNOWN");
    string reason=JsonString(response,"reason","NO_REASON");
    string sample_key=JsonString(response,"sample_key","");
+   string missing_risk_inputs=JsonString(response,"missing_risk_inputs","");
    Print("RamonCommandEA Django decision: ",decision,
          " reason=",reason,
+         " missing_risk_inputs=",missing_risk_inputs,
          " sample_key=",sample_key,
          " trading_authorization=",JsonBool(response,"trading_authorization",false),
          ". EA does not execute decision responses; broker execution remains command-only.");
