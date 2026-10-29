@@ -112,6 +112,7 @@ def decision(request):
         daily_baseline_day = ""
         daily_baseline_balance = None
         daily_current_equity = None
+        account_snapshot_balance = None
 
         heartbeat = None
         if instance_id and account_login:
@@ -147,6 +148,7 @@ def decision(request):
                         raise ValueError("invalid broker day")
                     snapshot_balance = _num(account_snapshot["balance"], "telemetry balance")
                     snapshot_equity = _num(account_snapshot["equity"], "telemetry equity")
+                    account_snapshot_balance = snapshot_balance
                     daily_current_equity = snapshot_equity
                     request_balance = _num(p["account_balance"], "request balance")
                 except (KeyError, TypeError, ValueError, OverflowError):
@@ -230,6 +232,11 @@ def decision(request):
             "bid": bid,
             "ask": ask,
             "point": point,
+          },
+          "account_snapshot": {
+            "balance": account_snapshot_balance,
+            "equity": daily_current_equity,
+            "broker_day": daily_baseline_day,
           },
           "daily_risk": {
             "baseline_available": server_daily_loss_percent is not None,
