@@ -251,10 +251,11 @@ class DjangoDecisionApiTests(TestCase):
           "stop_level_points":0,"take_profit_points":1000,"daily_loss_percent":0,"open_risk_percent":0}
     @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
     def test_complete_contract_and_audit(self):
-        r=self.client.post(self.url,data=json.dumps(self.payload()),content_type="application/json",**self.headers)
+        payload = self.payload()
+        r=self.client.post(self.url,data=json.dumps(payload),content_type="application/json",**self.headers)
         self.assertEqual(r.status_code,200,r.content); b=r.json()
         self.assertIn(b["decision"],("BUY","SELL","WAIT")); self.assertEqual(len(b["sample_key"]),16)
-        self.assertEqual(b["signal_bar_time"],self.payload()["bars"][-1]["time"])
+        self.assertEqual(b["signal_bar_time"],payload["bars"][-1]["time"])
         self.assertFalse(b["trading_authorization"]); self.assertFalse(b["execution_enabled"])
         self.assertTrue(b["risk_inputs_complete"])
         self.assertEqual(b["missing_risk_inputs"], "")
