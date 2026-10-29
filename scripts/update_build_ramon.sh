@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Pull Ramon main, rebuild the single Compose stack, migrate/check Django, and
-# compile/install the repository's current command EA into the active MT5 terminal.
-# This script never enables command execution and never removes Docker volumes.
+# Update the Django stack and compile/install both repository EA versions.
+# This script preserves Docker volumes and never attaches an EA or places trades.
 set -Eeuo pipefail
 
 REPO_DIR="${RAMON_REPO_DIR:-$HOME/Documents/Presentation/ramon-ai-trader-bridge}"
@@ -9,121 +8,104 @@ BRANCH="${RAMON_GIT_BRANCH:-main}"
 WINEPREFIX="${RAMON_MT5_PREFIX:-$HOME/.mt5}"
 TERMINAL_ID="${RAMON_MT5_TERMINAL_ID:-D0E8209F77C8CF37AD8BF550E51FF075}"
 EXPERTS_DIR="$WINEPREFIX/drive_c/users/amir/AppData/Roaming/MetaQuotes/Terminal/$TERMINAL_ID/MQL5/Experts"
-COMPOSE_FILE="docker-compose.yaml"
-EA_SOURCE="mt5/RamonCommandEA_v1.02.mq5"
-EA_TARGET="$EXPERTS_DIR/RamonCommandEA_v1.02.mq5"
+COMPOSE_FILE=docker-compose.yaml
 HEALTH_URL="${RAMON_HEALTH_URL:-http://127.0.0.1:8017/healthz}"
+EA_SOURCES=(mt5/RamonCommandEA_v1.02.mq5 mt5/Ramon_v0.62.6.mq5)
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 info() { printf '\n[%s] %s\n' "$(date '+%H:%M:%S')" "$*"; }
-
-command -v git >/dev/null || die "git is required"
-command -v docker >/dev/null || die "docker is required"
-command -v curl >/dev/null || die "curl is required"
-command -v wine >/dev/null || die "wine is required to compile MQL5 on this host"
-command -v winepath >/dev/null || die "winepath is required to convert the EA path for MetaEditor"
-
-[[ -d "$REPO_DIR/.git" ]] || die "Repository not found at $REPO_DIR. Clone it first or set RAMON_REPO_DIR."
+for cmd in git docker curl wine winepath timeout tr grep find cp; do
+  command -v "$cmd" >/dev/null 2>&1 || die "$cmd is required"
+done
+[[ -d "$REPO_DIR/.git" ]] || die "Repository not found: $REPO_DIR"
 cd "$REPO_DIR"
-[[ "$(git branch --show-current)" == "$BRANCH" ]] || die "Switch to '$BRANCH' before running (current: $(git branch --show-current))."
-[[ -f "$COMPOSE_FILE" ]] || die "Missing $COMPOSE_FILE."
-[[ -f .env ]] || die "Missing .env. Create it locally; this script will never generate or overwrite secrets."
-[[ -f "$EA_SOURCE" ]] || die "Missing current command EA source: $EA_SOURCE"
+[[ "$(git branch --show-current)" == "$BRANCH" ]] || die "Switch to $BRANCH before running."
+[[ -f "$COMPOSE_FILE" && -f .env ]] || die "Missing docker-compose.yaml or local .env."
+for source in "${EA_SOURCES[@]}"; do [[ -s "$source" ]] || die "Missing EA source: $source"; done
+[[ -z "$(git status --porcelain)" ]] || die "Working tree is not clean; commit or back up changes first."
 
-if [[ -n "$(git status --porcelain)" ]]; then
-  die "Working tree is not clean. Commit or back up your local changes before pulling; nothing has been changed."
-fi
-
-info "Fetching and fast-forwarding $BRANCH"
+info "Fast-forwarding $BRANCH"
 git fetch origin "$BRANCH"
 git pull --ff-only origin "$BRANCH"
 
-info "Validating the single Docker Compose configuration"
+info "Validating and deploying Compose stack"
 docker compose -f "$COMPOSE_FILE" config --quiet
-
-info "Building and starting services (persistent volumes are preserved)"
 docker compose -f "$COMPOSE_FILE" up -d --build
-
-info "Applying forward Django migrations"
 docker compose -f "$COMPOSE_FILE" exec -T django python manage.py migrate --noinput
 docker compose -f "$COMPOSE_FILE" exec -T django python manage.py check
-
-info "Waiting for Django health endpoint"
 healthy=0
 for attempt in $(seq 1 40); do
-  if curl --fail --silent --show-error --max-time 3 "$HEALTH_URL" >/dev/null 2>&1; then
-    healthy=1
-    break
-  fi
+  if curl --fail --silent --max-time 3 "$HEALTH_URL" >/dev/null 2>&1; then healthy=1; break; fi
   sleep 3
 done
-[[ "$healthy" == 1 ]] || {
+if [[ "$healthy" != 1 ]]; then
   docker compose -f "$COMPOSE_FILE" ps
   docker compose -f "$COMPOSE_FILE" logs --tail=100 django
   die "Django did not become healthy at $HEALTH_URL"
-}
+fi
 docker compose -f "$COMPOSE_FILE" ps
 
-info "Locating MetaEditor inside WINEPREFIX=$WINEPREFIX"
 [[ -d "$WINEPREFIX/drive_c" ]] || die "Wine prefix not found: $WINEPREFIX"
 METAEDITOR="${RAMON_METAEDITOR:-}"
 if [[ -z "$METAEDITOR" ]]; then
-  for candidate in \
-    "$WINEPREFIX/drive_c/Program Files/MetaTrader 5/metaeditor64.exe" \
-    "$WINEPREFIX/drive_c/Program Files/MetaTrader 5/metaeditor.exe" \
-    "$WINEPREFIX/drive_c/Program Files (x86)/MetaTrader 5/metaeditor64.exe"; do
+  for candidate in "$WINEPREFIX/drive_c/Program Files/MetaTrader 5/metaeditor64.exe" "$WINEPREFIX/drive_c/Program Files/MetaTrader 5/metaeditor.exe" "$WINEPREFIX/drive_c/Program Files (x86)/MetaTrader 5/metaeditor64.exe"; do
     if [[ -f "$candidate" ]]; then METAEDITOR="$candidate"; break; fi
   done
 fi
-if [[ -z "$METAEDITOR" ]]; then
-  METAEDITOR="$(find "$WINEPREFIX/drive_c" -type f \( -iname metaeditor64.exe -o -iname metaeditor.exe \) -print -quit 2>/dev/null || true)"
+[[ -n "$METAEDITOR" && -f "$METAEDITOR" ]] || METAEDITOR="$(find "$WINEPREFIX/drive_c" -type f \( -iname metaeditor64.exe -o -iname metaeditor.exe \) -print -quit 2>/dev/null || true)"
+[[ -n "$METAEDITOR" && -f "$METAEDITOR" ]] || die "MetaEditor not found; set RAMON_METAEDITOR."
+[[ -d "$EXPERTS_DIR" ]] || die "Active MT5 Experts directory not found: $EXPERTS_DIR"
+
+# The strategy source includes this file. Prefer the tracked copy; fall back to
+# the exact existing terminal copy. Never generate a placeholder dependency.
+TELEMETRY_INCLUDE=""
+if [[ -s mt5/RamonResearchTelemetry.mqh ]]; then
+  TELEMETRY_INCLUDE=mt5/RamonResearchTelemetry.mqh
+elif [[ -s "$EXPERTS_DIR/RamonResearchTelemetry.mqh" ]]; then
+  TELEMETRY_INCLUDE="$EXPERTS_DIR/RamonResearchTelemetry.mqh"
+else
+  TELEMETRY_INCLUDE="$(find "$REPO_DIR" "$WINEPREFIX/drive_c/users/amir/AppData/Roaming/MetaQuotes/Terminal" -type f -name RamonResearchTelemetry.mqh -print -quit 2>/dev/null || true)"
 fi
-[[ -n "$METAEDITOR" && -f "$METAEDITOR" ]] || die "MetaEditor was not found. Set RAMON_METAEDITOR to its exact .exe path."
-[[ -d "$EXPERTS_DIR" ]] || die "Active MT5 Experts directory not found: $EXPERTS_DIR. Set RAMON_MT5_TERMINAL_ID if needed."
-mkdir -p "$EXPERTS_DIR"
+[[ -n "$TELEMETRY_INCLUDE" && -s "$TELEMETRY_INCLUDE" ]] || die "Required RamonResearchTelemetry.mqh is missing. Add the real dependency to mt5/ or the active Experts directory; refusing to compile a broken strategy EA."
 
 STAMP="$(date '+%Y%m%d-%H%M%S')"
 BACKUP_DIR="$HOME/.local/share/ramon-ea-backups/$STAMP"
 mkdir -p "$BACKUP_DIR"
-for old in "$EA_TARGET" "${EA_TARGET%.mq5}.ex5"; do
-  if [[ -f "$old" ]]; then cp -p "$old" "$BACKUP_DIR/"; fi
+for source in "${EA_SOURCES[@]}"; do
+  base="$(basename "$source")"
+  for old in "$EXPERTS_DIR/$base" "$EXPERTS_DIR/${base%.mq5}.ex5"; do [[ ! -f "$old" ]] || cp -p "$old" "$BACKUP_DIR/"; done
 done
+[[ ! -f "$EXPERTS_DIR/RamonResearchTelemetry.mqh" ]] || cp -p "$EXPERTS_DIR/RamonResearchTelemetry.mqh" "$BACKUP_DIR/"
+cp -p "$TELEMETRY_INCLUDE" "$BACKUP_DIR/RamonResearchTelemetry.mqh"
 
-info "Installing the exact repository source for RamonCommandEA v1.02"
-cp "$EA_SOURCE" "$EA_TARGET"
-LOG_FILE="${EA_TARGET%.mq5}.log"
-EX5_TARGET="${EA_TARGET%.mq5}.ex5"
-rm -f "$LOG_FILE" "$EX5_TARGET"
-export WINEPREFIX
-set +e
-WINDOWS_EA_TARGET="$(winepath -w "$EA_TARGET")"
-[[ -n "$WINDOWS_EA_TARGET" ]] || die "winepath returned an empty Windows source path."
-# EA_TARGET is under the standard MT5 data path and contains no spaces. Do not
-# embed literal quote characters in the /compile argument: under Wine they can
-# be passed through as part of the switch and MetaEditor may exit 0 without
-# compiling or writing the expected .log/.ex5 files.
-[[ "$WINDOWS_EA_TARGET" != *" "* ]] || die "The converted EA source path contains spaces; use a no-space staging path before compiling: $WINDOWS_EA_TARGET"
-info "MetaEditor executable: $METAEDITOR"
-info "Windows source path: $WINDOWS_EA_TARGET"
-timeout 180s wine "$METAEDITOR" "/compile:$WINDOWS_EA_TARGET" /log
-compile_status=$?
-set -e
-[[ -f "$LOG_FILE" ]] || die "MetaEditor produced no log (exit=$compile_status). Previous files, if any, are backed up in $BACKUP_DIR."
-cat "$LOG_FILE"
-# MetaEditor under Wine may emit UTF-16-style logs containing NUL bytes.
-# Strip NULs for matching, and require the exact Result summary so "10 errors"
-# can never accidentally pass by containing the substring "0 errors".
-if [[ "$compile_status" -ne 0 ]] || ! tr -d '\000' < "$LOG_FILE" | grep -Eiq '^[[:space:]]*Result:[[:space:]]*0 errors,[[:space:]]*0 warnings([,[:space:]]|$)'; then
-  info "Compiler summary lines (NUL bytes removed):"
-  tr -d '\000' < "$LOG_FILE" | grep -Ei 'Result:|error|warning' || true
-  die "EA compilation did not report an exact zero-error, zero-warning Result summary. Inspect $LOG_FILE; backup: $BACKUP_DIR"
-fi
-[[ -s "${EA_TARGET%.mq5}.ex5" ]] || die "Compilation log succeeded but EX5 is missing. Backup: $BACKUP_DIR"
+compile_install() {
+  local source="$1" base target log_file ex5 winpath status normalized
+  base="$(basename "$source")"; target="$EXPERTS_DIR/$base"
+  log_file="${target%.mq5}.log"; ex5="${target%.mq5}.ex5"
+  cp "$source" "$target"
+  if [[ "$base" == Ramon_v0.62.6.mq5 ]]; then cp "$TELEMETRY_INCLUDE" "$EXPERTS_DIR/RamonResearchTelemetry.mqh"; fi
+  rm -f "$log_file" "$ex5"
+  winpath="$(WINEPREFIX="$WINEPREFIX" winepath -w "$target")"
+  [[ -n "$winpath" ]] || die "winepath returned an empty path for $target"
+  [[ "$winpath" != *" "* ]] || die "Wine compiler path contains spaces: $winpath"
+  info "Compiling $base"
+  printf 'MetaEditor: %s\nSource: %s\n' "$METAEDITOR" "$winpath"
+  set +e
+  WINEPREFIX="$WINEPREFIX" timeout 180s wine "$METAEDITOR" "/compile:$winpath" /log
+  status=$?
+  set -e
+  [[ -s "$log_file" ]] || die "No compiler log for $base (exit=$status). Backup: $BACKUP_DIR"
+  cat "$log_file"
+  normalized="$(tr -d '\000' < "$log_file")"
+  if [[ "$status" -ne 0 ]] || ! printf '%s\n' "$normalized" | grep -Eiq '^[[:space:]]*Result:[[:space:]]*0 errors,[[:space:]]*0 warnings([,[:space:]]|$)'; then
+    printf '%s\n' "$normalized" | grep -Ei 'Result:|error|warning' || true
+    die "Compiler validation failed for $base. Backup: $BACKUP_DIR"
+  fi
+  [[ -s "$ex5" ]] || die "No output binary for $base despite success summary. Backup: $BACKUP_DIR"
+  printf 'PASS: %s\nBinary: %s\n' "$base" "$ex5"
+}
 
-info "Success: Compose is running and RamonCommandEA_v1.02 compiled."
-printf 'EA source: %s\nEA binary: %s\nBackup: %s\n' "$EA_TARGET" "${EA_TARGET%.mq5}.ex5" "$BACKUP_DIR"
-printf '\nSafety notes:\n'
-printf ' - Command execution remains disabled by the source default; this script does not enable server flags or EA inputs.\n'
-printf ' - This script does not attach an EA to a chart or place trades.\n'
-printf ' - Ramon_v0.62.x strategy sources are not in this GitHub repository, so they are deliberately not overwritten or compiled by this script.\n'
-printf ' - Keep the strategy EA detached until its exact source is reviewed for independent OrderSend/CTrade calls and duplicate execution risk.\n'
+for source in "${EA_SOURCES[@]}"; do compile_install "$source"; done
+printf '\nDEPLOYMENT CHECKS PASSED\nDjango: %s\nExperts: %s\nBackups: %s\n' "$HEALTH_URL" "$EXPERTS_DIR" "$BACKUP_DIR"
+printf 'Installed binaries: RamonCommandEA_v1.02.ex5 and Ramon_v0.62.6.ex5\n'
+printf 'No EA was attached and no trades were placed. Server command flags are not changed.\n'
