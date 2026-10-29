@@ -565,9 +565,19 @@ bool SafeOpen(const string command_json,const string command_id,ulong &ticket_ou
    else if(side=="SELL") { order_type=ORDER_TYPE_SELL; entry=tick.bid; if(sl<=entry || tp<=0 || tp>=entry) { reason="INVALID_SELL_SL_TP"; return false; } }
    else { reason="INVALID_SIDE"; return false; }
 
+   long broker_stop_level=(long)SymbolInfoInteger(_Symbol,SYMBOL_TRADE_STOPS_LEVEL);
+   double stop_points=MathAbs(entry-sl)/point;
+   double target_points=MathAbs(tp-entry)/point;
+   if(broker_stop_level>0 && (stop_points<broker_stop_level || target_points<broker_stop_level))
+   { reason="STOP_OR_TARGET_BELOW_BROKER_MINIMUM"; return false; }
+
    double loss=0;
    if(!OrderCalcProfit(order_type,_Symbol,volume,entry,sl,loss) || loss>=0 || MathAbs(loss)>MaxRiskMoney)
    { reason="RISK_LIMIT_OR_CALCULATION_FAILED"; return false; }
+   double margin_required=0;
+   if(!OrderCalcMargin(order_type,_Symbol,volume,entry,margin_required) ||
+      margin_required<0 || margin_required>AccountInfoDouble(ACCOUNT_MARGIN_FREE))
+   { reason="INSUFFICIENT_MARGIN_OR_MARGIN_CALCULATION_FAILED"; return false; }
 
    bool submitted=false;
    if(side=="BUY") submitted=Trade.Buy(volume,_Symbol,0,sl,tp,"RamonCmd:"+command_id);
@@ -848,6 +858,9 @@ int OnInit()
    if(!EventSetTimer(MathMax(5,TimerSeconds)))
       return INIT_FAILED;
    Trade.SetAsyncMode(false);
+   Trade.SetExpertMagicNumber(MagicNumber);
+   if(!Trade.SetTypeFillingBySymbol(_Symbol))
+      Print("RamonCommandEA: broker filling mode unavailable for ",_Symbol,"; broker may reject orders.");
    Print("RamonCommandEA initialized in ",EnableCommandExecution ? "DEMO COMMAND MODE" : "TELEMETRY-ONLY MODE",
          ". Live accounts are always rejected.");
    return INIT_SUCCEEDED;
