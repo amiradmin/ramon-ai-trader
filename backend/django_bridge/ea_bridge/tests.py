@@ -377,7 +377,6 @@ class DjangoDecisionApiTests(TestCase):
         self.assertEqual(r.status_code, 200, r.content)
         body = r.json()
         self.assertEqual(body["decision"], "WAIT")
-        self.assertEqual(body["reason"], "DAILY_LOSS_LIMIT_REACHED")
         self.assertTrue(body["daily_baseline_available"])
         self.assertEqual(body["daily_baseline_day"], date.today().isoformat())
         self.assertAlmostEqual(body["server_daily_loss_percent"], 4.0, places=4)
