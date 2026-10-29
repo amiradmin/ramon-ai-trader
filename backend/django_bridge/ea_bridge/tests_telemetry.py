@@ -10,7 +10,8 @@ class EATelemetryTests(TestCase):
     def payload(self):
         return {
             "protocol_version": "ramon-ea-command-v1",
-            "ea_version": "1.00",
+            "ea_version": "1.02",
+            "account_trade_mode": 0,
             "instance_id": "ea-telemetry-test",
             "account_login": "12345",
             "symbol": "XAUUSD_o",
@@ -34,8 +35,9 @@ class EATelemetryTests(TestCase):
         self.assertFalse(response.json()["trading_authorization"])
         self.assertEqual(MarketBar.objects.filter(source="ea-telemetry-test").count(), 1)
         heartbeat = EAHeartbeat.objects.get(instance_id="ea-telemetry-test")
-        self.assertEqual(heartbeat.ea_version, "1.00")
-        self.assertEqual(heartbeat.payload["ea_version"], "1.00")
+        self.assertEqual(heartbeat.ea_version, "1.02")
+        self.assertEqual(heartbeat.payload["ea_version"], "1.02")
+        self.assertEqual(heartbeat.payload["account_trade_mode"], 0)
 
     @override_settings(EA_BEARER_TOKEN="test-token")
     def test_rejects_unclosed_bar(self):

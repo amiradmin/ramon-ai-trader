@@ -230,6 +230,7 @@ class DjangoDecisionApiTests(TestCase):
             trade_allowed=False,
             payload={
                 "server_name": "LiteFinance-MT5-Demo",
+                "account_trade_mode": 0,
                 "broker_day": date.today().isoformat(),
                 "account": {"balance": "10000", "equity": "10000",
                             "margin": "0", "free_margin": "10000",

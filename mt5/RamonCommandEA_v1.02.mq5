@@ -1,6 +1,7 @@
 #property strict
 #property version   "1.02"
-#property description "RamonCommandEA v1.02: Django telemetry + HTTP diagnostics"
+#property description "RamonCommandEA v1.02: Django telemetry + guarded demo execution"
+#define RAMON_COMMAND_EA_VERSION "1.02"
 
 #include <Trade/Trade.mqh>
 
@@ -506,6 +507,8 @@ string BuildTelemetry()
       +"\"instance_id\":\""+JsonEscape(InstanceId)+"\","
       +"\"account_login\":\""+IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN))+"\","
       +"\"server_name\":\""+JsonEscape(AccountInfoString(ACCOUNT_SERVER))+"\","
+      +"\"account_trade_mode\":"+IntegerToString((int)AccountInfoInteger(ACCOUNT_TRADE_MODE))+","
+      +"\"ea_version\":\""+RAMON_COMMAND_EA_VERSION+"\","
       +"\"broker_day\":\""+broker_day_text+"\","
       +"\"symbol\":\""+JsonEscape(_Symbol)+"\",\"timeframe\":\""+TfName(_Period)+"\","
       +"\"quote\":{\"bid\":"+DoubleToString(tick.bid,_Digits)+",\"ask\":"+DoubleToString(tick.ask,_Digits)+",\"point\":"+DoubleToString(point,_Digits)+"},"

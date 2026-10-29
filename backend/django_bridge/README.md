@@ -25,7 +25,7 @@ RAMON_EA_COMMAND_CREATION_ENABLED=0
 RAMON_EA_COMMAND_EXECUTION_ENABLED=0
 ```
 
-Keep `RAMON_PIPELINE_INGEST_ENABLED=0`, `RAMON_EA_COMMAND_CREATION_ENABLED=0`, and `RAMON_EA_COMMAND_EXECUTION_ENABLED=0` during validation. These are the Compose defaults. After verifying Redis, worker persistence, duplicate-event handling, and retry behavior, explicitly set only `RAMON_PIPELINE_INGEST_ENABLED=1` in the local `.env` to opt in to Redis-stream ingestion. Do not set either command flag to `1` until the decision-to-risk-verdict-to-command path and demo execution/reconciliation tests are complete. With pipeline ingestion disabled, the legacy event endpoint writes directly to the database. Never commit `.env` or secrets.
+Keep `RAMON_PIPELINE_INGEST_ENABLED=0`, `RAMON_EA_COMMAND_CREATION_ENABLED=0`, and `RAMON_EA_COMMAND_EXECUTION_ENABLED=0` during validation. These are the Compose defaults. After verifying Redis, worker persistence, duplicate-event handling, and retry behavior, explicitly set only `RAMON_PIPELINE_INGEST_ENABLED=1` in the local `.env` to opt in to Redis-stream ingestion. Do not set either command flag to `1` until the decision-to-risk-verdict-to-command path and demo execution/reconciliation tests are complete. With pipeline ingestion disabled, the legacy event endpoint writes directly to the database. Never commit `.env` or secrets. For the guarded demo-only trade lifecycle, follow [`docs/operations/demo-trading-activation.md`](../../docs/operations/demo-trading-activation.md); it covers account-mode verification, broker-confirmed daily baselines, opt-in flags, EA compilation, and order reconciliation. Missing baselines remain a hard `WAIT` condition.
 
 From the repository root:
 
