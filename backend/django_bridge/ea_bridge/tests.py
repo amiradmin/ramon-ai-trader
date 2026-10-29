@@ -4,7 +4,7 @@ from datetime import date, timedelta
 from unittest.mock import Mock, patch
 from django.test import TestCase, override_settings
 from django.utils import timezone
-from .models import AccountDailyBaseline, EAEvent, EAHeartbeat, MarketBar
+from .models import AccountDailyBaseline, EAEvent, EAHeartbeat, MarketBar, StrategyDecisionRecord
 from ramon_pipeline.management.commands.consume_ramon_streams import Command
 
 
@@ -381,6 +381,9 @@ class DjangoDecisionApiTests(TestCase):
         self.assertEqual(body["daily_baseline_day"], date.today().isoformat())
         self.assertAlmostEqual(body["server_daily_loss_percent"], 4.0, places=4)
         self.assertEqual(body["daily_loss_source"], "SERVER_BASELINE_EQUITY_DRAWDOWN")
+        audit = StrategyDecisionRecord.objects.get(decision_id=body["sample_key"])
+        self.assertAlmostEqual(audit.features["daily_risk"]["loss_percent"], 4.0, places=4)
+        self.assertEqual(audit.features["daily_risk"]["source"], "SERVER_BASELINE_EQUITY_DRAWDOWN")
 
     @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
     def test_rejects_account_login_mismatch(self):
