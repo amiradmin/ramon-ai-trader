@@ -86,7 +86,11 @@ def create_open_command(*, decision, verdict, instance_id, account_login, server
             raise ValueError("invalid broker day")
         bid = _decimal(quote.get("bid"), "bid")
         ask = _decimal(quote.get("ask"), "ask")
+        current_balance = _decimal(account.get("balance"), "balance")
         baseline_equity = _decimal(account.get("equity"), "equity")
+        decision_account = decision.features.get("account_snapshot", {})
+        decision_balance = _decimal(decision_account.get("balance"), "decision balance")
+        decision_equity = _decimal(decision_account.get("equity"), "decision equity")
         baseline = AccountDailyBaseline.objects.filter(
             account_login=account_login,
             server_name=server_name,
@@ -102,8 +106,12 @@ def create_open_command(*, decision, verdict, instance_id, account_login, server
         return None, False, "DAILY_LOSS_BASELINE_UNAVAILABLE"
     if verdict.details.get("daily_baseline_day") != broker_day.isoformat():
         return None, False, "RISK_VERDICT_BASELINE_DAY_MISMATCH"
-    if bid <= 0 or ask < bid or baseline_equity <= 0 or volume <= 0:
+    if bid <= 0 or ask < bid or current_balance <= 0 or baseline_equity <= 0 or volume <= 0:
         return None, False, "ACCOUNT_OR_QUOTE_VALUES_INVALID"
+    if abs(current_balance - decision_balance) > Decimal("0.01"):
+        return None, False, "ACCOUNT_BALANCE_CHANGED_AFTER_DECISION"
+    if abs(baseline_equity - decision_equity) > Decimal("0.01"):
+        return None, False, "ACCOUNT_EQUITY_CHANGED_AFTER_DECISION"
 
     daily_loss_percent = max(
         Decimal("0"),
