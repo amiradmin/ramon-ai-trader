@@ -10,6 +10,8 @@ Safety defaults must remain:
 - Telemetry must send `server_name` and broker-local `broker_day` (`YYYY-MM-DD`); the decision request must send the same `server_name` so Django can validate the account and use its server-side daily-risk baseline.
 - Live-account order execution is not enabled by this diagnostic build.
 
+Before the local build, the GitHub MT5 source-guard workflow checks the default-off execution flag, empty token default, broker identity/day fields, and fail-closed authorization checks. Passing that static check is not a substitute for MetaEditor compilation.
+
 ## Build
 
 1. Copy `mt5/RamonCommandEA_v1.02.mq5` to the active MT5 terminal's `MQL5/Experts` directory.
