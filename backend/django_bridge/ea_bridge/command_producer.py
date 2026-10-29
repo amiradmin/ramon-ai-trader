@@ -5,13 +5,13 @@ are explicitly enabled. It revalidates fresh account telemetry and never sizes a
 trade itself; the persisted risk verdict must already contain complete values.
 """
 import hashlib
-import math
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 from ramon_pipeline.signalflow.risk_management import RiskConfig
 
@@ -70,6 +70,12 @@ def create_open_command(*, decision, verdict, instance_id, account_login, server
         return None, False, "OPEN_POSITION_RISK_UNVERIFIED"
     if not isinstance(account, dict) or not isinstance(quote, dict):
         return None, False, "ACCOUNT_SNAPSHOT_INVALID"
+    quote_time = parse_datetime(str(snapshot.get("quote_time", "")))
+    if quote_time is None or quote_time.tzinfo is None or quote_time.utcoffset() is None:
+        return None, False, "QUOTE_TIMESTAMP_INVALID"
+    quote_age = (now - quote_time).total_seconds()
+    if quote_age < -5 or quote_age > 60:
+        return None, False, "QUOTE_STALE"
     if not isinstance(broker_day_raw, str):
         return None, False, "DAILY_LOSS_BASELINE_UNAVAILABLE"
 
