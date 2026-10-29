@@ -59,6 +59,10 @@ Open **EA bridge → EA events**. The list is newest-first, paginated at 50 rows
 
 All timestamps stored by Django use UTC. The EA's `observed_utc_epoch` field is retained in the JSON snapshot payload, while `received_at` records the database insertion time.
 
+## Daily-risk baseline recovery
+
+If the decision endpoint reports `DAILY_LOSS_BASELINE_UNAVAILABLE`, follow [`docs/operations/daily-risk-baseline-recovery.md`](../../docs/operations/daily-risk-baseline-recovery.md). The baseline must be the broker-verified opening balance for the exact account, server, and broker-local date; current equity/balance is not a safe substitute. Keep command creation and execution disabled while diagnosing.
+
 ## Safety / rollout
 
 - The bridge defaults to disabled in the EA and the Redis ingestion flag defaults to disabled.
