@@ -8,11 +8,12 @@ on:
       - "docs/ramon-django-pipeline/**"
       - ".github/workflows/ramon-django-pipeline.yml"
   push:
-    branches: ["feat/ramon-django-pipeline"]
+    branches: ["main", "feat/ramon-django-pipeline"]
     paths:
       - "backend/django_bridge/**"
       - "docker-compose.yaml"
       - ".github/workflows/ramon-django-pipeline.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
