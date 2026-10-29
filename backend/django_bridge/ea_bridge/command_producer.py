@@ -71,6 +71,8 @@ def create_open_command(*, decision, verdict, instance_id, account_login, server
         return None, False, "TERMINAL_TRADE_PERMISSION_DENIED"
 
     snapshot = heartbeat.payload if isinstance(heartbeat.payload, dict) else {}
+    if not _is_demo_account(snapshot):
+        return None, False, "DEMO_ACCOUNT_REQUIRED"
     positions = snapshot.get("positions")
     account = snapshot.get("account")
     quote = snapshot.get("quote")
