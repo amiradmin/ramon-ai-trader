@@ -242,7 +242,7 @@ class RiskManager:
             checks.append({"name": "daily_loss", "passed": True, "detail": "skipped: no daily_loss_percent supplied"})
         else:
             if daily_loss >= cfg.max_daily_loss_percent:
-                raise _Reject("DAILY_LOSS_LIMIT_REACHED", f"realised loss today is {daily_loss:g}% (limit {cfg.max_daily_loss_percent:g}%)")
+                raise _Reject("DAILY_LOSS_LIMIT_REACHED", f"daily loss today is {daily_loss:g}% (limit {cfg.max_daily_loss_percent:g}%)")
             checks.append({"name": "daily_loss", "passed": True, "detail": f"daily loss {daily_loss:g}% below {cfg.max_daily_loss_percent:g}%"})
 
         risk_pct = min(requested_pct, self.maximum_risk_percent)
