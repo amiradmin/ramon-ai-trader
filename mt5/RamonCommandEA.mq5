@@ -517,9 +517,10 @@ bool AckCommand(const string command_id,const string state,const string detail,
                 const double fill_volume=0.0)
 {
    string description=(broker_retcode==0 ? "" : Trade.ResultRetcodeDescription());
+   ulong order_ticket=(broker_retcode==0 ? 0 : Trade.ResultOrder());
    string result="{\"detail\":\""+JsonEscape(detail)+"\","
       +"\"broker_ticket\":\""+IntegerToString((long)ticket)+"\","
-      +"\"broker_order\":\""+IntegerToString((long)Trade.ResultOrder())+"\","
+      +"\"broker_order\":\""+IntegerToString((long)order_ticket)+"\","
       +"\"broker_deal\":\""+IntegerToString((long)deal_ticket)+"\","
       +"\"retcode\":"+IntegerToString((long)broker_retcode)+","
       +"\"retcode_description\":\""+JsonEscape(description)+"\","
