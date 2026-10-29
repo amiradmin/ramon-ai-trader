@@ -1,12 +1,13 @@
 """Conservative Django-hosted decision API for Ramon EA."""
 import hashlib, json, math, time, logging
+from decimal import Decimal
 from django.conf import settings
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 from .auth import BearerTokenRequired
 from django.utils import timezone
-from .models import AccountDailyBaseline, StrategyDecisionRecord, EAHeartbeat
+from .models import AccountDailyBaseline, StrategyDecisionRecord, EAHeartbeat, RiskVerdictRecord
 
 logger = logging.getLogger(__name__)
 from ramon_pipeline.signalflow.entry_timing import EntryTimer
@@ -250,10 +251,62 @@ def decision(request):
             "features": features,
           },
         )
+        # Persist a separate, auditable risk verdict. It is never an order command
+        # and deliberately cannot grant execution authorization.
+        risk_stage = result["stages"].get("risk_management", {})
+        risk_approved = bool(
+            record.action in ("BUY", "SELL")
+            and result.get("approved")
+            and risk_stage.get("approved")
+            and risk_guards_complete
+            and not account_state_reason
+        )
+        stop_price = risk_stage.get("stop_price")
+        take_profit_price = None
+        approved_volume = Decimal("0")
+        stop_loss_value = None
+        take_profit_value = None
+        verdict_reason = record.rationale_code or "RISK_REJECTED"
+        if risk_approved:
+            try:
+                approved_volume = Decimal(str(risk_stage["volume"]))
+                stop_loss_value = Decimal(str(stop_price))
+                tp_points = Decimal(str(p["take_profit_points"]))
+                point_value = Decimal(str(point))
+                entry_value = Decimal(str(ask if record.action == "BUY" else bid))
+                take_profit_price = entry_value + tp_points * point_value * (1 if record.action == "BUY" else -1)
+                if approved_volume <= 0 or stop_loss_value <= 0 or take_profit_price <= 0:
+                    raise ValueError("non-positive executable risk values")
+                take_profit_value = take_profit_price
+                verdict_reason = "RISK_APPROVED_ADVISORY_ONLY"
+            except (KeyError, TypeError, ValueError, ArithmeticError):
+                risk_approved = False
+                approved_volume = Decimal("0")
+                stop_loss_value = None
+                take_profit_value = None
+                verdict_reason = "RISK_VERDICT_INCOMPLETE"
+        RiskVerdictRecord.objects.create(
+            decision_id=key,
+            approved=risk_approved,
+            reason_code=verdict_reason[:128],
+            approved_volume=approved_volume,
+            stop_loss=stop_loss_value,
+            take_profit=take_profit_value,
+            details={
+                "execution_authorized": False,
+                "command_created": False,
+                "signal_action": record.action,
+                "risk_inputs_complete": risk_guards_complete,
+                "account_state_reason": account_state_reason,
+                "daily_baseline_day": daily_baseline_day,
+                "daily_baseline_balance": daily_baseline_balance,
+                "server_daily_loss_percent": server_daily_loss_percent,
+                "risk_stage": risk_stage,
+            },
+        )
         response = _compat(
           record.action, record.rationale_code, key, bar_time, bid, ask,
-          atr, median, spread, confidence,
-          bool(result["stages"]["risk_management"].get("approved") and risk_guards_complete and not account_state_reason),
+          atr, median, spread, confidence, risk_approved,
         )
         response["decision_record_created"] = created
         response["risk_inputs_complete"] = risk_guards_complete

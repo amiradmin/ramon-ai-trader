@@ -1,10 +1,11 @@
 import json
 import time
+from decimal import Decimal
 from datetime import date, timedelta
 from unittest.mock import Mock, patch
 from django.test import TestCase, override_settings
 from django.utils import timezone
-from .models import AccountDailyBaseline, EAEvent, EAHeartbeat, MarketBar, StrategyDecisionRecord
+from .models import AccountDailyBaseline, EAEvent, EAHeartbeat, MarketBar, RiskVerdictRecord, StrategyDecisionRecord
 from ramon_pipeline.management.commands.consume_ramon_streams import Command
 
 
@@ -278,6 +279,52 @@ class DjangoDecisionApiTests(TestCase):
             for check in opportunity["checks"]
         ))
         self.assertEqual(record.model_version, "django-signalflow-structural-v2")
+        verdict = RiskVerdictRecord.objects.filter(decision_id=b["sample_key"]).latest("created_at")
+        self.assertEqual(verdict.approved, b["risk_approved_advisory_only"])
+        self.assertFalse(verdict.details["execution_authorized"])
+        self.assertFalse(verdict.details["command_created"])
+        if not verdict.approved:
+            self.assertEqual(verdict.approved_volume, 0)
+    @override_settings(EA_BEARER_TOKEN="test-token", RAMON_DJANGO_DECISION_ENABLED=True)
+    @patch("ea_bridge.decision.SignalFlowPipeline.run")
+    def test_approved_risk_verdict_remains_non_executable(self, run_pipeline):
+        AccountDailyBaseline.objects.create(
+            account_login="12345678",
+            server_name="LiteFinance-MT5-Demo",
+            broker_day=date.today(),
+            opening_balance="10000.00",
+            source_instance_id="ea-decision-test",
+        )
+        run_pipeline.return_value = {
+            "approved": True,
+            "action": "BUY",
+            "reason": "SIGNALFLOW_APPROVED",
+            "stages": {
+                "opportunities": {"approved": True, "score": 0.9, "checks": []},
+                "entry_timing": {"approved": True, "checks": []},
+                "risk_management": {
+                    "approved": True, "reason": "RISK_APPROVED", "volume": 0.1,
+                    "stop_price": 2319.0, "stop_points": 130.0, "checks": [],
+                },
+            },
+        }
+        payload = self.payload()
+        response = self.client.post(
+            self.url, data=json.dumps(payload), content_type="application/json", **self.headers
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        body = response.json()
+        self.assertEqual(body["decision"], "BUY")
+        self.assertTrue(body["risk_approved_advisory_only"])
+        verdict = RiskVerdictRecord.objects.filter(decision_id=body["sample_key"]).latest("created_at")
+        self.assertTrue(verdict.approved)
+        self.assertEqual(verdict.reason_code, "RISK_APPROVED_ADVISORY_ONLY")
+        self.assertEqual(verdict.approved_volume, Decimal("0.1"))
+        self.assertEqual(verdict.stop_loss, Decimal("2319.0"))
+        self.assertEqual(verdict.take_profit, Decimal("2330.35"))
+        self.assertFalse(verdict.details["execution_authorized"])
+        self.assertFalse(verdict.details["command_created"])
+
     @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
     def test_same_bar_record_refreshes_when_quote_changes(self):
         payload = self.payload()
@@ -382,6 +429,10 @@ class DjangoDecisionApiTests(TestCase):
         b=r.json()
         self.assertEqual(b["decision"],"WAIT")
         self.assertEqual(b["reason"],"DAILY_LOSS_BASELINE_UNAVAILABLE")
+        verdict = RiskVerdictRecord.objects.filter(decision_id=b["sample_key"]).latest("created_at")
+        self.assertFalse(verdict.approved)
+        self.assertEqual(verdict.reason_code, "DAILY_LOSS_BASELINE_UNAVAILABLE")
+        self.assertFalse(verdict.details["execution_authorized"])
         self.assertFalse(b["trading_authorization"])
         self.assertFalse(b["execution_enabled"])
 
