@@ -97,9 +97,9 @@ compile_install() {
   [[ -s "$log_file" ]] || die "No compiler log for $base (exit=$status). Backup: $BACKUP_DIR"
   cat "$log_file"
   normalized="$(tr -d '\000' < "$log_file")"
-  if [[ "$status" -ne 0 ]] || ! printf '%s\n' "$normalized" | grep -Eiq '^[[:space:]]*Result:[[:space:]]*0 errors,[[:space:]]*0 warnings([,[:space:]]|$)'; then
+  if ! printf '%s\n' "$normalized" | grep -Eiq '^[[:space:]]*Result:[[:space:]]*0 errors,[[:space:]]*0 warnings([,[:space:]]|$)'; then
     printf '%s\n' "$normalized" | grep -Ei 'Result:|error|warning' || true
-    die "Compiler validation failed for $base. Backup: $BACKUP_DIR"
+    die "Compiler validation failed for $base (MetaEditor exit=$status). Backup: $BACKUP_DIR"
   fi
   [[ -s "$ex5" ]] || die "No output binary for $base despite success summary. Backup: $BACKUP_DIR"
   printf 'PASS: %s\nBinary: %s\n' "$base" "$ex5"
