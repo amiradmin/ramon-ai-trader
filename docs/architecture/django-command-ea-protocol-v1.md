@@ -2,7 +2,7 @@
 
 ## Status
 
-The Django command model and authenticated `commands/next` and `commands/ack` endpoints are implemented in the current `main` branch. API tests are being added separately. No endpoint currently creates trade commands from strategy decisions, and the existing production Ramon EA does not poll or execute this command protocol. The prototype EA is telemetry-only and has not been verified by MetaEditor compilation or demo-account execution.
+The Django command model and authenticated `commands/next` and `commands/ack` endpoints are implemented in the current `main` branch. Regression tests cover disabled-by-default behavior, account scoping, expiry, acknowledgement idempotency, state transitions, and bearer authentication. No endpoint currently creates trade commands from strategy decisions, and the existing production Ramon EA does not poll or execute this command protocol. The prototype EA is telemetry-only and has not been verified by MetaEditor compilation or demo-account execution.
 
 This protocol is not authorization to trade. Keep `RAMON_EA_COMMAND_EXECUTION_ENABLED=0`, keep EA execution disabled, and do not create executable commands until the risk-verdict producer, EA-side validation, broker-result reconciliation, and demo tests are complete.
 
