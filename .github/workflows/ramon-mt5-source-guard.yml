@@ -56,6 +56,22 @@ jobs:
               echo "FAIL: missing fail-closed command execution-authorization check: ${source}" >&2
               exit 1
             }
+            grep -q 'TRADE_RETCODE_DONE' "$source" || {
+              echo "FAIL: broker retcodes must be checked before reporting execution: ${source}" >&2
+              exit 1
+            }
+            grep -q 'RECONCILIATION_REQUIRED' "$source" || {
+              echo "FAIL: ambiguous broker results must require reconciliation: ${source}" >&2
+              exit 1
+            }
+            grep -q 'AckCommand(command_id,"EXECUTING"' "$source" || {
+              echo "FAIL: server must record execution start before broker submission: ${source}" >&2
+              exit 1
+            }
+            grep -q 'OrderCalcMargin' "$source" || {
+              echo "FAIL: OPEN commands must validate required margin: ${source}" >&2
+              exit 1
+            }
           done
 
           echo "Static safety contract passed. This does not replace MetaEditor compilation or demo validation."
