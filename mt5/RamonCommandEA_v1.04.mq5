@@ -332,12 +332,11 @@ string BuildBarsJson(const ENUM_TIMEFRAMES timeframe)
 string BuildMultiTimeframeBarsJson()
 {
    // Market-data collection only. Django retains all strategy and risk authority.
-   return "{\\"M1\\":"+BuildBarsJson(PERIOD_M1)+","
-      + "\\"M5\\":"+BuildBarsJson(PERIOD_M5)+","
-      + "\\"M15\\":"+BuildBarsJson(PERIOD_M15)+","
-      + "\\"H1\\":"+BuildBarsJson(PERIOD_H1)+"}";
+   return "{\"M1\":"+BuildBarsJson(PERIOD_M1)+","
+      + "\"M5\":"+BuildBarsJson(PERIOD_M5)+","
+      + "\"M15\":"+BuildBarsJson(PERIOD_M15)+","
+      + "\"H1\":"+BuildBarsJson(PERIOD_H1)+"}";
 }
-
 
 string BuildDecisionBarsJson()
 {
