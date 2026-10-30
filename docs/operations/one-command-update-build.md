@@ -1,26 +1,30 @@
 # One-command Ramon update and build
 
-From the existing local clone:
+From the existing local clone, run:
 
 ```bash
 cd ~/Documents/Presentation/ramon-ai-trader-bridge
 bash scripts/update_build_ramon.sh
 ```
 
-The script fast-forwards the selected Git branch, validates the single `docker-compose.yaml`, rebuilds and starts the Django/worker/Redis/TimescaleDB stack, applies forward migrations, runs Django checks, waits for `/healthz`, and compiles and installs both versioned EAs:
+This is the single deployment command for the supported local stack. It:
 
-- `mt5/RamonCommandEA_v1.02.mq5` -> `RamonCommandEA_v1.02.ex5`
-- `mt5/Ramon_v0.62.6.mq5` -> `Ramon_v0.62.6.ex5`
+1. Requires a clean checkout on the configured branch (default `main`) and fast-forwards it from `origin`.
+2. Validates the single `docker-compose.yaml` and builds/starts Django, the Redis Streams worker, Redis, and TimescaleDB.
+3. Applies forward Django migrations and runs `manage.py check`.
+4. Waits until Django, Redis, and TimescaleDB report healthy, the worker is running, Django's `/healthz` responds, Redis returns `PONG`, and PostgreSQL accepts connections.
+5. Backs up the currently installed command EA files, compiles `mt5/RamonCommandEA_v1.02.mq5`, requires MetaEditor's exact `Result: 0 errors, 0 warnings` summary, and verifies a new non-empty `.ex5`.
+6. Installs only `RamonCommandEA_v1.02.mq5` and `RamonCommandEA_v1.02.ex5` in the configured terminal's `MQL5/Experts` directory.
 
-The binaries and sources are installed under the active terminal's `MQL5/Experts` directory. Existing files are copied to `~/.local/share/ramon-ea-backups/<timestamp>/` before replacement. Each build requires MetaEditor's exact `Result: 0 errors, 0 warnings` summary and a non-empty output `.ex5`.
+The legacy `Ramon_v0.62.x` strategy EA is deliberately not installed by this command. Do not attach it alongside the command EA.
 
 ## Prerequisites
 
-- A clean checkout on the configured branch (default `main`).
-- A pre-existing local `.env`; the script never creates or prints secrets.
-- Docker Compose, curl, Wine, winepath, timeout, and MetaEditor.
-- By default, Wine prefix `~/.mt5` and terminal ID `D0E8209F77C8CF37AD8BF550E51FF075`.
-- The real `RamonResearchTelemetry.mqh` dependency used by the strategy EA. The script looks in `mt5/`, the active Experts directory, and the terminal tree; if it cannot find the source, it stops before replacing the EAs. It will not invent a placeholder.
+- Existing clone at `~/Documents/Presentation/ramon-ai-trader-bridge` (or set `RAMON_REPO_DIR`).
+- Clean Git working tree on the configured branch; the default is `main`.
+- Existing local `.env` containing the required PostgreSQL password and Django/EA secrets. The script never creates, prints, or commits secrets.
+- Docker Engine and Docker Compose plugin, Git, curl, Wine, `winepath`, `timeout`, `tr`, `grep`, `find`, `cp`, and MetaEditor.
+- Default Wine prefix `~/.mt5` and terminal ID `D0E8209F77C8CF37AD8BF550E51FF075`.
 
 Optional overrides:
 
@@ -34,9 +38,15 @@ bash scripts/update_build_ramon.sh
 
 Use `RAMON_METAEDITOR` if MetaEditor is installed in a nonstandard location, and `RAMON_HEALTH_URL` only if the health endpoint intentionally differs.
 
+## After the command
+
+The command starts the backend and installs the compiled EA, but intentionally does not launch MT5, attach an EA to a chart, or change trading permissions.
+
+For telemetry/decision validation, open MT5, attach `RamonCommandEA_v1.02` to the intended demo `XAUUSD_o` M15 chart, set the local Django bearer token in the EA Inputs, and allow WebRequest to `http://127.0.0.1:8017`. Keep `EnableCommandExecution=false` and server-side command creation/execution disabled. Verify heartbeat, telemetry, and decision logs before any separate demo-execution review.
+
 ## Failure and safety behavior
 
-- Stops at the first failed prerequisite, migration, health check, compiler result, or missing output binary.
-- Never runs `docker compose down`, removes volumes, resets the database, changes `.env` execution flags, attaches EAs to charts, or places trades.
-- Does not claim that successful compilation proves strategy correctness or demo readiness.
-- Django remains the intended authoritative strategy/risk service; deployment does not enable server-side command creation or execution.
+- Stops at the first failed prerequisite, migration, Django check, health/readiness check, compiler result, or missing output binary.
+- Copies existing command EA source/binary files to `~/.local/share/ramon-ea-backups/<timestamp>/` before replacement.
+- Never runs `docker compose down`, removes volumes, resets the database, changes `.env` execution flags, launches MT5, attaches EAs to charts, or places trades.
+- A successful deployment verifies service readiness and compilation only; it does not prove strategy quality, broker execution, demo readiness, or profitability.
