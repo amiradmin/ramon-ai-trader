@@ -80,8 +80,8 @@ def telemetry(request):
                     raise ValueError(f"bars_by_timeframe.{tf} must be an array of at most 512 bars")
                 total_bars += len(tf_bars)
                 grouped_bars[tf] = tf_bars
-            if total_bars > 1024:
-                raise ValueError("at most 1024 bars may be submitted per telemetry request")
+            if total_bars > 512:
+                raise ValueError("at most 512 bars may be submitted per telemetry request")
         bid = _decimal(quote.get("bid"), "quote.bid")
         ask = _decimal(quote.get("ask"), "quote.ask")
         point = _decimal(quote.get("point"), "quote.point")
