@@ -34,7 +34,7 @@ jobs:
             echo "FAIL: deployment script must compile the pinned strategy EA source." >&2
             exit 1
           }
-          if grep -Fq 'RamonResearchTelemetry.mqh' scripts/update_build_ramon.sh || grep -Eq 'RT_[A-Za-z0-9_]+' mt5/Ramon_v0.62.6.mq5; then
+          if grep -Fq 'RamonResearchTelemetry.mqh' scripts/update_build_ramon.sh || grep -Eq '(^|[^A-Za-z0-9_])RT_[A-Za-z0-9_]+' mt5/Ramon_v0.62.6.mq5; then
             echo "FAIL: optional research telemetry dependency must be absent from the strategy build." >&2
             exit 1
           fi
