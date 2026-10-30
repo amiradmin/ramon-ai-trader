@@ -388,11 +388,11 @@ def _classify_regime(bars: _Bars, ind: _Indicators, t: int, config: OpportunityC
         label = "BULLISH"
     elif bias == "BEAR" and structure != "BULLISH" and trending:
         label = "BEARISH"
-    elif bias == "BULL" and structure != "BEARISH" and early_trending:
+    elif bias == "BULL" and structure == "BULLISH" and early_trending:
         label = "EARLY_BULLISH"
-    elif bias == "BEAR" and structure != "BULLISH" and early_trending:
+    elif bias == "BEAR" and structure == "BEARISH" and early_trending:
         label = "EARLY_BEARISH"
-    elif adx < early_trend_floor or (bias == "NEUTRAL" and structure in ("MIXED", "UNKNOWN") and not trending):
+    elif adx < config.adx_ranging or (bias == "NEUTRAL" and structure in ("MIXED", "UNKNOWN") and not trending):
         label = "RANGING"
     else:
         label = "UNCERTAIN"
