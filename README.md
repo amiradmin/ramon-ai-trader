@@ -24,11 +24,7 @@ Prerequisites: Docker Engine with the Compose plugin, Git, curl, Wine, MetaEdito
 For the existing clone at `~/Documents/Presentation/ramon-ai-trader-bridge`:
 
 ```bash
-cd ~/Documents/Presentation/ramon-ai-trader-bridge
-git switch main
-git pull --ff-only origin main
-bash -n scripts/update_build_ramon.sh
-bash scripts/update_build_ramon.sh
+cd ~/Documents/Presentation/ramon-ai-trader-bridge && bash scripts/update_build_ramon.sh
 ```
 
 If the clone lives elsewhere, set `RAMON_REPO_DIR` to its absolute path before running the script. Optional build settings include `RAMON_MT5_PREFIX`, `RAMON_MT5_TERMINAL_ID`, `RAMON_METAEDITOR`, and `RAMON_HEALTH_URL`; see [the update/build runbook](docs/operations/one-command-update-build.md).
