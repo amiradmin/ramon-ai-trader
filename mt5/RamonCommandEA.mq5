@@ -247,7 +247,7 @@ string BuildBarsJson(const ENUM_TIMEFRAMES timeframe)
 {
    MqlRates rates[];
    ArraySetAsSeries(rates,true);
-   int count=MathMax(1,MathMin(BarsToSend,512));
+   int count=MathMax(1,MathMin(BarsToSend,128));
    int copied=CopyRates(_Symbol,timeframe,1,count,rates); // completed candles only
    if(copied<=0) return "[]";
    datetime server_now=TimeTradeServer();
