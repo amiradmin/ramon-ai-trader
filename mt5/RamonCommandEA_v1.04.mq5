@@ -531,7 +531,7 @@ string BuildTelemetry()
    datetime server_now=TimeTradeServer();
    if(server_now<=0 || !BrokerClockReady || !BrokerClockReliable) return "";
    datetime quote_utc=0;
-   if(!BrokerBarToUtc(tick.time,quote_utc)) return "";
+   bool quote_time_valid=BrokerBarToUtc(tick.time,quote_utc);
    // The risk baseline key uses the broker's calendar day, not local PC or UTC date.
    MqlDateTime broker_day_parts;
    TimeToStruct(server_now,broker_day_parts);
@@ -551,7 +551,7 @@ string BuildTelemetry()
       +"\"broker_day\":\""+broker_day_text+"\","
       +"\"symbol\":\""+JsonEscape(_Symbol)+"\",\"timeframe\":\""+TfName(_Period)+"\","
       +"\"quote\":{\"bid\":"+DoubleToString(tick.bid,_Digits)+",\"ask\":"+DoubleToString(tick.ask,_Digits)+",\"point\":"+DoubleToString(point,_Digits)+"},"
-      +"\"quote_time\":\""+IsoUtc(quote_utc)+"\","
+      +"\"quote_time\":"+(quote_time_valid ? "\""+IsoUtc(quote_utc)+"\"" : "null")+",
       +"\"terminal_trade_allowed\":"+((bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) && (bool)MQLInfoInteger(MQL_TRADE_ALLOWED) ? "true":"false")+","
       +"\"account\":"+account+",\"positions\":"+BuildPositionsJson()+","
       +"\"last_command_id\":\""+JsonEscape(LastCommandId)+"\",\"bars\":"+BuildBarsJson()+"}";
