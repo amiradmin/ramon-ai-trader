@@ -6,7 +6,7 @@ from django.test import TestCase, override_settings
 
 from ea_bridge.models import MarketBar
 from ramon_pipeline.schemas import EventKind
-from ramon_pipeline.management.commands.consume_ramon_streams import Command
+from ramon_pipeline.management.commands.consume_ramon_streams import Command, _dead_letter_invalid_event
 
 
 class MarketBarIngestionTests(TestCase):
@@ -124,3 +124,28 @@ class MarketBarIngestionTests(TestCase):
         )
         self.assertEqual(response.status_code, 400)
         build_pipeline.assert_not_called()
+
+    def test_invalid_stream_event_is_dead_lettered_before_acknowledgement(self):
+        client = Mock()
+        fields = {"event_id": "bad-bar-event", "payload": "{invalid"}
+        _dead_letter_invalid_event(
+            client,
+            "ramon:market-bars",
+            "ramon-worker",
+            "1710000000000-0",
+            fields,
+            ValueError("M15 timestamp is misaligned"),
+        )
+        client.xadd.assert_called_once_with(
+            "ramon:market-bars:dead-letter",
+            {
+                "event_id": "bad-bar-event",
+                "payload": "{invalid",
+                "dead_letter_source_stream": "ramon:market-bars",
+                "dead_letter_source_id": "1710000000000-0",
+                "dead_letter_reason": "M15 timestamp is misaligned",
+            },
+        )
+        client.xack.assert_called_once_with(
+            "ramon:market-bars", "ramon-worker", "1710000000000-0"
+        )
