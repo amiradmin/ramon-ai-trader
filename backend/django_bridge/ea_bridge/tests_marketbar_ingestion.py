@@ -101,3 +101,26 @@ class MarketBarIngestionTests(TestCase):
             ).count(),
             1,
         )
+
+    @override_settings(EA_BEARER_TOKEN="test-token", RAMON_PIPELINE_INGEST_ENABLED=True)
+    @patch("ramon_pipeline.django_adapter.build_pipeline")
+    def test_event_endpoint_rejects_misaligned_m15_bar_before_enqueue(self, build_pipeline):
+        payload = {
+            "instance_id": "marketbar-test-ea",
+            "event_id": "marketbar-event-shifted",
+            "event_type": "MARKET_BAR",
+            "occurred_at": "2026-10-26T09:00:00Z",
+            "symbol": "XAUUSD_o",
+            "timeframe": "M15",
+            "timestamp": "2026-10-26T08:45:01Z",
+            "open": "2300.00",
+            "high": "2302.00",
+            "low": "2299.00",
+            "close": "2301.50",
+            "volume": "12",
+        }
+        response = self.client.post(
+            self.url, data=json.dumps(payload), content_type="application/json", **self.headers
+        )
+        self.assertEqual(response.status_code, 400)
+        build_pipeline.assert_not_called()
