@@ -4,7 +4,6 @@
 #property description "Django-hosted SignalFlow XAUUSD_o M15 EA; local Django decision API required."
 
 #include <Trade/Trade.mqh>
-#include "RamonResearchTelemetry.mqh"
 
 
 #define RAMON_GMEM_MOVEABLE 0x0002
@@ -121,8 +120,6 @@ input string DiagnosticFileName = "Ramon_Diagnostic.txt";
 input bool ShowDashboard = true;
 input bool ShowTPLevelsOnChart = true; // Draw active MAIN TP1/TP2/TP3 levels and stage state on the chart.
 input bool EnableClipboardButton = true;
-input bool EnableResearchTelemetry = true; // Observation only; does not affect orders.
-input int ResearchQuoteIntervalMs = 1000;
 input bool WriteCsvLogs = true;
 input string SignalCsvFileName = "Ramon_Signals.csv";
 input string TradeCsvFileName = "Ramon_Trades.csv";
@@ -5687,7 +5684,6 @@ void SendDjangoMarketBarsIfDue()
 void OnTimer()
 {
    SendDjangoHeartbeatIfDue();
-   RT_ObservePosition(MagicNumber,SmallOnlyMode,LastSampleKey);
    ReadControlRiskCap();
    ReadDecisionCadence();
    WriteOpenDashboardPositions();
@@ -5882,9 +5878,6 @@ void OnTimer()
    LastBundleId=bundle_id;
    LastModelDecision=decision;
    LastModelReason=reason;
-   RT_Gate(MagicNumber,SmallOnlyMode,sample_key,decision,reason,StatusLine,
-      SymbolInfoDouble(_Symbol,SYMBOL_BID),SymbolInfoDouble(_Symbol,SYMBOL_ASK),
-      RiskPerTradeUSD*MoneyUnitsPerUSD,(sample_saved>=0.5));
    LastBaseDecision=base_decision;
    LastBaseReason=base_reason;
    LastEnsembleReady=(ensemble_ready>=0.5);
@@ -6384,17 +6377,12 @@ void OnTimer()
          ValidSampleKey(dashboard_origin_sample_key) ? dashboard_origin_sample_key : LastSampleKey);
    if(!V2ExecIdentity())
    { StatusLine="V2 EXECUTION BLOCKED: account changed after preparation"; Print(StatusLine); ShowStatus(); return; }
-   RT_Order(MagicNumber,SmallOnlyMode,"order_intent",LastSampleKey,decision,
-      (dashboard_manual_entry ? "dashboard_manual" : "ea_automatic"),volume,entry,stop,target,false,0,0,0);
    bool submitted=(
       decision=="BUY"
       ? Trade.Buy(volume,_Symbol,0.0,stop,target,trade_comment)
       : Trade.Sell(volume,_Symbol,0.0,stop,target,trade_comment)
    );
    uint retcode=Trade.ResultRetcode();
-   RT_Order(MagicNumber,SmallOnlyMode,"order_result",LastSampleKey,decision,
-      (dashboard_manual_entry ? "dashboard_manual" : "ea_automatic"),volume,entry,stop,target,
-      submitted,retcode,Trade.ResultOrder(),Trade.ResultDeal());
    V2ExecRecordResult(retcode,Trade.ResultOrder(),Trade.ResultDeal());
    if(!submitted || (retcode!=TRADE_RETCODE_DONE && retcode!=TRADE_RETCODE_DONE_PARTIAL && retcode!=TRADE_RETCODE_PLACED))
    {
@@ -6756,7 +6744,6 @@ void OnTradeTransaction(
          { V2StopoutFaultLatched=true; V2StopoutHistoryHealthy=false; }
       }
       RecordDealTelemetry(trans.deal);
-      RT_Deal(MagicNumber,SmallOnlyMode,trans.deal);
       AppendTradeCsv(trans.deal);
       WriteOpenDashboardPositions();
    }
@@ -6800,18 +6787,7 @@ bool CloseManagedPositionFromDashboard()
    }
 
    double profit_units=PositionGetDouble(POSITION_PROFIT);
-   string close_sample="";
-   string close_comment=PositionGetString(POSITION_COMMENT);
-   if(StringFind(close_comment,"Ramon:")==0 && StringLen(close_comment)>=22)
-      close_sample=StringSubstr(close_comment,6,16);
-   ulong close_position=(ulong)PositionGetInteger(POSITION_IDENTIFIER);
-   RT_Append(MagicNumber,SmallOnlyMode,"close_intent",
-      "\"actor\":\"dashboard_manual\",\"detail\":\"manual_dashboard_close\",\"ticket\":\""+IntegerToString((long)ticket)+"\"",close_sample,close_position);
    bool close_submitted=Trade.PositionClose(ticket,MaxDeviationPoints);
-   RT_Append(MagicNumber,SmallOnlyMode,"close_result",
-      "\"actor\":\"dashboard_manual\",\"detail\":\"manual_dashboard_close\",\"submitted\":"+(close_submitted?"true":"false")
-      +",\"retcode\":"+IntegerToString((long)Trade.ResultRetcode())
-      +",\"deal_id\":\""+IntegerToString((long)Trade.ResultDeal())+"\"",close_sample,close_position);
    if(close_submitted)
    {
       RecordDealTelemetry(Trade.ResultDeal(),"manual_dashboard_close");
@@ -6937,7 +6913,6 @@ int OnInit()
    string stopout_reason="";
    if(!V2RecoverStopoutHistory(stopout_reason))
       Print("V2 STOP OUT: startup entries blocked: ",stopout_reason);
-   RT_Start(EnableResearchTelemetry,ResearchQuoteIntervalMs,MagicNumber,SmallOnlyMode);
    EventSetTimer(1); // Separate network scheduling from five-second position management.
    // Stagger the second chart's WebRequest cadence from the primary chart.
    if(SmallOnlyMode)
@@ -6950,7 +6925,6 @@ int OnInit()
 
 void OnDeinit(const int reason)
 {
-   RT_Stop(MagicNumber,SmallOnlyMode,reason);
    EventKillTimer();
    ObjectsDeleteAll(0,UiPrefix);
    ObjectsDeleteAll(0,TpUiPrefix);
