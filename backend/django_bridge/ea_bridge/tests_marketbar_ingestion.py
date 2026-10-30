@@ -6,6 +6,7 @@ from django.test import TestCase, override_settings
 
 from ea_bridge.models import MarketBar
 from ramon_pipeline.schemas import EventKind
+from ramon_pipeline.management.commands.consume_ramon_streams import Command, _dead_letter_invalid_event
 
 
 class MarketBarIngestionTests(TestCase):
@@ -48,3 +49,103 @@ class MarketBarIngestionTests(TestCase):
         model_admin = admin.site._registry[MarketBar]
         self.assertIn("timestamp", model_admin.list_display)
         self.assertIn("close", model_admin.list_display)
+
+    def test_stream_worker_rejects_one_second_m15_timestamp_shift(self):
+        fields = {
+            "kind": "market_bar",
+            "event_id": "worker-bar-event",
+            "source": "worker-marketbar-ea",
+            "event_type": "MARKET_BAR",
+            "occurred_at": "2026-10-26T09:00:00+00:00",
+            "payload": json.dumps({
+                "symbol": "XAUUSD_o",
+                "timeframe": "M15",
+                "timestamp": "2026-10-26T08:45:01Z",
+                "open": "2300.00",
+                "high": "2302.00",
+                "low": "2299.00",
+                "close": "2301.50",
+                "volume": "12",
+            }),
+        }
+        with self.assertRaises(ValueError):
+            Command._persist(fields)
+        self.assertEqual(MarketBar.objects.count(), 0)
+
+    def test_stream_worker_deduplicates_replayed_aligned_m15_bar(self):
+        fields = {
+            "kind": "market_bar",
+            "event_id": "worker-bar-event-1",
+            "source": "worker-marketbar-ea",
+            "event_type": "MARKET_BAR",
+            "occurred_at": "2026-10-26T09:00:00+00:00",
+            "payload": json.dumps({
+                "symbol": "XAUUSD_o",
+                "timeframe": "M15",
+                "timestamp": "2026-10-26T08:45:00Z",
+                "open": "2300.00",
+                "high": "2302.00",
+                "low": "2299.00",
+                "close": "2301.50",
+                "volume": "12",
+            }),
+        }
+        Command._persist(fields)
+        fields["event_id"] = "worker-bar-event-2"
+        Command._persist(fields)
+        self.assertEqual(
+            MarketBar.objects.filter(
+                source="worker-marketbar-ea",
+                symbol="XAUUSD_o",
+                timeframe="M15",
+            ).count(),
+            1,
+        )
+
+    @override_settings(EA_BEARER_TOKEN="test-token", RAMON_PIPELINE_INGEST_ENABLED=True)
+    @patch("ramon_pipeline.django_adapter.build_pipeline")
+    def test_event_endpoint_rejects_misaligned_m15_bar_before_enqueue(self, build_pipeline):
+        payload = {
+            "instance_id": "marketbar-test-ea",
+            "event_id": "marketbar-event-shifted",
+            "event_type": "MARKET_BAR",
+            "occurred_at": "2026-10-26T09:00:00Z",
+            "symbol": "XAUUSD_o",
+            "timeframe": "M15",
+            "timestamp": "2026-10-26T08:45:01Z",
+            "open": "2300.00",
+            "high": "2302.00",
+            "low": "2299.00",
+            "close": "2301.50",
+            "volume": "12",
+        }
+        response = self.client.post(
+            self.url, data=json.dumps(payload), content_type="application/json", **self.headers
+        )
+        self.assertEqual(response.status_code, 400)
+        build_pipeline.assert_not_called()
+
+    def test_invalid_stream_event_is_dead_lettered_before_acknowledgement(self):
+        client = Mock()
+        fields = {"event_id": "bad-bar-event", "payload": "{invalid"}
+        _dead_letter_invalid_event(
+            client,
+            "ramon:market-bars",
+            "ramon-worker",
+            "1710000000000-0",
+            fields,
+            ValueError("M15 timestamp is misaligned"),
+        )
+        client.xadd.assert_called_once_with(
+            "ramon:market-bars:dead-letter",
+            {
+                "event_id": "bad-bar-event",
+                "payload": "{invalid",
+                "dead_letter_source_stream": "ramon:market-bars",
+                "dead_letter_source_id": "1710000000000-0",
+                "dead_letter_reason": "M15 timestamp is misaligned",
+            },
+        )
+        client.xack.assert_called_once_with(
+            "ramon:market-bars", "ramon-worker", "1710000000000-0"
+        )

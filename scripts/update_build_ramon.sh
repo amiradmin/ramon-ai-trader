@@ -10,7 +10,7 @@ TERMINAL_ID="${RAMON_MT5_TERMINAL_ID:-D0E8209F77C8CF37AD8BF550E51FF075}"
 EXPERTS_DIR="$WINEPREFIX/drive_c/users/amir/AppData/Roaming/MetaQuotes/Terminal/$TERMINAL_ID/MQL5/Experts"
 COMPOSE_FILE=docker-compose.yaml
 HEALTH_URL="${RAMON_HEALTH_URL:-http://127.0.0.1:8017/healthz}"
-EA_SOURCES=(mt5/RamonCommandEA_v1.02.mq5)
+EA_SOURCES=(mt5/RamonCommandEA_v1.04.mq5)
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 info() { printf '\n[%s] %s\n' "$(date '+%H:%M:%S')" "$*"; }
@@ -111,5 +111,5 @@ compile_install() {
 
 for source in "${EA_SOURCES[@]}"; do compile_install "$source"; done
 printf '\nDEPLOYMENT CHECKS PASSED\nDjango: %s\nExperts: %s\nBackups: %s\n' "$HEALTH_URL" "$EXPERTS_DIR" "$BACKUP_DIR"
-printf 'Installed binary: RamonCommandEA_v1.02.ex5\n'
+printf 'Installed binary: RamonCommandEA_v1.04.ex5\n'
 printf 'MT5 was not launched, no EA was attached, and no trades were placed. Server command flags are not changed.\n'
