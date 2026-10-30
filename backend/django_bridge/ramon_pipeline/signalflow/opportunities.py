@@ -87,6 +87,7 @@ class OpportunityConfig:
     min_ema_separation_atr: float = 0.3
     support_tolerance_atr: float = 0.5
     regime_lookback: int = 8  # compare with the regime this many bars ago
+    early_trend_minimum_score: float = 0.75  # stricter confirmation for sub-trending ADX regimes
     # Volatility
     atr_baseline_bars: int = 100
     atr_ratio_min: float = 0.6
@@ -115,6 +116,8 @@ class OpportunityConfig:
             raise ValueError("retracement bounds must satisfy 0 < min < max < 1")
         if not 0.0 < self.adx_ranging <= self.adx_trending:
             raise ValueError("adx_ranging must be positive and not above adx_trending")
+        if not 0.0 <= self.early_trend_minimum_score <= 1.0:
+            raise ValueError("early_trend_minimum_score must be between 0 and 1")
         if not 0.0 < self.atr_ratio_min < self.atr_ratio_max:
             raise ValueError("atr ratio bounds must satisfy 0 < min < max")
 
@@ -376,10 +379,19 @@ def _classify_regime(bars: _Bars, ind: _Indicators, t: int, config: OpportunityC
         bias = "NEUTRAL"
 
     trending = adx >= config.adx_trending
+    # ADX measures trend strength, not direction. Permit a *candidate* early
+    # trend when directional EMA/slope and swing structure agree, but require
+    # a stricter downstream setup score before it can be accepted.
+    early_trend_floor = config.adx_ranging * 0.85
+    early_trending = adx >= early_trend_floor
     if bias == "BULL" and structure != "BEARISH" and trending:
         label = "BULLISH"
     elif bias == "BEAR" and structure != "BULLISH" and trending:
         label = "BEARISH"
+    elif bias == "BULL" and structure == "BULLISH" and early_trending:
+        label = "EARLY_BULLISH"
+    elif bias == "BEAR" and structure == "BEARISH" and early_trending:
+        label = "EARLY_BEARISH"
     elif adx < config.adx_ranging or (bias == "NEUTRAL" and structure in ("MIXED", "UNKNOWN") and not trending):
         label = "RANGING"
     else:
@@ -399,8 +411,9 @@ def _trend_component(sign: int, regime: _Regime) -> float:
     return 0.5 * clip(abs(regime.separation_atr)) + 0.25 * clip(abs(regime.slope_atr) / 0.5) + 0.25 * structure
 
 
-def _strength_component(adx: float, config: OpportunityConfig) -> float:
-    return clip((adx - config.adx_ranging) / (35.0 - config.adx_ranging))
+def _strength_component(adx: float, config: OpportunityConfig, *, floor: float | None = None) -> float:
+    threshold = config.adx_ranging if floor is None else floor
+    return clip((adx - threshold) / (35.0 - threshold))
 
 
 def _volatility_component(ratio: float, config: OpportunityConfig) -> float:
@@ -795,7 +808,11 @@ class OpportunityDetector:
         components: dict[str, float] = {}
         baseline = median(x for x in ind.atr[-config.atr_baseline_bars:] if math.isfinite(x))
         atr_ratio = atr / baseline
-        components["strength"] = _strength_component(regime.adx, config)
+        is_early_trend = regime.label in {"EARLY_BULLISH", "EARLY_BEARISH"}
+        early_trend_floor = config.adx_ranging * 0.85
+        components["strength"] = _strength_component(
+            regime.adx, config, floor=early_trend_floor if is_early_trend else None
+        )
         components["volatility"] = _volatility_component(atr_ratio, config)
 
         def finish(status: str, reason: str, detail: str, side: str = "NONE", **kwargs: Any) -> dict[str, Any]:
@@ -821,14 +838,17 @@ class OpportunityDetector:
         if regime.label == "UNCERTAIN":
             _check(checks, "regime", False, regime_text, metrics={"value": round(regime.adx, 2), "threshold": config.adx_trending, "factor": "ADX; trend threshold"})
             return finish(DEFERRED, "MARKET_UNCERTAIN", f"trend signals conflict or are unconfirmed: {regime_text}")
-        _check(checks, "regime", True, regime_text, metrics={"value": round(regime.adx, 2), "threshold": config.adx_trending, "factor": "ADX; trend threshold"})
+        if is_early_trend:
+            _check(checks, "regime", True, regime_text, metrics={"value": round(regime.adx, 2), "threshold": round(early_trend_floor, 2), "factor": "ADX; early-trend floor with aligned EMA bias and structure"})
+        else:
+            _check(checks, "regime", True, regime_text, metrics={"value": round(regime.adx, 2), "threshold": config.adx_trending, "factor": "ADX; trend threshold"})
 
-        sign = 1 if regime.label == "BULLISH" else -1
+        sign = 1 if regime.label in {"BULLISH", "EARLY_BULLISH"} else -1
         side = "BUY" if sign > 0 else "SELL"
         components["trend"] = _trend_component(sign, regime)
 
-        opposite = "BEARISH" if sign > 0 else "BULLISH"
-        if previous.label == opposite:
+        opposite_labels = {"BEARISH", "EARLY_BEARISH"} if sign > 0 else {"BULLISH", "EARLY_BULLISH"}
+        if previous.label in opposite_labels:
             detail = f"regime was {previous.label} {config.regime_lookback} bars ago; reversal not yet established"
             _check(checks, "regime_stability", False, detail, metrics={"value": config.regime_lookback, "threshold": config.regime_lookback, "factor": "regime lookback (bars)"})
             return finish(DEFERRED, "REGIME_REVERSAL_UNCONFIRMED", detail, side)
@@ -928,11 +948,12 @@ class OpportunityDetector:
 
         # 4. Score threshold ----------------------------------------------------
         score = _weighted_score(components)
-        if score < self.minimum_score:
-            detail = f"setup score {score:.2f} is below the minimum {self.minimum_score:.2f}"
-            _check(checks, "score", False, detail, metrics={"value": round(score, 4), "threshold": self.minimum_score, "factor": "weighted setup score (0–1)"})
+        required_score = config.early_trend_minimum_score if is_early_trend else self.minimum_score
+        if score < required_score:
+            detail = f"setup score {score:.2f} is below the minimum {required_score:.2f}"
+            _check(checks, "score", False, detail, metrics={"value": round(score, 4), "threshold": required_score, "factor": "weighted setup score (0–1)"})
             return finish(REJECTED, "SETUP_SCORE_TOO_LOW", detail, side)
-        _check(checks, "score", True, f"setup score {score:.2f} >= {self.minimum_score:.2f}", metrics={"value": round(score, 4), "threshold": self.minimum_score, "factor": "weighted setup score (0–1)"})
+        _check(checks, "score", True, f"setup score {score:.2f} >= {required_score:.2f}", metrics={"value": round(score, 4), "threshold": required_score, "factor": "weighted setup score (0–1)"})
 
         # 5. Duplicate suppression: one signal per impulse/pullback ----------------
         anchor_time = bars.times[ih]
@@ -987,7 +1008,7 @@ class OpportunityDetector:
             f"{side} accepted: {regime.label.lower()} regime (ADX {regime.adx:.1f}, structure "
             f"{regime.structure.lower()}); pullback retraced {retracement:.0%} of a {impulse_atr:.1f} ATR "
             f"impulse into the EMA zone and price closed back above the fast EMA; RSI {rsi_dir:.0f}, "
-            f"ATR {atr_ratio:.2f}x baseline; score {score:.2f} >= {self.minimum_score:.2f}"
+            f"ATR {atr_ratio:.2f}x baseline; score {score:.2f} >= {required_score:.2f}"
         )
         if "forecasting" in extra:
             explanation += "; ARIMA/SARIMA agree"

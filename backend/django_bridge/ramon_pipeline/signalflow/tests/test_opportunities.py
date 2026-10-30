@@ -399,6 +399,20 @@ class MarketRegimeTests(TestCase):
         result = OpportunityDetector().evaluate(snapshot(bars[:cut]))
         return result["regime"]["label"], result
 
+    def test_aligned_directional_evidence_can_form_an_early_trend_below_full_adx_threshold(self):
+        bars = make_bars(UPTREND)
+        config = OpportunityConfig(adx_trending=1000.0)
+        parsed = opportunities_module._parse_bars(bars, config)
+        indicators = opportunities_module._compute_indicators(parsed, config)
+        regime = opportunities_module._classify_regime(
+            parsed, indicators, len(parsed.close) - 1, config
+        )
+
+        self.assertEqual(regime.label, "EARLY_BULLISH")
+        self.assertEqual(regime.ema_bias, "BULL")
+        self.assertEqual(regime.structure, "BULLISH")
+        self.assertLess(regime.adx, config.adx_trending)
+
     def test_regime_moves_from_bullish_to_uncertain_to_bearish_on_a_reversal(self):
         bars = make_bars(UPTREND + DOWNTREND)
         before, _ = self.regime_at(bars, 150)
@@ -433,9 +447,10 @@ class MarketRegimeTests(TestCase):
         self.assertEqual(result["regime"]["previous_label"], "BEARISH")
 
     def test_uncertain_when_trend_indicators_conflict(self):
-        # Rising EMAs but ADX in the grey zone between "ranging" and "trending".
+        # Rising EMAs but mixed swing structure: directional evidence does not agree.
         config = OpportunityConfig(adx_trending=60.0, adx_ranging=10.0)
-        result = OpportunityDetector(config=config).evaluate(snapshot(make_bars(LONG_SETUP)))
+        with patch.object(opportunities_module, "_structure", return_value="MIXED"):
+            result = OpportunityDetector(config=config).evaluate(snapshot(make_bars(LONG_SETUP)))
         self.assertEqual(result["regime"]["label"], "UNCERTAIN")
         self.assertEqual(result["reason"], "MARKET_UNCERTAIN")
 
