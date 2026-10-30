@@ -407,7 +407,7 @@ double CalculateDecisionTakeProfitPoints()
 
 void RequestDjangoDecision()
 {
-   Print("RamonCommandEA v1.02: decision poll started; symbol=", _Symbol,
+   Print("RamonCommandEA v1.03: decision poll started; symbol=", _Symbol,
          " timeframe=", TfName(_Period),
          " execution_enabled=", EnableCommandExecution);
    if(_Period!=PERIOD_M15)
@@ -500,6 +500,38 @@ string BuildPositionsJson()
    return out+"]";
 }
 
+double CalculateBrokerDayOpeningBalance()
+{
+   double current_balance=AccountInfoDouble(ACCOUNT_BALANCE);
+   datetime server_now=TimeTradeServer();
+   if(current_balance<=0 || server_now<=0) return 0.0;
+
+   MqlDateTime broker_day;
+   if(!TimeToStruct(server_now,broker_day)) return 0.0;
+   broker_day.hour=0;
+   broker_day.min=0;
+   broker_day.sec=0;
+   datetime day_start=StructToTime(broker_day);
+   if(day_start<=0 || !HistorySelect(day_start,server_now)) return 0.0;
+
+   // Reconstruct midnight balance from the current balance and all
+   // balance-affecting deals recorded since the broker-day start.
+   double day_net_change=0.0;
+   for(int i=0;i<HistoryDealsTotal();i++)
+   {
+      ulong deal=HistoryDealGetTicket(i);
+      if(deal==0) continue;
+      day_net_change+=HistoryDealGetDouble(deal,DEAL_PROFIT)
+                     +HistoryDealGetDouble(deal,DEAL_SWAP)
+                     +HistoryDealGetDouble(deal,DEAL_COMMISSION)
+                     +HistoryDealGetDouble(deal,DEAL_FEE);
+   }
+
+   double opening_balance=current_balance-day_net_change;
+   if(!MathIsValidNumber(opening_balance) || opening_balance<=0) return 0.0;
+   return opening_balance;
+}
+
 string BuildTelemetry()
 {
    MqlTick tick;
@@ -515,6 +547,8 @@ string BuildTelemetry()
    TimeToStruct(server_now,broker_day_parts);
    string broker_day_text=StringFormat("%04d-%02d-%02d",
       broker_day_parts.year,broker_day_parts.mon,broker_day_parts.day);
+   double day_open_balance=CalculateBrokerDayOpeningBalance();
+   string day_open_balance_json=(day_open_balance>0 ? DoubleToString(day_open_balance,2) : "null");
    string account="{\"currency\":\""+JsonEscape(AccountInfoString(ACCOUNT_CURRENCY))+"\","
       +"\"balance\":"+DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),2)+","
       +"\"equity\":"+DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY),2)+","
@@ -527,6 +561,7 @@ string BuildTelemetry()
       +"\"account_trade_mode\":"+IntegerToString((int)AccountInfoInteger(ACCOUNT_TRADE_MODE))+","
       +"\"ea_version\":\""+RAMON_COMMAND_EA_VERSION+"\","
       +"\"broker_day\":\""+broker_day_text+"\","
+      +"\"day_open_balance\":"+day_open_balance_json+","
       +"\"symbol\":\""+JsonEscape(_Symbol)+"\",\"timeframe\":\""+TfName(_Period)+"\","
       +"\"quote\":{\"bid\":"+DoubleToString(tick.bid,_Digits)+",\"ask\":"+DoubleToString(tick.ask,_Digits)+",\"point\":"+DoubleToString(point,_Digits)+"},"
       +"\"quote_time\":\""+IsoUtc((datetime)((long)tick.time-server_utc_offset))+"\","
@@ -792,7 +827,7 @@ int OnInit()
    if(!EventSetTimer(MathMax(5,TimerSeconds)))
       return INIT_FAILED;
    Trade.SetAsyncMode(false);
-   Print("RamonCommandEA v1.02 initialized in ",EnableCommandExecution ? "DEMO COMMAND MODE" : "TELEMETRY-ONLY MODE",
+   Print("RamonCommandEA v1.03 initialized in ",EnableCommandExecution ? "DEMO COMMAND MODE" : "TELEMETRY-ONLY MODE",
          "; timer_seconds=",MathMax(5,TimerSeconds),
          "; decision_interval_seconds=",MathMax(30,DecisionIntervalSeconds),
          ". Live accounts are always rejected.");
