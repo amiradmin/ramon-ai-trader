@@ -3,8 +3,7 @@
 From the existing local clone, run:
 
 ```bash
-cd ~/Documents/Presentation/ramon-ai-trader-bridge
-bash scripts/update_build_ramon.sh
+cd ~/Documents/Presentation/ramon-ai-trader-bridge && bash scripts/update_build_ramon.sh
 ```
 
 This is the single deployment command for the supported local stack. It:
