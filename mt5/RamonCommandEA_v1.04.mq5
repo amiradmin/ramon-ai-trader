@@ -308,12 +308,13 @@ bool PostJson(const string path,const string body,string &response)
    return true;
 }
 
-string BuildBarsJson()
+string BuildBarsJson(const ENUM_TIMEFRAMES timeframe)
 {
    MqlRates rates[];
    ArraySetAsSeries(rates,true);
-   int count=MathMax(1,MathMin(BarsToSend,512));
-   int copied=CopyRates(_Symbol,_Period,1,count,rates);
+   // Four timeframes x at most 128 bars = 512 bars per telemetry request.
+   int count=MathMax(1,MathMin(BarsToSend,128));
+   int copied=CopyRates(_Symbol,timeframe,1,count,rates); // completed candles only
    if(copied<=0 || !BrokerClockReady || !BrokerClockReliable) return "[]";
    string out="[";
    int emitted=0;
@@ -326,6 +327,15 @@ string BuildBarsJson()
       emitted++;
    }
    return out+"]";
+}
+
+string BuildMultiTimeframeBarsJson()
+{
+   // Market-data collection only. Django retains all strategy and risk authority.
+   return "{\\"M1\\":"+BuildBarsJson(PERIOD_M1)+","
+      + "\\"M5\\":"+BuildBarsJson(PERIOD_M5)+","
+      + "\\"M15\\":"+BuildBarsJson(PERIOD_M15)+","
+      + "\\"H1\\":"+BuildBarsJson(PERIOD_H1)+"}";
 }
 
 
@@ -554,7 +564,7 @@ string BuildTelemetry()
       +"\"quote_time\":"+(quote_time_valid ? "\""+IsoUtc(quote_utc)+"\"" : "null")+","
       +"\"terminal_trade_allowed\":"+((bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) && (bool)MQLInfoInteger(MQL_TRADE_ALLOWED) ? "true":"false")+","
       +"\"account\":"+account+",\"positions\":"+BuildPositionsJson()+","
-      +"\"last_command_id\":\""+JsonEscape(LastCommandId)+"\",\"bars\":"+BuildBarsJson()+"}";
+      +"\"last_command_id\":\""+JsonEscape(LastCommandId)+"\",\"bars_by_timeframe\":"+BuildMultiTimeframeBarsJson()+"}";
 }
 
 bool AckCommand(const string command_id,const string state,const string detail,const ulong ticket=0)
