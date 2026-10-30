@@ -407,6 +407,7 @@ class DjangoDecisionApiTests(TestCase):
 
         from .models import StrategyDecisionRecord
         self.assertEqual(StrategyDecisionRecord.objects.filter(decision_id=first_key).count(), 1)
+        self.assertEqual(RiskVerdictRecord.objects.filter(decision_id=first_key).count(), 1)
         record = StrategyDecisionRecord.objects.get(decision_id=first_key)
         self.assertEqual(record.features["market_snapshot"]["bid"], payload["bid"])
         self.assertEqual(record.features["market_snapshot"]["ask"], payload["ask"])
