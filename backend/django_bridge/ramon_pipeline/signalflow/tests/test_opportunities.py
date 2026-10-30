@@ -447,9 +447,10 @@ class MarketRegimeTests(TestCase):
         self.assertEqual(result["regime"]["previous_label"], "BEARISH")
 
     def test_uncertain_when_trend_indicators_conflict(self):
-        # Rising EMAs but ADX in the grey zone between "ranging" and "trending".
+        # Rising EMAs but mixed swing structure: directional evidence does not agree.
         config = OpportunityConfig(adx_trending=60.0, adx_ranging=10.0)
-        result = OpportunityDetector(config=config).evaluate(snapshot(make_bars(LONG_SETUP)))
+        with patch.object(opportunities_module, "_structure", return_value="MIXED"):
+            result = OpportunityDetector(config=config).evaluate(snapshot(make_bars(LONG_SETUP)))
         self.assertEqual(result["regime"]["label"], "UNCERTAIN")
         self.assertEqual(result["reason"], "MARKET_UNCERTAIN")
 
