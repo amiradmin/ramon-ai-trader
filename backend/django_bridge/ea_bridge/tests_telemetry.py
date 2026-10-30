@@ -53,3 +53,20 @@ class EATelemetryTests(TestCase):
         payload["bars"][0]["timestamp"] = "2026-10-27T09:30:00"
         response = self.client.post(self.url, data=json.dumps(payload), content_type="application/json", **self.headers)
         self.assertEqual(response.status_code, 400)
+
+    @override_settings(EA_BEARER_TOKEN="test-token")
+    def test_rejects_m15_bar_shifted_by_one_second(self):
+        payload = self.payload()
+        payload["bars"][0]["timestamp"] = "2026-10-27T09:30:01Z"
+        response = self.client.post(self.url, data=json.dumps(payload), content_type="application/json", **self.headers)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("15-minute boundary", response.json()["error"])
+        self.assertEqual(MarketBar.objects.count(), 0)
+
+    @override_settings(EA_BEARER_TOKEN="test-token")
+    def test_rejects_m15_bar_off_quarter_hour_boundary(self):
+        payload = self.payload()
+        payload["bars"][0]["timestamp"] = "2026-10-27T09:31:00Z"
+        response = self.client.post(self.url, data=json.dumps(payload), content_type="application/json", **self.headers)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(MarketBar.objects.count(), 0)
