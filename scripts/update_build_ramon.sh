@@ -25,8 +25,14 @@ for source in "${EA_SOURCES[@]}"; do [[ -s "$source" ]] || die "Missing EA sourc
 [[ -z "$(git status --porcelain)" ]] || die "Working tree is not clean; commit or back up changes first."
 
 info "Fast-forwarding $BRANCH"
+before_update_sha="$(git rev-parse HEAD)"
 git fetch origin "$BRANCH"
 git pull --ff-only origin "$BRANCH"
+after_update_sha="$(git rev-parse HEAD)"
+if [[ "$before_update_sha" != "$after_update_sha" ]]; then
+  info "Repository updated; restarting with the freshly pulled deployment script"
+  exec bash "$0"
+fi
 
 info "Validating and deploying Compose stack"
 docker compose -f "$COMPOSE_FILE" config --quiet
