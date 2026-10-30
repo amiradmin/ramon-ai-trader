@@ -106,16 +106,34 @@ def telemetry(request):
             if broker_day.isoformat() != broker_day_raw:
                 raise ValueError("broker_day must be YYYY-MM-DD")
         account_balance = None
+        account_day_open_balance = None
         if broker_day is not None and server_name:
             account_balance = _decimal(account.get("balance"), "account.balance")
             if account_balance <= 0:
                 raise ValueError("account.balance must be positive for daily risk tracking")
+            if p.get("day_open_balance") not in (None, ""):
+                account_day_open_balance = _decimal(p.get("day_open_balance"), "day_open_balance")
+                if account_day_open_balance <= 0:
+                    raise ValueError("day_open_balance must be positive")
     except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         return JsonResponse({"ok": False, "error": str(exc)}, status=400)
 
     with transaction.atomic():
-        # Establish a baseline only across an observed, continuous broker-day rollover.
-        # A missed rollover leaves the new day unbaselined and therefore fail-closed.
+        # Prefer the broker-history-derived opening balance sent by authenticated EA telemetry.
+        # This supports a first observation during the broker day without guessing from
+        # the current balance. get_or_create keeps the first baseline immutable.
+        if account_day_open_balance is not None:
+            AccountDailyBaseline.objects.get_or_create(
+                account_login=account_login,
+                server_name=server_name,
+                broker_day=broker_day,
+                defaults={
+                    "opening_balance": account_day_open_balance,
+                    "source_instance_id": instance_id,
+                },
+            )
+
+        # Backward-compatible fallback for older EAs that do not send day_open_balance.
         previous = EAHeartbeat.objects.select_for_update().filter(instance_id=instance_id).first()
         if previous is not None and broker_day is not None and server_name and account_balance is not None:
             previous_payload = previous.payload if isinstance(previous.payload, dict) else {}
@@ -170,6 +188,7 @@ def telemetry(request):
                     "server_name": server_name,
                     "account_trade_mode": account_trade_mode,
                     "broker_day": broker_day.isoformat() if broker_day else None,
+                    "day_open_balance": str(account_day_open_balance) if account_day_open_balance is not None else None,
                     "broker_time": p.get("broker_time"),
                     "account": account,
                     "positions": positions,
