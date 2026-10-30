@@ -2,6 +2,7 @@
 import hashlib, json, math, time, logging
 from decimal import Decimal
 from django.conf import settings
+from django.db import transaction
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
@@ -292,25 +293,44 @@ def decision(request):
                 stop_loss_value = None
                 take_profit_value = None
                 verdict_reason = "RISK_VERDICT_INCOMPLETE"
-        verdict = RiskVerdictRecord.objects.create(
-            decision_id=key,
-            approved=risk_approved,
-            reason_code=verdict_reason[:128],
-            approved_volume=approved_volume,
-            stop_loss=stop_loss_value,
-            take_profit=take_profit_value,
-            details={
-                "execution_authorized": False,
-                "command_created": False,
-                "signal_action": record.action,
-                "risk_inputs_complete": risk_guards_complete,
-                "account_state_reason": account_state_reason,
-                "daily_baseline_day": daily_baseline_day,
-                "daily_baseline_balance": daily_baseline_balance,
-                "server_daily_loss_percent": server_daily_loss_percent,
-                "risk_stage": risk_stage,
-            },
-        )
+        verdict_details = {
+            "execution_authorized": False,
+            "command_created": False,
+            "signal_action": record.action,
+            "risk_inputs_complete": risk_guards_complete,
+            "account_state_reason": account_state_reason,
+            "daily_baseline_day": daily_baseline_day,
+            "daily_baseline_balance": daily_baseline_balance,
+            "server_daily_loss_percent": server_daily_loss_percent,
+            "risk_stage": risk_stage,
+        }
+        # Repeated EA polls for the same closed M15 candle share one decision_id.
+        # Serialize on the decision row, then refresh the newest verdict in place.
+        # Older duplicate verdicts are retained as audit history; no rows are deleted.
+        with transaction.atomic():
+            locked_record = StrategyDecisionRecord.objects.select_for_update().get(pk=record.pk)
+            verdict = (
+                RiskVerdictRecord.objects.filter(decision_id=key)
+                .order_by("-created_at", "-pk")
+                .first()
+            )
+            verdict_values = {
+                "approved": risk_approved,
+                "reason_code": verdict_reason[:128],
+                "approved_volume": approved_volume,
+                "stop_loss": stop_loss_value,
+                "take_profit": take_profit_value,
+                "details": verdict_details,
+            }
+            if verdict is None:
+                verdict = RiskVerdictRecord.objects.create(
+                    decision_id=key,
+                    **verdict_values,
+                )
+            else:
+                for field, value in verdict_values.items():
+                    setattr(verdict, field, value)
+                verdict.save(update_fields=list(verdict_values))
         command = None
         command_created = False
         command_reason = "RISK_VERDICT_NOT_APPROVED" if not risk_approved else "COMMAND_CREATION_DISABLED"
