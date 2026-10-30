@@ -113,6 +113,7 @@ def decision(request):
         daily_baseline_balance = None
         daily_current_equity = None
         account_snapshot_balance = None
+        account_telemetry_age_seconds = None
 
         heartbeat = None
         if instance_id and account_login:
@@ -120,6 +121,7 @@ def decision(request):
 
         if heartbeat is not None:
             age = (timezone.now() - heartbeat.last_seen).total_seconds()
+            account_telemetry_age_seconds = round(age, 2)
             snapshot = heartbeat.payload if isinstance(heartbeat.payload, dict) else {}
             account_snapshot = snapshot.get("account", {})
             positions_snapshot = snapshot.get("positions", [])
@@ -233,6 +235,7 @@ def decision(request):
             "ask": ask,
             "point": point,
           },
+          "account_state_reason": account_state_reason or "OK",
           "account_snapshot": {
             "balance": account_snapshot_balance,
             "equity": daily_current_equity,
@@ -340,6 +343,8 @@ def decision(request):
         response["risk_inputs_received"] = ",".join(
           name for name in risk_guard_fields if name not in missing_risk_inputs
         )
+        response["account_state_reason"] = account_state_reason or "OK"
+        response["account_telemetry_age_seconds"] = account_telemetry_age_seconds
         response["daily_baseline_available"] = server_daily_loss_percent is not None
         response["daily_baseline_day"] = daily_baseline_day
         response["daily_baseline_balance"] = daily_baseline_balance
