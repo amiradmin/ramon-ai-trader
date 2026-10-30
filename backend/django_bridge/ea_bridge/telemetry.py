@@ -53,36 +53,58 @@ def telemetry(request):
         timeframe = str(p.get("timeframe", "")).strip()
         ea_version = str(p.get("ea_version", "")).strip()[:32]
         quote = p.get("quote", {})
-        bars = p.get("bars", [])
+        bars_by_timeframe = p.get("bars_by_timeframe")
+        legacy_bars = p.get("bars", [])
         if not instance_id or len(instance_id) > 128:
             raise ValueError("valid instance_id required")
         if not account_login or len(account_login) > 32:
             raise ValueError("valid account_login required")
         if not symbol or len(symbol) > 32 or not timeframe or len(timeframe) > 16:
             raise ValueError("valid symbol and timeframe required")
-        if not isinstance(quote, dict) or not isinstance(bars, list) or len(bars) > 512:
-            raise ValueError("quote object and at most 512 bars required")
+        if not isinstance(quote, dict):
+            raise ValueError("quote object required")
+        if bars_by_timeframe is None:
+            if not isinstance(legacy_bars, list) or len(legacy_bars) > 512:
+                raise ValueError("at most 512 legacy bars required")
+            grouped_bars = {timeframe.upper(): legacy_bars}
+        else:
+            if not isinstance(bars_by_timeframe, dict) or not bars_by_timeframe:
+                raise ValueError("bars_by_timeframe must be a non-empty object")
+            grouped_bars = {}
+            total_bars = 0
+            for raw_tf, tf_bars in bars_by_timeframe.items():
+                tf = str(raw_tf).strip().upper()
+                if tf not in {"M1", "M5", "M15", "H1"}:
+                    raise ValueError(f"unsupported telemetry timeframe: {tf}")
+                if not isinstance(tf_bars, list) or len(tf_bars) > 512:
+                    raise ValueError(f"bars_by_timeframe.{tf} must be an array of at most 512 bars")
+                total_bars += len(tf_bars)
+                grouped_bars[tf] = tf_bars
+            if total_bars > 512:
+                raise ValueError("at most 512 bars may be submitted per telemetry request")
         bid = _decimal(quote.get("bid"), "quote.bid")
         ask = _decimal(quote.get("ask"), "quote.ask")
         point = _decimal(quote.get("point"), "quote.point")
         if bid <= 0 or ask < bid or point <= 0:
             raise ValueError("invalid quote values")
         normalized_bars = []
-        for index, bar in enumerate(bars):
-            if not isinstance(bar, dict) or bar.get("closed") is not True:
-                raise ValueError(f"bars[{index}] must be a completed candle")
-            stamp = parse_datetime(str(bar.get("timestamp", "")))
-            if stamp is None or stamp.tzinfo is None:
-                raise ValueError(f"bars[{index}].timestamp must include timezone")
-            stamp = validate_bar_timestamp(stamp, timeframe)
-            o = _decimal(bar.get("open"), f"bars[{index}].open")
-            h = _decimal(bar.get("high"), f"bars[{index}].high")
-            lo = _decimal(bar.get("low"), f"bars[{index}].low")
-            c = _decimal(bar.get("close"), f"bars[{index}].close")
-            vol = _decimal(bar.get("volume", 0), f"bars[{index}].volume")
-            if min(o, h, lo, c) <= 0 or vol < 0 or h < max(o, c, lo) or lo > min(o, c, h):
-                raise ValueError(f"bars[{index}] has invalid OHLCV values")
-            normalized_bars.append((stamp, o, h, lo, c, vol))
+        for bar_timeframe, tf_bars in grouped_bars.items():
+            for index, bar in enumerate(tf_bars):
+                field = f"bars_by_timeframe.{bar_timeframe}[{index}]"
+                if not isinstance(bar, dict) or bar.get("closed") is not True:
+                    raise ValueError(f"{field} must be a completed candle")
+                stamp = parse_datetime(str(bar.get("timestamp", "")))
+                if stamp is None or stamp.tzinfo is None:
+                    raise ValueError(f"{field}.timestamp must include timezone")
+                stamp = validate_bar_timestamp(stamp, bar_timeframe)
+                o = _decimal(bar.get("open"), f"{field}.open")
+                h = _decimal(bar.get("high"), f"{field}.high")
+                lo = _decimal(bar.get("low"), f"{field}.low")
+                c = _decimal(bar.get("close"), f"{field}.close")
+                vol = _decimal(bar.get("volume", 0), f"{field}.volume")
+                if min(o, h, lo, c) <= 0 or vol < 0 or h < max(o, c, lo) or lo > min(o, c, h):
+                    raise ValueError(f"{field} has invalid OHLCV values")
+                normalized_bars.append((bar_timeframe, stamp, o, h, lo, c, vol))
         account = p.get("account", {})
         positions = p.get("positions", [])
         if not isinstance(account, dict) or not isinstance(positions, list) or len(positions) > 500:
@@ -147,9 +169,9 @@ def telemetry(request):
                     },
                 )
 
-        for stamp, o, h, lo, c, vol in normalized_bars:
+        for bar_timeframe, stamp, o, h, lo, c, vol in normalized_bars:
             MarketBar.objects.update_or_create(
-                source=instance_id, symbol=symbol, timeframe=timeframe, timestamp=stamp,
+                source=instance_id, symbol=symbol, timeframe=bar_timeframe, timestamp=stamp,
                 defaults={"open": o, "high": h, "low": lo, "close": c, "volume": vol},
             )
         EAHeartbeat.objects.update_or_create(
@@ -178,6 +200,6 @@ def telemetry(request):
             },
         )
     return JsonResponse({
-        "ok": True, "stored_bars": len(normalized_bars),
+        "ok": True, "stored_bars": len(normalized_bars), "stored_timeframes": sorted(grouped_bars),
         "telemetry_only": True, "trading_authorization": False,
     })

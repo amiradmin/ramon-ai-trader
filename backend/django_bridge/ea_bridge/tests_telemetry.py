@@ -70,3 +70,70 @@ class EATelemetryTests(TestCase):
         response = self.client.post(self.url, data=json.dumps(payload), content_type="application/json", **self.headers)
         self.assertEqual(response.status_code, 400)
         self.assertEqual(MarketBar.objects.count(), 0)
+
+    @override_settings(EA_BEARER_TOKEN="test-token")
+    def test_stores_multiple_timeframes_from_one_telemetry_request(self):
+        payload = self.payload()
+        payload.pop("bars")
+        payload["bars_by_timeframe"] = {
+            "M1": [{
+                "timestamp": "2026-10-27T09:31:00Z",
+                "open": 2320.0, "high": 2322.0, "low": 2319.0, "close": 2321.0,
+                "volume": 3, "closed": True,
+            }],
+            "M5": [{
+                "timestamp": "2026-10-27T09:30:00Z",
+                "open": 2320.0, "high": 2322.0, "low": 2319.0, "close": 2321.0,
+                "volume": 5, "closed": True,
+            }],
+            "M15": [{
+                "timestamp": "2026-10-27T09:30:00Z",
+                "open": 2320.0, "high": 2322.0, "low": 2319.0, "close": 2321.0,
+                "volume": 15, "closed": True,
+            }],
+            "H1": [{
+                "timestamp": "2026-10-27T09:00:00Z",
+                "open": 2320.0, "high": 2322.0, "low": 2319.0, "close": 2321.0,
+                "volume": 60, "closed": True,
+            }],
+        }
+        response = self.client.post(self.url, data=json.dumps(payload), content_type="application/json", **self.headers)
+        self.assertEqual(response.status_code, 200, response.json())
+        self.assertEqual(response.json()["stored_bars"], 4)
+        self.assertEqual(response.json()["stored_timeframes"], ["H1", "M1", "M15", "M5"])
+        self.assertEqual(
+            set(MarketBar.objects.filter(source="ea-telemetry-test").values_list("timeframe", flat=True)),
+            {"M1", "M5", "M15", "H1"},
+        )
+
+    @override_settings(EA_BEARER_TOKEN="test-token")
+    def test_rejects_m1_bar_shifted_by_one_second(self):
+        payload = self.payload()
+        payload.pop("bars")
+        payload["bars_by_timeframe"] = {
+            "M1": [{
+                "timestamp": "2026-10-27T09:31:01Z",
+                "open": 2320.0, "high": 2322.0, "low": 2319.0, "close": 2321.0,
+                "volume": 1, "closed": True,
+            }]
+        }
+        response = self.client.post(self.url, data=json.dumps(payload), content_type="application/json", **self.headers)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("M1 bar timestamp", response.json()["error"])
+        self.assertEqual(MarketBar.objects.count(), 0)
+
+    @override_settings(EA_BEARER_TOKEN="test-token")
+    def test_rejects_h1_bar_not_on_hour_boundary(self):
+        payload = self.payload()
+        payload.pop("bars")
+        payload["bars_by_timeframe"] = {
+            "H1": [{
+                "timestamp": "2026-10-27T09:05:00Z",
+                "open": 2320.0, "high": 2322.0, "low": 2319.0, "close": 2321.0,
+                "volume": 60, "closed": True,
+            }]
+        }
+        response = self.client.post(self.url, data=json.dumps(payload), content_type="application/json", **self.headers)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("H1 bar timestamp", response.json()["error"])
+        self.assertEqual(MarketBar.objects.count(), 0)

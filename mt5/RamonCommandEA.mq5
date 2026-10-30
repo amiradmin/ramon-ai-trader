@@ -1,7 +1,7 @@
 #property strict
-#property version   "1.00"
+#property version   "1.01"
 #property description "Ramon Django command EA: telemetry + guarded demo execution"
-#define RAMON_COMMAND_EA_VERSION "1.00"
+#define RAMON_COMMAND_EA_VERSION "1.01"
 
 #include <Trade/Trade.mqh>
 
@@ -243,12 +243,12 @@ bool PostJson(const string path,const string body,string &response)
    return true;
 }
 
-string BuildBarsJson()
+string BuildBarsJson(const ENUM_TIMEFRAMES timeframe)
 {
    MqlRates rates[];
    ArraySetAsSeries(rates,true);
-   int count=MathMax(1,MathMin(BarsToSend,512));
-   int copied=CopyRates(_Symbol,_Period,1,count,rates); // start at 1: omit the still-forming candle
+   int count=MathMax(1,MathMin(BarsToSend,128));
+   int copied=CopyRates(_Symbol,timeframe,1,count,rates); // completed candles only
    if(copied<=0) return "[]";
    datetime server_now=TimeTradeServer();
    datetime utc_now=TimeGMT();
@@ -267,6 +267,15 @@ string BuildBarsJson()
          +"\"volume\":"+DoubleToString((double)rates[i].tick_volume,0)+",\"closed\":true}";
    }
    return out+"]";
+}
+
+string BuildMultiTimeframeBarsJson()
+{
+   // Market-data collection only. Django still makes every strategy/risk decision.
+   return "{\"M1\":"+BuildBarsJson(PERIOD_M1)+","
+      +"\"M5\":"+BuildBarsJson(PERIOD_M5)+","
+      +"\"M15\":"+BuildBarsJson(PERIOD_M15)+","
+      +"\"H1\":"+BuildBarsJson(PERIOD_H1)+"}";
 }
 
 
@@ -509,7 +518,7 @@ string BuildTelemetry()
       +"\"quote_time\":\""+IsoUtc((datetime)((long)tick.time-server_utc_offset))+"\","
       +"\"terminal_trade_allowed\":"+((bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) && (bool)MQLInfoInteger(MQL_TRADE_ALLOWED) ? "true":"false")+","
       +"\"account\":"+account+",\"positions\":"+BuildPositionsJson()+","
-      +"\"last_command_id\":\""+JsonEscape(LastCommandId)+"\",\"bars\":"+BuildBarsJson()+"}";
+      +"\"last_command_id\":\""+JsonEscape(LastCommandId)+"\",\"bars_by_timeframe\":"+BuildMultiTimeframeBarsJson()+"}";
 }
 
 bool AckCommand(const string command_id,const string state,const string detail,const ulong ticket=0)
