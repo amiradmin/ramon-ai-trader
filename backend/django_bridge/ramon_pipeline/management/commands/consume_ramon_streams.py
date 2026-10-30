@@ -42,6 +42,16 @@ def _decode_event(fields):
     return event_id, instance_id, event_type[:64], occurred_at, payload
 
 
+def _dead_letter_invalid_event(client, stream, group, message_id, fields, error):
+    """Quarantine permanently invalid stream records before acknowledging them."""
+    dead_letter_fields = dict(fields)
+    dead_letter_fields["dead_letter_source_stream"] = stream
+    dead_letter_fields["dead_letter_source_id"] = message_id
+    dead_letter_fields["dead_letter_reason"] = str(error)[:500]
+    client.xadd(f"{stream}:dead-letter", dead_letter_fields)
+    client.xack(stream, group, message_id)
+
+
 class Command(BaseCommand):
     help = "Consume Ramon EA Redis Streams and persist snapshots/events to PostgreSQL."
 
@@ -122,6 +132,12 @@ class Command(BaseCommand):
                         try:
                             self._persist(fields)
                             client.xack(stream, group, message_id)
+                        except ValueError as exc:
+                            try:
+                                _dead_letter_invalid_event(client, stream, group, message_id, fields, exc)
+                                log.error("Quarantined invalid pending event stream=%s id=%s: %s", stream, message_id, exc)
+                            except Exception:
+                                log.exception("Failed to dead-letter pending event stream=%s id=%s", stream, message_id)
                         except Exception:
                             log.exception("Failed to recover pending event stream=%s id=%s", stream, message_id)
 
@@ -135,9 +151,15 @@ class Command(BaseCommand):
                             self._persist(fields)
                             # Acknowledge only after the database transaction has committed.
                             client.xack(stream, group, message_id)
+                        except ValueError as exc:
+                            try:
+                                _dead_letter_invalid_event(client, stream, group, message_id, fields, exc)
+                                log.error("Quarantined invalid event stream=%s id=%s: %s", stream, message_id, exc)
+                            except Exception:
+                                log.exception("Failed to dead-letter event stream=%s id=%s", stream, message_id)
                         except Exception:
                             log.exception("Failed to persist Redis event stream=%s id=%s", stream, message_id)
-                            # Leave it pending so a later recovery pass can retry it.
+                            # Leave transient failures pending so a later recovery pass can retry them.
             except KeyboardInterrupt:
                 self.stdout.write("Stopping Redis stream consumer.")
                 break
