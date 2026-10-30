@@ -26,11 +26,11 @@ jobs:
         run: |
           set -euo pipefail
           bash -n scripts/update_build_ramon.sh
-          grep -Fq 'mt5/RamonCommandEA_v1.03.mq5' scripts/update_build_ramon.sh || {
+          grep -Fq 'mt5/RamonCommandEA_v1.04.mq5' scripts/update_build_ramon.sh || {
             echo "FAIL: deployment script must compile the pinned command EA source." >&2
             exit 1
           }
-          grep -Fq 'EA_SOURCES=(mt5/RamonCommandEA_v1.03.mq5)' scripts/update_build_ramon.sh || {
+          grep -Fq 'EA_SOURCES=(mt5/RamonCommandEA_v1.04.mq5)' scripts/update_build_ramon.sh || {
             echo "FAIL: one-command deployment must install only the command EA." >&2
             exit 1
           }
@@ -179,6 +179,17 @@ jobs:
           Write-Output "Using MQL5 include root $mql5Root"
           $expertDir = Join-Path $mql5Root "Experts\RamonCI"
           New-Item -ItemType Directory -Force -Path $expertDir | Out-Null
+
+
+          if (-not (Select-String -Path "mt5/RamonCommandEA_v1.04.mq5" -Pattern "BrokerOffsetEpochs" -Quiet)) {
+            throw "EA must maintain broker UTC offset epochs"
+          }
+          if (-not (Select-String -Path "mt5/RamonCommandEA_v1.04.mq5" -Pattern "BrokerOffsetGaps" -Quiet)) {
+            throw "EA must reject candles in uncertain offset-transition intervals"
+          }
+          if (-not (Select-String -Path "mt5/RamonCommandEA_v1.04.mq5" -Pattern "broker_time<BrokerClockStartedAt" -Quiet)) {
+            throw "EA must withhold pre-start candles after initialization/restart"
+          }
 
           $sources = Get-ChildItem "mt5" -Filter "RamonCommandEA*.mq5" -File
           if (-not $sources) {
