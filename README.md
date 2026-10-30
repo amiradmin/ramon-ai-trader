@@ -2,7 +2,7 @@
 
 Ramon is a local MT5 gold-trading project whose **Django service owns strategy decisions, risk checks, and command authorization**. The MT5 Expert Advisor (EA) is a telemetry/command bridge and broker-side executor; it must not become a second strategy engine.
 
-> **Current status (2026-10-29):** the Django/Redis/TimescaleDB Compose stack is running and Django health/migrations have been checked locally. The current automated update/build entry point is `scripts/update_build_ramon.sh`. The local Wine/MetaEditor compile has recently failed to create a compiler log; do not treat the EA build as verified until a fresh `0 errors, 0 warnings` log and a new EX5 are confirmed. Keep all trading execution gates disabled.
+> **Deployment entry point:** `scripts/update_build_ramon.sh` is the single-command local deployment. It starts and validates the Compose services and compiles/installs only `RamonCommandEA_v1.02.ex5`. GitHub Actions has verified the command EA source contract and MetaEditor compilation for the current reviewed change. Local deployment still needs to be run on the target machine.
 
 ## Current supported stack
 
@@ -33,7 +33,7 @@ bash scripts/update_build_ramon.sh
 
 If the clone lives elsewhere, set `RAMON_REPO_DIR` to its absolute path before running the script. Optional build settings include `RAMON_MT5_PREFIX`, `RAMON_MT5_TERMINAL_ID`, `RAMON_METAEDITOR`, and `RAMON_HEALTH_URL`; see [the update/build runbook](docs/operations/one-command-update-build.md).
 
-The script validates the Compose configuration, builds/starts services, applies forward migrations, runs Django's system check, waits for health, backs up the current versioned command EA, then compiles the repository source. It does not attach an EA, change trading flags, or place orders. It stops rather than accepting a missing compiler log or a stale EX5 as a successful build.
+The script validates the Compose configuration, builds/starts services, applies forward migrations, runs Django's system check, verifies Django/Redis/TimescaleDB health and worker status, backs up the current command EA, then compiles and installs only `RamonCommandEA_v1.02.mq5`. The legacy `Ramon_v0.62.x` strategy EA is deliberately excluded to avoid installing a second EA alongside the command architecture. The script does not launch MT5, attach an EA, change trading flags, or place orders. It stops rather than accepting a missing compiler log or a stale EX5 as a successful build.
 
 ## EA and API
 
