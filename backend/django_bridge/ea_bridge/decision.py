@@ -308,7 +308,7 @@ def decision(request):
         # Serialize on the decision row, then refresh the newest verdict in place.
         # Older duplicate verdicts are retained as audit history; no rows are deleted.
         with transaction.atomic():
-            locked_record = StrategyDecisionRecord.objects.select_for_update().get(pk=record.pk)
+            record = StrategyDecisionRecord.objects.select_for_update().get(pk=record.pk)
             verdict = (
                 RiskVerdictRecord.objects.filter(decision_id=key)
                 .order_by("-created_at", "-pk")
