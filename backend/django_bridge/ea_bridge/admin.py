@@ -3,6 +3,7 @@ import json
 from django.contrib import admin
 
 from .models import (
+    AccountDailyBaseline,
     EAEvent,
     EAHeartbeat,
     MarketBar,
@@ -10,6 +11,25 @@ from .models import (
     RiskVerdictRecord,
     StrategyDecisionRecord,
 )
+
+
+@admin.register(AccountDailyBaseline)
+class AccountDailyBaselineAdmin(admin.ModelAdmin):
+    list_display = ("broker_day", "account_login", "server_name", "opening_balance", "source_instance_id", "captured_at")
+    list_filter = ("server_name", "broker_day")
+    search_fields = ("account_login", "server_name", "source_instance_id")
+    readonly_fields = ("account_login", "server_name", "broker_day", "opening_balance", "source_instance_id", "captured_at")
+    ordering = ("-broker_day", "-captured_at")
+    list_per_page = 50
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(MarketBar)
