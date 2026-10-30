@@ -34,6 +34,16 @@ jobs:
             echo "FAIL: one-command deployment must install only the command EA." >&2
             exit 1
           }
+          grep -Fq 'exec bash "$0"' scripts/update_build_ramon.sh || {
+            echo "FAIL: deployment script must restart itself after fast-forwarding to use the updated version." >&2
+            exit 1
+          }
+          for required in 'ramon-django' 'ramon-worker' 'ramon-redis' 'ramon-timescaledb' 'redis-cli ping' 'pg_isready'; do
+            grep -Fq "$required" scripts/update_build_ramon.sh || {
+              echo "FAIL: deployment script is missing readiness validation: $required" >&2
+              exit 1
+            }
+          done
           if grep -Fq 'mt5/Ramon_v0.62.6.mq5' scripts/update_build_ramon.sh; then
             echo "FAIL: legacy strategy EA must not be installed alongside the command EA." >&2
             exit 1
