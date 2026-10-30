@@ -1,6 +1,6 @@
 import json
 from django.test import TestCase, override_settings
-from .models import EAHeartbeat, MarketBar
+from .models import AccountDailyBaseline, EAHeartbeat, MarketBar
 
 
 class EATelemetryTests(TestCase):
@@ -14,6 +14,9 @@ class EATelemetryTests(TestCase):
             "account_trade_mode": 0,
             "instance_id": "ea-telemetry-test",
             "account_login": "12345",
+            "server_name": "Broker-Demo",
+            "broker_day": "2026-10-27",
+            "day_open_balance": 10000,
             "symbol": "XAUUSD_o",
             "timeframe": "M15",
             "quote": {"bid": 2320.30, "ask": 2320.35, "point": 0.01},
@@ -38,6 +41,41 @@ class EATelemetryTests(TestCase):
         self.assertEqual(heartbeat.ea_version, "1.02")
         self.assertEqual(heartbeat.payload["ea_version"], "1.02")
         self.assertEqual(heartbeat.payload["account_trade_mode"], 0)
+        baseline = AccountDailyBaseline.objects.get(
+            account_login="12345", server_name="Broker-Demo", broker_day="2026-10-27"
+        )
+        self.assertEqual(str(baseline.opening_balance), "10000.00")
+
+    @override_settings(EA_BEARER_TOKEN="test-token")
+    def test_daily_opening_balance_is_immutable_after_first_capture(self):
+        first = self.client.post(
+            self.url, data=json.dumps(self.payload()), content_type="application/json", **self.headers
+        )
+        self.assertEqual(first.status_code, 200)
+
+        later_payload = self.payload()
+        later_payload["account"]["balance"] = 9900
+        later_payload["account"]["equity"] = 9850
+        later_payload["day_open_balance"] = 9900
+        second = self.client.post(
+            self.url, data=json.dumps(later_payload), content_type="application/json", **self.headers
+        )
+        self.assertEqual(second.status_code, 200)
+        baseline = AccountDailyBaseline.objects.get(
+            account_login="12345", server_name="Broker-Demo", broker_day="2026-10-27"
+        )
+        self.assertEqual(str(baseline.opening_balance), "10000.00")
+
+    @override_settings(EA_BEARER_TOKEN="test-token")
+    def test_rejects_non_positive_daily_opening_balance(self):
+        payload = self.payload()
+        payload["day_open_balance"] = 0
+        response = self.client.post(
+            self.url, data=json.dumps(payload), content_type="application/json", **self.headers
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(AccountDailyBaseline.objects.count(), 0)
+        self.assertEqual(EAHeartbeat.objects.count(), 0)
 
     @override_settings(EA_BEARER_TOKEN="test-token")
     def test_rejects_unclosed_bar(self):
