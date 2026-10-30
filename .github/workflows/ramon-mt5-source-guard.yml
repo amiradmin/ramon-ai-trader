@@ -34,10 +34,10 @@ jobs:
             echo "FAIL: deployment script must compile the pinned strategy EA source." >&2
             exit 1
           }
-          grep -Fq 'RamonResearchTelemetry.mqh' scripts/update_build_ramon.sh || {
-            echo "FAIL: strategy include dependency must be checked before compilation." >&2
+          if grep -Fq 'RamonResearchTelemetry.mqh' scripts/update_build_ramon.sh || grep -Eq '(^|[^A-Za-z0-9_])RT_[A-Za-z0-9_]+' mt5/Ramon_v0.62.6.mq5; then
+            echo "FAIL: optional research telemetry dependency must be absent from the strategy build." >&2
             exit 1
-          }
+          fi
           if grep -Eq 'docker compose[^\n]*down[[:space:]]+-v|docker volume rm|docker system prune' scripts/update_build_ramon.sh; then
             echo "FAIL: deployment script must not delete Docker volumes or prune resources." >&2
             exit 1
