@@ -16,6 +16,7 @@ from django.views.decorators.http import require_POST
 
 from .auth import BearerTokenRequired
 from .models import AccountDailyBaseline, EAHeartbeat, MarketBar
+from .market_bars import validate_bar_timestamp
 
 
 def _body(request):
@@ -73,6 +74,7 @@ def telemetry(request):
             stamp = parse_datetime(str(bar.get("timestamp", "")))
             if stamp is None or stamp.tzinfo is None:
                 raise ValueError(f"bars[{index}].timestamp must include timezone")
+            stamp = validate_bar_timestamp(stamp, timeframe)
             o = _decimal(bar.get("open"), f"bars[{index}].open")
             h = _decimal(bar.get("high"), f"bars[{index}].high")
             lo = _decimal(bar.get("low"), f"bars[{index}].low")
