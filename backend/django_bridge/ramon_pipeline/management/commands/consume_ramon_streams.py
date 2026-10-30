@@ -13,6 +13,7 @@ from redis.exceptions import ResponseError
 
 from django.conf import settings
 from ea_bridge.models import EAEvent, MarketBar
+from ea_bridge.market_bars import validate_bar_timestamp
 from ramon_pipeline.redis_buffer import STREAMS
 
 log = logging.getLogger(__name__)
@@ -55,10 +56,12 @@ class Command(BaseCommand):
                 raise ValueError("market bar timestamp must be a valid ISO datetime")
             if bar_time.tzinfo is None or bar_time.utcoffset() is None:
                 raise ValueError("market bar timestamp must include a timezone")
+            timeframe = str(payload["timeframe"]).upper()[:16]
+            bar_time = validate_bar_timestamp(bar_time, timeframe)
             MarketBar.objects.get_or_create(
                 source=instance_id,
                 symbol=str(payload["symbol"])[:32],
-                timeframe=str(payload["timeframe"]).upper()[:16],
+                timeframe=timeframe,
                 timestamp=bar_time,
                 defaults={
                     "open": payload["open"],
