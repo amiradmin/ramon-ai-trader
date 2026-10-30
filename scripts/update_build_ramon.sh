@@ -56,17 +56,7 @@ fi
 [[ -n "$METAEDITOR" && -f "$METAEDITOR" ]] || die "MetaEditor not found; set RAMON_METAEDITOR."
 [[ -d "$EXPERTS_DIR" ]] || die "Active MT5 Experts directory not found: $EXPERTS_DIR"
 
-# The strategy source includes this file. Prefer the tracked copy; fall back to
-# the exact existing terminal copy. Never generate a placeholder dependency.
-TELEMETRY_INCLUDE=""
-if [[ -s mt5/RamonResearchTelemetry.mqh ]]; then
-  TELEMETRY_INCLUDE=mt5/RamonResearchTelemetry.mqh
-elif [[ -s "$EXPERTS_DIR/RamonResearchTelemetry.mqh" ]]; then
-  TELEMETRY_INCLUDE="$EXPERTS_DIR/RamonResearchTelemetry.mqh"
-else
-  TELEMETRY_INCLUDE="$(find "$REPO_DIR" "$WINEPREFIX/drive_c/users/amir/AppData/Roaming/MetaQuotes/Terminal" -type f -name RamonResearchTelemetry.mqh -print -quit 2>/dev/null || true)"
-fi
-[[ -n "$TELEMETRY_INCLUDE" && -s "$TELEMETRY_INCLUDE" ]] || die "Required RamonResearchTelemetry.mqh is missing. Add the real dependency to mt5/ or the active Experts directory; refusing to compile a broken strategy EA."
+# The strategy EA is self-contained; no optional research include is required.
 
 STAMP="$(date '+%Y%m%d-%H%M%S')"
 BACKUP_DIR="$HOME/.local/share/ramon-ea-backups/$STAMP"
@@ -75,20 +65,12 @@ for source in "${EA_SOURCES[@]}"; do
   base="$(basename "$source")"
   for old in "$EXPERTS_DIR/$base" "$EXPERTS_DIR/${base%.mq5}.ex5"; do [[ ! -f "$old" ]] || cp -p "$old" "$BACKUP_DIR/"; done
 done
-[[ ! -f "$EXPERTS_DIR/RamonResearchTelemetry.mqh" ]] || cp -p "$EXPERTS_DIR/RamonResearchTelemetry.mqh" "$BACKUP_DIR/"
-cp -p "$TELEMETRY_INCLUDE" "$BACKUP_DIR/RamonResearchTelemetry.mqh"
 
 compile_install() {
   local source="$1" base target log_file ex5 winpath status normalized
   base="$(basename "$source")"; target="$EXPERTS_DIR/$base"
   log_file="${target%.mq5}.log"; ex5="${target%.mq5}.ex5"
   cp "$source" "$target"
-  if [[ "$base" == Ramon_v0.62.6.mq5 ]]; then
-    telemetry_target="$EXPERTS_DIR/RamonResearchTelemetry.mqh"
-    if [[ "$(readlink -f "$TELEMETRY_INCLUDE")" != "$(readlink -f "$telemetry_target")" ]]; then
-      cp "$TELEMETRY_INCLUDE" "$telemetry_target"
-    fi
-  fi
   rm -f "$log_file" "$ex5"
   winpath="$(WINEPREFIX="$WINEPREFIX" winepath -w "$target")"
   [[ -n "$winpath" ]] || die "winepath returned an empty path for $target"
