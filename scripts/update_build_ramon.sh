@@ -83,7 +83,12 @@ compile_install() {
   base="$(basename "$source")"; target="$EXPERTS_DIR/$base"
   log_file="${target%.mq5}.log"; ex5="${target%.mq5}.ex5"
   cp "$source" "$target"
-  if [[ "$base" == Ramon_v0.62.6.mq5 ]]; then cp "$TELEMETRY_INCLUDE" "$EXPERTS_DIR/RamonResearchTelemetry.mqh"; fi
+  if [[ "$base" == Ramon_v0.62.6.mq5 ]]; then
+    telemetry_target="$EXPERTS_DIR/RamonResearchTelemetry.mqh"
+    if [[ "$(readlink -f "$TELEMETRY_INCLUDE")" != "$(readlink -f "$telemetry_target")" ]]; then
+      cp "$TELEMETRY_INCLUDE" "$telemetry_target"
+    fi
+  fi
   rm -f "$log_file" "$ex5"
   winpath="$(WINEPREFIX="$WINEPREFIX" winepath -w "$target")"
   [[ -n "$winpath" ]] || die "winepath returned an empty path for $target"
