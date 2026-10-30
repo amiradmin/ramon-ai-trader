@@ -30,10 +30,24 @@ jobs:
             echo "FAIL: deployment script must compile the pinned command EA source." >&2
             exit 1
           }
-          grep -Fq 'mt5/Ramon_v0.62.6.mq5' scripts/update_build_ramon.sh || {
-            echo "FAIL: deployment script must compile the pinned strategy EA source." >&2
+          grep -Fq 'EA_SOURCES=(mt5/RamonCommandEA_v1.02.mq5)' scripts/update_build_ramon.sh || {
+            echo "FAIL: one-command deployment must install only the command EA." >&2
             exit 1
           }
+          grep -Fq 'exec bash "$0"' scripts/update_build_ramon.sh || {
+            echo "FAIL: deployment script must restart itself after fast-forwarding to use the updated version." >&2
+            exit 1
+          }
+          for required in 'ramon-django' 'ramon-worker' 'ramon-redis' 'ramon-timescaledb' 'redis-cli ping' 'pg_isready'; do
+            grep -Fq "$required" scripts/update_build_ramon.sh || {
+              echo "FAIL: deployment script is missing readiness validation: $required" >&2
+              exit 1
+            }
+          done
+          if grep -Fq 'mt5/Ramon_v0.62.6.mq5' scripts/update_build_ramon.sh; then
+            echo "FAIL: legacy strategy EA must not be installed alongside the command EA." >&2
+            exit 1
+          fi
           if grep -Fq 'RamonResearchTelemetry.mqh' scripts/update_build_ramon.sh || grep -Eq '(^|[^A-Za-z0-9_])RT_[A-Za-z0-9_]+' mt5/Ramon_v0.62.6.mq5; then
             echo "FAIL: optional research telemetry dependency must be absent from the strategy build." >&2
             exit 1
