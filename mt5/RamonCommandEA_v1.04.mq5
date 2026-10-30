@@ -154,23 +154,6 @@ string IsoUtc(datetime stamp)
    return StringFormat("%04d-%02d-%02dT%02d:%02d:%02dZ",d.year,d.mon,d.day,d.hour,d.min,d.sec);
 }
 
-// Broker offsets are civil-time offsets, normally in 15-minute increments.
-// Rounding removes sub-minute jitter caused by sampling second-resolution clocks
-// on opposite sides of a second boundary.
-long StableBrokerUtcOffsetSeconds()
-{
-   datetime server_now=TimeTradeServer();
-   datetime utc_now=TimeGMT();
-   if(server_now<=0 || utc_now<=0) return 0;
-   long raw_offset=(long)(server_now-utc_now);
-   long stable_offset=(long)(MathRound((double)raw_offset/900.0)*900.0);
-   if(MathAbs((double)(raw_offset-stable_offset))>120.0)
-      Print("RAMON TIME WARNING: raw broker UTC offset=",raw_offset,
-            "s; normalized offset=",stable_offset,
-            "s. Check broker/server clock configuration.");
-   return stable_offset;
-}
-
 bool SampleBrokerClock()
 {
    datetime server_now=TimeTradeServer(), utc_now=TimeGMT();
