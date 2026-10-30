@@ -7,6 +7,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 from .auth import BearerTokenRequired
 from .models import EAEvent, EAHeartbeat, StrategyDecisionRecord
+from .market_bars import validate_bar_timestamp
 
 log = logging.getLogger(__name__)
 
@@ -83,6 +84,14 @@ def events(request):
             upper = event_type.upper()
             if upper in {"MARKET_BAR", "BAR", "OHLCV"}:
                 kind = EventKind.MARKET_BAR
+                if all(key in p for key in ("symbol", "timeframe", "timestamp")):
+                    bar_time = parse_datetime(str(p["timestamp"]))
+                    if bar_time is None or bar_time.tzinfo is None or bar_time.utcoffset() is None:
+                        return JsonResponse({"ok": False, "error": "market bar timestamp must include timezone"}, status=400)
+                    try:
+                        validate_bar_timestamp(bar_time, p["timeframe"])
+                    except ValueError as exc:
+                        return JsonResponse({"ok": False, "error": str(exc)}, status=400)
             elif upper in {"MARKET_TICK", "TICK", "QUOTE"}:
                 kind = EventKind.MARKET_TICK
             elif upper.startswith(("EXECUTION", "ORDER_", "TRADE_", "POSITION_", "FILL", "DEAL_")) or upper in {"FILL", "REJECTED", "CLOSED"}:
