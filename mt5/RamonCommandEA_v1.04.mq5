@@ -551,7 +551,7 @@ string BuildTelemetry()
       +"\"broker_day\":\""+broker_day_text+"\","
       +"\"symbol\":\""+JsonEscape(_Symbol)+"\",\"timeframe\":\""+TfName(_Period)+"\","
       +"\"quote\":{\"bid\":"+DoubleToString(tick.bid,_Digits)+",\"ask\":"+DoubleToString(tick.ask,_Digits)+",\"point\":"+DoubleToString(point,_Digits)+"},"
-      +"\"quote_time\":"+(quote_time_valid ? "\""+IsoUtc(quote_utc)+"\"" : "null")+",
+      +"\"quote_time\":"+(quote_time_valid ? "\""+IsoUtc(quote_utc)+"\"" : "null")+","
       +"\"terminal_trade_allowed\":"+((bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) && (bool)MQLInfoInteger(MQL_TRADE_ALLOWED) ? "true":"false")+","
       +"\"account\":"+account+",\"positions\":"+BuildPositionsJson()+","
       +"\"last_command_id\":\""+JsonEscape(LastCommandId)+"\",\"bars\":"+BuildBarsJson()+"}";
