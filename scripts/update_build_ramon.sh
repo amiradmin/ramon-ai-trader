@@ -14,7 +14,7 @@ EA_SOURCES=(mt5/RamonCommandEA_v1.02.mq5)
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 info() { printf '\n[%s] %s\n' "$(date '+%H:%M:%S')" "$*"; }
-for cmd in git docker curl wine winepath timeout tr grep find cp; do
+for cmd in git docker curl wine winepath timeout tr grep find cp seq sleep date mkdir basename cat rm; do
   command -v "$cmd" >/dev/null 2>&1 || die "$cmd is required"
 done
 [[ -d "$REPO_DIR/.git" ]] || die "Repository not found: $REPO_DIR"
@@ -33,6 +33,19 @@ if [[ "$before_update_sha" != "$after_update_sha" ]]; then
   info "Repository updated; restarting with the freshly pulled deployment script"
   exec bash "$0"
 fi
+
+info "Checking Docker and MT5 prerequisites"
+docker info >/dev/null 2>&1 || die "Docker daemon is not reachable"
+[[ -d "$WINEPREFIX/drive_c" ]] || die "Wine prefix not found: $WINEPREFIX"
+METAEDITOR="${RAMON_METAEDITOR:-}"
+if [[ -z "$METAEDITOR" ]]; then
+  for candidate in "$WINEPREFIX/drive_c/Program Files/MetaTrader 5/metaeditor64.exe" "$WINEPREFIX/drive_c/Program Files/MetaTrader 5/metaeditor.exe" "$WINEPREFIX/drive_c/Program Files (x86)/MetaTrader 5/metaeditor64.exe"; do
+    if [[ -f "$candidate" ]]; then METAEDITOR="$candidate"; break; fi
+  done
+fi
+[[ -n "$METAEDITOR" && -f "$METAEDITOR" ]] || METAEDITOR="$(find "$WINEPREFIX/drive_c" -type f \( -iname metaeditor64.exe -o -iname metaeditor.exe \) -print -quit 2>/dev/null || true)"
+[[ -n "$METAEDITOR" && -f "$METAEDITOR" ]] || die "MetaEditor not found; set RAMON_METAEDITOR."
+[[ -d "$EXPERTS_DIR" ]] || die "Active MT5 Experts directory not found: $EXPERTS_DIR"
 
 info "Validating and deploying Compose stack"
 docker compose -f "$COMPOSE_FILE" config --quiet
@@ -59,17 +72,6 @@ fi
 docker compose -f "$COMPOSE_FILE" exec -T redis redis-cli ping | grep -qx PONG || die "Redis ping failed"
 docker compose -f "$COMPOSE_FILE" exec -T timescaledb sh -lc 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' || die "TimescaleDB readiness check failed"
 docker compose -f "$COMPOSE_FILE" ps
-
-[[ -d "$WINEPREFIX/drive_c" ]] || die "Wine prefix not found: $WINEPREFIX"
-METAEDITOR="${RAMON_METAEDITOR:-}"
-if [[ -z "$METAEDITOR" ]]; then
-  for candidate in "$WINEPREFIX/drive_c/Program Files/MetaTrader 5/metaeditor64.exe" "$WINEPREFIX/drive_c/Program Files/MetaTrader 5/metaeditor.exe" "$WINEPREFIX/drive_c/Program Files (x86)/MetaTrader 5/metaeditor64.exe"; do
-    if [[ -f "$candidate" ]]; then METAEDITOR="$candidate"; break; fi
-  done
-fi
-[[ -n "$METAEDITOR" && -f "$METAEDITOR" ]] || METAEDITOR="$(find "$WINEPREFIX/drive_c" -type f \( -iname metaeditor64.exe -o -iname metaeditor.exe \) -print -quit 2>/dev/null || true)"
-[[ -n "$METAEDITOR" && -f "$METAEDITOR" ]] || die "MetaEditor not found; set RAMON_METAEDITOR."
-[[ -d "$EXPERTS_DIR" ]] || die "Active MT5 Experts directory not found: $EXPERTS_DIR"
 
 # The command EA uses only the standard MQL5 Trade include.
 
