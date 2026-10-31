@@ -47,6 +47,13 @@ class RiskConfig:
     min_reward_risk: float = 1.5  # applied only when take_profit_points is supplied
     max_total_risk_percent: float = 2.0  # open risk + this trade, applied when open_risk_percent is supplied
     max_daily_loss_percent: float = 3.0  # halt after this realised loss, applied when daily_loss_percent is supplied
+    # Validation / safety options. Defaults keep the original behaviour.
+    # strict_structural: with a structural opportunity but no ``point``, reject instead of silently
+    # falling back to the caller-supplied stop_loss_points.
+    strict_structural: bool = False
+    # short_stop_spread_adjust: a SELL stop triggers on the ask while structure is read on the bid
+    # chart, so move a short stop up by the current spread to keep it on the same structural level.
+    short_stop_spread_adjust: bool = False
 
     def __post_init__(self) -> None:
         if self.stop_buffer_atr < 0:
@@ -159,6 +166,14 @@ class RiskManager:
             raise _Reject("MISSING_OR_INVALID_RISK_INPUT", "entry quote must be numeric") from None
 
         stop_price = invalidation - sign * cfg.stop_buffer_atr * atr
+        if cfg.short_stop_spread_adjust and sign < 0:
+            try:
+                bid_q, ask_q = float(market["bid"]), float(market["ask"])
+            except (KeyError, TypeError, ValueError):
+                raise _Reject("MISSING_OR_INVALID_RISK_INPUT", "bid and ask are required to adjust a short stop for the spread") from None
+            if not (math.isfinite(bid_q) and math.isfinite(ask_q) and 0 < bid_q <= ask_q):
+                raise _Reject("MISSING_OR_INVALID_RISK_INPUT", "bid and ask must be positive with ask >= bid")
+            stop_price += ask_q - bid_q
         distance = (entry_price - stop_price) * sign
         if distance <= 0:
             raise _Reject("ENTRY_BEYOND_STOP", f"entry {entry_price:g} is already beyond the stop level {stop_price:g}")
@@ -190,7 +205,8 @@ class RiskManager:
         cfg = self.config
         structural = isinstance(opportunity, Mapping) and isinstance(opportunity.get("setup"), Mapping)
         fallback_note = None
-        if structural and market.get("point") is None and market.get("stop_loss_points") is not None:
+        if (structural and not cfg.strict_structural and market.get("point") is None
+                and market.get("stop_loss_points") is not None):
             # Callers that only supply a stop distance keep working: without ``point`` the
             # structural stop cannot be converted to points, so the supplied stop is used.
             structural = False

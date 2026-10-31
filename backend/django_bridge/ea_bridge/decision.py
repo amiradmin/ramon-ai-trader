@@ -10,8 +10,56 @@ from django.utils import timezone
 from .models import AccountDailyBaseline, StrategyDecisionRecord, EAHeartbeat, RiskVerdictRecord
 
 logger = logging.getLogger(__name__)
-from ramon_pipeline.signalflow.entry_timing import EntryTimer
+import threading
+from collections import OrderedDict
+from ramon_pipeline.signalflow.entry_timing import EntryTimer, EntryTimingConfig
+from ramon_pipeline.signalflow.opportunities import OpportunityConfig, OpportunityDetector
 from ramon_pipeline.signalflow.pipeline import SignalFlowPipeline
+from ramon_pipeline.signalflow.risk_management import RiskConfig, RiskManager
+
+# Long-lived duplicate-signal memory. A detector created per request starts with an empty
+# memory, so dedupe only works when this shared store is injected (RAMON_DEDUPE_SIGNALS=1).
+# It is per worker process: with several gunicorn workers use one worker or a shared store.
+_SIGNAL_MEMORY = OrderedDict()
+_SIGNAL_MEMORY_LOCK = threading.Lock()
+
+
+def _build_pipeline():
+    """Build the SignalFlow pipeline for one request.
+
+    Always on (fail-closed, no change to decisions for a well-formed request): the closed-bar
+    flag must be explicitly True, the signal time must be known for the freshness check, and a
+    structural stop never silently falls back to a caller-supplied stop.
+    Opt-in via settings (default off, so live behaviour is unchanged until you enable them):
+      RAMON_DEDUPE_SIGNALS, RAMON_USE_COMPUTED_ENTRY_QUALITY,
+      RAMON_SHORT_STOP_SPREAD_ADJUST, RAMON_IMPULSE_START_MODE.
+    """
+    def opt(name, default):
+        return getattr(settings, name, default)
+
+    dedupe = bool(opt("RAMON_DEDUPE_SIGNALS", False))
+    detector = OpportunityDetector(
+        config=OpportunityConfig(
+            require_closed_flag=True,
+            impulse_start_mode=opt("RAMON_IMPULSE_START_MODE", "LAST_SWING_LOW"),
+        ),
+        accepted_store=_SIGNAL_MEMORY if dedupe else None,
+        accepted_lock=_SIGNAL_MEMORY_LOCK if dedupe else None,
+    )
+    timer = EntryTimer(
+        require_quote=True,
+        config=EntryTimingConfig(
+            require_signal_time=True,
+            ignore_supplied_quality=bool(opt("RAMON_USE_COMPUTED_ENTRY_QUALITY", False)),
+        ),
+    )
+    risk = RiskManager(
+        config=RiskConfig(
+            strict_structural=True,
+            short_stop_spread_adjust=bool(opt("RAMON_SHORT_STOP_SPREAD_ADJUST", False)),
+        )
+    )
+    return SignalFlowPipeline(opportunities=detector, entry_timer=timer, risk_manager=risk)
 
 def _num(v, name):
     v=float(v)
@@ -96,6 +144,11 @@ def decision(request):
                 f"bar_time={bar_time}, now={now}, ahead_seconds={bar_time-now}"
             )
         if now-bar_time>3*900: raise ValueError("latest closed M15 bar is stale")
+        # Optional server-side proof that the newest candle has closed (bar_time is its OPEN time).
+        # Only enable when bar times and this server's clock use the same time base (see the
+        # broker-time offset note in the README), otherwise every request would be rejected.
+        if getattr(settings,"RAMON_ENFORCE_BAR_CLOSE",False) and now<bar_time+900:
+            raise ValueError("latest M15 bar is still forming")
         ranges=[max(highs[i]-lows[i],abs(highs[i]-closes[i-1]),abs(lows[i]-closes[i-1])) for i in range(1,len(bars))]
         atr=sum(ranges[-14:])/min(14,len(ranges))
         if not math.isfinite(atr) or atr<=0: raise ValueError("invalid ATR")
@@ -196,7 +249,7 @@ def decision(request):
         # The client value is required for protocol compatibility, but never used to
         # authorize trading. The daily-loss guard receives only the server-derived value.
         market["daily_loss_percent"] = server_daily_loss_percent
-        result=SignalFlowPipeline(entry_timer=EntryTimer(require_quote=True)).run(market)
+        result=_build_pipeline().run(market)
         if not risk_guards_complete:
             action = "WAIT"
             reason = "RISK_INPUTS_INCOMPLETE"

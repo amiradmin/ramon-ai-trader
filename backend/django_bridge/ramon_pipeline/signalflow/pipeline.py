@@ -11,6 +11,7 @@ reaches back to change an earlier decision.
 import inspect
 from typing import Any, Mapping
 
+from .common import DEFERRED
 from .entry_timing import EntryTimer
 from .learning import Learning
 from .opportunities import OpportunityDetector
@@ -44,6 +45,13 @@ class SignalFlowPipeline:
         approved = all(bool(stages[name].get("approved")) for name in _STAGE_ORDER)
         action = opportunity.get("side", "HOLD") if approved else "HOLD"
         rejected_by = next((name for name in _STAGE_ORDER if not stages[name].get("approved")), None)
+        # A later stage that DEFERS means "not now, try again". Give the signal back to the
+        # detector so the next bar is not reported as DUPLICATE_SIGNAL.
+        if opportunity.get("approved") and not approved:
+            deferred = any(stages[name].get("status") == DEFERRED for name in _STAGE_ORDER[1:])
+            release = getattr(self.opportunities, "release", None)
+            if deferred and callable(release) and opportunity.get("dedupe_key"):
+                release(opportunity["dedupe_key"], opportunity.get("signal_bar_time"))
         return {
             "system": "SignalFlow",
             "contract_version": CONTRACT_VERSION,
