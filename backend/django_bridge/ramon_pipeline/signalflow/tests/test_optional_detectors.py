@@ -135,6 +135,15 @@ class OptionalDetectorContractTests(TestCase):
         self.assertTrue(detector.release(first["dedupe_key"],first["signal_bar_time"]))
         self.assertTrue(detector.evaluate(market)["approved"])
 
+    def test_multi_setup_release_reaches_wrapped_trend_detector(self):
+        bars=make_bars(LONG_SETUP+[(1,1.0),(1,.8)])
+        detector=MultiSetupDetector(trend_detector=OpportunityDetector())
+        first=detector.evaluate(snapshot(bars[:-2]))
+        self.assertTrue(first["approved"],first["reason"])
+        self.assertTrue(detector.release(first["dedupe_key"],first["signal_bar_time"]))
+        later=detector.evaluate(snapshot(bars[:-1]))
+        self.assertTrue(later["approved"],later["reason"])
+
     def test_highest_scoring_same_side_candidate_wins(self):
         class Stub:
             def __init__(self,kind,score):
