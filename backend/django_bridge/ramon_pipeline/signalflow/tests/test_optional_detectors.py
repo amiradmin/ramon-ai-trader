@@ -122,6 +122,19 @@ class OptionalDetectorContractTests(TestCase):
         self.assertTrue(short["approved"],short["reason"])
         self.assertEqual((long["side"],short["side"]),("BUY","SELL"))
 
+    def test_multi_setup_reservation_can_be_released_after_downstream_defer(self):
+        class Stub:
+            def evaluate(self,market):
+                return {"approved":True,"status":"ACCEPTED","side":"BUY","candidate_side":"BUY",
+                        "score":.8,"reason":"OK","signal_bar_time":123,
+                        "setup":{"type":"TREND_PULLBACK","anchor_time":100}}
+        detector=MultiSetupDetector(trend_detector=Stub())
+        market={"symbol":"XAUUSD_o","timeframe":"M15","bars":[{"time":123}]}
+        first=detector.evaluate(market)
+        self.assertTrue(first["approved"])
+        self.assertTrue(detector.release(first["dedupe_key"],first["signal_bar_time"]))
+        self.assertTrue(detector.evaluate(market)["approved"])
+
     def test_highest_scoring_same_side_candidate_wins(self):
         class Stub:
             def __init__(self,kind,score):
