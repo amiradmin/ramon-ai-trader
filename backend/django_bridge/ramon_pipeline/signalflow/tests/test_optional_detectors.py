@@ -1,4 +1,6 @@
 from unittest import TestCase
+from unittest.mock import patch
+from ramon_pipeline.signalflow._detector_utils import atr_series,adx_series,rsi_series
 from ramon_pipeline.signalflow.breakout import BreakoutDetector
 from ramon_pipeline.signalflow.opportunities import OpportunityConfig
 from ramon_pipeline.signalflow.multi_setup import MultiSetupConfig,MultiSetupDetector
@@ -38,6 +40,53 @@ class OptionalDetectorContractTests(TestCase):
         self.assertTrue(detector.evaluate(market)["approved"])
         duplicate=detector.evaluate(market)
         self.assertEqual(duplicate["reason"],"DUPLICATE_SIGNAL")
+
+
+    def test_indicator_values_are_prefix_causal(self):
+        bars=[]
+        price=2000.0
+        for i in range(80):
+            close=price+(0.15 if i%3 else -0.1)
+            bars.append({"time":1700000000+i*900,"open":price,"high":max(price,close)+.5,
+                         "low":min(price,close)-.5,"close":close})
+            price=close
+        for fn in (atr_series,adx_series,rsi_series):
+            prefix=fn(bars[:-1])[-1]
+            extended=fn(bars)[-2]
+            self.assertAlmostEqual(prefix,extended,places=10)
+
+    def test_breakout_detector_is_mirror_symmetric(self):
+        bars=[]
+        for i in range(60):
+            bars.append({"time":1700000000+i*900,"open":100.0,"high":101.0,"low":99.0,"close":100.0})
+        bars.append({"time":1700000000+60*900,"open":101.0,"high":101.7,"low":100.8,"close":101.5})
+        mirrored=[{"time":b["time"],"open":200-b["open"],"high":200-b["low"],
+                   "low":200-b["high"],"close":200-b["close"]} for b in bars]
+        def atr_mock(series): return [1.0]*(len(series)-1)+[1.2]
+        def adx_mock(series): return [10.0]*(len(series)-1)+[11.0]
+        with patch("ramon_pipeline.signalflow.breakout.atr_series",side_effect=atr_mock), patch("ramon_pipeline.signalflow.breakout.adx_series",side_effect=adx_mock):
+            long=BreakoutDetector().evaluate({"symbol":"XAUUSD_o","bars":bars})
+            short=BreakoutDetector().evaluate({"symbol":"XAUUSD_o","bars":mirrored})
+        self.assertTrue(long["approved"],long["reason"])
+        self.assertTrue(short["approved"],short["reason"])
+        self.assertEqual((long["side"],short["side"]),("BUY","SELL"))
+
+    def test_range_reversion_detector_is_mirror_symmetric(self):
+        bars=[]
+        for i in range(60):
+            bars.append({"time":1700000000+i*900,"open":100.0,"high":101.0,"low":99.0,"close":100.0})
+        bars.append({"time":1700000000+60*900,"open":99.4,"high":99.8,"low":98.7,"close":99.6})
+        mirrored=[{"time":b["time"],"open":200-b["open"],"high":200-b["low"],
+                   "low":200-b["high"],"close":200-b["close"]} for b in bars]
+        def atr_mock(series): return [1.0]*len(series)
+        def adx_mock(series): return [10.0]*len(series)
+        with patch("ramon_pipeline.signalflow.range_reversion.atr_series",side_effect=atr_mock), patch("ramon_pipeline.signalflow.range_reversion.adx_series",side_effect=adx_mock), patch("ramon_pipeline.signalflow.range_reversion.rsi_series",return_value=[20.0]*len(bars)):
+            long=RangeReversionDetector().evaluate({"symbol":"XAUUSD_o","bars":bars})
+        with patch("ramon_pipeline.signalflow.range_reversion.atr_series",side_effect=atr_mock), patch("ramon_pipeline.signalflow.range_reversion.adx_series",side_effect=adx_mock), patch("ramon_pipeline.signalflow.range_reversion.rsi_series",return_value=[80.0]*len(bars)):
+            short=RangeReversionDetector().evaluate({"symbol":"XAUUSD_o","bars":mirrored})
+        self.assertTrue(long["approved"],long["reason"])
+        self.assertTrue(short["approved"],short["reason"])
+        self.assertEqual((long["side"],short["side"]),("BUY","SELL"))
 
     def test_opposite_accepted_candidates_conflict(self):
         class Stub:
