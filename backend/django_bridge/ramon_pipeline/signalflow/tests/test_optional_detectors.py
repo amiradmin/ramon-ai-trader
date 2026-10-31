@@ -2,7 +2,8 @@ from unittest import TestCase
 from unittest.mock import patch
 from ramon_pipeline.signalflow._detector_utils import atr_series,adx_series,rsi_series
 from ramon_pipeline.signalflow.breakout import BreakoutDetector
-from ramon_pipeline.signalflow.opportunities import OpportunityConfig
+from ramon_pipeline.signalflow.opportunities import OpportunityConfig,OpportunityDetector
+from ramon_pipeline.signalflow.tests.test_opportunities import LONG_SETUP,make_bars,snapshot
 from ramon_pipeline.signalflow.multi_setup import MultiSetupConfig,MultiSetupDetector
 from ramon_pipeline.signalflow.range_reversion import RangeReversionDetector
 from ramon_pipeline.signalflow.reversal import ReversalDetector
@@ -18,6 +19,14 @@ class OptionalDetectorContractTests(TestCase):
         self.assertFalse(cfg.consider_previous_impulse)
         self.assertFalse(cfg.shallow_pullback_mode)
         self.assertEqual(cfg.zone_reference,"FAST_EMA")
+        self.assertEqual(cfg.symbol_overrides,{})
+        legacy=OpportunityDetector().evaluate(snapshot(make_bars(LONG_SETUP)))
+        self.assertNotIn("pullback_variant",legacy["setup"])
+    def test_symbol_specific_threshold_override_is_applied(self):
+        cfg=OpportunityConfig(symbol_overrides={"XAUUSD_o":{"min_impulse_atr":100.0}})
+        result=OpportunityDetector(config=cfg).evaluate(snapshot(make_bars(LONG_SETUP)))
+        self.assertEqual(result["reason"],"IMPULSE_TOO_SMALL")
+
     def test_symbol_prefix_gate(self):
         self.assertEqual(BreakoutDetector().evaluate({"symbol":"EURUSD","bars":[]})["reason"],"UNSUPPORTED_SYMBOL")
     def test_identical_prefix_is_deterministic(self):
