@@ -3,7 +3,7 @@ from unittest.mock import patch
 from ramon_pipeline.signalflow._detector_utils import atr_series,adx_series,rsi_series
 from ramon_pipeline.signalflow.breakout import BreakoutDetector
 from ramon_pipeline.signalflow.opportunities import OpportunityConfig,OpportunityDetector
-from ramon_pipeline.signalflow.tests.test_opportunities import LONG_SETUP,make_bars,snapshot
+from ramon_pipeline.signalflow.tests.test_opportunities import LONG_SETUP,SHORT_SETUP,make_bars,snapshot
 from ramon_pipeline.signalflow.multi_setup import MultiSetupConfig,MultiSetupDetector
 from ramon_pipeline.signalflow.range_reversion import RangeReversionDetector
 from ramon_pipeline.signalflow.reversal import ReversalDetector
@@ -22,6 +22,22 @@ class OptionalDetectorContractTests(TestCase):
         self.assertEqual(cfg.symbol_overrides,{})
         legacy=OpportunityDetector().evaluate(snapshot(make_bars(LONG_SETUP)))
         self.assertNotIn("pullback_variant",legacy["setup"])
+    def test_opt_in_pullback_options_preserve_long_short_symmetry(self):
+        cases=((LONG_SETUP,2400.0,"BUY"),(SHORT_SETUP,2600.0,"SELL"))
+        configs=(
+            OpportunityConfig(consider_previous_impulse=True),
+            OpportunityConfig(shallow_pullback_mode=True),
+            OpportunityConfig(zone_reference="SLOW_EMA",zone_tolerance_atr=5.0),
+        )
+        for config in configs:
+            sides=[]
+            for legs,start,expected in cases:
+                result=OpportunityDetector(config=config).evaluate(snapshot(make_bars(legs,start_price=start)))
+                self.assertTrue(result["approved"],(config,result["reason"]))
+                self.assertEqual(result["side"],expected)
+                sides.append(result["side"])
+            self.assertEqual(sides,["BUY","SELL"])
+
     def test_symbol_specific_threshold_override_is_applied(self):
         cfg=OpportunityConfig(symbol_overrides={"XAUUSD_o":{"min_impulse_atr":100.0}})
         result=OpportunityDetector(config=cfg).evaluate(snapshot(make_bars(LONG_SETUP)))
