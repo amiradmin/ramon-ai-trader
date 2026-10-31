@@ -18,7 +18,7 @@ class PipelineWiringTests(TestCase):
     def test_public_api_is_exposed_from_the_package(self):
         for name in signalflow.__all__:
             self.assertTrue(hasattr(signalflow, name), name)
-        self.assertEqual(len(signalflow.__all__), 9)
+        self.assertEqual(len(signalflow.__all__), 16)
 
     def test_approved_run_uses_the_structural_stop_not_the_supplied_one(self):
         outcome = SignalFlowPipeline().run(market())
