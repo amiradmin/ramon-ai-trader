@@ -1,5 +1,6 @@
 """Causal helpers for optional SignalFlow detectors."""
 import math
+import hashlib
 from typing import Any, Mapping, Sequence
 
 def market_bars(market: Mapping[str, Any]) -> list[dict[str, float]]:
@@ -49,11 +50,19 @@ def adx_series(bars,period=14):
     for i in range(first+1,n):v=(v*(period-1)+dx[i])/period;out[i]=v
     return out
 
-def result(status,reason,*,side="HOLD",candidate_side="NONE",score=0.0,setup=None,detail=""):
+def result(status,reason,*,side="HOLD",candidate_side="NONE",score=0.0,setup=None,detail="",market=None):
     ok=status=="ACCEPTED"
+    setup=setup or {}
+    signal_time=setup.get("signal_bar_time")
+    signal_id=None
+    if ok and setup:
+        symbol=str((market or {}).get("symbol",""))
+        timeframe=str((market or {}).get("timeframe","M15")).upper()
+        seed=f"{symbol}|{timeframe}|{setup.get('type')}|{side}|{signal_time}"
+        signal_id=hashlib.sha256(seed.encode()).hexdigest()[:16]
     return {"approved":ok,"status":status,"side":side if ok else "HOLD","candidate_side":candidate_side,
             "score":round(float(score),4),"reason":reason,"explanation":detail or reason,"regime":None,
-            "components":{},"checks":[],"signal_bar_time":None,"setup":setup or {}}
+            "components":{},"checks":[],"signal_bar_time":signal_time,"setup":setup,"signal_id":signal_id}
 
 def unsupported_symbol(market,prefixes):
     s=str(market.get("symbol","")).strip().upper()
