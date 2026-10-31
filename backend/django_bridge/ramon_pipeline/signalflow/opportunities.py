@@ -38,7 +38,7 @@ import logging
 import math
 import threading
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from statistics import median
 from typing import Any, Callable, Mapping, Sequence
 
@@ -111,6 +111,7 @@ class OpportunityConfig:
     shallow_pullback_mode: bool = False
     shallow_min_retracement: float = 0.15
     zone_reference: str = "FAST_EMA"
+    symbol_overrides: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.impulse_start_mode not in ("LAST_SWING_LOW", "LOWEST_SINCE_PRIOR_HIGH"):
@@ -119,6 +120,13 @@ class OpportunityConfig:
             raise ValueError("shallow_min_retracement must be positive and below min_retracement")
         if self.zone_reference not in ("FAST_EMA", "SLOW_EMA"):
             raise ValueError("zone_reference must be FAST_EMA or SLOW_EMA")
+        allowed = {name for name in self.__dataclass_fields__ if name not in {"symbol_prefixes", "symbol_overrides"}}
+        for symbol, values in self.symbol_overrides.items():
+            if not isinstance(symbol, str) or not symbol.strip() or not isinstance(values, Mapping):
+                raise ValueError("symbol_overrides must map non-empty symbols to option mappings")
+            unknown = set(values) - allowed
+            if unknown:
+                raise ValueError(f"unsupported symbol override options: {', '.join(sorted(unknown))}")
         if self.pivot_window < 1:
             raise ValueError("pivot_window must be at least 1")
         if not 1 <= self.fast_ema < self.slow_ema:
@@ -791,6 +799,11 @@ class OpportunityDetector:
         config = self.config
         checks: list[dict[str, Any]] = []
         symbol = str(market.get("symbol", "")).strip()
+        override = config.symbol_overrides.get(symbol)
+        if override is None:
+            override = next((v for k, v in config.symbol_overrides.items() if k.upper() == symbol.upper()), None)
+        if override:
+            config = replace(config, **dict(override), symbol_overrides={})
         timeframe = str(market.get("timeframe", "M15")).upper()
 
         def done(status: str, reason: str, **kwargs: Any) -> dict[str, Any]:
@@ -953,7 +966,7 @@ class OpportunityDetector:
     
             # Candidate legs are ordered newest first. The optional fallback only retries
             # an older confirmed swing after one of the three specified geometry failures.
-            candidates = list(reversed(o_swing_highs))
+            candidates = list(reversed(o_swing_highs))[:2 if config.consider_previous_impulse else 1]
             selected = None
             failure = None
             for rank, candidate_high in enumerate(candidates, start=1):
