@@ -46,4 +46,4 @@ class BreakoutDetector:
                "atr":a[t],"atr_ratio":ratio,"adx":d[t],"reference_price":close,"invalidation_price":level,
                "signal_bar_time":b[t]["time"]}
         return result("ACCEPTED","RANGE_BREAKOUT_CONFIRMED",side=side,candidate_side=side,score=score,
-                      setup=setup,detail=f"{side} range breakout confirmed")
+                      setup=setup,detail=f"{side} range breakout confirmed",market=market)
