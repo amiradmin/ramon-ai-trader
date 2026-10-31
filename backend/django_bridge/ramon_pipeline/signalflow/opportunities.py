@@ -98,8 +98,18 @@ class OpportunityConfig:
     zone_tolerance_atr: float = 0.25
     max_bars_since_pullback_low: int = 6
     rsi_overbought: float = 70.0  # mirrored (100 - x) for shorts
+    # Validation / safety options. Defaults keep the original behaviour.
+    # require_closed_flag: treat a missing/None ``last_bar_closed`` as "not confirmed closed"
+    # (fail closed) instead of assuming the newest candle is complete.
+    require_closed_flag: bool = False
+    # impulse_start_mode: "LAST_SWING_LOW" (original: the last confirmed swing low before the
+    # swing high) or "LOWEST_SINCE_PRIOR_HIGH" (the lowest low between the previous swing high
+    # and this one, so a minor fractal low just before the high cannot shrink the impulse).
+    impulse_start_mode: str = "LAST_SWING_LOW"
 
     def __post_init__(self) -> None:
+        if self.impulse_start_mode not in ("LAST_SWING_LOW", "LOWEST_SINCE_PRIOR_HIGH"):
+            raise ValueError("impulse_start_mode must be LAST_SWING_LOW or LOWEST_SINCE_PRIOR_HIGH")
         if self.pivot_window < 1:
             raise ValueError("pivot_window must be at least 1")
         if not 1 <= self.fast_ema < self.slow_ema:
@@ -464,6 +474,8 @@ class OpportunityDetector:
         sarima_order: tuple[int, int, int] = (1, 1, 1),
         sarima_seasonal_order: tuple[int, int, int, int] = (1, 0, 1, 5),
         config: OpportunityConfig | None = None,
+        accepted_store: "OrderedDict[str, float] | None" = None,
+        accepted_lock: Any = None,
     ) -> None:
         if not 0.0 <= minimum_score <= 1.0:
             raise ValueError("minimum_score must be between 0 and 1")
@@ -476,9 +488,11 @@ class OpportunityDetector:
         self.sarima_order = sarima_order
         self.sarima_seasonal_order = sarima_seasonal_order
         self.config = config or OpportunityConfig()
-        self._lock = threading.Lock()
+        # A detector built per request has an empty dedupe memory. To make duplicate
+        # suppression work across requests, inject a long-lived store (and its lock).
+        self._lock = accepted_lock if accepted_lock is not None else threading.Lock()
         # signal key -> signal bar time already accepted (bounded, oldest evicted first)
-        self._accepted: OrderedDict[str, float] = OrderedDict()
+        self._accepted: OrderedDict[str, float] = accepted_store if accepted_store is not None else OrderedDict()
         # (model, symbol, timeframe, source, params, bar time) -> result or failure
         self._forecast_cache: OrderedDict[tuple, Any] = OrderedDict()
 
@@ -642,6 +656,21 @@ class OpportunityDetector:
             "sarima_quality": self._forecast_quality(sarima),
         }
 
+    def release(self, dedupe_key: str, bar_time: Any = None) -> bool:
+        """Forget an accepted signal so a later bar can still produce it.
+
+        Called when a later stage DEFERRED the trade ("not now, try again"): without this a
+        deferred signal would be reported as ``DUPLICATE_SIGNAL`` on the next bar.
+        """
+        with self._lock:
+            earlier = self._accepted.get(dedupe_key)
+            if earlier is None:
+                return False
+            if bar_time is not None and float(earlier) != float(bar_time):
+                return False
+            del self._accepted[dedupe_key]
+            return True
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -762,7 +791,8 @@ class OpportunityDetector:
             tuple(prefix.upper() for prefix in config.symbol_prefixes)
         ):
             _check(checks, "symbol", False, f"{symbol} is not supported by this strategy")
-            return done(REJECTED, "UNSUPPORTED_SYMBOL", detail=f"{symbol} is not an XAUUSD instrument")
+            return done(REJECTED, "UNSUPPORTED_SYMBOL",
+                        detail=f"{symbol} does not start with any of {', '.join(config.symbol_prefixes)}")
 
         try:
             bars = _parse_bars(market["bars"], config)
@@ -771,9 +801,12 @@ class OpportunityDetector:
             return done(REJECTED, exc.reason, detail=exc.detail)
         _check(checks, "data_valid", True, f"{len(bars.close)} completed bars", metrics={"value": len(bars.close), "threshold": config.min_bars, "factor": "completed bars"})
 
-        if market.get("last_bar_closed") is False:
-            _check(checks, "bar_complete", False, "the newest candle is still forming", metrics={"value": 0, "threshold": 1, "factor": "closed candle (0/1)"})
-            return done(DEFERRED, "LAST_BAR_NOT_CLOSED", detail="the newest candle is still forming")
+        closed_flag = market.get("last_bar_closed")
+        if closed_flag is False or (config.require_closed_flag and closed_flag is not True):
+            detail = ("the newest candle is still forming" if closed_flag is False
+                      else "last_bar_closed was not confirmed True by the caller")
+            _check(checks, "bar_complete", False, detail, metrics={"value": 0, "threshold": 1, "factor": "closed candle (0/1)"})
+            return done(DEFERRED, "LAST_BAR_NOT_CLOSED", detail=detail)
         _check(checks, "bar_complete", True, "accepted as completed by the Django decision endpoint contract", metrics={"value": 1, "threshold": 1, "factor": "closed candle (0/1)"})
 
         t = len(bars.close) - 1
@@ -864,6 +897,11 @@ class OpportunityDetector:
             _check(checks, "impulse", False, "no confirmed swing point before the latest extreme")
             return finish(REJECTED, "NO_IMPULSE_LEG", "no confirmed swing point before the latest extreme", side)
         il = starts[-1]
+        if config.impulse_start_mode == "LOWEST_SINCE_PRIOR_HIGH":
+            prior_highs = [i for i in o_swing_highs if i < ih]
+            leg_start = prior_highs[-1] if prior_highs else 0
+            leg = o_low[leg_start:ih]
+            il = leg_start + leg.index(min(leg))
         if max(o_high[ih + 1:]) >= o_high[ih]:
             detail = "price is still making new extremes; no pullback has started"
             _check(checks, "impulse", False, detail)
@@ -1001,6 +1039,7 @@ class OpportunityDetector:
             components={k: round(v, 4) for k, v in components.items()},
             signal_bar_time=_time_out(bar_time),
             signal_id=signal_id,
+            dedupe_key=signal_key,
             explanation=explanation,
             **extra,
         )

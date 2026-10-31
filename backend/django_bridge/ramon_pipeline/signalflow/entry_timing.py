@@ -46,6 +46,9 @@ class EntryTimingConfig:
     min_risk_room_atr: float = 0.25  # entry must stay at least this far from the invalidation level
     max_spread_atr: float = 0.20  # spread as a fraction of ATR
     max_spread_to_risk: float = 0.25  # spread as a fraction of the distance to invalidation
+    # Validation / safety options. Defaults keep the original behaviour.
+    require_signal_time: bool = False  # reject (instead of skipping freshness) when signal/latest bar time is missing
+    ignore_supplied_quality: bool = False  # always compute quality from spread/chase/freshness, never take market["entry_quality"]
 
     def __post_init__(self) -> None:
         if self.max_signal_age_bars < 0:
@@ -218,6 +221,10 @@ class EntryTimer:
 
         # Freshness -----------------------------------------------------------
         age = self._signal_age_bars(opportunity, market)
+        if age is None and cfg.require_signal_time:
+            check("freshness", False, "signal or latest bar time not supplied")
+            return self._finish(REJECTED, "SIGNAL_TIME_UNAVAILABLE", opportunity, checks, metrics,
+                                "signal or latest bar time not supplied, so freshness cannot be judged")
         if age is None:
             check("freshness", True, "skipped: signal or latest bar time not supplied")
             age_for_quality = 0.0
@@ -277,7 +284,7 @@ class EntryTimer:
             check("price_checks", True, "skipped: no bid/ask/point supplied, so invalidation, chase and relative spread were not judged")
 
         # Quality -----------------------------------------------------------------
-        if "entry_quality" in market and market["entry_quality"] is not None:
+        if not cfg.ignore_supplied_quality and "entry_quality" in market and market["entry_quality"] is not None:
             quality = _number(market["entry_quality"], "entry_quality")
             source = "SUPPLIED"
         else:

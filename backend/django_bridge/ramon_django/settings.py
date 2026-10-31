@@ -48,6 +48,12 @@ EA_BEARER_TOKEN = os.environ.get("RAMON_EA_BEARER_TOKEN", "")
 EA_MAX_BODY_BYTES = int(os.environ.get("RAMON_EA_MAX_BODY_BYTES", "65536"))
 RAMON_PIPELINE_INGEST_ENABLED = os.environ.get("RAMON_PIPELINE_INGEST_ENABLED", "0") == "1"
 RAMON_DJANGO_DECISION_ENABLED = os.environ.get("RAMON_DJANGO_DECISION_ENABLED", "1") == "1"
+# Validation options for the SignalFlow decision path. All default OFF so live behaviour is unchanged.
+RAMON_DEDUPE_SIGNALS = os.environ.get("RAMON_DEDUPE_SIGNALS", "0") == "1"
+RAMON_USE_COMPUTED_ENTRY_QUALITY = os.environ.get("RAMON_USE_COMPUTED_ENTRY_QUALITY", "0") == "1"
+RAMON_SHORT_STOP_SPREAD_ADJUST = os.environ.get("RAMON_SHORT_STOP_SPREAD_ADJUST", "0") == "1"
+RAMON_IMPULSE_START_MODE = os.environ.get("RAMON_IMPULSE_START_MODE", "LAST_SWING_LOW")
+RAMON_ENFORCE_BAR_CLOSE = os.environ.get("RAMON_ENFORCE_BAR_CLOSE", "0") == "1"
 # Command creation and delivery are separate explicit opt-ins; both default off.
 RAMON_EA_COMMAND_CREATION_ENABLED = os.environ.get("RAMON_EA_COMMAND_CREATION_ENABLED", "0") == "1"
 RAMON_EA_COMMAND_EXECUTION_ENABLED = os.environ.get("RAMON_EA_COMMAND_EXECUTION_ENABLED", "0") == "1"
