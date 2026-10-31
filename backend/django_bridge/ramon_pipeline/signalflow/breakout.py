@@ -29,8 +29,8 @@ class BreakoutDetector:
             i=t-off
             if i<c.range_bars:continue
             old=b[i-c.range_bars:i];oh=max(x["high"] for x in old);ol=min(x["low"] for x in old)
-            if b[i]["close"]>oh+c.breakout_atr*a[i] and b[t]["close"]<=rh:return result("REJECTED","BREAKOUT_FAILED_WITHIN_TWO_BARS")
-            if b[i]["close"]<ol-c.breakout_atr*a[i] and b[t]["close"]>=rl:return result("REJECTED","BREAKOUT_FAILED_WITHIN_TWO_BARS")
+            if b[i]["close"]>oh+c.breakout_atr*a[i] and b[t]["close"]<=oh:return result("REJECTED","BREAKOUT_FAILED_WITHIN_TWO_BARS")
+            if b[i]["close"]<ol-c.breakout_atr*a[i] and b[t]["close"]>=ol:return result("REJECTED","BREAKOUT_FAILED_WITHIN_TWO_BARS")
         if any(x!=x or x>=c.adx_ranging for x in d[t-c.minimum_ranging_bars:t]):return result("DEFERRED","RANGE_NOT_ESTABLISHED")
         base=median(x for x in a[max(14,t-80):t] if x==x and x>0)
         oldbase=median(x for x in a[max(14,t-81):t-1] if x==x and x>0)
