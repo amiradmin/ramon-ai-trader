@@ -40,7 +40,7 @@ class OptionalDetectorContractTests(TestCase):
 
     def test_shallow_pullback_requires_fast_ema_touch_then_resumption(self):
         legs=UPTREND+[(12,11),(4,-2.0),(2,1.5)]
-        result=OpportunityDetector(config=OpportunityConfig(shallow_pullback_mode=True,zone_tolerance_atr=1.0)).evaluate(
+        result=OpportunityDetector(config=OpportunityConfig(shallow_pullback_mode=True,min_retracement=0.5,zone_tolerance_atr=1.0)).evaluate(
             snapshot(make_bars(legs)))
         self.assertTrue(result["approved"],result["reason"])
         self.assertEqual(result["setup"]["pullback_variant"],"SHALLOW")
