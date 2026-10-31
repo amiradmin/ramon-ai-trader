@@ -95,6 +95,8 @@ class OptionalDetectorContractTests(TestCase):
         self.assertTrue(long["approved"],long["reason"])
         self.assertTrue(short["approved"],short["reason"])
         self.assertEqual((long["side"],short["side"]),("BUY","SELL"))
+        self.assertTrue(long["signal_id"] and short["signal_id"])
+        self.assertEqual(long["signal_bar_time"],bars[-1]["time"])
 
     def test_range_reversion_detector_is_mirror_symmetric(self):
         bars=[]
