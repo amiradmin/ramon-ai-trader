@@ -115,7 +115,7 @@ class OpportunityConfig:
     def __post_init__(self) -> None:
         if self.impulse_start_mode not in ("LAST_SWING_LOW", "LOWEST_SINCE_PRIOR_HIGH"):
             raise ValueError("impulse_start_mode must be LAST_SWING_LOW or LOWEST_SINCE_PRIOR_HIGH")
-        if not 0.0 < self.shallow_min_retracement < self.min_retracement:
+        if self.shallow_pullback_mode and not 0.0 < self.shallow_min_retracement < self.min_retracement:
             raise ValueError("shallow_min_retracement must be positive and below min_retracement")
         if self.zone_reference not in ("FAST_EMA", "SLOW_EMA"):
             raise ValueError("zone_reference must be FAST_EMA or SLOW_EMA")
@@ -990,7 +990,7 @@ class OpportunityDetector:
                 elif (candidate_retracement < config.min_retracement
                       and not (config.shallow_pullback_mode
                                and candidate_retracement >= config.shallow_min_retracement
-                               and candidate_zone_gap <= config.zone_tolerance_atr)):
+                               and candidate_fast_gap <= config.zone_tolerance_atr)):
                     candidate_reason = "PULLBACK_NOT_DEEP_ENOUGH"
                 elif candidate_zone_gap > config.zone_tolerance_atr:
                     candidate_reason = "PULLBACK_NOT_IN_VALUE_ZONE"
