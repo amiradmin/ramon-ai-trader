@@ -38,7 +38,7 @@ import logging
 import math
 import threading
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from statistics import median
 from typing import Any, Callable, Mapping, Sequence
 
@@ -106,10 +106,27 @@ class OpportunityConfig:
     # swing high) or "LOWEST_SINCE_PRIOR_HIGH" (the lowest low between the previous swing high
     # and this one, so a minor fractal low just before the high cannot shrink the impulse).
     impulse_start_mode: str = "LAST_SWING_LOW"
+    # Optional pullback coverage experiments. Disabled defaults preserve legacy output.
+    consider_previous_impulse: bool = False
+    shallow_pullback_mode: bool = False
+    shallow_min_retracement: float = 0.15
+    zone_reference: str = "FAST_EMA"
+    symbol_overrides: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.impulse_start_mode not in ("LAST_SWING_LOW", "LOWEST_SINCE_PRIOR_HIGH"):
             raise ValueError("impulse_start_mode must be LAST_SWING_LOW or LOWEST_SINCE_PRIOR_HIGH")
+        if self.shallow_pullback_mode and not 0.0 < self.shallow_min_retracement < self.min_retracement:
+            raise ValueError("shallow_min_retracement must be positive and below min_retracement")
+        if self.zone_reference not in ("FAST_EMA", "SLOW_EMA"):
+            raise ValueError("zone_reference must be FAST_EMA or SLOW_EMA")
+        allowed = {name for name in self.__dataclass_fields__ if name not in {"symbol_prefixes", "symbol_overrides"}}
+        for symbol, values in self.symbol_overrides.items():
+            if not isinstance(symbol, str) or not symbol.strip() or not isinstance(values, Mapping):
+                raise ValueError("symbol_overrides must map non-empty symbols to option mappings")
+            unknown = set(values) - allowed
+            if unknown:
+                raise ValueError(f"unsupported symbol override options: {', '.join(sorted(unknown))}")
         if self.pivot_window < 1:
             raise ValueError("pivot_window must be at least 1")
         if not 1 <= self.fast_ema < self.slow_ema:
@@ -782,6 +799,11 @@ class OpportunityDetector:
         config = self.config
         checks: list[dict[str, Any]] = []
         symbol = str(market.get("symbol", "")).strip()
+        override = config.symbol_overrides.get(symbol)
+        if override is None:
+            override = next((v for k, v in config.symbol_overrides.items() if k.upper() == symbol.upper()), None)
+        if override:
+            config = replace(config, **dict(override), symbol_overrides={})
         timeframe = str(market.get("timeframe", "M15")).upper()
 
         def done(status: str, reason: str, **kwargs: Any) -> dict[str, Any]:
@@ -888,46 +910,156 @@ class OpportunityDetector:
             o_ema_fast, o_ema_slow = [-x for x in ind.ema_fast], [-x for x in ind.ema_slow]
             o_swing_highs, o_swing_lows = ind.swing_lows, ind.swing_highs
 
-        if not o_swing_highs:
-            _check(checks, "impulse", False, "no confirmed swing point in the trend direction")
-            return finish(REJECTED, "NO_IMPULSE_LEG", "no confirmed swing point in the trend direction", side)
-        ih = o_swing_highs[-1]
-        starts = [i for i in o_swing_lows if i < ih]
-        if not starts:
-            _check(checks, "impulse", False, "no confirmed swing point before the latest extreme")
-            return finish(REJECTED, "NO_IMPULSE_LEG", "no confirmed swing point before the latest extreme", side)
-        il = starts[-1]
-        if config.impulse_start_mode == "LOWEST_SINCE_PRIOR_HIGH":
-            prior_highs = [i for i in o_swing_highs if i < ih]
-            leg_start = prior_highs[-1] if prior_highs else 0
-            leg = o_low[leg_start:ih]
-            il = leg_start + leg.index(min(leg))
-        if max(o_high[ih + 1:]) >= o_high[ih]:
-            detail = "price is still making new extremes; no pullback has started"
-            _check(checks, "impulse", False, detail)
-            return finish(DEFERRED, "IMPULSE_STILL_EXTENDING", detail, side)
-        impulse = o_high[ih] - o_low[il]
-        impulse_atr = impulse / atr
-        if impulse_atr < config.min_impulse_atr:
-            detail = f"impulse leg is {impulse_atr:.1f} ATR, below the {config.min_impulse_atr:.1f} ATR minimum"
-            _check(checks, "impulse", False, detail, metrics={"value": round(impulse_atr, 3), "threshold": config.min_impulse_atr, "factor": "impulse leg (ATR)"})
-            return finish(REJECTED, "IMPULSE_TOO_SMALL", detail, side)
-        _check(checks, "impulse", True, f"impulse leg of {impulse_atr:.1f} ATR", metrics={"value": round(impulse_atr, 3), "threshold": config.min_impulse_atr, "factor": "impulse leg (ATR)"})
-
-        window = o_low[ih + 1:]
-        pullback_low = min(window)
-        ip = ih + 1 + window.index(pullback_low)
-        retracement = (o_high[ih] - pullback_low) / impulse
-        if pullback_low <= o_low[il] or retracement > config.max_retracement:
-            detail = f"pullback retraced {retracement:.0%} of the impulse; the trend structure is broken"
-            _check(checks, "pullback_depth", False, detail, metrics={"value": round(retracement * 100, 2), "threshold": f"{config.min_retracement * 100:.1f}–{config.max_retracement * 100:.1f}%", "factor": "impulse retracement (%)"})
-            return finish(REJECTED, "PULLBACK_TOO_DEEP", detail, side)
-        if retracement < config.min_retracement:
-            detail = f"pullback retraced only {retracement:.0%} (minimum {config.min_retracement:.0%})"
-            _check(checks, "pullback_depth", False, detail, metrics={"value": round(retracement * 100, 2), "threshold": f"{config.min_retracement * 100:.1f}–{config.max_retracement * 100:.1f}%", "factor": "impulse retracement (%)"})
-            return finish(DEFERRED, "PULLBACK_NOT_DEEP_ENOUGH", detail, side)
-        _check(checks, "pullback_depth", True, f"pullback retraced {retracement:.0%} of the impulse", metrics={"value": round(retracement * 100, 2), "threshold": f"{config.min_retracement * 100:.1f}–{config.max_retracement * 100:.1f}%", "factor": "impulse retracement (%)"})
-
+        experimental_pullback = (config.consider_previous_impulse or config.shallow_pullback_mode or config.zone_reference != "FAST_EMA")
+        if not experimental_pullback:
+            if not o_swing_highs:
+                _check(checks, "impulse", False, "no confirmed swing point in the trend direction")
+                return finish(REJECTED, "NO_IMPULSE_LEG", "no confirmed swing point in the trend direction", side)
+            ih = o_swing_highs[-1]
+            starts = [i for i in o_swing_lows if i < ih]
+            if not starts:
+                _check(checks, "impulse", False, "no confirmed swing point before the latest extreme")
+                return finish(REJECTED, "NO_IMPULSE_LEG", "no confirmed swing point before the latest extreme", side)
+            il = starts[-1]
+            if config.impulse_start_mode == "LOWEST_SINCE_PRIOR_HIGH":
+                prior_highs = [i for i in o_swing_highs if i < ih]
+                leg_start = prior_highs[-1] if prior_highs else 0
+                leg = o_low[leg_start:ih]
+                il = leg_start + leg.index(min(leg))
+            if max(o_high[ih + 1:]) >= o_high[ih]:
+                detail = "price is still making new extremes; no pullback has started"
+                _check(checks, "impulse", False, detail)
+                return finish(DEFERRED, "IMPULSE_STILL_EXTENDING", detail, side)
+            impulse = o_high[ih] - o_low[il]
+            impulse_atr = impulse / atr
+            if impulse_atr < config.min_impulse_atr:
+                detail = f"impulse leg is {impulse_atr:.1f} ATR, below the {config.min_impulse_atr:.1f} ATR minimum"
+                _check(checks, "impulse", False, detail, metrics={"value": round(impulse_atr, 3), "threshold": config.min_impulse_atr, "factor": "impulse leg (ATR)"})
+                return finish(REJECTED, "IMPULSE_TOO_SMALL", detail, side)
+            _check(checks, "impulse", True, f"impulse leg of {impulse_atr:.1f} ATR", metrics={"value": round(impulse_atr, 3), "threshold": config.min_impulse_atr, "factor": "impulse leg (ATR)"})
+            window = o_low[ih + 1:]
+            pullback_low = min(window)
+            ip = ih + 1 + window.index(pullback_low)
+            retracement = (o_high[ih] - pullback_low) / impulse
+            if pullback_low <= o_low[il] or retracement > config.max_retracement:
+                detail = f"pullback retraced {retracement:.0%} of the impulse; the trend structure is broken"
+                _check(checks, "pullback_depth", False, detail, metrics={"value": round(retracement * 100, 2), "threshold": f"{config.min_retracement * 100:.1f}–{config.max_retracement * 100:.1f}%", "factor": "impulse retracement (%)"})
+                return finish(REJECTED, "PULLBACK_TOO_DEEP", detail, side)
+            if retracement < config.min_retracement:
+                detail = f"pullback retraced only {retracement:.0%} (minimum {config.min_retracement:.0%})"
+                _check(checks, "pullback_depth", False, detail, metrics={"value": round(retracement * 100, 2), "threshold": f"{config.min_retracement * 100:.1f}–{config.max_retracement * 100:.1f}%", "factor": "impulse retracement (%)"})
+                return finish(DEFERRED, "PULLBACK_NOT_DEEP_ENOUGH", detail, side)
+            _check(checks, "pullback_depth", True, f"pullback retraced {retracement:.0%} of the impulse", metrics={"value": round(retracement * 100, 2), "threshold": f"{config.min_retracement * 100:.1f}–{config.max_retracement * 100:.1f}%", "factor": "impulse retracement (%)"})
+            zone_ema = ind.ema_fast if sign > 0 else [-value for value in ind.ema_fast]
+            zone_gap_atr = max(0.0, pullback_low - zone_ema[ip]) / atr
+            impulse_rank = 1
+            shallow_variant = False
+    
+        else:
+            if not o_swing_highs:
+                _check(checks, "impulse", False, "no confirmed swing point in the trend direction")
+                return finish(REJECTED, "NO_IMPULSE_LEG", "no confirmed swing point in the trend direction", side)
+    
+            zone_ema = ind.ema_slow if config.zone_reference == "SLOW_EMA" else ind.ema_fast
+            if sign < 0:
+                zone_ema = [-value for value in zone_ema]
+    
+            # Candidate legs are ordered newest first. The optional fallback only retries
+            # an older confirmed swing after one of the three specified geometry failures.
+            candidates = list(reversed(o_swing_highs))[:2 if config.consider_previous_impulse else 1]
+            selected = None
+            failure = None
+            for rank, candidate_high in enumerate(candidates, start=1):
+                starts = [i for i in o_swing_lows if i < candidate_high]
+                if not starts:
+                    failure = ("NO_IMPULSE_LEG", "no confirmed swing point before the latest extreme")
+                    continue
+                candidate_low = starts[-1]
+                if config.impulse_start_mode == "LOWEST_SINCE_PRIOR_HIGH":
+                    prior_highs = [i for i in o_swing_highs if i < candidate_high]
+                    leg_start = prior_highs[-1] if prior_highs else 0
+                    leg = o_low[leg_start:candidate_high]
+                    candidate_low = leg_start + leg.index(min(leg))
+                if max(o_high[candidate_high + 1:]) >= o_high[candidate_high]:
+                    if rank == 1:
+                        detail = "price is still making new extremes; no pullback has started"
+                        _check(checks, "impulse", False, detail)
+                        return finish(DEFERRED, "IMPULSE_STILL_EXTENDING", detail, side)
+                    continue
+                candidate_impulse = o_high[candidate_high] - o_low[candidate_low]
+                candidate_impulse_atr = candidate_impulse / atr
+                candidate_window = o_low[candidate_high + 1:]
+                if not candidate_window:
+                    continue
+                candidate_pullback = min(candidate_window)
+                candidate_ip = candidate_high + 1 + candidate_window.index(candidate_pullback)
+                candidate_retracement = (o_high[candidate_high] - candidate_pullback) / candidate_impulse
+                candidate_zone_gap = max(0.0, candidate_pullback - zone_ema[candidate_ip]) / atr
+                candidate_fast_gap = max(0.0, candidate_pullback - o_ema_fast[candidate_ip]) / atr
+                candidate_reason = None
+                if candidate_impulse_atr < config.min_impulse_atr:
+                    candidate_reason = "IMPULSE_TOO_SMALL"
+                elif candidate_pullback <= o_low[candidate_low] or candidate_retracement > config.max_retracement:
+                    candidate_reason = "PULLBACK_TOO_DEEP"
+                elif (candidate_retracement < config.min_retracement
+                      and not (config.shallow_pullback_mode
+                               and candidate_retracement >= config.shallow_min_retracement
+                               and candidate_fast_gap <= config.zone_tolerance_atr)):
+                    candidate_reason = "PULLBACK_NOT_DEEP_ENOUGH"
+                elif candidate_zone_gap > config.zone_tolerance_atr:
+                    candidate_reason = "PULLBACK_NOT_IN_VALUE_ZONE"
+                # An older impulse is eligible only if slow-EMA support remained intact
+                # from that impulse through the current bar.
+                support_from_candidate = config.support_tolerance_atr * atr
+                support_broken = any(
+                    o_close[j] < o_ema_slow[j] - support_from_candidate
+                    for j in range(candidate_high + 1, t + 1)
+                )
+                if candidate_reason is None and support_broken:
+                    candidate_reason = "TREND_SUPPORT_BROKEN"
+                if candidate_reason is None:
+                    selected = (candidate_high, candidate_low, candidate_impulse,
+                                candidate_impulse_atr, candidate_pullback, candidate_ip,
+                                candidate_retracement, candidate_zone_gap, rank)
+                    break
+                failure = (candidate_reason, f"candidate impulse rank {rank} failed {candidate_reason}")
+                if rank == 1 and not config.consider_previous_impulse:
+                    break
+                if rank > 1:
+                    break
+                if candidate_reason not in {
+                    "IMPULSE_TOO_SMALL", "PULLBACK_TOO_DEEP", "PULLBACK_NOT_IN_VALUE_ZONE"
+                } or not config.consider_previous_impulse:
+                    break
+    
+            if selected is None:
+                reason, detail = failure or ("NO_IMPULSE_LEG", "no eligible confirmed impulse")
+                if reason == "IMPULSE_TOO_SMALL":
+                    _check(checks, "impulse", False, detail)
+                    return finish(REJECTED, reason, detail, side)
+                if reason in {"PULLBACK_TOO_DEEP", "PULLBACK_NOT_IN_VALUE_ZONE"}:
+                    _check(checks, "pullback_depth", False, detail)
+                    return finish(REJECTED if reason == "PULLBACK_TOO_DEEP" else DEFERRED, reason, detail, side)
+                if reason == "PULLBACK_NOT_DEEP_ENOUGH":
+                    _check(checks, "pullback_depth", False, detail)
+                    return finish(DEFERRED, "PULLBACK_NOT_DEEP_ENOUGH", detail, side)
+                return finish(REJECTED, reason, detail, side)
+    
+            ih, il, impulse, impulse_atr, pullback_low, ip, retracement, zone_gap_atr, impulse_rank = selected
+            if impulse_rank > 1:
+                _check(checks, "previous_impulse", True, f"using previous confirmed impulse (rank {impulse_rank})")
+            _check(checks, "impulse", True, f"impulse leg of {impulse_atr:.1f} ATR",
+                   metrics={"value": round(impulse_atr, 3), "threshold": config.min_impulse_atr, "factor": "impulse leg (ATR)"})
+            shallow_variant = retracement < config.min_retracement
+            if shallow_variant:
+                detail = f"shallow pullback retraced {retracement:.0%}; fast EMA zone touch and resumption required"
+                _check(checks, "pullback_depth", True, detail,
+                       metrics={"value": round(retracement * 100, 2), "threshold": config.shallow_min_retracement * 100, "factor": "shallow impulse retracement (%)"})
+            else:
+                _check(checks, "pullback_depth", True, f"pullback retraced {retracement:.0%} of the impulse",
+                       metrics={"value": round(retracement * 100, 2), "threshold": f"{config.min_retracement * 100:.1f}–{config.max_retracement * 100:.1f}%", "factor": "impulse retracement (%)"})
+    
+    
         support = config.support_tolerance_atr * atr
         if any(o_close[j] < o_ema_slow[j] - support for j in range(ih + 1, t + 1)):
             detail = f"a close broke below the slow EMA by more than {config.support_tolerance_atr} ATR"
@@ -935,12 +1067,20 @@ class OpportunityDetector:
             return finish(REJECTED, "TREND_SUPPORT_BROKEN", detail, side)
         _check(checks, "trend_support", True, "closes held above the slow EMA")
 
-        zone_gap_atr = max(0.0, pullback_low - o_ema_fast[ip]) / atr
-        if zone_gap_atr > config.zone_tolerance_atr:
-            detail = f"pullback stopped {zone_gap_atr:.2f} ATR above the fast EMA zone"
-            _check(checks, "value_zone", False, detail, metrics={"value": round(zone_gap_atr, 3), "threshold": config.zone_tolerance_atr, "factor": "gap to fast EMA zone (ATR)"})
-            return finish(DEFERRED, "PULLBACK_NOT_IN_VALUE_ZONE", detail, side)
-        _check(checks, "value_zone", True, "pullback reached the fast EMA zone", metrics={"value": round(zone_gap_atr, 3), "threshold": config.zone_tolerance_atr, "factor": "gap to fast EMA zone (ATR)"})
+        if not experimental_pullback:
+            if zone_gap_atr > config.zone_tolerance_atr:
+                detail = f"pullback stopped {zone_gap_atr:.2f} ATR above the fast EMA zone"
+                _check(checks, "value_zone", False, detail, metrics={"value": round(zone_gap_atr, 3), "threshold": config.zone_tolerance_atr, "factor": "gap to fast EMA zone (ATR)"})
+                return finish(DEFERRED, "PULLBACK_NOT_IN_VALUE_ZONE", detail, side)
+            _check(checks, "value_zone", True, "pullback reached the fast EMA zone", metrics={"value": round(zone_gap_atr, 3), "threshold": config.zone_tolerance_atr, "factor": "gap to fast EMA zone (ATR)"})
+        else:
+            if zone_gap_atr > config.zone_tolerance_atr:
+                zone_name = config.zone_reference.lower().replace("_", " ")
+                detail = f"pullback stopped {zone_gap_atr:.2f} ATR from the {zone_name} zone"
+                _check(checks, "value_zone", False, detail, metrics={"value": round(zone_gap_atr, 3), "threshold": config.zone_tolerance_atr, "factor": f"gap to {zone_name} zone (ATR)"})
+                return finish(DEFERRED, "PULLBACK_NOT_IN_VALUE_ZONE", detail, side)
+            _check(checks, "value_zone", True, f"pullback reached the {config.zone_reference.lower().replace('_', ' ')} zone",
+                   metrics={"value": round(zone_gap_atr, 3), "threshold": config.zone_tolerance_atr, "factor": "gap to selected EMA zone (ATR)"})
         components["pullback"] = _pullback_component(retracement, zone_gap_atr, config)
 
         bars_since_low = t - ip
@@ -997,6 +1137,14 @@ class OpportunityDetector:
             "rsi": round(ind.rsi[t], 2),
             "atr_ratio": round(atr_ratio, 3),
         }
+        # Keep the default result byte-for-byte compatible. Experimental metadata
+        # appears only when a new pullback option is explicitly active.
+        if config.consider_previous_impulse or config.shallow_pullback_mode or config.zone_reference != "FAST_EMA":
+            setup["impulse_rank"] = impulse_rank
+            setup["pullback_variant"] = (
+                "SHALLOW" if shallow_variant else
+                "DEEP_EMA" if config.zone_reference == "SLOW_EMA" else "STANDARD"
+            )
         extra: dict[str, Any] = {"setup": setup}
 
         # 6. Optional statistical evidence (only for setups that already passed) ----

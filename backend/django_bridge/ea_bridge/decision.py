@@ -267,7 +267,11 @@ def decision(request):
         key=hashlib.sha256(f"{symbol}:{bar_time}:django-signalflow-v1".encode()).hexdigest()[:16]
         confidence=max(0.0,min(1.0,float(result["stages"]["opportunities"].get("score",min(setup,quality)))))
         median=closes[-1]+(atr*.1 if action=="BUY" else -atr*.1 if action=="SELL" else 0)
+        opportunity_setup = result["stages"]["opportunities"].get("setup") or {}
         features = {
+          "setup_type": opportunity_setup.get("type"),
+          "pullback_variant": opportunity_setup.get("pullback_variant"),
+          "impulse_rank": opportunity_setup.get("impulse_rank"),
           "ema20": fast,
           "ema50": slow,
           "atr": atr,
