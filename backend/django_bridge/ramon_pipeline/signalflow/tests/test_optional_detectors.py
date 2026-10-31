@@ -3,7 +3,7 @@ from unittest.mock import patch
 from ramon_pipeline.signalflow._detector_utils import atr_series,adx_series,rsi_series
 from ramon_pipeline.signalflow.breakout import BreakoutDetector
 from ramon_pipeline.signalflow.opportunities import OpportunityConfig,OpportunityDetector
-from ramon_pipeline.signalflow.tests.test_opportunities import LONG_SETUP,SHORT_SETUP,make_bars,snapshot
+from ramon_pipeline.signalflow.tests.test_opportunities import LONG_SETUP,SHORT_SETUP,UPTREND,make_bars,snapshot
 from ramon_pipeline.signalflow.multi_setup import MultiSetupConfig,MultiSetupDetector
 from ramon_pipeline.signalflow.range_reversion import RangeReversionDetector
 from ramon_pipeline.signalflow.reversal import ReversalDetector
@@ -37,6 +37,13 @@ class OptionalDetectorContractTests(TestCase):
                 self.assertEqual(result["side"],expected)
                 sides.append(result["side"])
             self.assertEqual(sides,["BUY","SELL"])
+
+    def test_shallow_pullback_requires_fast_ema_touch_then_resumption(self):
+        legs=UPTREND+[(12,11),(4,-2.0),(2,1.5)]
+        result=OpportunityDetector(config=OpportunityConfig(shallow_pullback_mode=True)).evaluate(
+            snapshot(make_bars(legs)))
+        self.assertTrue(result["approved"],result["reason"])
+        self.assertEqual(result["setup"]["pullback_variant"],"SHALLOW")
 
     def test_symbol_specific_threshold_override_is_applied(self):
         cfg=OpportunityConfig(symbol_overrides={"XAUUSD_o":{"min_impulse_atr":100.0}})
