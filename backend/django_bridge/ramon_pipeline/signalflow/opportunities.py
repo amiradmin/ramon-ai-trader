@@ -995,6 +995,7 @@ class OpportunityDetector:
                 candidate_ip = candidate_high + 1 + candidate_window.index(candidate_pullback)
                 candidate_retracement = (o_high[candidate_high] - candidate_pullback) / candidate_impulse
                 candidate_zone_gap = max(0.0, candidate_pullback - zone_ema[candidate_ip]) / atr
+                candidate_fast_gap = max(0.0, candidate_pullback - o_ema_fast[candidate_ip]) / atr
                 candidate_reason = None
                 if candidate_impulse_atr < config.min_impulse_atr:
                     candidate_reason = "IMPULSE_TOO_SMALL"
