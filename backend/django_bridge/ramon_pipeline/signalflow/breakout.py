@@ -42,7 +42,7 @@ class BreakoutDetector:
         elif close<=rl-c.breakout_atr*a[t]:side,level="SELL",rl
         else:return result("DEFERRED","NO_RANGE_BREAKOUT")
         score=safe_score(.5+.2*min(1,ratio-1)+.3*min(1,(d[t]-d[t-1])/5))
-        setup={"type":"RANGE_BREAKOUT","side":side,"range_high":rh,"range_low":rl,"breakout_level":level,
+        setup={"type":"RANGE_BREAKOUT","side":side,"range_high":rh,"range_low":rl,"range_start_time":prior[0]["time"],"breakout_level":level,
                "atr":a[t],"atr_ratio":ratio,"adx":d[t],"reference_price":close,"invalidation_price":level,
                "signal_bar_time":b[t]["time"]}
         return result("ACCEPTED","RANGE_BREAKOUT_CONFIRMED",side=side,candidate_side=side,score=score,
