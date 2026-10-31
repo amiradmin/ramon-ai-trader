@@ -21,6 +21,14 @@ class MultiSetupDetector:
         self.range_reversion_detector=range_reversion_detector or RangeReversionDetector()
         self.reversal_detector=reversal_detector or ReversalDetector()
         self._seen=set()
+    def _candidate(self,market,detector,default_type):
+        candidate=dict(detector.evaluate(market))
+        setup=dict(candidate.get("setup") or {})
+        setup.setdefault("type",default_type)
+        setup.setdefault("pullback_variant",None)
+        setup.setdefault("impulse_rank",None)
+        candidate["setup"]=setup
+        return self._dedupe(market,candidate)
     def _dedupe(self,market,candidate):
         if not candidate.get("approved"):return candidate
         setup=candidate.get("setup") or {}
@@ -35,10 +43,10 @@ class MultiSetupDetector:
         self._seen.add(key)
         return candidate
     def evaluate(self,market:Mapping[str,Any])->dict[str,Any]:
-        candidates=[self._dedupe(market,self.trend_detector.evaluate(market))]
-        if self.config.enable_breakout:candidates.append(self._dedupe(market,self.breakout_detector.evaluate(market)))
-        if self.config.enable_range_reversion:candidates.append(self._dedupe(market,self.range_reversion_detector.evaluate(market)))
-        if self.config.enable_reversal:candidates.append(self._dedupe(market,self.reversal_detector.evaluate(market)))
+        candidates=[self._candidate(market,self.trend_detector,"TREND_PULLBACK")]
+        if self.config.enable_breakout:candidates.append(self._candidate(market,self.breakout_detector,"RANGE_BREAKOUT"))
+        if self.config.enable_range_reversion:candidates.append(self._candidate(market,self.range_reversion_detector,"RANGE_MEAN_REVERSION"))
+        if self.config.enable_reversal:candidates.append(self._candidate(market,self.reversal_detector,"REVERSAL"))
         accepted=[x for x in candidates if x.get("approved") and x.get("status")=="ACCEPTED"]
         if len({x.get("side") for x in accepted})>1:
             out=dict(accepted[0]);out.update(approved=False,status="DEFERRED",side="HOLD",candidate_side="NONE",
