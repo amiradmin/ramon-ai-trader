@@ -33,7 +33,7 @@ class RangeReversionDetector:
         if (side=="BUY" and mid<=ref) or (side=="SELL" and mid>=ref):return result("REJECTED","RANGE_MIDPOINT_NOT_AHEAD")
         if abs(mid-ref)>hi-lo:return result("REJECTED","RANGE_TARGET_TOO_FAR")
         score=safe_score(.55+min(.25,abs(50-r[t])/100)+min(.2,(c.adx_ranging-d[t])/100))
-        setup={"type":"RANGE_MEAN_REVERSION","side":side,"range_high":hi,"range_low":lo,"range_midpoint":mid,
+        setup={"type":"RANGE_MEAN_REVERSION","side":side,"range_high":hi,"range_low":lo,"range_start_time":prior[0]["time"],"range_midpoint":mid,
                "target_price":mid,"reference_price":ref,"invalidation_price":lo if side=="BUY" else hi,
                "atr":a[t],"adx":d[t],"rsi":r[t],"signal_bar_time":bar["time"]}
         return result("ACCEPTED","RANGE_MEAN_REVERSION_CONFIRMED",side=side,candidate_side=side,
