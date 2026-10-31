@@ -37,4 +37,4 @@ class RangeReversionDetector:
                "target_price":mid,"reference_price":ref,"invalidation_price":lo if side=="BUY" else hi,
                "atr":a[t],"adx":d[t],"rsi":r[t],"signal_bar_time":bar["time"]}
         return result("ACCEPTED","RANGE_MEAN_REVERSION_CONFIRMED",side=side,candidate_side=side,
-                      score=score,setup=setup,detail=f"{side} range-edge rejection; midpoint target {mid:.2f}")
+                      score=score,setup=setup,detail=f"{side} range-edge rejection; midpoint target {mid:.2f}",market=market)
