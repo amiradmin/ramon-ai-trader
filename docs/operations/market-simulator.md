@@ -40,6 +40,6 @@ The current Compose configuration keeps `RAMON_PIPELINE_INGEST_ENABLED=0`. In th
 
 ## Expected validation
 
-After starting the simulator, check the EA bridge status endpoint and Django admin for instance `RAMON-SIM-001`. The telemetry response should report `ok=true`, `telemetry_only=true`, and `trading_authorization=false`. With `--decisions`, the decision endpoint may return `WAIT` because the synthetic account has no server-recorded daily-risk baseline; that is the intended fail-closed behavior, not a simulator failure.
+After starting the simulator, check the EA bridge status endpoint and Django admin for instance `RAMON-SIM-001`. The telemetry response should report `ok=true`, `telemetry_only=true`, and `trading_authorization=false`. Use `--decisions` only after the simulator has remained connected across a broker-day rollover and Django has established its server-side daily-risk baseline. Before that, the decision endpoint is expected to fail closed because the baseline is unavailable. This is separate from successful telemetry/event ingestion.
 
 Stop with Ctrl+C. No Docker volumes or database records are automatically deleted.
