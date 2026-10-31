@@ -22,7 +22,7 @@ class MultiSetupDetector:
         self.range_reversion_detector=range_reversion_detector or RangeReversionDetector()
         self.reversal_detector=reversal_detector or ReversalDetector()
         self._seen={}
-        self._dedupe_keys={}
+        self._release_targets={}
     def _candidate(self,market,detector,default_type):
         candidate=dict(detector.evaluate(market))
         setup=dict(candidate.get("setup") or {})
@@ -30,8 +30,8 @@ class MultiSetupDetector:
         setup.setdefault("pullback_variant",None)
         setup.setdefault("impulse_rank",None)
         candidate["setup"]=setup
-        return self._dedupe(market,candidate)
-    def _dedupe(self,market,candidate):
+        return self._dedupe(market,candidate,detector)
+    def _dedupe(self,market,candidate,detector=None):
         if not candidate.get("approved"):return candidate
         setup=candidate.get("setup") or {}
         kind=setup.get("type","UNKNOWN")
@@ -45,15 +45,18 @@ class MultiSetupDetector:
         dedupe_key=hashlib.sha256(repr(key).encode()).hexdigest()[:24]
         signal_time=candidate.get("signal_bar_time",setup.get("signal_bar_time"))
         self._seen[key]=signal_time
-        self._dedupe_keys[dedupe_key]=key
+        self._release_targets[dedupe_key]=(key,detector,candidate.get("dedupe_key"))
         return {**candidate,"dedupe_key":dedupe_key}
     def release(self,dedupe_key,bar_time=None):
-        key=self._dedupe_keys.get(dedupe_key)
-        if key is None:return False
+        target=self._release_targets.get(dedupe_key)
+        if target is None:return False
+        key,detector,source_key=target
         stored_time=self._seen.get(key)
         if bar_time is not None and stored_time is not None and float(stored_time)!=float(bar_time):return False
         self._seen.pop(key,None)
-        self._dedupe_keys.pop(dedupe_key,None)
+        self._release_targets.pop(dedupe_key,None)
+        if source_key and callable(getattr(detector,"release",None)):
+            detector.release(source_key,bar_time)
         return True
     def evaluate(self,market:Mapping[str,Any])->dict[str,Any]:
         candidates=[self._candidate(market,self.trend_detector,"TREND_PULLBACK")]
