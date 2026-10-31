@@ -1,5 +1,6 @@
 """Opt-in orchestration for independent setup detectors."""
 from dataclasses import dataclass
+import hashlib
 from typing import Any,Mapping
 from .breakout import BreakoutDetector
 from .opportunities import OpportunityDetector
@@ -20,7 +21,8 @@ class MultiSetupDetector:
         self.breakout_detector=breakout_detector or BreakoutDetector()
         self.range_reversion_detector=range_reversion_detector or RangeReversionDetector()
         self.reversal_detector=reversal_detector or ReversalDetector()
-        self._seen=set()
+        self._seen={}
+        self._dedupe_keys={}
     def _candidate(self,market,detector,default_type):
         candidate=dict(detector.evaluate(market))
         setup=dict(candidate.get("setup") or {})
@@ -40,8 +42,19 @@ class MultiSetupDetector:
         if key in self._seen:
             return {**candidate,"approved":False,"status":"REJECTED","side":"HOLD",
                     "reason":"DUPLICATE_SIGNAL","explanation":f"duplicate {kind} candidate"}
-        self._seen.add(key)
-        return candidate
+        dedupe_key=hashlib.sha256(repr(key).encode()).hexdigest()[:24]
+        signal_time=candidate.get("signal_bar_time",setup.get("signal_bar_time"))
+        self._seen[key]=signal_time
+        self._dedupe_keys[dedupe_key]=key
+        return {**candidate,"dedupe_key":dedupe_key}
+    def release(self,dedupe_key,bar_time=None):
+        key=self._dedupe_keys.get(dedupe_key)
+        if key is None:return False
+        stored_time=self._seen.get(key)
+        if bar_time is not None and stored_time is not None and float(stored_time)!=float(bar_time):return False
+        self._seen.pop(key,None)
+        self._dedupe_keys.pop(dedupe_key,None)
+        return True
     def evaluate(self,market:Mapping[str,Any])->dict[str,Any]:
         candidates=[self._candidate(market,self.trend_detector,"TREND_PULLBACK")]
         if self.config.enable_breakout:candidates.append(self._candidate(market,self.breakout_detector,"RANGE_BREAKOUT"))
@@ -49,10 +62,17 @@ class MultiSetupDetector:
         if self.config.enable_reversal:candidates.append(self._candidate(market,self.reversal_detector,"REVERSAL"))
         accepted=[x for x in candidates if x.get("approved") and x.get("status")=="ACCEPTED"]
         if len({x.get("side") for x in accepted})>1:
+            for candidate in accepted:
+                self.release(candidate.get("dedupe_key"),candidate.get("signal_bar_time"))
             out=dict(accepted[0]);out.update(approved=False,status="DEFERRED",side="HOLD",candidate_side="NONE",
                 reason="SETUP_CONFLICT",explanation="opposing accepted setup candidates conflict on this bar",
                 candidates=candidates)
             return out
-        if accepted:return {**max(accepted,key=lambda x:float(x.get("score",0))),"candidates":candidates}
+        if accepted:
+            winner=max(accepted,key=lambda x:float(x.get("score",0)))
+            for candidate in accepted:
+                if candidate is not winner:
+                    self.release(candidate.get("dedupe_key"),candidate.get("signal_bar_time"))
+            return {**winner,"candidates":candidates}
         winner=next((x for x in candidates if x.get("status")=="DEFERRED"),candidates[0])
         return {**winner,"candidates":candidates}
