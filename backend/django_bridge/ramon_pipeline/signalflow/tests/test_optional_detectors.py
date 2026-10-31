@@ -115,6 +115,20 @@ class OptionalDetectorContractTests(TestCase):
         self.assertTrue(short["approved"],short["reason"])
         self.assertEqual((long["side"],short["side"]),("BUY","SELL"))
 
+    def test_highest_scoring_same_side_candidate_wins(self):
+        class Stub:
+            def __init__(self,kind,score):
+                self.kind,self.score=kind,score
+            def evaluate(self,market):
+                return {"approved":True,"status":"ACCEPTED","side":"BUY","candidate_side":"BUY",
+                        "score":self.score,"reason":"OK","setup":{"type":self.kind}}
+        detector=MultiSetupDetector(config=MultiSetupConfig(enable_breakout=True),
+                                    trend_detector=Stub("TREND_PULLBACK",.7),
+                                    breakout_detector=Stub("RANGE_BREAKOUT",.9))
+        result=detector.evaluate({})
+        self.assertEqual(result["setup"]["type"],"RANGE_BREAKOUT")
+        self.assertEqual(len(result["candidates"]),2)
+
     def test_opposite_accepted_candidates_conflict(self):
         class Stub:
             def __init__(self,side):self.side=side
