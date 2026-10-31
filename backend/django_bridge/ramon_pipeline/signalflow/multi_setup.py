@@ -20,11 +20,25 @@ class MultiSetupDetector:
         self.breakout_detector=breakout_detector or BreakoutDetector()
         self.range_reversion_detector=range_reversion_detector or RangeReversionDetector()
         self.reversal_detector=reversal_detector or ReversalDetector()
+        self._seen=set()
+    def _dedupe(self,market,candidate):
+        if not candidate.get("approved"):return candidate
+        setup=candidate.get("setup") or {}
+        kind=setup.get("type","UNKNOWN")
+        bars=market.get("bars") or []
+        current_time=(bars[-1].get("time") if bars else candidate.get("signal_bar_time"))
+        anchor=setup.get("anchor_time",setup.get("range_start_time",setup.get("signal_bar_time",current_time)))
+        key=(str(market.get("symbol","")),str(market.get("timeframe","M15")),kind,candidate.get("side"),anchor)
+        if key in self._seen:
+            return {**candidate,"approved":False,"status":"REJECTED","side":"HOLD",
+                    "reason":"DUPLICATE_SIGNAL","explanation":f"duplicate {kind} candidate"}
+        self._seen.add(key)
+        return candidate
     def evaluate(self,market:Mapping[str,Any])->dict[str,Any]:
-        candidates=[self.trend_detector.evaluate(market)]
-        if self.config.enable_breakout:candidates.append(self.breakout_detector.evaluate(market))
-        if self.config.enable_range_reversion:candidates.append(self.range_reversion_detector.evaluate(market))
-        if self.config.enable_reversal:candidates.append(self.reversal_detector.evaluate(market))
+        candidates=[self._dedupe(market,self.trend_detector.evaluate(market))]
+        if self.config.enable_breakout:candidates.append(self._dedupe(market,self.breakout_detector.evaluate(market)))
+        if self.config.enable_range_reversion:candidates.append(self._dedupe(market,self.range_reversion_detector.evaluate(market)))
+        if self.config.enable_reversal:candidates.append(self._dedupe(market,self.reversal_detector.evaluate(market)))
         accepted=[x for x in candidates if x.get("approved") and x.get("status")=="ACCEPTED"]
         if len({x.get("side") for x in accepted})>1:
             out=dict(accepted[0]);out.update(approved=False,status="DEFERRED",side="HOLD",candidate_side="NONE",
