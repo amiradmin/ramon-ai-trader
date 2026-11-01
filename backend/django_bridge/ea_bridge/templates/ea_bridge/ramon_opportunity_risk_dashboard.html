@@ -319,31 +319,41 @@ function flowCheckMarkup(check, state, displayName) {
   const math = check.calculation || "";
   return `<div class="flow-check ${css}"><span class="flow-check-dot"></span><div><strong>${esc(label)}</strong><p>${esc(detail)}</p></div><em>${tag}</em>${math}</div>`;
 }
-function orderedEntryFlowChecks(checks) {
+function orderedEntryFlowChecks(checks, waitingForOpportunity = false) {
   const byName = Object.fromEntries(checks.filter(item => item && item.name).map(item => [item.name, item]));
-  const order = [
-    ["spread_absolute", "Absolute spread limit"],
-    ["freshness", "Signal freshness"],
-    ["invalidation", "Invalidation and minimum risk room"],
-    ["chase", "Price chase protection"],
-    ["spread_volatility", "Spread versus ATR volatility"],
-    ["spread_risk", "Spread versus invalidation risk"],
-    ["quality", "Entry quality"]
-  ];
   const rows = [];
-  let stopped = false;
-  for (const [name, label] of order) {
-    const item = byName[name];
-    // On a successful evaluation, spread_volatility is appended only after BOTH
-    // the ATR-relative and risk-distance spread gates pass.
-    if (name === "spread_risk" && !item && byName.spread_volatility?.passed === true) continue;
-    if (item) {
-      rows.push({...item, displayName:label});
-      if (item.passed !== true) stopped = true;
-    } else if (stopped) {
-      rows.push({name, displayName:label, notReached:true});
+  const add = (name, label, item, detail) => {
+    if (waitingForOpportunity) {
+      rows.push({name, displayName:label, notReached:true,
+        detail:"Waiting for an approved M15 opportunity. Django has not evaluated this entry-timing check yet."});
+    } else if (item) {
+      rows.push({...item, name, displayName:label});
+    } else {
+      rows.push({name, displayName:label, notReached:true,
+        detail:detail || "Not evaluated because an earlier entry-timing check stopped the stage."});
     }
+  };
+
+  // Five visible boxes. The absolute spread and quote-relative spread tests
+  // are grouped into one spread box; the backend's checks remain unchanged.
+  add("freshness", "Signal freshness", byName.freshness);
+  add("invalidation", "Invalidation / minimum risk room", byName.invalidation);
+  add("chase", "Price chase protection", byName.chase);
+
+  const spreadParts = [byName.spread_absolute, byName.spread_volatility].filter(Boolean);
+  const spreadFailed = spreadParts.find(item => item.passed !== true);
+  const spreadCheck = spreadParts.length ? {
+    name:"spread_conditions",
+    passed:!spreadFailed,
+    detail:spreadParts.map(item => item.detail || item.name).join(" · ")
+  } : null;
+  if (spreadCheck && !byName.spread_volatility && byName.price_checks) {
+    spreadCheck.detail += " · ATR-relative spread checks skipped because no live quote was supplied";
   }
+  add("spread_conditions", "Spread conditions", spreadCheck,
+    "Not evaluated because an earlier entry-timing check stopped the stage.");
+
+  add("quality", "Entry quality", byName.quality);
   return rows;
 }
 function flowStageMarkup(title, stageResult, checks, fallback, forcedState) {
@@ -654,10 +664,9 @@ function renderDecisionFlow(decision) {
 
   const opportunityMarkup = flowStageMarkup("01 · OPPORTUNITY", opportunity, oppChecks,
     "Opportunity detector did not return individual checks.", oppState);
-  const timingMarkup = timingReached
-    ? flowStageMarkup("02 · ENTRY TIMING", timing, orderedEntryFlowChecks(timingChecks),
-        "Entry timer returned no individual checks.", stageState(timing))
-    : flowStageMarkup("02 · ENTRY TIMING", {}, [], "Waiting for an approved opportunity.", "idle");
+  const timingMarkup = flowStageMarkup("02 · ENTRY TIMING", timingReached ? timing : {},
+    orderedEntryFlowChecks(timingChecks, !timingReached),
+    "Entry timer returned no individual checks.", timingReached ? stageState(timing) : "idle");
   const riskMarkup = riskReached
     ? flowStageMarkup("03 · RISK MANAGEMENT", risk, riskChecks,
         "Risk manager returned no individual checks.", stageState(risk))
