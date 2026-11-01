@@ -498,11 +498,49 @@ function opportunityVolatilityCalculation(check, opportunity) {
     '</div></details>';
 }
 
+function opportunityRegimeStabilityCalculation(check, opportunity) {
+  if (String(check?.name || "").toLowerCase() !== "regime_stability") return "";
+  const metrics = check.metrics || {};
+  const regime = opportunity?.regime || {};
+  const lookback = Number.isFinite(Number(metrics.threshold)) ? Number(metrics.threshold) :
+    Number.isFinite(Number(metrics.value)) ? Number(metrics.value) : null;
+  const current = String(regime.label || "N/A").toUpperCase();
+  const previous = String(regime.previous_label || "N/A").toUpperCase();
+  const opposite = current === "BULLISH" ? "BEARISH" : current === "BEARISH" ? "BULLISH" : null;
+  const passed = check.passed === true ? true : check.passed === false ? false : null;
+  const state = value => value === null ? "unknown" : value ? "pass" : "fail";
+  const metric = (label, value, result) => '<div class="regime-metric"><span>' + esc(label) + '</span><code class="regime-value ' + state(result) + '">' + esc(value) + '</code><b class="regime-verdict ' + state(result) + '">' + (result === null ? "N/A" : result ? "PASS" : "FAIL") + '</b></div>';
+  const lookbackText = lookback === null ? "configured lookback" : lookback + " completed M15 bars";
+  const canCompare = Boolean(opposite) && previous !== "N/A";
+  const comparisonPass = canCompare ? previous !== opposite : null;
+  const comparison = !canCompare ? "Previous regime label is not available in the Django response." :
+    previous + (comparisonPass ? " is not opposite to " : " is opposite to ") + current + ".";
+  const explanation = passed === true ? "No opposite regime was detected at the lookback point; the current trend passes the stability gate." :
+    passed === false ? "The lookback regime was opposite to the current trend. Django defers the setup until the reversal is established." :
+    "Django did not provide enough information to determine the stability result.";
+  return '<details class="flow-math flow-details regime-stability-details">' +
+    '<summary><span>Regime Stability calculation · ' + esc(passed === true ? "STABLE" : passed === false ? "OPPOSITE REGIME" : "N/A") + '</span><span class="regime-toggle-hint">Show formula & live values <span aria-hidden="true">＋</span></span></summary>' +
+    '<div class="regime-content">' +
+    '<span class="math-label">1 · Stability rule</span>' +
+    '<code>PASS when the regime ' + esc(lookbackText) + ' ago is NOT opposite to the current bullish/bearish regime.</code>' +
+    '<code>DEFER when previous regime = opposite of current regime (reversal not yet established).</code>' +
+    '<span class="math-label">2 · Live Django values</span>' +
+    metric("Current regime", current, Boolean(opposite)) +
+    metric("Regime ' + (lookback === null ? "lookback" : lookback + " bars") + ' ago", previous, canCompare ? comparisonPass : null) +
+    metric("Opposite regime to reject", opposite || "N/A", canCompare ? true : null) +
+    '<code class="regime-explain">' + esc(comparison) + '</code>' +
+    '<span class="math-label">3 · Decision</span>' +
+    metric("Stability check", passed === null ? "Not evaluated" : passed ? "No opposite regime at lookback" : "Opposite regime detected", passed) +
+    '<code class="regime-result ' + (passed === true ? "pass" : passed === false ? "fail" : "unknown") + '">' + esc(explanation) + '</code>' +
+    '<code class="regime-explain">The comparison uses the regime classified from completed candles only; it does not predict or confirm a reversal by itself.</code>' +
+    '</div></details>';
+}
+
 function renderDecisionFlow(decision) {
   // Preserve the user's expand/collapse choice when the dashboard refreshes.
   const openDetails = new Set(
-    [...$("decisionFlow").querySelectorAll(".regime-details[open], .volatility-details[open]")].map(node =>
-      node.classList.contains("volatility-details") ? "volatility" : "regime")
+    [...$("decisionFlow").querySelectorAll(".regime-details[open], .volatility-details[open], .regime-stability-details[open]")].map(node =>
+      node.classList.contains("volatility-details") ? "volatility" : node.classList.contains("regime-stability-details") ? "regime_stability" : "regime")
   );
   const opportunity = stage(decision, "opportunities");
   const timing = stage(decision, "entry_timing");
@@ -514,9 +552,11 @@ function renderDecisionFlow(decision) {
     ...item,
     calculation: item.name === "regime"
       ? opportunityRegimeCalculation(item, opportunity)
-      : item.name === "volatility"
-        ? opportunityVolatilityCalculation(item, opportunity)
-        : ""
+      : item.name === "regime_stability"
+        ? opportunityRegimeStabilityCalculation(item, opportunity)
+        : item.name === "volatility"
+          ? opportunityVolatilityCalculation(item, opportunity)
+          : ""
   }));
   const timingChecks = stageChecks(timing);
   const riskChecks = stageChecks(risk).map(item => ({
@@ -551,8 +591,8 @@ function renderDecisionFlow(decision) {
     : flowStageMarkup("04 · AUTHORIZATION / MT5", {}, [],
         "Downstream execution is held until all upstream stages pass.", "idle");
   $("decisionFlow").innerHTML = opportunityMarkup + timingMarkup + riskMarkup + authMarkup;
-  $("decisionFlow").querySelectorAll(".regime-details, .volatility-details").forEach(node => {
-    node.open = openDetails.has(node.classList.contains("volatility-details") ? "volatility" : "regime");
+  $("decisionFlow").querySelectorAll(".regime-details, .volatility-details, .regime-stability-details").forEach(node => {
+    node.open = openDetails.has(node.classList.contains("volatility-details") ? "volatility" : node.classList.contains("regime-stability-details") ? "regime_stability" : "regime");
   });
 
   let summaryState = "idle";
