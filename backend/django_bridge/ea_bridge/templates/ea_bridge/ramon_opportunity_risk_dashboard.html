@@ -453,6 +453,8 @@ function opportunityRegimeCalculation(check, opportunity) {
 }
 
 function renderDecisionFlow(decision) {
+  // Preserve the user's expand/collapse choice when the dashboard refreshes.
+  const regimeWasOpen = $("decisionFlow").querySelector(".regime-details")?.open === true;
   const opportunity = stage(decision, "opportunities");
   const timing = stage(decision, "entry_timing");
   const risk = stage(decision, "risk_management");
@@ -496,6 +498,8 @@ function renderDecisionFlow(decision) {
     : flowStageMarkup("04 · AUTHORIZATION / MT5", {}, [],
         "Downstream execution is held until all upstream stages pass.", "idle");
   $("decisionFlow").innerHTML = opportunityMarkup + timingMarkup + riskMarkup + authMarkup;
+  const regimeDetails = $("decisionFlow").querySelector(".regime-details");
+  if (regimeDetails) regimeDetails.open = regimeWasOpen;
 
   let summaryState = "idle";
   let summaryText = "No current decision is available.";
