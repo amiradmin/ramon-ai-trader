@@ -47,6 +47,27 @@
 .flow-math code{display:block;color:#dce8f8;font:10px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:normal;overflow-wrap:anywhere}
 .flow-math .math-result{color:var(--green)}
 
+
+/* Collapsible, color-coded regime calculation */
+.regime-details{grid-column:2 / 4;margin-top:5px;padding:0;border-left:2px solid #40536d;background:#0c1420;border-radius:0 7px 7px 0;min-width:0}
+.regime-details summary{display:flex;justify-content:space-between;align-items:center;gap:10px;cursor:pointer;list-style:none;padding:9px 10px;color:#dce8f8;font-size:10px;font-weight:800}
+.regime-details summary::-webkit-details-marker{display:none}
+.regime-details summary:after{content:"＋";color:var(--blue);font-size:13px}
+.regime-details[open] summary:after{content:"−"}
+.regime-toggle-hint{margin-left:auto;color:var(--muted);font-size:9px;font-weight:500}
+.regime-content{padding:0 10px 10px}
+.regime-content .math-label{display:block;color:var(--muted);font-size:8px;letter-spacing:.55px;text-transform:uppercase;margin:9px 0 4px}
+.regime-content code{display:block;color:#dce8f8;font:10px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:normal;overflow-wrap:anywhere;margin:3px 0}
+.regime-metric{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;align-items:center;padding:5px 7px;margin:4px 0;border:1px solid #26364a;border-radius:6px;background:#111a26}
+.regime-metric>span{font-size:9px;color:#b8c6d8}
+.regime-value{font-weight:800}
+.regime-value.pass,.regime-verdict.pass,.regime-result.pass{color:var(--green)}
+.regime-value.fail,.regime-verdict.fail,.regime-result.fail{color:var(--red)}
+.regime-value.unknown,.regime-verdict.unknown{color:var(--amber)}
+.regime-verdict{font-size:8px;letter-spacing:.4px}
+.regime-explain{color:var(--muted)!important;font-size:9px!important}
+.regime-result{padding:6px 7px;border-radius:5px;background:#111a26;font-weight:800!important}
+
 .flow-stage.waiting{animation:structural-wait-pulse 1.25s ease-in-out infinite;border-color:#a8863c}
 .flow-stage.blocked{animation:structural-blocked-pulse 1.15s ease-in-out infinite;border-color:var(--red)}
 .flow-summary{margin-top:12px;padding:11px 13px;border-radius:9px;border:1px solid #34445a;background:#111a26;font-size:11px}
@@ -376,31 +397,59 @@ function opportunityRegimeCalculation(check, opportunity) {
   const regime = opportunity?.regime || {};
   const n = value => typeof value === "number" && Number.isFinite(value) ? value : null;
   const f = value => value === null ? "N/A" : Number(value).toLocaleString(undefined, {maximumFractionDigits: 3});
+  const state = passed => passed === null ? "unknown" : passed ? "pass" : "fail";
+  const metric = (label, value, passed, suffix = "") =>
+    `<div class="regime-metric"><span>${esc(label)}</span><code class="regime-value ${state(passed)}">${esc(value)}${esc(suffix)}</code><b class="regime-verdict ${state(passed)}">${passed === null ? "N/A" : passed ? "PASS" : "FAIL"}</b></div>`;
   const adx = n(regime.adx);
-  const adxTrendThreshold = 22.0;
-  const adxRangeThreshold = 18.0;
-  const emaBias = String(regime.ema_bias || "N/A").toUpperCase();
-  const structure = String(regime.structure || "N/A").toUpperCase();
+  const trendThreshold = 22.0;
+  const rangeThreshold = 18.0;
   const separation = n(regime.ema_separation_atr);
   const slope = n(regime.ema_slope_atr);
+  const emaBias = String(regime.ema_bias || "N/A").toUpperCase();
+  const structure = String(regime.structure || "N/A").toUpperCase();
   const label = String(regime.label || "N/A").toUpperCase();
-  const adxLine = adx === null
-    ? "N/A — ADX value not returned by Django"
-    : `ADX ${f(adx)} ≥ ${f(adxTrendThreshold)} → ${adx >= adxTrendThreshold ? "TRUE (trend strength confirmed)" : "FALSE"}`;
-  const emaLine = emaBias === "BEAR"
-    ? `EMA bias = BEAR (EMA20 below EMA50 by ${f(separation)} ATR; EMA50 slope = ${f(slope)} ATR)`
-    : emaBias === "BULL"
-      ? `EMA bias = BULL (EMA20 above EMA50 by ${f(separation)} ATR; EMA50 slope = ${f(slope)} ATR)`
-      : `EMA bias = ${emaBias} (Django classification)`;
-  const structureLine = structure === "BEARISH"
-    ? "Latest two confirmed swing highs: lower high AND latest two confirmed swing lows: lower low → BEARISH"
+  const adxPass = adx === null ? null : adx >= trendThreshold;
+  const emaPass = ["BULL", "BEAR"].includes(emaBias) ? true : null;
+  const structurePass = structure === "BEARISH" || structure === "BULLISH" ? true : null;
+  const isBear = label === "BEARISH";
+  const isBull = label === "BULLISH";
+  const trendLine = adx === null
+    ? "ADX unavailable — Django did not return a numeric value."
+    : `ADX ${f(adx)} ≥ ${f(trendThreshold)} → ${adxPass ? "TRUE · trend strength confirmed" : "FALSE · trend threshold not reached"}`;
+  const separationPass = separation === null ? null : (emaBias === "BEAR" ? separation <= -0.3 : emaBias === "BULL" ? separation >= 0.3 : false);
+  const slopePass = slope === null ? null : (emaBias === "BEAR" ? slope < 0 : emaBias === "BULL" ? slope > 0 : false);
+  const emaDescription = emaBias === "BEAR" ? "EMA20 below EMA50" : emaBias === "BULL" ? "EMA20 above EMA50" : "EMA direction not classified";
+  const structureDescription = structure === "BEARISH"
+    ? "Lower High AND Lower Low"
     : structure === "BULLISH"
-      ? "Latest two confirmed swing highs: higher high AND latest two confirmed swing lows: higher low → BULLISH"
-      : `Confirmed swing structure = ${structure}`;
-  const resultLine = adx !== null
-    ? `Regime rule: ADX ≥ 22 AND EMA bias = BEAR AND structure ≠ BULLISH → ${adx >= adxTrendThreshold && emaBias === "BEAR" && structure !== "BULLISH" ? "BEARISH condition satisfied" : "BEARISH condition not satisfied"}; Django regime = ${label}`
-    : `Django regime = ${label}; full calculation unavailable because ADX is missing`;
-  return `<div class="flow-math"><span class="math-label">Regime classification · Formula</span><code>BEARISH = (ADX ≥ 22) AND (EMA bias = BEAR) AND (Structure ≠ BULLISH)</code><code>EMA bias: EMA20 − EMA50 ≤ −(0.3 × ATR), Close &lt; EMA50 + (0.5 × ATR), EMA50 slope &lt; 0</code><code>Structure: Lower High AND Lower Low from the last two confirmed swing points</code><span class="math-label">Live calculation · Current Django decision</span><code>${esc(adxLine)}</code><code>${esc(emaLine)}</code><code>${esc(structureLine)}</code><code class="math-result">${esc(resultLine)}</code></div>`;
+      ? "Higher High AND Higher Low"
+      : structure;
+  const overallPass = adxPass === null ? null : adxPass && ((isBear && emaBias === "BEAR" && structure !== "BULLISH") || (isBull && emaBias === "BULL" && structure !== "BEARISH"));
+  const outcomeClass = label === "BEARISH" ? "fail" : label === "BULLISH" ? "pass" : "unknown";
+  return `<details class="flow-math regime-details">
+    <summary><span>Regime calculation · ${esc(label)}</span><span class="regime-toggle-hint">Show formula & live values <span aria-hidden="true">＋</span></span></summary>
+    <div class="regime-content">
+      <span class="math-label">1 · Regime decision formula</span>
+      <code>BEARISH = (ADX ≥ 22) AND (EMA bias = BEAR) AND (Structure ≠ BULLISH)</code>
+      <code>BULLISH = (ADX ≥ 22) AND (EMA bias = BULL) AND (Structure ≠ BEARISH)</code>
+      <span class="math-label">2 · Trend strength · ADX</span>
+      ${metric("ADX threshold", adx === null ? "N/A" : `${f(adx)} ≥ ${f(trendThreshold)}`, adxPass)}
+      <code class="regime-explain">${esc(trendLine)}</code>
+      <span class="math-label">3 · EMA direction · normalized by ATR</span>
+      <code>Separation = (EMA20 − EMA50) ÷ ATR; EMA50 slope = (EMA50 now − EMA50 10 bars ago) ÷ ATR</code>
+      ${metric(`${emaDescription} · separation`, separation === null ? "N/A" : `${f(separation)} ATR ${emaBias === "BEAR" ? "≤ −0.300" : "≥ +0.300"} ATR`, separationPass)}
+      ${metric("EMA50 slope direction", slope === null ? "N/A" : `${f(slope)} ATR ${emaBias === "BEAR" ? "< 0" : "> 0"}`, slopePass)}
+      <code class="regime-explain">Close location filter: Close ${emaBias === "BEAR" ? "<" : ">"} EMA50 ${emaBias === "BEAR" ? "+ 0.5 × ATR" : "− 0.5 × ATR"} · included in Django's EMA bias classification.</code>
+      <div class="regime-metric"><span>Django EMA bias</span><code class="regime-value ${emaPass === null ? "unknown" : "pass"}">${esc(emaBias)}</code><b class="regime-verdict ${emaPass === null ? "unknown" : "pass"}">${emaPass === null ? "N/A" : "CLASSIFIED"}</b></div>
+      <span class="math-label">4 · Market structure · confirmed swing points</span>
+      <code>BEARISH structure = Lower High AND Lower Low</code>
+      <code>BULLISH structure = Higher High AND Higher Low</code>
+      <div class="regime-metric"><span>Confirmed swing structure</span><code class="regime-value ${structurePass === null ? "unknown" : structure === "BEARISH" ? "fail" : "pass"}">${esc(structureDescription)}</code><b class="regime-verdict ${structurePass === null ? "unknown" : "pass"}">${structurePass === null ? "N/A" : "CONFIRMED"}</b></div>
+      <span class="math-label">5 · Final Django regime result</span>
+      <code class="regime-result ${outcomeClass}">${esc(`ADX ≥ 22 AND EMA bias = ${emaBias} AND structure compatible → Django regime = ${label}`)}</code>
+      <code class="regime-explain">${esc(adx === null ? "Cannot independently evaluate the complete rule: ADX is unavailable." : `Trend threshold: ${adxPass ? "PASS" : "FAIL"} · EMA bias: ${emaBias} · Structure: ${structure} · Final label is the value returned by Django.`)}</code>
+    </div>
+  </details>`;
 }
 
 function renderDecisionFlow(decision) {
