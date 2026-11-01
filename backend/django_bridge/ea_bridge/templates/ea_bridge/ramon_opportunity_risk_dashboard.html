@@ -371,9 +371,11 @@ function renderOpportunityTable() {
   const start = (scannerPage - 1) * scannerPageSize;
   const pageItems = filtered.slice(start, start + scannerPageSize);
 
-  $("opportunities").innerHTML = pageItems.length
-    ? pageItems.map(({decision, index}) => renderDecisionRow(decision, index)).join("")
-    : '<tr><td colspan="9">No opportunities match the selected filters.</td></tr>';
+  $("opportunities").innerHTML = !scannerDecisions.length
+    ? '<tr><td colspan="9">No saved decisions available.</td></tr>'
+    : pageItems.length
+      ? pageItems.map(({decision, index}) => renderDecisionRow(decision, index)).join("")
+      : '<tr><td colspan="9">No opportunities match the selected filters.</td></tr>';
 
   $("scannerPagination").innerHTML = `
     <span>Showing ${filtered.length ? start + 1 : 0}–${Math.min(start + scannerPageSize, filtered.length)} of ${filtered.length} matching decisions</span>
