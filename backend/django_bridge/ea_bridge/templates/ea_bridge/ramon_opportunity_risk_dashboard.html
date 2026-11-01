@@ -78,6 +78,15 @@
 .regime-explain{color:var(--muted)!important;font-size:9px!important}
 .regime-result{padding:6px 7px;border-radius:5px;background:#111a26;font-weight:800!important}
 
+/* Individual, keyboard-accessible tooltips for the live Regime calculation */
+.regime-term{position:relative;display:inline-flex;align-items:center;gap:4px;color:#dce8f8;border-bottom:1px dotted rgba(126,170,255,.75);cursor:help;outline:none;z-index:1}
+.regime-term>span{color:var(--blue);font-size:.9em;font-weight:900}
+.regime-term:hover,.regime-term:focus-visible{color:#fff;border-bottom-color:var(--blue);z-index:40}
+.regime-term:focus-visible{outline:2px solid rgba(126,170,255,.55);outline-offset:3px;border-radius:2px}
+.regime-term:after{content:attr(data-tooltip);position:absolute;z-index:60;left:0;top:calc(100% + 7px);width:min(290px,75vw);padding:10px 11px;border:1px solid #526783;border-radius:8px;background:#050a11;color:#edf3fb;font:500 10px/1.55 Inter,ui-sans-serif,system-ui,sans-serif;white-space:normal;text-align:left;box-shadow:0 10px 28px rgba(0,0,0,.5);opacity:0;visibility:hidden;pointer-events:none;transform:translateY(-3px);transition:opacity .12s ease,transform .12s ease}
+.regime-term:hover:after,.regime-term:focus-visible:after{opacity:1;visibility:visible;transform:translateY(0)}
+.regime-term.align-right:after{left:auto;right:0}
+
 .flow-stage.waiting{animation:structural-wait-pulse 1.25s ease-in-out infinite;border-color:#a8863c}
 .flow-stage.blocked{animation:structural-blocked-pulse 1.15s ease-in-out infinite;border-color:var(--red)}
 .flow-summary{margin-top:12px;padding:11px 13px;border-radius:9px;border:1px solid #34445a;background:#111a26;font-size:11px}
@@ -564,6 +573,11 @@ function opportunityRegimeCalculation(check, opportunity) {
   const state = passed => passed === null ? "unknown" : passed ? "pass" : "fail";
   const metric = (label, value, passed, suffix = "") =>
     `<div class="regime-metric"><span>${esc(label)}</span><code class="regime-value ${state(passed)}">${esc(value)}${esc(suffix)}</code><b class="regime-verdict ${state(passed)}">${passed === null ? "N/A" : passed ? "PASS" : "FAIL"}</b></div>`;
+  const term = (name, description, alignRight = false) =>
+    `<span class="regime-term${alignRight ? " align-right" : ""}" tabindex="0" role="button" aria-label="${esc(name + ": " + description)}" data-tooltip="${esc(description)}">${esc(name)}<span aria-hidden="true">ⓘ</span></span>`;
+  const adxTip = "ADX(14) measures trend strength, not direction. Django treats ADX ≥ 22 as trending and ADX < 18 as ranging evidence. Values from 18 to below 22 are a transition zone; the final label also depends on EMA bias and confirmed swing structure.";
+  const emaTip = "EMA bias is directional only when all conditions agree. BULL: EMA20 − EMA50 ≥ 0.3 ATR, EMA50 slope over 10 bars > 0, and close > EMA50 − 0.5 ATR. BEAR is mirrored: separation ≤ −0.3 ATR, slope < 0, and close < EMA50 + 0.5 ATR. Otherwise the bias is NEUTRAL.";
+  const structureTip = "Django uses confirmed swing highs and lows (3 bars on each side by default). BULLISH requires a Higher High AND Higher Low; BEARISH requires a Lower High AND Lower Low. Otherwise structure is MIXED, or UNKNOWN if there are too few confirmed swings. Opposite-direction structure blocks that regime; MIXED/UNKNOWN does not.";
   const adx = n(regime.adx);
   const trendThreshold = 22.0;
   const rangeThreshold = 18.0;
@@ -594,18 +608,18 @@ function opportunityRegimeCalculation(check, opportunity) {
     <summary><span>Regime calculation · ${esc(label)}</span><span class="regime-toggle-hint">Show formula & live values <span aria-hidden="true">＋</span></span></summary>
     <div class="regime-content">
       <span class="math-label">1 · Regime decision formula</span>
-      <code>BEARISH = (ADX ≥ 22) AND (EMA bias = BEAR) AND (Structure ≠ BULLISH)</code>
-      <code>BULLISH = (ADX ≥ 22) AND (EMA bias = BULL) AND (Structure ≠ BEARISH)</code>
-      <span class="math-label">2 · Trend strength · ADX</span>
+      <code>BEARISH = (${term("ADX", adxTip)} ≥ 22) AND (${term("EMA bias", emaTip)} = BEAR) AND (${term("Structure", structureTip, true)} ≠ BULLISH)</code>
+      <code>BULLISH = (${term("ADX", adxTip)} ≥ 22) AND (${term("EMA bias", emaTip)} = BULL) AND (${term("Structure", structureTip, true)} ≠ BEARISH)</code>
+      <span class="math-label">2 · Trend strength · ${term("ADX", adxTip)}</span>
       ${metric("ADX threshold", adx === null ? "N/A" : `${f(adx)} ≥ ${f(trendThreshold)}`, adxPass)}
       <code class="regime-explain">${esc(trendLine)}</code>
-      <span class="math-label">3 · EMA direction · normalized by ATR</span>
+      <span class="math-label">3 · EMA direction · ${term("EMA Bias", emaTip)} · normalized by ATR</span>
       <code>Separation = (EMA20 − EMA50) ÷ ATR; EMA50 slope = (EMA50 now − EMA50 10 bars ago) ÷ ATR</code>
       ${metric(`${emaDescription} · separation`, separation === null ? "N/A" : `${f(separation)} ATR ${emaBias === "BEAR" ? "≤ −0.300" : "≥ +0.300"} ATR`, separationPass)}
       ${metric("EMA50 slope direction", slope === null ? "N/A" : `${f(slope)} ATR ${emaBias === "BEAR" ? "< 0" : "> 0"}`, slopePass)}
       <code class="regime-explain">Close location filter: Close ${emaBias === "BEAR" ? "<" : ">"} EMA50 ${emaBias === "BEAR" ? "+ 0.5 × ATR" : "− 0.5 × ATR"} · included in Django's EMA bias classification.</code>
       <div class="regime-metric"><span>Django EMA bias</span><code class="regime-value ${emaPass === null ? "unknown" : "pass"}">${esc(emaBias)}</code><b class="regime-verdict ${emaPass === null ? "unknown" : "pass"}">${emaPass === null ? "N/A" : "CLASSIFIED"}</b></div>
-      <span class="math-label">4 · Market structure · confirmed swing points</span>
+      <span class="math-label">4 · Market structure · ${term("Structure", structureTip)} · confirmed swing points</span>
       <code>BEARISH structure = Lower High AND Lower Low</code>
       <code>BULLISH structure = Higher High AND Higher Low</code>
       <div class="regime-metric"><span>Confirmed swing structure</span><code class="regime-value ${structurePass === null ? "unknown" : structure === "BEARISH" ? "fail" : "pass"}">${esc(structureDescription)}</code><b class="regime-verdict ${structurePass === null ? "unknown" : "pass"}">${structurePass === null ? "N/A" : "CONFIRMED"}</b></div>
