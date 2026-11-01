@@ -462,10 +462,12 @@ function opportunityVolatilityCalculation(check, opportunity) {
   const maximum = 2.5;
   const passed = check.passed === true ? true : check.passed === false ? false : null;
   const component = n(opportunity?.components?.volatility);
-  const state = passed === null ? "unknown" : passed ? "pass" : "fail";
-  const metric = (label, value, result, note = "") =>
-    '<div class="regime-metric"><span>' + esc(label) + '</span><code class="regime-value ' + state + '">' + esc(value) + '</code><b class="regime-verdict ' + state + '">' + result + '</b></div>' +
-    (note ? '<code class="regime-explain">' + esc(note) + '</code>' : "");
+  const metric = (label, value, passed, note = "") => {
+    const state = passed === null ? "unknown" : passed ? "pass" : "fail";
+    const result = passed === null ? "N/A" : passed ? "PASS" : "FAIL";
+    return '<div class="regime-metric"><span>' + esc(label) + '</span><code class="regime-value ' + state + '>' + esc(value) + '</code><b class="regime-verdict ' + state + '>' + result + '</b></div>' +
+      (note ? '<code class="regime-explain">' + esc(note) + '</code>' : "");
+  };
   const ratioLine = ratio === null ? "Django did not return a numeric ATR ratio." :
     'ATR ratio = ' + f(ratio) + 'x; acceptable interval is ' + f(minimum) + 'x to ' + f(maximum) + 'x.';
   const componentLine = component === null ? "Volatility score component was not supplied in this decision." :
@@ -481,7 +483,7 @@ function opportunityVolatilityCalculation(check, opportunity) {
     '<code>ATR ratio = Current ATR(14) ÷ Median of the most recent 100 ATR(14) values</code>' +
     '<code>Current ATR and its baseline are calculated from completed M15 candles only.</code>' +
     '<span class="math-label">2 · Live Django calculation</span>' +
-    metric("Current ATR ratio", ratio === null ? "N/A" : f(ratio) + "x", passed === null ? "N/A" : passed ? "PASS" : "FAIL", ratioLine) +
+    metric("Current ATR ratio", ratio === null ? "N/A" : f(ratio) + "x", passed, ratioLine) +
     '<code class="regime-explain">The check returns the ratio; separate raw ATR and median values are not exposed in this decision payload.</code>' +
     '<span class="math-label">3 · Acceptance thresholds</span>' +
     '<code>REJECT if ratio < 0.60x · PASS if 0.60x ≤ ratio ≤ 2.50x · DEFER if ratio > 2.50x</code>' +
