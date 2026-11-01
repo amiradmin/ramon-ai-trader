@@ -356,6 +356,34 @@ function orderedEntryFlowChecks(checks, waitingForOpportunity = false) {
   add("quality", "Entry quality", byName.quality);
   return rows;
 }
+function orderedRiskFlowChecks(checks, waitingForUpstream = false) {
+  const byName = Object.fromEntries(checks.filter(item => item && item.name).map(item => [String(item.name).toLowerCase(), item]));
+  const groups = [
+    {name:"stop", label:"Stop placement & broker minimum", aliases:["stop","stop_below_broker_minimum"]},
+    {name:"reward_risk", label:"Reward / risk", aliases:["reward_risk","reward_risk_too_low"]},
+    {name:"daily_loss", label:"Daily loss limit", aliases:["daily_loss","daily_loss_limit_reached"]},
+    {name:"portfolio_risk", label:"Portfolio risk exposure", aliases:["portfolio_risk","portfolio_risk_limit_reached"]},
+    {name:"sizing", label:"Position sizing & risk budget", aliases:["sizing","risk_budget_below_minimum_volume","risk_budget_exceeded"]}
+  ];
+  return groups.map(group => {
+    if (waitingForUpstream) return {
+      name:group.name, displayName:group.label, notReached:true,
+      detail:"Waiting for approved opportunity and entry timing. Django has not evaluated risk yet."
+    };
+    const parts = group.aliases.map(name => byName[name]).filter(Boolean);
+    if (!parts.length) return {
+      name:group.name, displayName:group.label, notReached:true,
+      detail:"Not evaluated because an earlier risk-management check stopped this stage."
+    };
+    const failed = parts.find(item => item.passed !== true);
+    const merged = {
+      name:group.name, displayName:group.label,
+      passed:!failed,
+      detail:parts.map(item => item.detail || item.name).join(" · ")
+    };
+    return merged;
+  });
+}
 function flowStageMarkup(title, stageResult, checks, fallback, forcedState) {
   const state = forcedState || stageState(stageResult);
   const stateLabel = state === "pass" ? "PASSED" : state === "wait" ? "WAITING" : state === "blocked" ? "BLOCKED" : "NOT REACHED";
@@ -667,10 +695,14 @@ function renderDecisionFlow(decision) {
   const timingMarkup = flowStageMarkup("02 · ENTRY TIMING", timingReached ? timing : {},
     orderedEntryFlowChecks(timingChecks, !timingReached),
     "Entry timer returned no individual checks.", timingReached ? stageState(timing) : "idle");
-  const riskMarkup = riskReached
-    ? flowStageMarkup("03 · RISK MANAGEMENT", risk, riskChecks,
-        "Risk manager returned no individual checks.", stageState(risk))
-    : flowStageMarkup("03 · RISK MANAGEMENT", {}, [], "Upstream stage has not approved; risk evaluation is not reached.", "idle");
+  const riskDisplayChecks = orderedRiskFlowChecks(riskChecks, !riskReached).map(item => ({
+    ...item,
+    calculation: item.notReached ? "" : item.calculation || riskCalculationMarkup(
+      riskChecks.find(check => check.name === item.name) || item, risk, decision
+    )
+  }));
+  const riskMarkup = flowStageMarkup("03 · RISK MANAGEMENT", riskReached ? risk : {},
+    riskDisplayChecks, "Risk manager returned no individual checks.", riskReached ? stageState(risk) : "idle");
 
   const allPipelineApproved = opportunity.approved === true && timing.approved === true && risk.approved === true;
   const finalAction = String(decision.action || "").toUpperCase();
