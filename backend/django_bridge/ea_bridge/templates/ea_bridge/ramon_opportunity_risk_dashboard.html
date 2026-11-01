@@ -707,18 +707,40 @@ function renderDecisionFlow(decision) {
   const allPipelineApproved = opportunity.approved === true && timing.approved === true && risk.approved === true;
   const finalAction = String(decision.action || "").toUpperCase();
   const finalGuardBlocked = allPipelineApproved && !["BUY", "SELL"].includes(finalAction);
-  // The current Django decision API is deliberately fail-closed: a pipeline verdict
-  // is not broker authorization, and the dashboard must never imply an order was sent.
-  const authMarkup = allPipelineApproved
-    ? finalGuardBlocked
-      ? flowStageMarkup("04 · DJANGO FINAL GUARD", {
-          explanation: `All SignalFlow stages passed, but Django's final decision is ${finalAction}. Reason: ${decision.rationale_code || "not supplied"}.`
-        }, [], "", "blocked")
-      : flowStageMarkup("04 · AUTHORIZATION / MT5", {
-          explanation: "Strategy pipeline passed. Trading authorization is still false; MT5 execution is not confirmed."
-        }, [], "", "idle")
-    : flowStageMarkup("04 · AUTHORIZATION / MT5", {}, [],
-        "Downstream execution is held until all upstream stages pass.", "idle");
+  // Authorization and broker execution are separate gates. The dashboard feed
+  // currently exposes the Django decision only; it does not expose command-gate
+  // settings, a live EA heartbeat, or a broker acknowledgement. Never infer them.
+  const authChecks = allPipelineApproved
+    ? [
+        {name:"django_authorization", displayName:"Django trading authorization",
+          passed:false, detail: finalGuardBlocked
+            ? `BLOCKED: Django final decision is ${finalAction} (${decision.rationale_code || "reason not supplied"}). No authorization is granted.`
+            : "BLOCKED: the current decision API keeps trading_authorization=false. A passed strategy pipeline is advisory only."},
+        {name:"command_gates", displayName:"Server command-creation / execution gates",
+          notReached:true, detail:"Not exposed by the dashboard feed. Both server-side command gates must be explicitly enabled; no gate state is assumed."},
+        {name:"ea_heartbeat", displayName:"MT5 EA heartbeat & account identity",
+          notReached:true, detail:"Live heartbeat is not included in this dashboard payload. Fresh account, server, symbol and demo-account identity are not confirmed here."},
+        {name:"terminal_permissions", displayName:"MT5 terminal trading permissions",
+          notReached:true, detail:"Terminal connection and Algo Trading permissions are not included in this dashboard payload. No permission is inferred."},
+        {name:"broker_ack", displayName:"Broker order execution & acknowledgement",
+          notReached:true, detail:"No command acknowledgement or broker fill is available in this dashboard payload. No order is reported as sent or filled."}
+      ]
+    : [
+        {name:"django_authorization", displayName:"Django trading authorization", notReached:true,
+          detail:"Waiting for all three upstream Django stages to pass. Authorization is not granted."},
+        {name:"command_gates", displayName:"Server command-creation / execution gates", notReached:true,
+          detail:"Not reached. Server command gates are not evaluated by the dashboard until upstream approval."},
+        {name:"ea_heartbeat", displayName:"MT5 EA heartbeat & account identity", notReached:true,
+          detail:"Not reached. A fresh MT5 heartbeat and matching account identity have not been confirmed here."},
+        {name:"terminal_permissions", displayName:"MT5 terminal trading permissions", notReached:true,
+          detail:"Not reached. Terminal connectivity and trading permissions are not confirmed here."},
+        {name:"broker_ack", displayName:"Broker order execution & acknowledgement", notReached:true,
+          detail:"Not reached. No broker execution or fill is implied."}
+      ];
+  const authMarkup = flowStageMarkup("04 · AUTHORIZATION / MT5",
+    allPipelineApproved ? {approved:false, status:"BLOCKED",
+      explanation:"Django authorization is false; MT5 execution is not confirmed."} : {},
+    authChecks, "", allPipelineApproved ? "blocked" : "idle");
   $("decisionFlow").innerHTML = opportunityMarkup + timingMarkup + riskMarkup + authMarkup;
   $("decisionFlow").querySelectorAll(".regime-details, .volatility-details, .regime-stability-details, .impulse-details").forEach(node => {
     node.open = openDetails.has(node.classList.contains("volatility-details") ? "volatility" : node.classList.contains("regime-stability-details") ? "regime_stability" : node.classList.contains("impulse-details") ? "impulse" : "regime");
