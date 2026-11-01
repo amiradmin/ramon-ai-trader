@@ -842,16 +842,15 @@ const FLOW_CHECK_TOOLTIPS = {
 function renderDecisionVariableGuide() {
   const target = $("decisionVariableGuideItems");
   if (!target) return;
-  target.innerHTML = DECISION_VARIABLE_GROUPS.map(group =>
+  target.innerHTML = decorateDecisionFlowTooltips(DECISION_VARIABLE_GROUPS.map(group =>
     '<section class="variable-group"><h3>' + esc(group.title) + '</h3><div class="variable-items">' +
     group.items.map(([name, description]) =>
       '<span class="variable-chip" tabindex="0" role="note" title="' + esc(description) +
       '" aria-label="' + esc(name + ". " + description) + '" data-tooltip="' + esc(description) +
       '"><span>' + esc(name) + '</span></span>'
     ).join("") + '</div></section>'
-  ).join("");
+  ).join(""));
 }
-renderDecisionVariableGuide();
 
 const FLOW_ABBREVIATION_TOOLTIPS = {
   ATR:"Average True Range — a volatility measure based on true candle ranges. Used to normalize distances and compare volatility.",
@@ -884,6 +883,7 @@ function decorateDecisionFlowTooltips(markup) {
     );
   }).join("");
 }
+renderDecisionVariableGuide();
 function renderDecisionFlow(decision) {
   // Preserve the user's expand/collapse choice when the dashboard refreshes.
   const openDetails = new Set(
