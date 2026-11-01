@@ -31,7 +31,11 @@
 .flow-state.blocked{background:#3a2028;color:var(--red)}.flow-state.idle{background:#202b39;color:var(--muted)}
 .flow-checks{display:grid;gap:7px}
 .flow-check{display:grid;grid-template-columns:7px minmax(0,1fr) auto;gap:7px;align-items:start;padding:7px 8px;border:1px solid #243247;border-radius:8px;background:#111a26}
+.flow-check.wait{animation:flow-check-wait 1.15s ease-in-out infinite;border-color:#a8863c;box-shadow:0 0 0 1px rgba(244,197,106,.2),0 0 12px rgba(244,197,106,.12)}
+.flow-check.blocked{animation:flow-check-blocked .9s ease-in-out infinite;border-color:var(--red);box-shadow:0 0 0 1px rgba(255,113,133,.28),0 0 14px rgba(255,113,133,.16)}
 .flow-check-dot{width:7px;height:7px;border-radius:50%;background:#718096;margin-top:4px}
+@keyframes flow-check-wait{0%,100%{opacity:1;filter:brightness(1)}50%{opacity:.62;filter:brightness(1.35)}}
+@keyframes flow-check-blocked{0%,100%{opacity:1;filter:brightness(1)}50%{opacity:.48;filter:brightness(1.55)}}
 .flow-check.pass .flow-check-dot{background:var(--green)}.flow-check.wait .flow-check-dot{background:var(--amber)}
 .flow-check.blocked .flow-check-dot{background:var(--red)}.flow-check.idle .flow-check-dot{background:#65748a}
 .flow-check strong{font-size:10px;display:block;overflow-wrap:anywhere}
@@ -47,7 +51,7 @@
 .flow-note{font-size:10px;color:var(--muted);margin-top:9px}
 @media(max-width:1050px){.flow-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.flow-stage:nth-child(2):after{display:none}}
 @media(max-width:620px){.flow-grid{grid-template-columns:1fr;gap:18px}.flow-stage:not(:last-child):after{content:"↓";right:auto;left:50%;top:auto;bottom:-19px;transform:translateX(-50%)}}
-@media(prefers-reduced-motion:reduce){.flow-stage.waiting,.flow-stage.blocked,.flow-state.wait,.flow-state.blocked{animation:none;transform:none}}
+@media(prefers-reduced-motion:reduce){.flow-stage.waiting,.flow-stage.blocked,.flow-state.wait,.flow-state.blocked,.flow-check.wait,.flow-check.blocked{animation:none;transform:none}}
 
 .bar{height:7px;border-radius:9px;background:#273244;overflow:hidden;margin-top:7px}.bar i{display:block;height:100%;border-radius:9px;background:linear-gradient(90deg,#4d8dff,#43d6a0)}.timeline{display:grid;gap:13px}.event{display:grid;grid-template-columns:66px 12px 1fr;gap:10px;align-items:start}.event time{color:var(--muted);font-size:11px;padding-top:2px}.event .line{height:100%;position:relative}.event .line:before{content:"";position:absolute;top:5px;left:3px;width:6px;height:6px;border-radius:50%;background:var(--blue)}.event .line:after{content:"";position:absolute;top:16px;bottom:-12px;left:5px;width:2px;background:#2a394e}.event:last-child .line:after{display:none}.event strong{font-size:12px}.event p{margin:3px 0 0;color:var(--muted);font-size:11px}.footer{color:#69788c;font-size:11px;text-align:center;padding:24px 0 6px}
 @media(max-width:900px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.lower{grid-template-columns:1fr}.detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.wrap{padding:17px}}
@@ -260,7 +264,7 @@ function flowStageMarkup(title, stageResult, checks, fallback, forcedState) {
   const stateLabel = state === "pass" ? "PASSED" : state === "wait" ? "WAITING" : state === "blocked" ? "BLOCKED" : "NOT REACHED";
   const checkMarkup = checks.length
     ? checks.map(item => flowCheckMarkup(item, item.passed === true ? "pass" : (String(stageResult?.status || "").toUpperCase() === "DEFERRED" ? "wait" : "blocked"), item.displayName)).join("")
-    : `<div class="flow-check idle"><span class="flow-check-dot"></span><div><strong>${esc(fallback || "No checks returned")}</strong><p>${esc(stageResult?.explanation || stageResult?.reason || "This stage has no saved check details.")}</p></div><em>${state === "blocked" ? "BLOCKED" : stateLabel}</em></div>`;
+    : `<div class="flow-check ${state}"><span class="flow-check-dot"></span><div><strong>${esc(fallback || "No checks returned")}</strong><p>${esc(stageResult?.explanation || stageResult?.reason || "This stage has no saved check details.")}</p></div><em>${state === "blocked" ? "BLOCKED" : state === "wait" ? "WAIT" : stateLabel}</em></div>`;
   return `<section class="flow-stage ${state === "wait" ? "waiting" : state === "blocked" ? "blocked" : ""}">
     <div class="flow-stage-head"><div class="flow-stage-title">${esc(title)}</div><span class="flow-state ${state}">${stateLabel}</span></div>
     <div class="flow-checks">${checkMarkup}</div>
