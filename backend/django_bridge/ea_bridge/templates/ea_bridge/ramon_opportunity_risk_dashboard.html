@@ -48,6 +48,16 @@
 .flow-math .math-result{color:var(--green)}
 
 
+/* Expandable formula panels for entry timing and risk management */
+.entry-details,.risk-details{grid-column:2 / 4;margin-top:5px;padding:0;border-left:2px solid #40536d;background:#0c1420;border-radius:0 7px 7px 0;min-width:0}
+.entry-details summary,.risk-details summary{display:flex;justify-content:space-between;align-items:center;gap:10px;cursor:pointer;list-style:none;padding:9px 10px;color:#dce8f8;font-size:10px;font-weight:800}
+.entry-details summary::-webkit-details-marker,.risk-details summary::-webkit-details-marker{display:none}
+.entry-details summary:after,.risk-details summary:after{content:"＋";color:var(--blue);font-size:13px}
+.entry-details[open] summary:after,.risk-details[open] summary:after{content:"−"}
+.entry-content,.risk-content{padding:0 10px 10px}
+.entry-content .math-label,.risk-content .math-label{display:block;color:var(--muted);font-size:8px;letter-spacing:.55px;text-transform:uppercase;margin:9px 0 4px}
+.entry-content code,.risk-content code{display:block;color:#dce8f8;font:10px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:normal;overflow-wrap:anywhere;margin:3px 0}
+.entry-content .math-result,.risk-content .math-result{color:var(--green)}
 /* Collapsible, color-coded regime calculation */
 .regime-details{grid-column:2 / 4;margin-top:5px;padding:0;border-left:2px solid #40536d;background:#0c1420;border-radius:0 7px 7px 0;min-width:0}
 .regime-details summary{display:flex;justify-content:space-between;align-items:center;gap:10px;cursor:pointer;list-style:none;padding:9px 10px;color:#dce8f8;font-size:10px;font-weight:800}
@@ -395,13 +405,50 @@ function flowStageMarkup(title, stageResult, checks, fallback, forcedState) {
     <div class="flow-checks">${checkMarkup}</div>
   </section>`;
 }
+function entryCalculationMarkup(check, timing, opportunity, decision) {
+  const metrics = timing || {};
+  const setup = opportunity?.setup || {};
+  const n = value => typeof value === "number" && Number.isFinite(value) ? value : null;
+  const f = value => value === null ? "NOT SUPPLIED" : Number(value).toLocaleString(undefined, {maximumFractionDigits:6});
+  const name = String(check?.name || "").toLowerCase();
+  const show = (label, value, suffix="") => `<code>${esc(label)}: ${esc(f(value))}${suffix}</code>`;
+  const status = check?.notReached ? "NOT REACHED" : check?.passed === true ? "PASS" : check?.passed === false ? "BLOCKED / WAIT" : "NOT SUPPLIED";
+  let title = "Entry validation";
+  let formula = "Django evaluates the entry-timing gate using the current opportunity and market snapshot.";
+  let values = "";
+  if (name === "freshness") {
+    title = "Signal freshness";
+    formula = "SignalAgeBars = (LatestCompletedBarTime − SignalBarTime) ÷ BarInterval; PASS when 0 ≤ age ≤ max_signal_age_bars (default 1.0).";
+    values = show("Signal age (bars)",n(metrics.signal_age_bars)) + show("Configured maximum",null) + `<code>Latest result: ${esc(check?.detail || "NOT SUPPLIED")}</code>`;
+  } else if (name === "invalidation") {
+    title = "Invalidation / minimum risk room";
+    formula = "RoomToInvalidationATR = DirectionalDistance(EntryPrice, InvalidationPrice) ÷ ATR; PASS when price has not crossed invalidation and room ≥ min_risk_room_atr (default 0.25).";
+    values = show("ATR",n(setup.atr)) + show("Reference price",n(setup.reference_price)) + show("Invalidation price",n(setup.invalidation_price)) + show("Room to invalidation (ATR)",n(metrics.room_to_invalidation_atr)) + `<code>Latest result: ${esc(check?.detail || "NOT SUPPLIED")}</code>`;
+  } else if (name === "chase") {
+    title = "Price chase protection";
+    formula = "ChaseATR = DirectionalDistance(EntryPrice, SignalReferencePrice) ÷ ATR; PASS when ChaseATR ≤ max_chase_atr (default 0.50).";
+    values = show("Signal reference price",n(setup.reference_price)) + show("ATR",n(setup.atr)) + show("Chase distance (ATR)",n(metrics.chase_atr)) + `<code>Latest result: ${esc(check?.detail || "NOT SUPPLIED")}</code>`;
+  } else if (name === "spread_conditions") {
+    title = "Spread conditions";
+    formula = "Absolute spread ≤ maximum_spread_points (default 50); SpreadATR = (SpreadPoints × Point) ÷ ATR ≤ 0.20; SpreadToRisk = (SpreadPoints × Point) ÷ DistanceToInvalidation ≤ 0.25.";
+    values = show("Spread (points)",n(metrics.spread_points)) + show("Spread / ATR",n(metrics.spread_atr_fraction)) + show("Spread / risk distance",n(metrics.spread_to_risk)) + `<code>Quote checks: ${esc(metrics.price_checks || "NOT SUPPLIED")}</code><code>Latest result: ${esc(check?.detail || "NOT SUPPLIED")}</code>`;
+  } else if (name === "quality") {
+    title = "Entry quality";
+    formula = "When computed: Quality = 0.40×SpreadEfficiency + 0.35×PriceLocation + 0.25×Freshness; PASS when 0 ≤ quality ≤ 1 and quality ≥ minimum_quality (default 0.65). A supplied quality may be used when configured.";
+    values = show("Entry quality",n(metrics.quality)) + `<code>Quality source: ${esc(metrics.quality_source || "NOT SUPPLIED")}</code><code>Latest result: ${esc(check?.detail || "NOT SUPPLIED")}</code>`;
+  } else {
+    values = `<code>${esc(check?.detail || "No diagnostic values supplied by Django.")}</code>`;
+  }
+  return `<details class="entry-details" data-check="${esc(name)}"><summary><span>${esc(title)} · Calculation</span><span class="regime-toggle-hint">Show formula & live values</span></summary><div class="entry-content"><span class="math-label">Validation status</span><code class="math-result">${esc(status)}</code><span class="math-label">Formula / rule</span><code>${esc(formula)}</code><span class="math-label">Live values from saved Django decision</span>${values}</div></details>`;
+}
+
 function riskCalculationMarkup(check, risk, decision) {
   const inputs = decision.features?.risk_calculation_inputs || {};
   const daily = decision.features?.daily_risk || {};
   const n = value => typeof value === "number" && Number.isFinite(value) ? value : null;
   const f = value => value === null ? "N/A" : Number(value).toLocaleString(undefined, {maximumFractionDigits: 6});
   const row = (label, formula, calculation, result) =>
-    `<div class="flow-math"><span class="math-label">${esc(label)} · Formula</span><code>${esc(formula)}</code><span class="math-label">Live calculation</span><code>${esc(calculation)}</code>${result ? `<code class="math-result">${esc(result)}</code>` : ""}</div>`;
+    `<details class="risk-details" data-check="${esc(name)}"><summary><span>${esc(label)} · Calculation</span><span class="regime-toggle-hint">Show formula & live values</span></summary><div class="risk-content"><span class="math-label">Formula / rule</span><code>${esc(formula)}</code><span class="math-label">Live calculation from saved Django decision</span><code>${esc(calculation)}</code>${result ? `<code class="math-result">${esc(result)}</code>` : ""}<span class="math-label">Validation status</span><code class="math-result">${esc(check?.notReached ? "NOT REACHED" : check?.passed === true ? "PASS" : check?.passed === false ? "BLOCKED / WAIT" : "NOT SUPPLIED")}</code></div></details>`;
   const name = String(check?.name || "").toLowerCase();
   const balance = n(inputs.account_balance);
   const requestedPct = n(inputs.risk_percent);
@@ -663,8 +710,8 @@ function opportunityImpulseCalculation(check, opportunity) {
 function renderDecisionFlow(decision) {
   // Preserve the user's expand/collapse choice when the dashboard refreshes.
   const openDetails = new Set(
-    [...$("decisionFlow").querySelectorAll(".regime-details[open], .volatility-details[open], .regime-stability-details[open], .impulse-details[open]")].map(node =>
-      node.classList.contains("volatility-details") ? "volatility" : node.classList.contains("regime-stability-details") ? "regime_stability" : node.classList.contains("impulse-details") ? "impulse" : "regime")
+    [...$("decisionFlow").querySelectorAll(".regime-details[open], .volatility-details[open], .regime-stability-details[open], .impulse-details[open], .entry-details[open], .risk-details[open]")].map(node =>
+      node.classList.contains("entry-details") ? "entry:" + node.dataset.check : node.classList.contains("risk-details") ? "risk:" + node.dataset.check : node.classList.contains("volatility-details") ? "volatility" : node.classList.contains("regime-stability-details") ? "regime_stability" : node.classList.contains("impulse-details") ? "impulse" : "regime")
   );
   const opportunity = stage(decision, "opportunities");
   const timing = stage(decision, "entry_timing");
@@ -684,7 +731,10 @@ function renderDecisionFlow(decision) {
             ? opportunityImpulseCalculation(item, opportunity)
             : ""
   }));
-  const timingChecks = stageChecks(timing);
+  const timingChecks = orderedEntryFlowChecks(stageChecks(timing), !timingReached).map(item => ({
+    ...item,
+    calculation: entryCalculationMarkup(item, timing, opportunity, decision)
+  }));
   const riskChecks = stageChecks(risk).map(item => ({
     ...item,
     calculation: riskCalculationMarkup(item, risk, decision)
@@ -693,11 +743,11 @@ function renderDecisionFlow(decision) {
   const opportunityMarkup = flowStageMarkup("01 · OPPORTUNITY", opportunity, oppChecks,
     "Opportunity detector did not return individual checks.", oppState);
   const timingMarkup = flowStageMarkup("02 · ENTRY TIMING", timingReached ? timing : {},
-    orderedEntryFlowChecks(timingChecks, !timingReached),
+    timingChecks,
     "Entry timer returned no individual checks.", timingReached ? stageState(timing) : "idle");
   const riskDisplayChecks = orderedRiskFlowChecks(riskChecks, !riskReached).map(item => ({
     ...item,
-    calculation: item.notReached ? "" : item.calculation || riskCalculationMarkup(
+    calculation: item.calculation || riskCalculationMarkup(
       riskChecks.find(check => check.name === item.name) || item, risk, decision
     )
   }));
@@ -742,8 +792,9 @@ function renderDecisionFlow(decision) {
       explanation:"Django authorization is false; MT5 execution is not confirmed."} : {},
     authChecks, "", allPipelineApproved ? "blocked" : "idle");
   $("decisionFlow").innerHTML = opportunityMarkup + timingMarkup + riskMarkup + authMarkup;
-  $("decisionFlow").querySelectorAll(".regime-details, .volatility-details, .regime-stability-details, .impulse-details").forEach(node => {
-    node.open = openDetails.has(node.classList.contains("volatility-details") ? "volatility" : node.classList.contains("regime-stability-details") ? "regime_stability" : node.classList.contains("impulse-details") ? "impulse" : "regime");
+  $("decisionFlow").querySelectorAll(".regime-details, .volatility-details, .regime-stability-details, .impulse-details, .entry-details, .risk-details").forEach(node => {
+    const key = node.classList.contains("entry-details") ? "entry:" + node.dataset.check : node.classList.contains("risk-details") ? "risk:" + node.dataset.check : node.classList.contains("volatility-details") ? "volatility" : node.classList.contains("regime-stability-details") ? "regime_stability" : node.classList.contains("impulse-details") ? "impulse" : "regime";
+    node.open = openDetails.has(key);
   });
 
   let summaryState = "idle";
