@@ -42,6 +42,11 @@
 .flow-check p{font-size:10px;color:var(--muted);margin:2px 0 0;overflow-wrap:anywhere}
 .flow-check em{font-size:8px;font-style:normal;font-weight:900;letter-spacing:.35px;color:var(--muted)}
 .flow-check.pass em{color:var(--green)}.flow-check.wait em{color:var(--amber)}.flow-check.blocked em{color:var(--red)}
+.flow-math{grid-column:2 / 4;margin-top:5px;padding:7px 8px;border-left:2px solid #40536d;background:#0c1420;border-radius:0 6px 6px 0;min-width:0}
+.flow-math .math-label{display:block;color:var(--muted);font-size:8px;letter-spacing:.55px;text-transform:uppercase;margin:2px 0}
+.flow-math code{display:block;color:#dce8f8;font:10px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:normal;overflow-wrap:anywhere}
+.flow-math .math-result{color:var(--green)}
+
 .flow-stage.waiting{animation:structural-wait-pulse 1.25s ease-in-out infinite;border-color:#a8863c}
 .flow-stage.blocked{animation:structural-blocked-pulse 1.15s ease-in-out infinite;border-color:var(--red)}
 .flow-summary{margin-top:12px;padding:11px 13px;border-radius:9px;border:1px solid #34445a;background:#111a26;font-size:11px}
@@ -241,7 +246,8 @@ function flowCheckMarkup(check, state, displayName) {
     : state === "wait" ? "wait"
     : state === "blocked" ? "blocked" : "idle";
   const tag = css === "pass" ? "PASS" : css === "wait" ? "WAIT" : css === "blocked" ? "BLOCKED" : "NOT REACHED";
-  return `<div class="flow-check ${css}"><span class="flow-check-dot"></span><div><strong>${esc(label)}</strong><p>${esc(detail)}</p></div><em>${tag}</em></div>`;
+  const math = check.calculation || "";
+  return `<div class="flow-check ${css}"><span class="flow-check-dot"></span><div><strong>${esc(label)}</strong><p>${esc(detail)}</p></div><em>${tag}</em>${math}</div>`;
 }
 function orderedEntryFlowChecks(checks) {
   const byName = Object.fromEntries(checks.filter(item => item && item.name).map(item => [item.name, item]));
@@ -281,6 +287,90 @@ function flowStageMarkup(title, stageResult, checks, fallback, forcedState) {
     <div class="flow-checks">${checkMarkup}</div>
   </section>`;
 }
+function riskCalculationMarkup(check, risk, decision) {
+  const inputs = decision.features?.risk_calculation_inputs || {};
+  const daily = decision.features?.daily_risk || {};
+  const n = value => typeof value === "number" && Number.isFinite(value) ? value : null;
+  const f = value => value === null ? "N/A" : Number(value).toLocaleString(undefined, {maximumFractionDigits: 6});
+  const row = (label, formula, calculation, result) =>
+    `<div class="flow-math"><span class="math-label">${esc(label)} · Formula</span><code>${esc(formula)}</code><span class="math-label">Live calculation</span><code>${esc(calculation)}</code>${result ? `<code class="math-result">${esc(result)}</code>` : ""}</div>`;
+  const name = String(check?.name || "").toLowerCase();
+  const balance = n(inputs.account_balance);
+  const requestedPct = n(inputs.risk_percent);
+  const effectivePct = n(risk.risk_percent);
+  const stopPoints = n(risk.stop_points);
+  const pointValue = n(inputs.point_value_per_lot);
+  const budget = n(risk.risk_budget);
+  const volume = n(risk.volume);
+  const rawVolume = budget !== null && stopPoints > 0 && pointValue > 0 ? budget / (stopPoints * pointValue) : null;
+  const tpPoints = n(inputs.take_profit_points);
+  const rr = n(risk.reward_risk);
+  const stopPrice = n(risk.stop_price);
+  const setup = stage(decision, "opportunities").setup || {};
+  const atr = n(setup.atr);
+  const invalidation = n(setup.invalidation_price);
+  const dailyLoss = n(daily.loss_percent);
+  const openingBalance = n(daily.opening_balance);
+  const equity = n(daily.current_equity);
+
+  if (name === "stop") {
+    if (stopPrice !== null && risk.stop_source === "STRUCTURAL" && atr !== null && invalidation !== null) {
+      const buffer = n(inputs.stop_buffer_atr);
+      const multiplier = buffer === null ? 0.25 : buffer;
+      const side = String(risk.side || stage(decision, "opportunities").side || "").toUpperCase();
+      const expression = side === "SELL" ? "SL = Invalidation + (ATR × Buffer)" : "SL = Invalidation − (ATR × Buffer)";
+      const calculation = side === "SELL"
+        ? `${f(invalidation)} + (${f(atr)} × ${f(multiplier)}) = ${f(stopPrice)}`
+        : `${f(invalidation)} − (${f(atr)} × ${f(multiplier)}) = ${f(stopPrice)}`;
+      return row("Stop loss", expression, calculation, `Stop distance = ${f(stopPoints)} points · Stop price = ${f(stopPrice)}`);
+    }
+    return row("Stop distance", "StopPoints = |EntryPrice − StopLoss| ÷ Point",
+      stopPoints === null ? "N/A — risk stage did not return stop_points" : `Django-calculated stop distance = ${f(stopPoints)} points`,
+      stopPrice === null ? "Stop price: N/A" : `Stop price = ${f(stopPrice)}`);
+  }
+  if (name === "sizing") {
+    const budgetLine = budget !== null && balance !== null && effectivePct !== null
+      ? `${f(balance)} × ${f(effectivePct)} ÷ 100 = ${f(budget)}`
+      : "N/A — Django did not return all sizing values";
+    const volumeLine = rawVolume !== null
+      ? `${f(budget)} ÷ (${f(stopPoints)} × ${f(pointValue)}) = ${f(rawVolume)} lots before broker-step rounding`
+      : "N/A — budget, stop points or point value unavailable";
+    const step = n(inputs.volume_step);
+    const rounded = volume !== null && step !== null
+      ? `Approved volume = ${f(volume)} lots (step ${f(step)}; broker limits applied by Django)`
+      : `Approved volume = ${f(volume)} lots`;
+    return row("Risk budget", "RiskBudget = Balance × EffectiveRiskPercent ÷ 100", budgetLine,
+      volumeLine + " · " + rounded);
+  }
+  if (name === "reward_risk") {
+    const line = tpPoints !== null && stopPoints !== null && stopPoints > 0
+      ? `${f(tpPoints)} ÷ ${f(stopPoints)} = ${f(rr)}`
+      : "N/A — take-profit points or stop points unavailable";
+    return row("Reward / risk", "RR = TakeProfitDistance ÷ StopLossDistance", line,
+      rr === null ? "Django RR result: N/A" : `Django RR = ${f(rr)} · minimum required is enforced by Django`);
+  }
+  if (name === "daily_loss") {
+    const line = openingBalance !== null && equity !== null && dailyLoss !== null
+      ? `max(0, (${f(openingBalance)} − ${f(equity)}) ÷ ${f(openingBalance)} × 100) = ${f(dailyLoss)}%`
+      : `Server-calculated daily loss = ${f(dailyLoss)}%`;
+    return row("Daily loss", "DailyLoss% = max(0, (OpeningBalance − CurrentEquity) ÷ OpeningBalance × 100)", line,
+      check.detail || "Limit evaluation is performed by Django");
+  }
+  if (name === "portfolio_risk") {
+    const openRisk = n(inputs.open_risk_percent);
+    return row("Portfolio exposure", "AvailableHeadroom = MaxTotalRiskPercent − OpenRiskPercent",
+      openRisk === null ? "N/A — open risk percentage was not supplied" : `${f(openRisk)}% open risk · ${check.detail || "headroom evaluated by Django"}`,
+      "Portfolio limit decision remains authoritative in Django");
+  }
+  if (name === "stop_below_broker_minimum") {
+    const minStop = n(inputs.stop_level_points);
+    return row("Broker minimum stop", "StopPoints ≥ BrokerMinimumStopPoints",
+      stopPoints !== null && minStop !== null ? `${f(stopPoints)} ≥ ${f(minStop)} points` : "N/A — broker minimum or stop distance unavailable",
+      check.detail || "Broker stop-level validation");
+  }
+  return "";
+}
+
 function renderDecisionFlow(decision) {
   const opportunity = stage(decision, "opportunities");
   const timing = stage(decision, "entry_timing");
@@ -290,7 +380,10 @@ function renderDecisionFlow(decision) {
   const riskReached = timingReached && timing.approved === true;
   const oppChecks = stageChecks(opportunity);
   const timingChecks = stageChecks(timing);
-  const riskChecks = stageChecks(risk);
+  const riskChecks = stageChecks(risk).map(item => ({
+    ...item,
+    calculation: riskCalculationMarkup(item, risk, decision)
+  }));
 
   const opportunityMarkup = flowStageMarkup("01 · OPPORTUNITY", opportunity, oppChecks,
     "Opportunity detector did not return individual checks.", oppState);
