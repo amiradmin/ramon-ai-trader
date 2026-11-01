@@ -79,7 +79,8 @@
 .regime-result{padding:6px 7px;border-radius:5px;background:#111a26;font-weight:800!important}
 
 /* Individual, keyboard-accessible tooltips for the live Regime calculation */
-.regime-term{position:relative;display:inline;color:#dce8f8;border-bottom:1px dotted rgba(126,170,255,.75);cursor:help;outline:none;z-index:1}
+.regime-term{position:relative;display:inline-flex;align-items:center;gap:4px;color:#dce8f8;border-bottom:1px dotted rgba(126,170,255,.75);cursor:help;outline:none;z-index:1}
+.regime-term>span{color:var(--blue);font-size:.9em;font-weight:900}
 .regime-term:hover,.regime-term:focus-visible{color:#fff;border-bottom-color:var(--blue);z-index:40}
 .regime-term:focus-visible{outline:2px solid rgba(126,170,255,.55);outline-offset:3px;border-radius:2px}
 .regime-term:after{content:attr(data-tooltip);position:absolute;z-index:60;left:0;top:calc(100% + 7px);width:min(290px,75vw);padding:10px 11px;border:1px solid #526783;border-radius:8px;background:#050a11;color:#edf3fb;font:500 10px/1.55 Inter,ui-sans-serif,system-ui,sans-serif;white-space:normal;text-align:left;box-shadow:0 10px 28px rgba(0,0,0,.5);opacity:0;visibility:hidden;pointer-events:none;transform:translateY(-3px);transition:opacity .12s ease,transform .12s ease}
@@ -573,7 +574,7 @@ function opportunityRegimeCalculation(check, opportunity) {
   const metric = (label, value, passed, suffix = "") =>
     `<div class="regime-metric"><span>${esc(label)}</span><code class="regime-value ${state(passed)}">${esc(value)}${esc(suffix)}</code><b class="regime-verdict ${state(passed)}">${passed === null ? "N/A" : passed ? "PASS" : "FAIL"}</b></div>`;
   const term = (name, description, alignRight = false) =>
-    `<span class="regime-term${alignRight ? " align-right" : ""}" tabindex="0" role="note" aria-label="${esc(name + ": " + description)}" data-tooltip="${esc(description)}">${esc(name)}</span>`;
+    `<span class="regime-term${alignRight ? " align-right" : ""}" tabindex="0" role="note" aria-label="${esc(name + ": " + description)}" data-tooltip="${esc(description)}">${esc(name)}<span aria-hidden="true">ⓘ</span></span>`;
   const adxTip = "ADX(14) measures trend strength, not direction. Django treats ADX ≥ 22 as trending and ADX < 18 as ranging evidence. Values from 18 to below 22 are a transition zone; the final label also depends on EMA bias and confirmed swing structure.";
   const emaTip = "EMA bias is directional only when all conditions agree. BULL: EMA20 − EMA50 ≥ 0.3 ATR, EMA50 slope over 10 bars > 0, and close > EMA50 − 0.5 ATR. BEAR is mirrored: separation ≤ −0.3 ATR, slope < 0, and close < EMA50 + 0.5 ATR. Otherwise the bias is NEUTRAL.";
   const structureTip = "Django uses confirmed swing highs and lows (3 bars on each side by default). BULLISH requires a Higher High AND Higher Low; BEARISH requires a Lower High AND Lower Low. Otherwise structure is MIXED, or UNKNOWN if there are too few confirmed swings. Opposite-direction structure blocks that regime; MIXED/UNKNOWN does not.";
@@ -997,3 +998,217 @@ function learningCheckText(check) {
   const m = check.metrics || {};
   const value = m.value !== undefined ? fmt(m.value) : val(check, "detail", "reason");
   const status = check.passed === true ? "PASS" : check.passed === false ? "BLOCKED" : "WAIT";
+  return status + " · " + value;
+}
+function renderLearning(decision) {
+  const lesson = learningLessons[activeLearningLesson];
+  $("learningLessonTitle").textContent = lesson.title;
+  $("learningLessonBody").innerHTML = lesson.body;
+  document.querySelectorAll(".learning-tab").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.lesson === activeLearningLesson)));
+  const opportunity = stage(decision, "opportunities");
+  const timing = stage(decision, "entry_timing");
+  const risk = stage(decision, "risk_management");
+  const items = activeLearningLesson === "opportunity" ? [
+    ["Market regime", learningCheckText(learningCheck(decision,"opportunities","regime")),"Direction and structure"],
+    ["Volatility", learningCheckText(learningCheck(decision,"opportunities","volatility")),"ATR relative to recent median"],
+    ["Impulse", learningCheckText(learningCheck(decision,"opportunities","impulse")),"Directional leg ÷ ATR"],
+    ["Regime stability", learningCheckText(learningCheck(decision,"opportunities","regime_stability")),"Recent regime consistency"]
+  ] : activeLearningLesson === "entry" ? [
+    ["M15 opportunity", opportunity.approved === true ? "APPROVED" : opportunity.approved === false ? "NOT APPROVED" : "Not supplied","Upstream opportunity gate"],
+    ["Entry timing", learningCheckText(learningCheck(decision,"entry_timing","confirmation")),"Actual Django check, if supplied"],
+    ["Entry quality", fmt(val(timing,"quality")),"Django timing-stage output"],
+    ["Spread", fmt(val(timing,"spread_points")),"Broker points; unavailable if not supplied"]
+  ] : activeLearningLesson === "risk" ? [
+    ["Risk stage", fmt(val(risk,"status")),"Actual Django risk verdict"],
+    ["Stop check", learningCheckText(learningCheck(decision,"risk_management","stop")),"Stop-loss validation"],
+    ["Reward / risk", learningCheckText(learningCheck(decision,"risk_management","reward_risk")),"Configured R:R gate"],
+    ["Daily loss", learningCheckText(learningCheck(decision,"risk_management","daily_loss")),"Daily loss protection"]
+  ] : [
+    ["Decision ID", fmt(val(decision,"decision_id")),"Immutable decision reference"],
+    ["Model version", fmt(val(decision,"model_version")),"Model provenance"],
+    ["Decision time (UTC)", utc(decision.created_at),"Saved Django timestamp"],
+    ["Outcome record", "Not linked in this feed","No realized R/P&L inferred"]
+  ];
+  $("learningLiveValues").innerHTML = items.map(([label,value,note]) => { const valueText = String(value); const valueClass = valueText.startsWith("PASS") ? "pass" : valueText.startsWith("BLOCKED") ? "blocked" : valueText.startsWith("WAIT") ? "wait" : ""; return '<div class="learning-live"><span>'+esc(label)+'</span><strong class="'+valueClass+'">'+esc(valueText)+'</strong><small>'+esc(note)+'</small></div>'; }).join("");
+  const created = decision.created_at ? new Date(decision.created_at) : null;
+  const ageSeconds = created && Number.isFinite(created.getTime()) ? Math.max(0,Math.floor((Date.now()-created.getTime())/1000)) : null;
+  const feed = $("learningFeedStatus");
+  feed.className = "learning-status " + (ageSeconds !== null && ageSeconds <= 90 ? "pass" : "wait");
+  feed.textContent = ageSeconds === null ? "TIMESTAMP UNAVAILABLE" : ageSeconds <= 90 ? "RECENT DJANGO DECISION" : "LAST SAVED DECISION · " + Math.floor(ageSeconds/60) + " MIN AGO";
+  $("learningLiveNote").textContent = "Decision timestamp: " + (created ? utc(decision.created_at) : "unavailable") + ". Dashboard refreshes every 10 seconds. A saved decision is not a tick-by-tick candle feed.";
+}
+document.querySelectorAll(".learning-tab").forEach(button => button.addEventListener("click", () => {
+  activeLearningLesson = button.dataset.lesson;
+  if (window.latestLearningDecision) renderLearning(window.latestLearningDecision);
+}));
+
+function renderRisk(decision) {
+  const risk = stage(decision, "risk_management");
+  const timing = stage(decision, "entry_timing");
+  const checks = Array.isArray(risk.checks) ? risk.checks : [];
+  const check = name => checks.find(item => item && item.name === name);
+  const stopCheck = check("stop");
+  const rrCheck = check("reward_risk");
+  const dailyCheck = check("daily_loss");
+  const newsCheck = check("news_guard");
+  const duplicateCheck = check("duplicate_position");
+  $("riskBudget").textContent = fmt(val(risk, "risk_budget"));
+  $("dailyLossLimit").textContent = dailyCheck ? dailyCheck.detail : "Unavailable";
+  $("rrGate").textContent = rrCheck ? rrCheck.detail : "Unavailable";
+  $("stopRequired").textContent = stopCheck
+    ? `${stopCheck.passed === true ? "Passed" : "Failed"} · ${fmt(stopCheck.detail)}`
+    : "Unavailable";
+  $("spreadStatus").textContent = fmt(val(timing, "spread_points")) === "Unavailable"
+    ? "Unavailable" : `${fmt(timing.spread_points)} points`;
+  $("newsGuard").textContent = newsCheck ? newsCheck.detail : "Unavailable";
+  $("duplicateCheck").textContent = duplicateCheck ? duplicateCheck.detail : "Unavailable";
+  $("riskBar").style.width = "0%";
+}
+
+let scannerDecisions = [];
+let scannerPage = 1;
+let scannerPageSize = 10;
+
+function renderOpportunityTable() {
+  const sideFilter = $("sideFilter").value;
+  const stateFilter = $("stateFilter").value;
+  const filtered = scannerDecisions
+    .map((decision, index) => ({decision, index}))
+    .filter(({decision}) => {
+      const sideMatch = sideFilter === "all" || direction(decision) === sideFilter;
+      const stateMatch = stateFilter === "all" || stateOf(decision) === stateFilter;
+      return sideMatch && stateMatch;
+    });
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / scannerPageSize));
+  scannerPage = Math.min(Math.max(1, scannerPage), pageCount);
+  const start = (scannerPage - 1) * scannerPageSize;
+  const pageItems = filtered.slice(start, start + scannerPageSize);
+
+  $("opportunities").innerHTML = !scannerDecisions.length
+    ? '<tr><td colspan="9">No saved decisions available.</td></tr>'
+    : pageItems.length
+      ? pageItems.map(({decision, index}) => renderDecisionRow(decision, index)).join("")
+      : '<tr><td colspan="9">No opportunities match the selected filters.</td></tr>';
+
+  $("scannerPagination").innerHTML = `
+    <span>Showing ${filtered.length ? start + 1 : 0}–${Math.min(start + scannerPageSize, filtered.length)} of ${filtered.length} matching decisions</span>
+    <div class="pagination-controls">
+      <label for="scannerPageSize">Rows per page</label>
+      <select id="scannerPageSize" aria-label="Rows per page">
+        <option value="10" ${scannerPageSize === 10 ? "selected" : ""}>10</option>
+        <option value="25" ${scannerPageSize === 25 ? "selected" : ""}>25</option>
+        <option value="50" ${scannerPageSize === 50 ? "selected" : ""}>50</option>
+      </select>
+      <span>Page ${scannerPage} of ${pageCount}</span>
+      <button class="btn" id="scannerPrev" type="button" ${scannerPage <= 1 ? "disabled" : ""}>Previous</button>
+      <button class="btn" id="scannerNext" type="button" ${scannerPage >= pageCount ? "disabled" : ""}>Next</button>
+    </div>`;
+}
+
+function filterRows(resetPage = false) {
+  if (resetPage) scannerPage = 1;
+  renderOpportunityTable();
+}
+$("sideFilter").addEventListener("change", () => filterRows(true));
+$("stateFilter").addEventListener("change", () => filterRows(true));
+$("reset").addEventListener("click", () => {
+  $("sideFilter").value = "all";
+  $("stateFilter").value = "all";
+  filterRows(true);
+});
+$("scannerPagination").addEventListener("click", event => {
+  if (event.target.id === "scannerPrev" && scannerPage > 1) {
+    scannerPage -= 1;
+    renderOpportunityTable();
+  } else if (event.target.id === "scannerNext") {
+    scannerPage += 1;
+    renderOpportunityTable();
+  }
+});
+$("scannerPagination").addEventListener("change", event => {
+  if (event.target.id !== "scannerPageSize") return;
+  scannerPageSize = Number(event.target.value) || 10;
+  scannerPage = 1;
+  renderOpportunityTable();
+});
+$("opportunities").addEventListener("click", event => {
+  const button = event.target.closest(".expand");
+  if (!button) return;
+  const detail = $(button.dataset.id);
+  detail.classList.toggle("open");
+  button.textContent = detail.classList.contains("open") ? "Hide" : "View";
+});
+
+async function refresh() {
+  const connection = $("connection");
+  try {
+    const response = await fetch("/api/ea/v1/dashboard-data", {cache: "no-store"});
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    if (!data.ok || !Array.isArray(data.decisions)) {
+      throw new Error("Unexpected dashboard data format");
+    }
+    const decisions = data.decisions;
+    connection.textContent = "DJANGO · FEED CONNECTED";
+
+    $("statDecisions").textContent = fmt(decisions.length);
+    $("statSetups").textContent = fmt(decisions.filter(d =>
+      stage(d, "opportunities").approved === true).length);
+
+    if (!decisions.length) {
+      $("status").innerHTML = "<strong>No saved decisions yet.</strong> Waiting for a decision record from Django.";
+      $("opportunities").innerHTML = '<tr><td colspan="9">No saved decisions available.</td></tr>';
+      scannerDecisions = [];
+      scannerPage = 1;
+      renderOpportunityTable();
+      window.latestLearningDecision = null;
+      $("learningFeedStatus").className = "learning-status wait";
+      $("learningFeedStatus").textContent = "WAITING FOR DECISION";
+      $("learningLiveValues").innerHTML = '<div class="small">No saved Django decision is available.</div>';
+      $("learningLiveNote").textContent = "No live lesson evidence is available until Django saves a decision.";
+      $("decisionFlow").innerHTML = '<div class="small">No saved decision stages are available yet.</div>';
+      $("flowSummary").className = "flow-summary";
+      $("flowSummary").textContent = "Waiting for the first Django decision.";
+      $("statEntryQuality").textContent = "Unavailable";
+      $("statRisk").textContent = "Unavailable";
+      ["riskBudget", "dailyLossLimit", "rrGate", "stopRequired", "spreadStatus", "newsGuard", "duplicateCheck"]
+        .forEach(id => $(id).textContent = "Unavailable");
+      return;
+    }
+
+    const latest = decisions[0];
+    window.latestLearningDecision = latest;
+    renderLearning(latest);
+    renderDecisionFlow(latest);
+    const latestFeatures = latest.features || {};
+    const latestTiming = stage(latest, "entry_timing");
+    const latestRisk = stage(latest, "risk_management");
+    const approved = latestFeatures.approved === true;
+    const action = val(latest, "action");
+    $("status").innerHTML = `
+      <div class="brand">
+        <span class="pill ${approved ? "ready" : "watch"}">${esc(action)}</span>
+        <strong>${esc(latest.symbol)}</strong>
+        <span class="small">Confidence: ${esc(fmt(latest.confidence))}</span>
+      </div>
+      <p><strong>Final decision:</strong> ${approved ? "Approved by pipeline" : "Not approved"}
+      · <strong>Reason:</strong> ${esc(val(latest, "rationale_code"))}</p>
+      <div class="small">Decision ${esc(latest.decision_id)} · Saved ${esc(utc(latest.created_at))}
+      · Approval does not confirm broker execution.</div>`;
+
+    $("statEntryQuality").textContent = fmt(val(latestTiming, "quality"));
+    $("statRisk").textContent = fmt(val(latestRisk, "status"));
+    scannerDecisions = decisions;
+    renderOpportunityTable();
+    renderRisk(latest);
+  } catch (error) {
+    connection.textContent = "DJANGO · FEED ERROR";
+    $("status").innerHTML = `<span class="negative">Could not load decision data: ${esc(error.message)}</span>`;
+  }
+}
+refresh();
+setInterval(refresh, 10000);
+</script>
+</body>
+</html>
