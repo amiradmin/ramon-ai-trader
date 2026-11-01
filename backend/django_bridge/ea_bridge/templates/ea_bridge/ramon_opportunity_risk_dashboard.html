@@ -46,8 +46,8 @@
 @media(max-width:620px){.flow-grid{grid-template-columns:1fr;gap:18px}.flow-stage:not(:last-child):after{content:"↓";right:auto;left:50%;top:auto;bottom:-19px;transform:translateX(-50%)}}
 @media(prefers-reduced-motion:reduce){.flow-stage.waiting,.flow-stage.blocked{animation:none}}
 
-.structural-grid{display:grid;grid-template-columns:1fr;gap:10px}.structural-item{display:flex;gap:10px;align-items:flex-start;padding:12px;background:#0d141e;border:1px solid #243247;border-radius:10px;min-width:0}.structural-item.waiting{animation:structural-wait-pulse 1.25s ease-in-out infinite;border-color:#a8863c}.structural-item.blocked{animation:structural-blocked-pulse 1.15s ease-in-out infinite;border-color:#ff7185}@keyframes structural-wait-pulse{0%,100%{box-shadow:0 0 0 rgba(244,197,106,0);background:#0d141e}50%{box-shadow:0 0 14px rgba(244,197,106,.22);background:#211d14}}@keyframes structural-blocked-pulse{0%,100%{box-shadow:0 0 0 rgba(255,113,133,0);background:#0d141e}50%{box-shadow:0 0 16px rgba(255,113,133,.24);background:#28151d}}.structural-metrics{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}.structural-metric{display:inline-flex;gap:4px;align-items:center;padding:3px 7px;border:1px solid #33445b;border-radius:6px;background:#121d2a;color:#cbd7e8;font-size:10px;overflow-wrap:anywhere}.structural-metric b{color:#8cbbff;font-weight:800}.structural-metric .metric-value{color:#edf3fb;font-variant-numeric:tabular-nums}.structural-metric .metric-value.value-bad{color:var(--red);font-weight:900}.structural-metric .metric-value.threshold-good{color:var(--green);font-weight:900}@media(prefers-reduced-motion:reduce){.structural-item.waiting,.structural-item.blocked{animation:none}.structural-item.waiting{border-color:#f4c56a}.structural-item.blocked{border-color:var(--red)}}.structural-mark{flex:0 0 72px;text-align:center;border-radius:7px;padding:4px 6px;font-size:10px;font-weight:800;letter-spacing:.3px}.structural-mark.pass{background:#123328;color:var(--green)}.structural-mark.blocked{background:#3a2028;color:var(--red)}.structural-mark.wait{background:#382f1c;color:var(--amber)}.structural-mark.skipped,.structural-mark.unknown{background:#202b39;color:var(--muted)}.structural-copy{min-width:0}.structural-copy strong{display:block;font-size:12px}.structural-copy p{margin:3px 0 0;color:var(--muted);font-size:11px;overflow-wrap:anywhere}.bar{height:7px;border-radius:9px;background:#273244;overflow:hidden;margin-top:7px}.bar i{display:block;height:100%;border-radius:9px;background:linear-gradient(90deg,#4d8dff,#43d6a0)}.timeline{display:grid;gap:13px}.event{display:grid;grid-template-columns:66px 12px 1fr;gap:10px;align-items:start}.event time{color:var(--muted);font-size:11px;padding-top:2px}.event .line{height:100%;position:relative}.event .line:before{content:"";position:absolute;top:5px;left:3px;width:6px;height:6px;border-radius:50%;background:var(--blue)}.event .line:after{content:"";position:absolute;top:16px;bottom:-12px;left:5px;width:2px;background:#2a394e}.event:last-child .line:after{display:none}.event strong{font-size:12px}.event p{margin:3px 0 0;color:var(--muted);font-size:11px}.footer{color:#69788c;font-size:11px;text-align:center;padding:24px 0 6px}
-@media(max-width:900px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.lower{grid-template-columns:1fr}.detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.structural-grid{grid-template-columns:1fr}.wrap{padding:17px}}
+.bar{height:7px;border-radius:9px;background:#273244;overflow:hidden;margin-top:7px}.bar i{display:block;height:100%;border-radius:9px;background:linear-gradient(90deg,#4d8dff,#43d6a0)}.timeline{display:grid;gap:13px}.event{display:grid;grid-template-columns:66px 12px 1fr;gap:10px;align-items:start}.event time{color:var(--muted);font-size:11px;padding-top:2px}.event .line{height:100%;position:relative}.event .line:before{content:"";position:absolute;top:5px;left:3px;width:6px;height:6px;border-radius:50%;background:var(--blue)}.event .line:after{content:"";position:absolute;top:16px;bottom:-12px;left:5px;width:2px;background:#2a394e}.event:last-child .line:after{display:none}.event strong{font-size:12px}.event p{margin:3px 0 0;color:var(--muted);font-size:11px}.footer{color:#69788c;font-size:11px;text-align:center;padding:24px 0 6px}
+@media(max-width:900px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.lower{grid-template-columns:1fr}.detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.wrap{padding:17px}}
 @media(max-width:480px){.stats{grid-template-columns:1fr 1fr}.stat-value{font-size:22px}.card{padding:14px}.title{font-size:22px}.detail-grid{grid-template-columns:1fr 1fr}}
 </style>
 </head>
@@ -77,12 +77,6 @@
     <div class="flow-note">The diagram is read-only. A passed strategy pipeline is not broker authorization and does not mean an MT5 order was sent.</div>
   </div>
 </section>
-
-<div class="section-head"><div><h2>Structural strategy checklist</h2><p>Live results from the latest saved opportunity-stage evaluation. Not-yet-run checks are never shown as passed.</p></div><div class="small" id="structuralMeta">Waiting for structural evaluation…</div></div>
-<div class="card" style="margin-bottom:20px">
-  <div id="structuralSummary" class="small" style="margin-bottom:12px">Loading structural checks…</div>
-  <div id="structuralChecklist" class="structural-grid"><div class="small">Waiting for Django decision data…</div></div>
-</div>
 
 <div class="section-head"><div><h2>Opportunity scanner</h2><p>Review the setup, planned entry window, invalidation and trade management.</p></div>
 <div class="filters"><select id="sideFilter" aria-label="Filter direction"><option value="all">All directions</option><option value="BUY">Buy</option><option value="SELL">Sell</option><option value="WATCH">Watch</option></select><select id="stateFilter" aria-label="Filter status"><option value="all">All statuses</option><option value="READY">Ready</option><option value="CONDITIONAL">Conditional</option><option value="WAIT">Wait</option></select><button class="btn" id="reset">Reset filters</button></div></div>
@@ -333,121 +327,6 @@ function renderDecisionFlow(decision) {
   $("flowSummary").innerHTML = `<strong>ACTIVE PROCESS STATUS:</strong> ${esc(summaryText)}`;
 }
 
-function renderStructuralChecklist(decision) {
-  const features = decision.features || {};
-  const opportunity = stage(decision, "opportunities");
-  const timing = stage(decision, "entry_timing");
-  const risk = stage(decision, "risk_management");
-  const checks = [opportunity, timing, risk].flatMap(section => Array.isArray(section.checks) ? section.checks : []);
-  const check = name => checks.find(item => item && item.name === name);
-  const structural = features.opportunity_input_path === "completed_ohlc_structural";
-  const resultStatus = String(val(opportunity, "status")).toUpperCase();
-  const metricMarkup = found => {
-    const groups = [
-      {label:"Value", keys:["value","actual","current","observed","measured","score"]},
-      {label:"Threshold", keys:["threshold","expected","required","limit","target"]},
-      {label:"Factor", keys:["factor","weight","multiplier","indicator","metric"]}
-    ];
-    const chips = [];
-    found.forEach(item => {
-      const source = item.metrics && typeof item.metrics === "object"
-        ? {...item, ...item.metrics}
-        : item;
-      const values = groups.map(group => {
-        const key = group.keys.find(candidate =>
-          source[candidate] !== undefined && source[candidate] !== null && source[candidate] !== ""
-        );
-        if (!key) return null;
-      const css = group.label === "Threshold" ? "threshold-good"
-        : group.label === "Value" && item.passed !== true ? "value-bad" : "";
-      return {label:group.label, value:source[key], css};
-      }).filter(Boolean);
-      if (!values.length) return;
-      const prefix = item.name ? `<b>${esc(item.name)}</b>` : "";
-      chips.push(`<span class="structural-metric">${prefix}${values.map(entry =>
-        `<span>${esc(entry.label)}: <span class="metric-value ${entry.css}">${esc(fmt(entry.value))}</span></span>`
-      ).join("")}</span>`);
-    });
-    return chips.length ? `<div class="structural-metrics">${chips.join("")}</div>` : "";
-  };
-  const stateFor = names => {
-    const found = names.map(check).filter(Boolean);
-    const metrics = metricMarkup(found);
-    if (!found.length) return {label:"NOT RUN", css:"unknown", detail:"No result for this check in the latest evaluation.", metrics};
-    const failed = found.find(item => item.passed !== true);
-    if (failed) return {
-      label: resultStatus === "DEFERRED" ? "WAIT" : "BLOCKED",
-      css: resultStatus === "DEFERRED" ? "wait" : "blocked",
-      detail: failed.detail || "Check did not pass.",
-      metrics
-    };
-    if (found.length !== names.length) return {label:"PARTIAL", css:"unknown", detail:"Only part of this check group has run.", metrics};
-    return {label:"PASS", css:"pass", detail:found.map(item => item.detail).filter(Boolean).join(" · "), metrics};
-  };
-  const dataCheck = check("data_valid");
-  const regime = opportunity.regime;
-  const items = [
-    {title:"1. Validate candle data", ...stateFor(["data_valid"])},
-    {title:"2. XAUUSD symbol filter", ...(check("symbol") ? stateFor(["symbol"]) : (
-      structural && String(decision.symbol || "").toUpperCase().startsWith("XAUUSD")
-        ? {label:"PASS",css:"pass",detail:"Symbol matches the configured XAUUSD prefix."}
-        : {label:"NOT RUN",css:"unknown",detail:"Symbol-filter result is unavailable."}
-    ))},
-    {title:"3. Newest candle closed", ...stateFor(["bar_complete"])},
-    {title:"4. Calculate EMA, ATR, ADX, RSI and confirmed swings", ...(
-      dataCheck?.passed === true && regime
-        ? {label:"PASS",css:"pass",detail:"Indicator/regime calculation completed; ADX, EMA structure and slope are present. RSI/ATR checks appear in later gates when reached."}
-        : stateFor(["data_valid","regime"])
-    )},
-    {title:"5. Classify market regime", ...stateFor(["regime"])},
-    {title:"6. Stable regime and acceptable volatility", ...stateFor(["regime_stability","volatility"])},
-    {title:"7. Impulse and EMA-zone pullback", ...stateFor(["impulse","pullback_depth","value_zone"])},
-    {title:"8. Resumption confirmation", ...stateFor(["resumption"])},
-    {title:"9. Momentum and weighted score", ...stateFor(["momentum","score"])},
-    {title:"10. Duplicate signal protection", ...stateFor(["duplicate"])},
-    {title:"11. Optional ARIMA/SARIMA confirmation", ...(check("forecast") ? stateFor(["forecast"]) : (
-      opportunity.forecasting
-        ? {label:"RESULT",css:"unknown",detail:fmt(opportunity.forecasting)}
-        : {label:"SKIPPED",css:"skipped",detail:"Optional forecast confirmation was not enabled for this evaluation."}
-    ))},
-    {title:"12. Entry timing and trigger", ...(
-      ["entry_timing","entry_window","entry_trigger","signal_freshness"].some(name => check(name))
-        ? stateFor(["entry_timing","entry_window","entry_trigger","signal_freshness"].filter(name => check(name)))
-        : {label:timing.status ? String(timing.status).toUpperCase() : "NOT RUN",
-           css:timing.approved === true ? "pass" : /BLOCK|FAIL|REJECT/i.test(String(timing.status || "")) ? "blocked" : "unknown",
-           detail:timing.explanation || "Entry timing/trigger result was not supplied by this evaluation."}
-    )},
-    {title:"13. Stop-loss placement", ...(check("stop") ? stateFor(["stop"]) : {label:"NOT RUN",css:"unknown",detail:"Stop-loss validation was not returned by the risk stage."})},
-    {title:"14. Minimum reward-to-risk", ...(check("reward_risk") ? stateFor(["reward_risk"]) : {label:"NOT RUN",css:"unknown",detail:"Reward-to-risk validation was not returned by the risk stage."})},
-    {title:"15. Position sizing and exposure", ...(
-      ["position_size","position_sizing","exposure"].some(name => check(name))
-        ? stateFor(["position_size","position_sizing","exposure"].filter(name => check(name)))
-        : {label:"NOT RUN",css:"unknown",detail:"Position size/exposure is not assumed safe without an explicit risk-stage result."}
-    )},
-    {title:"16. Daily loss and drawdown limits", ...(check("daily_loss") ? stateFor(["daily_loss"]) : {label:"NOT RUN",css:"unknown",detail:"Daily loss/drawdown gate was not returned by the risk stage."})},
-    {title:"17. Spread, news and duplicate-position guards", ...(
-      ["spread","news_guard","duplicate_position"].some(name => check(name))
-        ? stateFor(["spread","news_guard","duplicate_position"].filter(name => check(name)))
-        : {label:"NOT RUN",css:"unknown",detail:"Spread, news and duplicate-position checks are not assumed passed when results are missing."}
-    )},
-    {title:"18. Broker execution authorization", label:"READ ONLY", css:"unknown",
-      detail:"This dashboard is a read-only monitor. A green checklist never means an order was sent or that trading is authorized."}
-  ];
-  $("structuralMeta").textContent = structural
-    ? `Structural candles: ${fmt(features.structural_candle_count)} · ${esc(decision.symbol)} · ${esc(val(opportunity,"status"))}`
-    : "Legacy input path — structural checks unavailable";
-  $("structuralSummary").innerHTML = structural
-    ? `Latest opportunity: <strong>${esc(val(opportunity,"reason"))}</strong> · ${esc(val(opportunity,"explanation"))}`
-    : "This decision was not evaluated from candle structure. The checklist is intentionally not marked as passed.";
-  $("structuralChecklist").innerHTML = items.map(item =>
-    `<div class="structural-item ${item.css === "wait" ? "waiting" : item.css === "blocked" ? "blocked" : ""}"><span class="structural-mark ${item.css}">${esc(item.label)}</span><div class="structural-copy"><strong>${esc(item.title)}</strong><p>${esc(item.detail)}</p>${item.metrics || ""}</div></div>`
-  ).join("");
-  if (!structural) {
-    $("structuralChecklist").insertAdjacentHTML("afterbegin",
-      '<div class="structural-item"><span class="structural-mark unknown">UNAVAILABLE</span><div class="structural-copy"><strong>Structural path not active for this decision</strong><p>Use a new decision after deploying the candle-based pipeline update.</p></div></div>');
-  }
-}
-
 function renderRisk(decision) {
   const risk = stage(decision, "risk_management");
   const timing = stage(decision, "entry_timing");
@@ -528,7 +407,6 @@ async function refresh() {
 
     const latest = decisions[0];
     renderDecisionFlow(latest);
-    renderStructuralChecklist(latest);
     const latestFeatures = latest.features || {};
     const latestTiming = stage(latest, "entry_timing");
     const latestRisk = stage(latest, "risk_management");
