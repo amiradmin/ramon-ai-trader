@@ -769,7 +769,7 @@ function renderLearning(decision) {
     ["Decision time (UTC)", utc(decision.created_at),"Saved Django timestamp"],
     ["Outcome record", "Not linked in this feed","No realized R/P&L inferred"]
   ];
-  $("learningLiveValues").innerHTML = items.map(([label,value,note]) => { const valueText = String(value); const valueClass = /^PASS\\b/.test(valueText) ? "pass" : /^BLOCKED\\b/.test(valueText) ? "blocked" : /^WAIT\\b/.test(valueText) ? "wait" : ""; return '<div class="learning-live"><span>'+esc(label)+'</span><strong class="'+valueClass+'">'+esc(valueText)+'</strong><small>'+esc(note)+'</small></div>'; }).join("");
+  $("learningLiveValues").innerHTML = items.map(([label,value,note]) => { const valueText = String(value); const valueClass = valueText.startsWith("PASS") ? "pass" : valueText.startsWith("BLOCKED") ? "blocked" : valueText.startsWith("WAIT") ? "wait" : ""; return '<div class="learning-live"><span>'+esc(label)+'</span><strong class="'+valueClass+'">'+esc(valueText)+'</strong><small>'+esc(note)+'</small></div>'; }).join("");
   const created = decision.created_at ? new Date(decision.created_at) : null;
   const ageSeconds = created && Number.isFinite(created.getTime()) ? Math.max(0,Math.floor((Date.now()-created.getTime())/1000)) : null;
   const feed = $("learningFeedStatus");
