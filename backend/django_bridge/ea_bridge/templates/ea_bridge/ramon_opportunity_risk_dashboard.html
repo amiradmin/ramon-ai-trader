@@ -227,18 +227,50 @@ const stageState = stageResult => {
   const status = String(stageResult.status || "").toUpperCase();
   return status === "DEFERRED" ? "wait" : status === "REJECTED" ? "blocked" : "idle";
 };
-function flowCheckMarkup(check, state) {
-  const label = prettyCheck(check.name);
-  const detail = check.detail || "No diagnostic detail supplied.";
-  const css = state === "pass" ? "pass" : state === "wait" ? "wait" : state === "blocked" ? "blocked" : "idle";
+function flowCheckMarkup(check, state, displayName) {
+  const label = displayName || prettyCheck(check.name);
+  const detail = check.detail || (check.notReached
+    ? "Not evaluated because an earlier entry-timing gate stopped this stage."
+    : "No diagnostic detail supplied.");
+  const css = check.notReached ? "idle"
+    : state === "pass" ? "pass"
+    : state === "wait" ? "wait"
+    : state === "blocked" ? "blocked" : "idle";
   const tag = css === "pass" ? "PASS" : css === "wait" ? "WAIT" : css === "blocked" ? "BLOCKED" : "NOT REACHED";
   return `<div class="flow-check ${css}"><span class="flow-check-dot"></span><div><strong>${esc(label)}</strong><p>${esc(detail)}</p></div><em>${tag}</em></div>`;
+}
+function orderedEntryFlowChecks(checks) {
+  const byName = Object.fromEntries(checks.filter(item => item && item.name).map(item => [item.name, item]));
+  const order = [
+    ["spread_absolute", "Absolute spread limit"],
+    ["freshness", "Signal freshness"],
+    ["invalidation", "Invalidation and minimum risk room"],
+    ["chase", "Price chase protection"],
+    ["spread_volatility", "Spread versus ATR volatility"],
+    ["spread_risk", "Spread versus invalidation risk"],
+    ["quality", "Entry quality"]
+  ];
+  const rows = [];
+  let stopped = false;
+  for (const [name, label] of order) {
+    const item = byName[name];
+    // On a successful evaluation, spread_volatility is appended only after BOTH
+    // the ATR-relative and risk-distance spread gates pass.
+    if (name === "spread_risk" && !item && byName.spread_volatility?.passed === true) continue;
+    if (item) {
+      rows.push({...item, displayName:label});
+      if (item.passed !== true) stopped = true;
+    } else if (stopped) {
+      rows.push({name, displayName:label, notReached:true});
+    }
+  }
+  return rows;
 }
 function flowStageMarkup(title, stageResult, checks, fallback, forcedState) {
   const state = forcedState || stageState(stageResult);
   const stateLabel = state === "pass" ? "PASSED" : state === "wait" ? "WAITING" : state === "blocked" ? "BLOCKED" : "NOT REACHED";
   const checkMarkup = checks.length
-    ? checks.map(item => flowCheckMarkup(item, item.passed === true ? "pass" : (String(stageResult?.status || "").toUpperCase() === "DEFERRED" ? "wait" : "blocked"))).join("")
+    ? checks.map(item => flowCheckMarkup(item, item.passed === true ? "pass" : (String(stageResult?.status || "").toUpperCase() === "DEFERRED" ? "wait" : "blocked"), item.displayName)).join("")
     : `<div class="flow-check idle"><span class="flow-check-dot"></span><div><strong>${esc(fallback || "No checks returned")}</strong><p>${esc(stageResult?.explanation || stageResult?.reason || "This stage has no saved check details.")}</p></div><em>${state === "blocked" ? "BLOCKED" : stateLabel}</em></div>`;
   return `<section class="flow-stage ${state === "wait" ? "waiting" : state === "blocked" ? "blocked" : ""}">
     <div class="flow-stage-head"><div class="flow-stage-title">${esc(title)}</div><span class="flow-state ${state}">${stateLabel}</span></div>
@@ -259,7 +291,7 @@ function renderDecisionFlow(decision) {
   const opportunityMarkup = flowStageMarkup("01 · OPPORTUNITY", opportunity, oppChecks,
     "Opportunity detector did not return individual checks.", oppState);
   const timingMarkup = timingReached
-    ? flowStageMarkup("02 · ENTRY TIMING", timing, timingChecks,
+    ? flowStageMarkup("02 · ENTRY TIMING", timing, orderedEntryFlowChecks(timingChecks),
         "Entry timer returned no individual checks.", stageState(timing))
     : flowStageMarkup("02 · ENTRY TIMING", {}, [], "Waiting for an approved opportunity.", "idle");
   const riskMarkup = riskReached
