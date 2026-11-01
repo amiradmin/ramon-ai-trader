@@ -299,6 +299,21 @@ def decision(request):
             "loss_percent": server_daily_loss_percent,
             "source": "SERVER_BASELINE_EQUITY_DRAWDOWN" if server_daily_loss_percent is not None else "UNAVAILABLE_FAIL_CLOSED",
           },
+          # Read-only inputs for explaining the existing Django risk verdict in the dashboard.
+          # These fields do not participate in, or alter, the decision.
+          "risk_calculation_inputs": {
+            "account_balance": market["account_balance"],
+            "risk_percent": market["risk_percent"],
+            "stop_loss_points": market["stop_loss_points"],
+            "point_value_per_lot": market["point_value_per_lot"],
+            "volume_step": market["volume_step"],
+            "min_volume": market["min_volume"],
+            "max_volume": market["max_volume"],
+            "stop_level_points": market["stop_level_points"],
+            "take_profit_points": market["take_profit_points"],
+            "daily_loss_percent": server_daily_loss_percent,
+            "open_risk_percent": market["open_risk_percent"],
+          },
         }
         record, created = StrategyDecisionRecord.objects.update_or_create(
           decision_id=key,
