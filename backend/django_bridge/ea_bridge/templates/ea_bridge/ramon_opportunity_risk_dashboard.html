@@ -536,11 +536,48 @@ function opportunityRegimeStabilityCalculation(check, opportunity) {
     '</div></details>';
 }
 
+function opportunityImpulseCalculation(check, opportunity) {
+  if (String(check?.name || "").toLowerCase() !== "impulse") return "";
+  const metrics = check.metrics || {};
+  const value = typeof metrics.value === "number" && Number.isFinite(metrics.value) ? metrics.value : null;
+  const threshold = typeof metrics.threshold === "number" && Number.isFinite(metrics.threshold) ? metrics.threshold : 2.0;
+  const passed = check.passed === true ? true : check.passed === false ? false : null;
+  const status = passed === null ? "unknown" : passed ? "pass" : "fail";
+  const fmt = x => x === null ? "N/A" : Number(x).toFixed(3);
+  const metric = (label, shown, ok) => '<div class="regime-metric"><span>' + esc(label) + '</span><code class="regime-value ' + (ok === null ? "unknown" : ok ? "pass" : "fail") + '">' + esc(shown) + '</code><b class="regime-verdict ' + (ok === null ? "unknown" : ok ? "pass" : "fail") + '">' + (ok === null ? "N/A" : ok ? "PASS" : "FAIL") + '</b></div>';
+  const reason = String(check.reason || check.detail || check.message || "");
+  const stillExtending = /still making new extremes|no pullback has started/i.test(reason);
+  const tooSmall = value !== null && value < threshold;
+  const interpretation = stillExtending ? "WAIT: price is still extending to new extremes. A pullback has not started, so the impulse leg cannot yet be finalized." :
+    value === null ? "Django did not expose a numeric impulse/ATR measurement for this check." :
+    tooSmall ? "REJECT: the measured impulse is smaller than the configured minimum." :
+    passed ? "PASS: a confirmed impulse leg meets the minimum size requirement." :
+    "Impulse check did not pass. See the live Django reason above.";
+  return '<details class="flow-math flow-details impulse-details">' +
+    '<summary><span>Impulse calculation · ' + (value === null ? (stillExtending ? "WAIT" : "N/A") : fmt(value) + ' ATR') + '</span><span class="regime-toggle-hint">Show formula & live values <span aria-hidden="true">＋</span></span></summary>' +
+    '<div class="regime-content">' +
+    '<span class="math-label">1 · Impulse definition</span>' +
+    '<code>Impulse size = Trend-direction swing extreme − preceding confirmed opposite swing point</code>' +
+    '<code>Impulse strength (ATR) = Impulse size ÷ Current ATR(14)</code>' +
+    '<code>Minimum required impulse = ' + fmt(threshold) + ' ATR (Django OpportunityDetector configuration)</code>' +
+    '<span class="math-label">2 · Live Django calculation</span>' +
+    metric("Measured impulse", value === null ? "Not available" : fmt(value) + " ATR", passed) +
+    metric("Minimum impulse", fmt(threshold) + " ATR", value === null ? null : value >= threshold) +
+    '<code class="regime-explain">The current check payload exposes the normalized impulse size and threshold, but not the exact swing prices or raw ATR. Those values are not fabricated here.</code>' +
+    '<span class="math-label">3 · Pullback-start condition</span>' +
+    '<code>WAIT if any later completed candle makes an equal or more extreme trend-direction high/low than the candidate swing extreme.</code>' +
+    metric("New extreme / pullback started", stillExtending ? "New extreme detected · pullback not started" : "No extension reported by this check", stillExtending ? false : passed === null ? null : true) +
+    '<span class="math-label">4 · Final interpretation</span>' +
+    '<code class="regime-result ' + status + '">' + esc(interpretation) + '</code>' +
+    '<code class="regime-explain">Swing points are confirmed using the configured pivot window; the detector uses completed M15 candles and does not use future candles.</code>' +
+    '</div></details>';
+}
+
 function renderDecisionFlow(decision) {
   // Preserve the user's expand/collapse choice when the dashboard refreshes.
   const openDetails = new Set(
-    [...$("decisionFlow").querySelectorAll(".regime-details[open], .volatility-details[open], .regime-stability-details[open]")].map(node =>
-      node.classList.contains("volatility-details") ? "volatility" : node.classList.contains("regime-stability-details") ? "regime_stability" : "regime")
+    [...$("decisionFlow").querySelectorAll(".regime-details[open], .volatility-details[open], .regime-stability-details[open], .impulse-details[open]")].map(node =>
+      node.classList.contains("volatility-details") ? "volatility" : node.classList.contains("regime-stability-details") ? "regime_stability" : node.classList.contains("impulse-details") ? "impulse" : "regime")
   );
   const opportunity = stage(decision, "opportunities");
   const timing = stage(decision, "entry_timing");
@@ -556,7 +593,9 @@ function renderDecisionFlow(decision) {
         ? opportunityRegimeStabilityCalculation(item, opportunity)
         : item.name === "volatility"
           ? opportunityVolatilityCalculation(item, opportunity)
-          : ""
+          : item.name === "impulse"
+            ? opportunityImpulseCalculation(item, opportunity)
+            : ""
   }));
   const timingChecks = stageChecks(timing);
   const riskChecks = stageChecks(risk).map(item => ({
@@ -591,8 +630,8 @@ function renderDecisionFlow(decision) {
     : flowStageMarkup("04 · AUTHORIZATION / MT5", {}, [],
         "Downstream execution is held until all upstream stages pass.", "idle");
   $("decisionFlow").innerHTML = opportunityMarkup + timingMarkup + riskMarkup + authMarkup;
-  $("decisionFlow").querySelectorAll(".regime-details, .volatility-details, .regime-stability-details").forEach(node => {
-    node.open = openDetails.has(node.classList.contains("volatility-details") ? "volatility" : node.classList.contains("regime-stability-details") ? "regime_stability" : "regime");
+  $("decisionFlow").querySelectorAll(".regime-details, .volatility-details, .regime-stability-details, .impulse-details").forEach(node => {
+    node.open = openDetails.has(node.classList.contains("volatility-details") ? "volatility" : node.classList.contains("regime-stability-details") ? "regime_stability" : node.classList.contains("impulse-details") ? "impulse" : "regime");
   });
 
   let summaryState = "idle";
