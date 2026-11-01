@@ -574,7 +574,7 @@ function opportunityRegimeCalculation(check, opportunity) {
   const metric = (label, value, passed, suffix = "") =>
     `<div class="regime-metric"><span>${esc(label)}</span><code class="regime-value ${state(passed)}">${esc(value)}${esc(suffix)}</code><b class="regime-verdict ${state(passed)}">${passed === null ? "N/A" : passed ? "PASS" : "FAIL"}</b></div>`;
   const term = (name, description, alignRight = false) =>
-    `<span class="regime-term${alignRight ? " align-right" : ""}" tabindex="0" role="button" aria-label="${esc(name + ": " + description)}" data-tooltip="${esc(description)}">${esc(name)}<span aria-hidden="true">ⓘ</span></span>`;
+    `<span class="regime-term${alignRight ? " align-right" : ""}" tabindex="0" role="note" aria-label="${esc(name + ": " + description)}" data-tooltip="${esc(description)}">${esc(name)}<span aria-hidden="true">ⓘ</span></span>`;
   const adxTip = "ADX(14) measures trend strength, not direction. Django treats ADX ≥ 22 as trending and ADX < 18 as ranging evidence. Values from 18 to below 22 are a transition zone; the final label also depends on EMA bias and confirmed swing structure.";
   const emaTip = "EMA bias is directional only when all conditions agree. BULL: EMA20 − EMA50 ≥ 0.3 ATR, EMA50 slope over 10 bars > 0, and close > EMA50 − 0.5 ATR. BEAR is mirrored: separation ≤ −0.3 ATR, slope < 0, and close < EMA50 + 0.5 ATR. Otherwise the bias is NEUTRAL.";
   const structureTip = "Django uses confirmed swing highs and lows (3 bars on each side by default). BULLISH requires a Higher High AND Higher Low; BEARISH requires a Lower High AND Lower Low. Otherwise structure is MIXED, or UNKNOWN if there are too few confirmed swings. Opposite-direction structure blocks that regime; MIXED/UNKNOWN does not.";
