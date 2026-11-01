@@ -93,6 +93,28 @@
 @media(max-width:900px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.lower{grid-template-columns:1fr}.detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.wrap{padding:17px}}
 @media(max-width:480px){.stats{grid-template-columns:1fr 1fr}.stat-value{font-size:22px}.card{padding:14px}.title{font-size:22px}.detail-grid{grid-template-columns:1fr 1fr}}
 
+
+/* Decision-variable tooltips and reference guide */
+.variable-guide{margin-top:12px;border:1px solid #29384c;border-radius:10px;background:#0c131d;overflow:visible}
+.variable-guide>summary{cursor:pointer;list-style:none;padding:11px 13px;color:#dce8f8;font-size:11px;font-weight:800;display:flex;justify-content:space-between;gap:10px}
+.variable-guide>summary::-webkit-details-marker{display:none}
+.variable-guide>summary:after{content:"＋";color:var(--blue);font-size:13px}
+.variable-guide[open]>summary:after{content:"−"}
+.variable-guide-intro{padding:0 13px 10px;color:var(--muted);font-size:10px}
+.variable-guide-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;padding:0 10px 12px}
+.variable-group{min-width:0;border:1px solid #26364a;border-radius:8px;padding:9px;background:#111a26}
+.variable-group h3{font-size:9px;letter-spacing:.45px;text-transform:uppercase;color:#b8c6d8;margin:0 0 8px}
+.variable-items{display:flex;flex-wrap:wrap;gap:6px}
+.variable-chip{position:relative;display:inline-flex;align-items:center;gap:5px;border:1px solid #34445a;border-radius:6px;padding:5px 7px;background:#0d1622;color:#dce8f8;font-size:9px;cursor:help;outline:none}
+.variable-chip .variable-info{color:var(--blue);font-weight:900}
+.variable-chip:hover,.variable-chip:focus-visible{border-color:var(--blue);background:#17263a}
+.variable-chip:focus-visible{box-shadow:0 0 0 2px rgba(126,170,255,.3)}
+.variable-chip:after{content:attr(data-tooltip);position:absolute;z-index:50;left:0;top:calc(100% + 7px);width:min(270px,75vw);padding:9px 10px;border:1px solid #526783;border-radius:8px;background:#050a11;color:#edf3fb;font-size:10px;font-weight:500;line-height:1.5;white-space:normal;text-align:left;box-shadow:0 10px 28px rgba(0,0,0,.45);opacity:0;visibility:hidden;pointer-events:none;transform:translateY(-3px);transition:opacity .12s ease,transform .12s ease}
+.variable-chip:hover:after,.variable-chip:focus-visible:after{opacity:1;visibility:visible;transform:translateY(0)}
+.flow-check strong[title]{cursor:help;text-decoration:underline dotted rgba(126,170,255,.55);text-underline-offset:3px}
+@media(max-width:1050px){.variable-guide-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:620px){.variable-guide-grid{grid-template-columns:1fr}.variable-chip:after{left:auto;right:0}}
+
 /* Live Learning Mode */
 .learning-shell{margin:20px 0}
 .learning-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
@@ -139,6 +161,11 @@
     <div id="decisionFlow" class="flow-grid" aria-live="polite"><div class="small">Waiting for the latest Django decision…</div></div>
     <div id="flowSummary" class="flow-summary">Waiting for decision diagnostics…</div>
     <div class="flow-note">The diagram is read-only. A passed strategy pipeline is not broker authorization and does not mean an MT5 order was sent.</div>
+    <details class="variable-guide" id="decisionVariableGuide">
+      <summary>48-variable decision reference · hover or focus each item for its description</summary>
+      <div class="variable-guide-intro">These are the proposed decision inputs and controls. A tooltip explains the meaning; it does not imply that a variable is currently calculated, enabled, or used as a mandatory gate. The live PASS / WAIT / BLOCKED states above come only from saved Django decisions.</div>
+      <div class="variable-guide-grid" id="decisionVariableGuideItems"></div>
+    </details>
   </div>
 </section>
 
@@ -327,7 +354,8 @@ function flowCheckMarkup(check, state, displayName) {
     : state === "blocked" ? "blocked" : "idle";
   const tag = css === "pass" ? "PASS" : css === "wait" ? "WAIT" : css === "blocked" ? "BLOCKED" : "NOT REACHED";
   const math = check.calculation || "";
-  return `<div class="flow-check ${css}"><span class="flow-check-dot"></span><div><strong>${esc(label)}</strong><p>${esc(detail)}</p></div><em>${tag}</em>${math}</div>`;
+  const tooltip = FLOW_CHECK_TOOLTIPS[check.name] || detail;
+  return `<div class="flow-check ${css}"><span class="flow-check-dot"></span><div><strong title="${esc(tooltip)}" tabindex="0">${esc(label)}</strong><p>${esc(detail)}</p></div><em>${tag}</em>${math}</div>`;
 }
 function orderedEntryFlowChecks(checks, waitingForOpportunity = false) {
   const byName = Object.fromEntries(checks.filter(item => item && item.name).map(item => [item.name, item]));
@@ -706,6 +734,108 @@ function opportunityImpulseCalculation(check, opportunity) {
     '<code class="regime-explain">Swing points are confirmed using the configured pivot window; the detector uses completed M15 candles and does not use future candles.</code>' +
     '</div></details>';
 }
+
+
+const DECISION_VARIABLE_GROUPS = [
+  {title:"01 · Market regime",items:[
+    ["ADX","Average Directional Index: measures trend strength, not bullish or bearish direction. Interpret it with price structure and a configured threshold."],
+    ["ATR regime","Compares current Average True Range with its recent baseline to classify volatility as relatively low, normal, or high."],
+    ["Volatility expansion","Detects whether recent candle ranges or ATR are increasing, indicating a stronger movement in market activity."],
+    ["Volatility contraction","Detects declining ranges or ATR, which can indicate consolidation or a pause before the next move."],
+    ["Trending / ranging classification","Classifies whether price behaviour is directional or predominantly sideways using configured trend and structure evidence."],
+    ["Higher-timeframe regime","Summarizes the broader market state on a higher timeframe so an M15 setup is evaluated in its larger context."]
+  ]},
+  {title:"02 · Trend analysis",items:[
+    ["EMA 20","The 20-period Exponential Moving Average, giving more weight to recent prices and representing the shorter-term trend."],
+    ["EMA 50","The 50-period Exponential Moving Average, representing a slower intermediate trend reference."],
+    ["EMA slopes","Measures whether selected EMAs are rising, falling, or flat; slope magnitude can help distinguish directional movement from noise."],
+    ["Price vs EMA","Measures the position and distance of price relative to an EMA, helping identify trend alignment or extension."],
+    ["Trend direction","Assigns bullish, bearish, or neutral direction from the configured price, EMA, and structure rules."],
+    ["Higher-timeframe alignment","Checks whether the M15 trade direction agrees with the selected higher-timeframe directional bias."]
+  ]},
+  {title:"03 · Structure & opportunity",items:[
+    ["HH / HL","Higher highs and higher lows: a sequence of confirmed swing points commonly associated with bullish structure."],
+    ["LH / LL","Lower highs and lower lows: a sequence of confirmed swing points commonly associated with bearish structure."],
+    ["BOS","Break of Structure: a confirmed break beyond a relevant prior swing level in the direction of a developing move."],
+    ["CHOCH","Change of Character: evidence that the previous structure may be weakening or changing direction; it needs confirmation."],
+    ["Impulse strength","Measures the size and directional quality of the impulse leg, often normalized by ATR to compare across volatility regimes."],
+    ["Pullback depth","Measures how much of the preceding impulse has retraced, often as a fraction or percentage of that impulse."],
+    ["Pullback duration","Counts completed bars from the start of the pullback to assess whether the retracement is brief, mature, or prolonged."],
+    ["Support / resistance distance","Measures the distance from the proposed setup or entry to a relevant support or resistance level."]
+  ]},
+  {title:"04 · Entry timing",items:[
+    ["Trigger candle","The completed candle or candle pattern that satisfies the configured entry trigger in the approved trade direction."],
+    ["Candle body ratio","Candle body size divided by total high-low range; helps describe whether the candle closed with directional conviction."],
+    ["Wick rejection","Measures wick size and location as evidence that price was rejected from a level or zone."],
+    ["Momentum confirmation","Checks whether momentum is recovering or continuing in the intended direction after the pullback."],
+    ["Retest confirmation","Checks whether price revisits a broken level or entry zone and behaves consistently with the proposed direction."],
+    ["Entry-zone distance","Measures how far the current or planned entry is from the defined pullback or trigger zone."],
+    ["Candle-close confirmation","Requires the relevant signal candle to close before confirmation, preventing decisions from relying on an unfinished candle."]
+  ]},
+  {title:"05 · Market quality & execution",items:[
+    ["ATR suitability","Checks whether current volatility is suitable for the strategy's stop distance, target distance, and execution assumptions."],
+    ["Spread","The current bid-ask difference, expressed in broker points or price units; a direct trading cost."],
+    ["Spread / ATR ratio","Normalizes spread by ATR to estimate how large the transaction spread is relative to recent market movement."],
+    ["Estimated slippage","An estimate of the difference between the requested execution price and the likely fill price; it is not a guaranteed value."],
+    ["Commission / fees","Trading charges expected for opening and closing the position, using the broker's applicable contract and account schedule."]
+  ]},
+  {title:"06 · Risk management",items:[
+    ["Risk per trade","The maximum planned monetary loss for one trade, usually derived from account equity or balance and a configured risk fraction."],
+    ["Stop-loss distance","The price distance between the planned entry and protective stop, converted using the symbol's point or tick specification."],
+    ["Lot size","The position volume calculated from permitted monetary risk, stop distance, tick value, and broker volume constraints."],
+    ["Total exposure","The combined open or proposed risk across positions, rather than looking at a new trade in isolation."],
+    ["Daily loss","The account's realized and/or configured daily loss measure compared with the daily loss limit."],
+    ["Maximum drawdown","The decline from a defined account equity peak to a subsequent equity trough, measured against the configured limit."],
+    ["Reward / risk ratio","Expected reward divided by planned risk for the proposed trade, after applying the strategy's entry, stop, and target assumptions."],
+    ["Correlated exposure","Checks whether existing positions or proposed trades share risk drivers, potentially concentrating exposure in the same market move."]
+  ]},
+  {title:"07 · News & trading session",items:[
+    ["High-impact news proximity","Measures time until or since scheduled high-impact events and applies the configured pre-news and post-news restrictions."],
+    ["London / New York session","Identifies the active trading session using the configured market timezone and session boundaries."],
+    ["Rollover period","Detects the broker's daily rollover window, when spreads, liquidity, and financing conditions may become abnormal."],
+    ["Market trading availability","Checks whether the symbol and broker currently permit trading, including session closures and unavailable market conditions."]
+  ]},
+  {title:"08 · Data & system integrity",items:[
+    ["Missing bars","Detects gaps in the expected candle sequence so indicators and structure calculations are not silently based on incomplete history."],
+    ["Stale data","Checks whether the latest received quote or completed candle is too old for a reliable current decision."],
+    ["Duplicate bars","Detects repeated candle timestamps or duplicate records that could distort indicators, signals, and backtests."],
+    ["UTC / time synchronization","Ensures candle, event, news, and decision timestamps use consistent UTC handling and correct bar boundaries."]
+  ]}
+];
+const FLOW_CHECK_TOOLTIPS = {
+  regime:"Classifies the current market context as bullish, bearish, ranging, or uncertain using the strategy's configured regime evidence.",
+  volatility:"Compares current ATR with its recent baseline to assess whether volatility is suitable for the setup.",
+  impulse:"Measures the directional impulse leg, commonly in ATR units, to distinguish a meaningful move from ordinary noise.",
+  regime_stability:"Checks whether recent regime readings are consistent or whether the market state is changing or conflicting.",
+  freshness:"Checks how many completed bars have elapsed since the signal. Old signals must not be entered as if they were fresh.",
+  invalidation:"Checks whether the setup's invalidation level has been crossed and whether enough risk room remains for a valid trade.",
+  chase:"Measures how far price has moved from the signal reference, normalized by ATR, to avoid entering after an extended move.",
+  spread_conditions:"Checks absolute spread and spread relative to volatility and available risk distance. Missing live quote data must not be treated as a pass.",
+  quality:"Summarizes the configured entry-quality evidence. It is a timing assessment, not a substitute for risk authorization.",
+  stop:"Validates stop placement, direction, and broker minimum stop-distance requirements.",
+  reward_risk:"Compares expected reward with planned risk against the configured minimum reward-to-risk threshold.",
+  daily_loss:"Checks current daily loss against the account's configured daily loss limit.",
+  portfolio_risk:"Checks aggregate open and proposed risk against portfolio-level exposure limits.",
+  sizing:"Validates position volume against the calculated risk budget and broker minimum, maximum, and step constraints.",
+  django_authorization:"The final Django-side trading authorization gate. A passed strategy pipeline does not itself grant authorization.",
+  command_gates:"Checks server-side command creation and execution switches before any command can be issued to the MT5 bridge.",
+  ea_heartbeat:"Checks that the MT5 bridge is recently connected and reporting the expected account and terminal identity.",
+  terminal_permissions:"Checks terminal connectivity and whether automated trading permissions are available.",
+  broker_ack:"Confirms whether the broker acknowledged the order and whether an execution or fill was actually reported."
+};
+function renderDecisionVariableGuide() {
+  const target = $("decisionVariableGuideItems");
+  if (!target) return;
+  target.innerHTML = DECISION_VARIABLE_GROUPS.map(group =>
+    '<section class="variable-group"><h3>' + esc(group.title) + '</h3><div class="variable-items">' +
+    group.items.map(([name, description]) =>
+      '<span class="variable-chip" tabindex="0" role="note" title="' + esc(description) +
+      '" aria-label="' + esc(name + ". " + description) + '" data-tooltip="' + esc(description) +
+      '"><span>' + esc(name) + '</span><span class="variable-info" aria-hidden="true">ⓘ</span></span>'
+    ).join("") + '</div></section>'
+  ).join("");
+}
+renderDecisionVariableGuide();
 
 function renderDecisionFlow(decision) {
   // Preserve the user's expand/collapse choice when the dashboard refreshes.
