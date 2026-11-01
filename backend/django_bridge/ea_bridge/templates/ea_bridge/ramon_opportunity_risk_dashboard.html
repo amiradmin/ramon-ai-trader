@@ -371,6 +371,38 @@ function riskCalculationMarkup(check, risk, decision) {
   return "";
 }
 
+function opportunityRegimeCalculation(check, opportunity) {
+  if (String(check?.name || "").toLowerCase() !== "regime") return "";
+  const regime = opportunity?.regime || {};
+  const n = value => typeof value === "number" && Number.isFinite(value) ? value : null;
+  const f = value => value === null ? "N/A" : Number(value).toLocaleString(undefined, {maximumFractionDigits: 3});
+  const adx = n(regime.adx);
+  const adxTrendThreshold = 22.0;
+  const adxRangeThreshold = 18.0;
+  const emaBias = String(regime.ema_bias || "N/A").toUpperCase();
+  const structure = String(regime.structure || "N/A").toUpperCase();
+  const separation = n(regime.ema_separation_atr);
+  const slope = n(regime.ema_slope_atr);
+  const label = String(regime.label || "N/A").toUpperCase();
+  const adxLine = adx === null
+    ? "N/A — ADX value not returned by Django"
+    : `ADX ${f(adx)} ≥ ${f(adxTrendThreshold)} → ${adx >= adxTrendThreshold ? "TRUE (trend strength confirmed)" : "FALSE"}`;
+  const emaLine = emaBias === "BEAR"
+    ? `EMA bias = BEAR (EMA20 below EMA50 by ${f(separation)} ATR; EMA50 slope = ${f(slope)} ATR)`
+    : emaBias === "BULL"
+      ? `EMA bias = BULL (EMA20 above EMA50 by ${f(separation)} ATR; EMA50 slope = ${f(slope)} ATR)`
+      : `EMA bias = ${emaBias} (Django classification)`;
+  const structureLine = structure === "BEARISH"
+    ? "Latest two confirmed swing highs: lower high AND latest two confirmed swing lows: lower low → BEARISH"
+    : structure === "BULLISH"
+      ? "Latest two confirmed swing highs: higher high AND latest two confirmed swing lows: higher low → BULLISH"
+      : `Confirmed swing structure = ${structure}`;
+  const resultLine = adx !== null
+    ? `Regime rule: ADX ≥ 22 AND EMA bias = BEAR AND structure ≠ BULLISH → ${adx >= adxTrendThreshold && emaBias === "BEAR" && structure !== "BULLISH" ? "BEARISH condition satisfied" : "BEARISH condition not satisfied"}; Django regime = ${label}`
+    : `Django regime = ${label}; full calculation unavailable because ADX is missing`;
+  return `<div class="flow-math"><span class="math-label">Regime classification · Formula</span><code>BEARISH = (ADX ≥ 22) AND (EMA bias = BEAR) AND (Structure ≠ BULLISH)</code><code>EMA bias: EMA20 − EMA50 ≤ −(0.3 × ATR), Close &lt; EMA50 + (0.5 × ATR), EMA50 slope &lt; 0</code><code>Structure: Lower High AND Lower Low from the last two confirmed swing points</code><span class="math-label">Live calculation · Current Django decision</span><code>${esc(adxLine)}</code><code>${esc(emaLine)}</code><code>${esc(structureLine)}</code><code class="math-result">${esc(resultLine)}</code></div>`;
+}
+
 function renderDecisionFlow(decision) {
   const opportunity = stage(decision, "opportunities");
   const timing = stage(decision, "entry_timing");
@@ -378,7 +410,10 @@ function renderDecisionFlow(decision) {
   const oppState = stageState(opportunity);
   const timingReached = opportunity.approved === true;
   const riskReached = timingReached && timing.approved === true;
-  const oppChecks = stageChecks(opportunity);
+  const oppChecks = stageChecks(opportunity).map(item => ({
+    ...item,
+    calculation: opportunityRegimeCalculation(item, opportunity)
+  }));
   const timingChecks = stageChecks(timing);
   const riskChecks = stageChecks(risk).map(item => ({
     ...item,
