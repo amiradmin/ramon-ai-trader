@@ -120,7 +120,7 @@
 .variable-chip:focus-visible{box-shadow:0 0 0 2px rgba(126,170,255,.3)}
 .variable-chip:after{content:attr(data-tooltip);position:absolute;z-index:50;left:0;top:calc(100% + 7px);width:min(270px,75vw);padding:9px 10px;border:1px solid #526783;border-radius:8px;background:#050a11;color:#edf3fb;font-size:10px;font-weight:500;line-height:1.5;white-space:normal;text-align:left;box-shadow:0 10px 28px rgba(0,0,0,.45);opacity:0;visibility:hidden;pointer-events:none;transform:translateY(-3px);transition:opacity .12s ease,transform .12s ease}
 .variable-chip:hover:after,.variable-chip:focus-visible:after{opacity:1;visibility:visible;transform:translateY(0)}
-.flow-check strong[title]{cursor:help;text-decoration:underline dotted rgba(126,170,255,.55);text-underline-offset:3px}
+.flow-check strong.flow-tooltip{position:relative;cursor:help;text-decoration:underline dotted rgba(126,170,255,.55);text-underline-offset:3px}.flow-check strong.flow-tooltip:after,.flow-abbr:after{content:attr(data-tooltip);position:absolute;z-index:90;left:0;top:calc(100% + 7px);width:min(310px,78vw);padding:9px 10px;border:1px solid #526783;border-radius:8px;background:#050a11;color:#edf3fb;font-size:10px;font-weight:500;line-height:1.5;white-space:normal;text-align:left;box-shadow:0 10px 28px rgba(0,0,0,.5);opacity:0;visibility:hidden;pointer-events:none;transform:translateY(-3px);transition:opacity .12s ease,transform .12s ease}.flow-check strong.flow-tooltip:hover:after,.flow-check strong.flow-tooltip:focus-visible:after,.flow-abbr:hover:after,.flow-abbr:focus-visible:after{opacity:1;visibility:visible;transform:translateY(0)}.flow-abbr{position:relative;cursor:help;text-decoration:underline dotted rgba(126,170,255,.7);text-underline-offset:2px}.flow-abbr:after{font-style:normal;font-weight:500}.flow-abbr:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 
 
 @media(max-width:1050px){.variable-guide-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
@@ -365,8 +365,8 @@ function flowCheckMarkup(check, state, displayName) {
     : state === "blocked" ? "blocked" : "idle";
   const tag = css === "pass" ? "PASS" : css === "wait" ? "WAIT" : css === "blocked" ? "BLOCKED" : "NOT REACHED";
   const math = check.calculation || "";
-  const tooltip = FLOW_CHECK_TOOLTIPS[check.name] || detail;
-  return `<div class="flow-check ${css}"><span class="flow-check-dot"></span><div><strong title="${esc(tooltip)}" tabindex="0">${esc(label)}</strong><p>${esc(detail)}</p></div><em>${tag}</em>${math}</div>`;
+  const tooltip = FLOW_CHECK_TOOLTIPS[check.name] || FLOW_CHECK_TOOLTIPS[String(check.name || "").toLowerCase()] || detail || "Individual Django decision check. Hover for its meaning; the live status is from the latest saved decision.";
+  return `<div class="flow-check ${css}"><span class="flow-check-dot"></span><div><strong class="flow-tooltip" data-tooltip="${esc(tooltip)}" title="${esc(tooltip)}" tabindex="0">${esc(label)}</strong><p>${esc(detail)}</p></div><em>${tag}</em>${math}</div>`;
 }
 function orderedEntryFlowChecks(checks, waitingForOpportunity = false) {
   const byName = Object.fromEntries(checks.filter(item => item && item.name).map(item => [item.name, item]));
@@ -847,12 +847,43 @@ function renderDecisionVariableGuide() {
     group.items.map(([name, description]) =>
       '<span class="variable-chip" tabindex="0" role="note" title="' + esc(description) +
       '" aria-label="' + esc(name + ". " + description) + '" data-tooltip="' + esc(description) +
-      '"><span>' + esc(name) + '</span><span class="variable-info" aria-hidden="true">ⓘ</span></span>'
+      '"><span>' + esc(name) + '</span></span>'
     ).join("") + '</div></section>'
   ).join("");
 }
 renderDecisionVariableGuide();
 
+const FLOW_ABBREVIATION_TOOLTIPS = {
+  ATR:"Average True Range — a volatility measure based on true candle ranges. Used to normalize distances and compare volatility.",
+  EMA:"Exponential Moving Average — a moving average that gives more weight to recent prices.",
+  ADX:"Average Directional Index — measures trend strength, not whether the trend is bullish or bearish.",
+  M15:"15-minute chart timeframe. Each candle represents 15 minutes of market data.",
+  HH:"Higher High — a confirmed swing high above the previous confirmed swing high.",
+  HL:"Higher Low — a confirmed swing low above the previous confirmed swing low.",
+  LH:"Lower High — a confirmed swing high below the previous confirmed swing high.",
+  LL:"Lower Low — a confirmed swing low below the previous confirmed swing low.",
+  BOS:"Break of Structure — a confirmed break beyond a relevant previous swing level.",
+  CHOCH:"Change of Character — a possible change in market structure that still requires confirmation.",
+  RR:"Reward-to-Risk ratio — expected reward divided by planned risk.",
+  SL:"Stop Loss — the protective exit price intended to limit a losing trade.",
+  TP:"Take Profit — the target exit price intended to realize the planned reward.",
+  EA:"Expert Advisor — the MT5 program acting as Ramons execution and telemetry bridge.",
+  MT5:"MetaTrader 5 — the trading terminal connected to the broker.",
+  UTC:"Coordinated Universal Time — the common time standard for market, news, and decision timestamps.",
+  API:"Application Programming Interface — the defined interface through which services exchange data and commands.",
+  OHLC:"Open, High, Low, Close — the four standard prices recorded for a candle."
+};
+function decorateDecisionFlowTooltips(markup) {
+  const keys = Object.keys(FLOW_ABBREVIATION_TOOLTIPS).sort((a,b) => b.length-a.length);
+  const pattern = new RegExp("\\b(" + keys.join("|") + ")\\b", "g");
+  return markup.split(/(<[^>]*>)/g).map(part => {
+    if (part.startsWith("<") && part.endsWith(">")) return part;
+    return part.replace(pattern, token =>
+      '<abbr class="flow-abbr" tabindex="0" title="' + esc(FLOW_ABBREVIATION_TOOLTIPS[token]) +
+      '" data-tooltip="' + esc(FLOW_ABBREVIATION_TOOLTIPS[token]) + '">' + token + '</abbr>'
+    );
+  }).join("");
+}
 function renderDecisionFlow(decision) {
   // Preserve the user's expand/collapse choice when the dashboard refreshes.
   const openDetails = new Set(
@@ -937,7 +968,7 @@ function renderDecisionFlow(decision) {
     allPipelineApproved ? {approved:false, status:"BLOCKED",
       explanation:"Django authorization is false; MT5 execution is not confirmed."} : {},
     authChecks, "", allPipelineApproved ? "blocked" : "idle");
-  $("decisionFlow").innerHTML = opportunityMarkup + timingMarkup + riskMarkup + authMarkup;
+  $("decisionFlow").innerHTML = decorateDecisionFlowTooltips(opportunityMarkup + timingMarkup + riskMarkup + authMarkup);
   $("decisionFlow").querySelectorAll(".regime-details, .volatility-details, .regime-stability-details, .impulse-details, .entry-details, .risk-details").forEach(node => {
     const key = node.classList.contains("entry-details") ? "entry:" + node.dataset.check : node.classList.contains("risk-details") ? "risk:" + node.dataset.check : node.classList.contains("volatility-details") ? "volatility" : node.classList.contains("regime-stability-details") ? "regime_stability" : node.classList.contains("impulse-details") ? "impulse" : "regime";
     node.open = openDetails.has(key);
