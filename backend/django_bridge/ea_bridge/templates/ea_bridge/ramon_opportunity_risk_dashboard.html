@@ -291,10 +291,20 @@ function renderDecisionFlow(decision) {
     : flowStageMarkup("03 · RISK MANAGEMENT", {}, [], "Upstream stage has not approved; risk evaluation is not reached.", "idle");
 
   const allPipelineApproved = opportunity.approved === true && timing.approved === true && risk.approved === true;
-  const authMarkup = flowStageMarkup("04 · AUTHORIZATION / MT5", {}, [],
-    allPipelineApproved
-      ? "Pipeline approved, but trading authorization remains false. No order execution is confirmed."
-      : "Downstream execution is held until all upstream stages pass.", "idle");
+  const finalAction = String(decision.action || "").toUpperCase();
+  const finalGuardBlocked = allPipelineApproved && !["BUY", "SELL"].includes(finalAction);
+  // The current Django decision API is deliberately fail-closed: a pipeline verdict
+  // is not broker authorization, and the dashboard must never imply an order was sent.
+  const authMarkup = allPipelineApproved
+    ? finalGuardBlocked
+      ? flowStageMarkup("04 · DJANGO FINAL GUARD", {
+          explanation: `All SignalFlow stages passed, but Django's final decision is ${finalAction}. Reason: ${decision.rationale_code || "not supplied"}.`
+        }, [], "", "blocked")
+      : flowStageMarkup("04 · AUTHORIZATION / MT5", {
+          explanation: "Strategy pipeline passed. Trading authorization is still false; MT5 execution is not confirmed."
+        }, [], "", "idle")
+    : flowStageMarkup("04 · AUTHORIZATION / MT5", {}, [],
+        "Downstream execution is held until all upstream stages pass.", "idle");
   $("decisionFlow").innerHTML = opportunityMarkup + timingMarkup + riskMarkup + authMarkup;
 
   let summaryState = "idle";
@@ -308,9 +318,12 @@ function renderDecisionFlow(decision) {
   } else if (riskReached && ["wait","blocked"].includes(stageState(risk))) {
     summaryState = stageState(risk);
     summaryText = `Risk management is ${summaryState.toUpperCase()}: ${val(risk, "reason")} — ${val(risk, "explanation")}`;
+  } else if (finalGuardBlocked) {
+    summaryState = "blocked";
+    summaryText = `All SignalFlow stages passed, but Django's final guard blocked the decision: ${finalAction} — ${val(decision, "rationale_code")}.`;
   } else if (allPipelineApproved) {
     summaryState = "pass";
-    summaryText = "All three Django pipeline stages passed. Broker authorization and MT5 execution are separate and remain unconfirmed.";
+    summaryText = "All three Django pipeline stages passed. Trading authorization remains false and no MT5 order is confirmed.";
   } else if (oppState === "pass" && !timingReached) {
     summaryText = "Opportunity found; entry timing has not yet approved an entry.";
   } else {
