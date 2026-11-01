@@ -95,7 +95,7 @@
 
 
 /* Decision-variable tooltips and reference guide */
-.variable-guide{margin-top:12px;border:1px solid #29384c;border-radius:10px;background:#0c131d;overflow:visible}
+.variable-guide{margin-top:12px;border:1px solid #29384c;border-radius:10px;background:#0c131d;overflow:visible;position:relative;z-index:4}
 .variable-guide>summary{cursor:pointer;list-style:none;padding:11px 13px;color:#dce8f8;font-size:11px;font-weight:800;display:flex;justify-content:space-between;gap:10px}
 .variable-guide>summary::-webkit-details-marker{display:none}
 .variable-guide>summary:after{content:"＋";color:var(--blue);font-size:13px}
@@ -112,6 +112,15 @@
 .variable-chip:after{content:attr(data-tooltip);position:absolute;z-index:50;left:0;top:calc(100% + 7px);width:min(270px,75vw);padding:9px 10px;border:1px solid #526783;border-radius:8px;background:#050a11;color:#edf3fb;font-size:10px;font-weight:500;line-height:1.5;white-space:normal;text-align:left;box-shadow:0 10px 28px rgba(0,0,0,.45);opacity:0;visibility:hidden;pointer-events:none;transform:translateY(-3px);transition:opacity .12s ease,transform .12s ease}
 .variable-chip:hover:after,.variable-chip:focus-visible:after{opacity:1;visibility:visible;transform:translateY(0)}
 .flow-check strong[title]{cursor:help;text-decoration:underline dotted rgba(126,170,255,.55);text-underline-offset:3px}
+
+.variable-chip{z-index:1}
+.variable-chip:hover,.variable-chip:focus-visible{z-index:60}
+.variable-chip:after{z-index:100}
+.flow-check strong[data-tooltip]{position:relative;display:inline-flex;align-items:center;gap:5px;cursor:help;text-decoration:none}
+.flow-check strong[data-tooltip]:after{content:"ⓘ";display:inline-grid;place-items:center;width:13px;height:13px;border:1px solid #59769e;border-radius:50%;color:#9fc1ff;font-size:9px;font-weight:800;text-decoration:none}
+.flow-check strong[data-tooltip]:before{content:attr(data-tooltip);position:absolute;z-index:120;left:0;bottom:calc(100% + 8px);width:min(270px,75vw);padding:9px 10px;border:1px solid #526783;border-radius:8px;background:#050a11;color:#edf3fb;font-size:10px;font-weight:500;line-height:1.5;white-space:normal;text-align:left;box-shadow:0 10px 28px rgba(0,0,0,.5);opacity:0;visibility:hidden;pointer-events:none}
+.flow-check strong[data-tooltip]:hover:before,.flow-check strong[data-tooltip]:focus-visible:before{opacity:1;visibility:visible}
+
 @media(max-width:1050px){.variable-guide-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:620px){.variable-guide-grid{grid-template-columns:1fr}.variable-chip:after{left:auto;right:0}}
 
@@ -161,7 +170,7 @@
     <div id="decisionFlow" class="flow-grid" aria-live="polite"><div class="small">Waiting for the latest Django decision…</div></div>
     <div id="flowSummary" class="flow-summary">Waiting for decision diagnostics…</div>
     <div class="flow-note">The diagram is read-only. A passed strategy pipeline is not broker authorization and does not mean an MT5 order was sent.</div>
-    <details class="variable-guide" id="decisionVariableGuide">
+    <details class="variable-guide" id="decisionVariableGuide" open>
       <summary>48-variable decision reference · hover or focus each item for its description</summary>
       <div class="variable-guide-intro">These are the proposed decision inputs and controls. A tooltip explains the meaning; it does not imply that a variable is currently calculated, enabled, or used as a mandatory gate. The live PASS / WAIT / BLOCKED states above come only from saved Django decisions.</div>
       <div class="variable-guide-grid" id="decisionVariableGuideItems"></div>
@@ -355,7 +364,7 @@ function flowCheckMarkup(check, state, displayName) {
   const tag = css === "pass" ? "PASS" : css === "wait" ? "WAIT" : css === "blocked" ? "BLOCKED" : "NOT REACHED";
   const math = check.calculation || "";
   const tooltip = FLOW_CHECK_TOOLTIPS[check.name] || detail;
-  return `<div class="flow-check ${css}"><span class="flow-check-dot"></span><div><strong title="${esc(tooltip)}" tabindex="0">${esc(label)}</strong><p>${esc(detail)}</p></div><em>${tag}</em>${math}</div>`;
+  return `<div class="flow-check ${css}"><span class="flow-check-dot"></span><div><strong data-tooltip="${esc(tooltip)}" aria-label="${esc(label + ". " + tooltip)}" tabindex="0">${esc(label)}</strong><p>${esc(detail)}</p></div><em>${tag}</em>${math}</div>`;
 }
 function orderedEntryFlowChecks(checks, waitingForOpportunity = false) {
   const byName = Object.fromEntries(checks.filter(item => item && item.name).map(item => [item.name, item]));
