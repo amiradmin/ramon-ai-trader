@@ -452,9 +452,56 @@ function opportunityRegimeCalculation(check, opportunity) {
   </details>`;
 }
 
+function opportunityVolatilityCalculation(check, opportunity) {
+  if (String(check?.name || "").toLowerCase() !== "volatility") return "";
+  const metrics = check.metrics || {};
+  const n = value => typeof value === "number" && Number.isFinite(value) ? value : null;
+  const f = value => value === null ? "N/A" : Number(value).toLocaleString(undefined, {maximumFractionDigits: 3});
+  const ratio = n(metrics.value);
+  const minimum = 0.6;
+  const maximum = 2.5;
+  const passed = check.passed === true ? true : check.passed === false ? false : null;
+  const component = n(opportunity?.components?.volatility);
+  const state = passed === null ? "unknown" : passed ? "pass" : "fail";
+  const metric = (label, value, result, note = "") =>
+    '<div class="regime-metric"><span>' + esc(label) + '</span><code class="regime-value ' + state + '">' + esc(value) + '</code><b class="regime-verdict ' + state + '">' + result + '</b></div>' +
+    (note ? '<code class="regime-explain">' + esc(note) + '</code>' : "");
+  const ratioLine = ratio === null ? "Django did not return a numeric ATR ratio." :
+    'ATR ratio = ' + f(ratio) + 'x; acceptable interval is ' + f(minimum) + 'x to ' + f(maximum) + 'x.';
+  const componentLine = component === null ? "Volatility score component was not supplied in this decision." :
+    'Volatility component = ' + f(component) + ' / 1.00; weighted contribution = ' + f(component * 0.15) + ' of the total 0–1 opportunity score (15% weight).';
+  const interpretation = ratio === null ? "Cannot independently evaluate the volatility gate because the ratio is unavailable." :
+    ratio < minimum ? "Too quiet: opportunity is rejected because ATR is below the minimum." :
+    ratio > maximum ? "Volatility spike: opportunity is deferred until volatility settles." :
+    "Within the allowed volatility range: the volatility gate passes.";
+  return '<details class="flow-math regime-details volatility-details">' +
+    '<summary><span>Volatility calculation · ' + (ratio === null ? "N/A" : f(ratio) + 'x ATR ratio') + '</span><span class="regime-toggle-hint">Show formula & live values <span aria-hidden="true">＋</span></span></summary>' +
+    '<div class="regime-content">' +
+    '<span class="math-label">1 · Volatility formula</span>' +
+    '<code>ATR ratio = Current ATR(14) ÷ Median of the most recent 100 ATR(14) values</code>' +
+    '<code>Current ATR and its baseline are calculated from completed M15 candles only.</code>' +
+    '<span class="math-label">2 · Live Django calculation</span>' +
+    metric("Current ATR ratio", ratio === null ? "N/A" : f(ratio) + "x", passed === null ? "N/A" : passed ? "PASS" : "FAIL", ratioLine) +
+    '<code class="regime-explain">The check returns the ratio; separate raw ATR and median values are not exposed in this decision payload.</code>' +
+    '<span class="math-label">3 · Acceptance thresholds</span>' +
+    '<code>REJECT if ratio < 0.60x · PASS if 0.60x ≤ ratio ≤ 2.50x · DEFER if ratio > 2.50x</code>' +
+    metric("Minimum volatility", ratio === null ? "N/A" : f(ratio) + 'x ≥ ' + f(minimum) + 'x', ratio === null ? null : ratio >= minimum, ratio === null ? "Ratio unavailable" : "Minimum threshold check") +
+    metric("Maximum volatility", ratio === null ? "N/A" : f(ratio) + 'x ≤ ' + f(maximum) + 'x', ratio === null ? null : ratio <= maximum, ratio === null ? "Ratio unavailable" : "Maximum threshold check") +
+    '<span class="math-label">4 · Effect on opportunity score</span>' +
+    '<code>Volatility weight = 15% of the total opportunity score</code>' +
+    '<code>Component score: 0 below 0.60x; ramps to 1.00 between 0.60x and 0.80x; remains 1.00 from 0.80x to 1.60x; then declines to 0 at 2.50x.</code>' +
+    '<code class="regime-explain">' + esc(componentLine) + '</code>' +
+    '<span class="math-label">5 · Final interpretation</span>' +
+    '<code class="regime-result ' + (passed === true ? "pass" : passed === false ? "fail" : "unknown") + '">' + esc(interpretation) + '</code>' +
+    '</div></details>';
+}
+
 function renderDecisionFlow(decision) {
   // Preserve the user's expand/collapse choice when the dashboard refreshes.
-  const regimeWasOpen = $("decisionFlow").querySelector(".regime-details")?.open === true;
+  const openDetails = new Set(
+    [...$("decisionFlow").querySelectorAll(".regime-details[open]")].map(node =>
+      node.classList.contains("volatility-details") ? "volatility" : "regime")
+  );
   const opportunity = stage(decision, "opportunities");
   const timing = stage(decision, "entry_timing");
   const risk = stage(decision, "risk_management");
@@ -463,7 +510,8 @@ function renderDecisionFlow(decision) {
   const riskReached = timingReached && timing.approved === true;
   const oppChecks = stageChecks(opportunity).map(item => ({
     ...item,
-    calculation: opportunityRegimeCalculation(item, opportunity)
+    calculation: opportunityRegimeCalculation(item, opportunity) ||
+      opportunityVolatilityCalculation(item, opportunity)
   }));
   const timingChecks = stageChecks(timing);
   const riskChecks = stageChecks(risk).map(item => ({
@@ -498,8 +546,9 @@ function renderDecisionFlow(decision) {
     : flowStageMarkup("04 · AUTHORIZATION / MT5", {}, [],
         "Downstream execution is held until all upstream stages pass.", "idle");
   $("decisionFlow").innerHTML = opportunityMarkup + timingMarkup + riskMarkup + authMarkup;
-  const regimeDetails = $("decisionFlow").querySelector(".regime-details");
-  if (regimeDetails) regimeDetails.open = regimeWasOpen;
+  $("decisionFlow").querySelectorAll(".regime-details").forEach(node => {
+    node.open = openDetails.has(node.classList.contains("volatility-details") ? "volatility" : "regime");
+  });
 
   let summaryState = "idle";
   let summaryText = "No current decision is available.";
