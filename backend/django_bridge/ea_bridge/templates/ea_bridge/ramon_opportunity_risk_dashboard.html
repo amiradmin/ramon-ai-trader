@@ -219,7 +219,7 @@ const FLOW_ENTRY_ORDER = [
   ["spread_risk", "Spread versus risk distance"],
   ["quality", "Entry quality"]
 ];
-const prettyCheck = name => String(name || "unnamed_check").replace(/_/g, " ").replace(/\\b\\w/g, c => c.toUpperCase());
+const prettyCheck = name => String(name || "unnamed_check").replace(/_/g, " ").replace(/(^| )([a-z])/g, (_, space, letter) => space + letter.toUpperCase());
 const stageChecks = stageResult => Array.isArray(stageResult?.checks) ? stageResult.checks : [];
 const stageState = stageResult => {
   if (!stageResult || !Object.keys(stageResult).length) return "idle";
