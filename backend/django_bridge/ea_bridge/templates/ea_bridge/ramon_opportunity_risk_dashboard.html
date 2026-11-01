@@ -526,8 +526,8 @@ function opportunityRegimeStabilityCalculation(check, opportunity) {
     '<code>DEFER when previous regime = opposite of current regime (reversal not yet established).</code>' +
     '<span class="math-label">2 · Live Django values</span>' +
     metric("Current regime", current, Boolean(opposite)) +
-    metric("Regime ' + (lookback === null ? "lookback" : lookback + " bars") + ' ago", previous, canCompare ? comparisonPass : null) +
-    metric("Opposite regime to reject", opposite || "N/A", canCompare ? true : null) +
+    metric("Regime " + (lookback === null ? "lookback" : lookback + " bars") + " ago", previous, canCompare ? comparisonPass : null) +
+    metric("Opposite regime to reject", opposite || "N/A", null) +
     '<code class="regime-explain">' + esc(comparison) + '</code>' +
     '<span class="math-label">3 · Decision</span>' +
     metric("Stability check", passed === null ? "Not evaluated" : passed ? "No opposite regime at lookback" : "Opposite regime detected", passed) +
