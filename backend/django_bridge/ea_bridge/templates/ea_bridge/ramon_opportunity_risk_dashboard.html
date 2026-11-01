@@ -465,7 +465,7 @@ function opportunityVolatilityCalculation(check, opportunity) {
   const metric = (label, value, passed, note = "") => {
     const state = passed === null ? "unknown" : passed ? "pass" : "fail";
     const result = passed === null ? "N/A" : passed ? "PASS" : "FAIL";
-    return '<div class="regime-metric"><span>' + esc(label) + '</span><code class="regime-value ' + state + '>' + esc(value) + '</code><b class="regime-verdict ' + state + '>' + result + '</b></div>' +
+    return '<div class="regime-metric"><span>' + esc(label) + '</span><code class="regime-value ' + state + '">' + esc(value) + '</code><b class="regime-verdict ' + state + '">' + result + '</b></div>' +
       (note ? '<code class="regime-explain">' + esc(note) + '</code>' : "");
   };
   const ratioLine = ratio === null ? "Django did not return a numeric ATR ratio." :
@@ -476,7 +476,7 @@ function opportunityVolatilityCalculation(check, opportunity) {
     ratio < minimum ? "Too quiet: opportunity is rejected because ATR is below the minimum." :
     ratio > maximum ? "Volatility spike: opportunity is deferred until volatility settles." :
     "Within the allowed volatility range: the volatility gate passes.";
-  return '<details class="flow-math regime-details volatility-details">' +
+  return '<details class="flow-math flow-details volatility-details">' +
     '<summary><span>Volatility calculation · ' + (ratio === null ? "N/A" : f(ratio) + 'x ATR ratio') + '</span><span class="regime-toggle-hint">Show formula & live values <span aria-hidden="true">＋</span></span></summary>' +
     '<div class="regime-content">' +
     '<span class="math-label">1 · Volatility formula</span>' +
@@ -501,7 +501,7 @@ function opportunityVolatilityCalculation(check, opportunity) {
 function renderDecisionFlow(decision) {
   // Preserve the user's expand/collapse choice when the dashboard refreshes.
   const openDetails = new Set(
-    [...$("decisionFlow").querySelectorAll(".regime-details[open]")].map(node =>
+    [...$("decisionFlow").querySelectorAll(".regime-details[open], .volatility-details[open]")].map(node =>
       node.classList.contains("volatility-details") ? "volatility" : "regime")
   );
   const opportunity = stage(decision, "opportunities");
@@ -512,8 +512,11 @@ function renderDecisionFlow(decision) {
   const riskReached = timingReached && timing.approved === true;
   const oppChecks = stageChecks(opportunity).map(item => ({
     ...item,
-    calculation: opportunityRegimeCalculation(item, opportunity) ||
-      opportunityVolatilityCalculation(item, opportunity)
+    calculation: item.name === "regime"
+      ? opportunityRegimeCalculation(item, opportunity)
+      : item.name === "volatility"
+        ? opportunityVolatilityCalculation(item, opportunity)
+        : ""
   }));
   const timingChecks = stageChecks(timing);
   const riskChecks = stageChecks(risk).map(item => ({
@@ -548,7 +551,7 @@ function renderDecisionFlow(decision) {
     : flowStageMarkup("04 · AUTHORIZATION / MT5", {}, [],
         "Downstream execution is held until all upstream stages pass.", "idle");
   $("decisionFlow").innerHTML = opportunityMarkup + timingMarkup + riskMarkup + authMarkup;
-  $("decisionFlow").querySelectorAll(".regime-details").forEach(node => {
+  $("decisionFlow").querySelectorAll(".regime-details, .volatility-details").forEach(node => {
     node.open = openDetails.has(node.classList.contains("volatility-details") ? "volatility" : "regime");
   });
 
