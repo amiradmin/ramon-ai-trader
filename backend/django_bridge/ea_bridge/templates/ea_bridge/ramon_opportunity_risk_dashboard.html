@@ -82,6 +82,27 @@
 .bar{height:7px;border-radius:9px;background:#273244;overflow:hidden;margin-top:7px}.bar i{display:block;height:100%;border-radius:9px;background:linear-gradient(90deg,#4d8dff,#43d6a0)}.timeline{display:grid;gap:13px}.event{display:grid;grid-template-columns:66px 12px 1fr;gap:10px;align-items:start}.event time{color:var(--muted);font-size:11px;padding-top:2px}.event .line{height:100%;position:relative}.event .line:before{content:"";position:absolute;top:5px;left:3px;width:6px;height:6px;border-radius:50%;background:var(--blue)}.event .line:after{content:"";position:absolute;top:16px;bottom:-12px;left:5px;width:2px;background:#2a394e}.event:last-child .line:after{display:none}.event strong{font-size:12px}.event p{margin:3px 0 0;color:var(--muted);font-size:11px}.footer{color:#69788c;font-size:11px;text-align:center;padding:24px 0 6px}
 @media(max-width:900px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.lower{grid-template-columns:1fr}.detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.wrap{padding:17px}}
 @media(max-width:480px){.stats{grid-template-columns:1fr 1fr}.stat-value{font-size:22px}.card{padding:14px}.title{font-size:22px}.detail-grid{grid-template-columns:1fr 1fr}}
+
+/* Live Learning Mode */
+.learning-shell{margin:20px 0}
+.learning-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+.learning-tab{border:1px solid var(--line);background:#0d141e;color:var(--muted);padding:9px 12px;border-radius:9px;cursor:pointer;font:inherit;font-size:11px}
+.learning-tab[aria-pressed="true"]{border-color:var(--blue);background:#17263a;color:#dce8f8}
+.learning-layout{display:grid;grid-template-columns:1.05fr .95fr;gap:14px}
+.learning-lesson{background:#0d141e;border:1px solid #29384c;border-radius:12px;padding:16px;min-width:0}
+.learning-lesson h3{font-size:15px;margin:0 0 8px}
+.learning-lesson p,.learning-lesson li{font-size:11px;color:#b8c6d8;line-height:1.65}
+.learning-lesson ul{padding-left:18px;margin:8px 0}
+.learning-live-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.learning-live{padding:10px;background:#111a26;border:1px solid #26364a;border-radius:9px;min-width:0}
+.learning-live span{display:block;color:var(--muted);font-size:9px}
+.learning-live strong{display:block;font-size:12px;margin-top:4px;overflow-wrap:anywhere}
+.learning-live small{display:block;color:var(--muted);font-size:9px;margin-top:3px}
+.learning-status{display:inline-flex;border-radius:99px;padding:4px 8px;font-size:9px;font-weight:800;background:#202b39;color:var(--muted)}
+.learning-status.pass{background:#123328;color:var(--green)}.learning-status.wait{background:#382f1c;color:var(--amber)}.learning-status.blocked{background:#3a2028;color:var(--red)}
+.learning-foot{font-size:10px;color:var(--muted);margin-top:10px}
+@media(max-width:800px){.learning-layout{grid-template-columns:1fr}}
+
 </style>
 </head>
 <body>
@@ -108,6 +129,34 @@
     <div id="decisionFlow" class="flow-grid" aria-live="polite"><div class="small">Waiting for the latest Django decision…</div></div>
     <div id="flowSummary" class="flow-summary">Waiting for decision diagnostics…</div>
     <div class="flow-note">The diagram is read-only. A passed strategy pipeline is not broker authorization and does not mean an MT5 order was sent.</div>
+  </div>
+</section>
+
+
+<section class="learning-shell" aria-labelledby="learningTitle">
+  <div class="section-head"><div><h2 id="learningTitle">Live Learning Mode</h2><p>Learn trading concepts against Ramon’s latest saved XAUUSD decision—not a fabricated example.</p></div>
+    <span id="learningFeedStatus" class="learning-status">WAITING FOR MARKET DATA</span>
+  </div>
+  <div class="card">
+    <div class="learning-tabs" role="group" aria-label="Trading lesson">
+      <button class="learning-tab" type="button" data-lesson="opportunity" aria-pressed="true">01 · Opportunity</button>
+      <button class="learning-tab" type="button" data-lesson="entry" aria-pressed="false">02 · Entry timing</button>
+      <button class="learning-tab" type="button" data-lesson="risk" aria-pressed="false">03 · Risk</button>
+      <button class="learning-tab" type="button" data-lesson="learning" aria-pressed="false">04 · Learn from outcomes</button>
+    </div>
+    <div class="learning-layout">
+      <article class="learning-lesson">
+        <div class="eyebrow">TRADING CONCEPT</div>
+        <h3 id="learningLessonTitle">Finding the right opportunity</h3>
+        <div id="learningLessonBody"></div>
+      </article>
+      <article class="learning-lesson">
+        <div class="eyebrow">LIVE XAUUSD EVIDENCE · DJANGO</div>
+        <h3>What the market decision currently tells us</h3>
+        <div id="learningLiveValues" class="learning-live-grid"><div class="small">Waiting for the latest decision…</div></div>
+        <div id="learningLiveNote" class="learning-foot">Live values will appear when Django has saved decision data.</div>
+      </article>
+    </div>
   </div>
 </section>
 
@@ -660,6 +709,79 @@ function renderDecisionFlow(decision) {
   $("flowSummary").innerHTML = `<strong>ACTIVE PROCESS STATUS:</strong> ${esc(summaryText)}`;
 }
 
+
+const learningLessons = {
+  opportunity: {
+    title: "Finding the right opportunity · M15",
+    body: '<p>Start with the market context. A trend-following pullback setup needs a directional regime, a meaningful impulse, acceptable volatility, and evidence that price has begun to pull back—not merely continued extending.</p><ul><li><b>Regime:</b> classify bullish, bearish, ranging, or uncertain conditions.</li><li><b>Volatility:</b> compare current ATR(14) with its recent median.</li><li><b>Structure:</b> inspect confirmed swing highs and lows.</li><li><b>Impulse:</b> measure the directional leg in ATR units.</li><li><b>Stability:</b> check that the recent regime is not opposite to the current one.</li></ul><p><b>Lesson:</b> a strong trend alone is not an entry. Wait for the pullback and the entry trigger.</p>'
+  },
+  entry: {
+    title: "Entering at the right time · M5 confirmation",
+    body: '<p>After M15 identifies a valid opportunity, entry timing asks whether price has confirmed a tradable trigger. It is a separate question from whether the market direction is bullish or bearish.</p><ul><li>Use completed candles for confirmation.</li><li>Check signal freshness; do not chase an expired setup.</li><li>Compare trigger direction with the approved M15 opportunity.</li><li>Account for spread and current market conditions.</li></ul><p><b>Lesson:</b> opportunity approval does not mean enter immediately. If timing is WAIT, wait.</p>'
+  },
+  risk: {
+    title: "Managing risk precisely · Before any order",
+    body: '<p>Risk is calculated before execution. A valid setup can still be rejected because its stop, reward-to-risk, spread, exposure, news, or daily-loss conditions are unacceptable.</p><ul><li>Risk amount = account equity × permitted risk fraction.</li><li>Stop distance must use the actual planned entry and stop prices.</li><li>Position size also requires tick value and contract specifications.</li><li>Reward-to-risk = expected reward ÷ planned risk.</li><li>Include spread, commission, and likely slippage in evaluation.</li></ul><p><b>Lesson:</b> never infer lot size from risk percentage alone.</p>'
+  },
+  learning: {
+    title: "Learning from outcomes · Evidence, not hindsight",
+    body: '<p>Save the decision as it was known at the time, then compare it with the eventual trade outcome. Keep predictions and features causal: never use future candles or future-return columns as model inputs.</p><ul><li>Log the decision, timestamp, regime, features, and model version.</li><li>After closure, record fill, slippage, exit reason, costs, and realized R.</li><li>Compare simple baselines with candidate models on unseen time periods.</li><li>Use walk-forward and regime-specific evaluation; monitor drawdown and overtrading.</li><li>Keep experimental models in shadow mode until out-of-sample evidence supports promotion.</li></ul><p><b>Lesson:</b> a profitable example is not proof of an edge. Evaluate many trades after costs.</p>'
+  }
+};
+let activeLearningLesson = "opportunity";
+function learningCheck(decision, stageName, checkName) {
+  const checks = stage(decision, stageName).checks;
+  return Array.isArray(checks) ? checks.find(item => String(item?.name || "").toLowerCase() === checkName) : null;
+}
+function learningCheckText(check) {
+  if (!check) return "Not supplied";
+  const m = check.metrics || {};
+  const value = m.value !== undefined ? fmt(m.value) : val(check, "detail", "reason");
+  const status = check.passed === true ? "PASS" : check.passed === false ? "BLOCKED" : "WAIT";
+  return status + " · " + value;
+}
+function renderLearning(decision) {
+  const lesson = learningLessons[activeLearningLesson];
+  $("learningLessonTitle").textContent = lesson.title;
+  $("learningLessonBody").innerHTML = lesson.body;
+  document.querySelectorAll(".learning-tab").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.lesson === activeLearningLesson)));
+  const opportunity = stage(decision, "opportunities");
+  const timing = stage(decision, "entry_timing");
+  const risk = stage(decision, "risk_management");
+  const items = activeLearningLesson === "opportunity" ? [
+    ["Market regime", learningCheckText(learningCheck(decision,"opportunities","regime")),"Direction and structure"],
+    ["Volatility", learningCheckText(learningCheck(decision,"opportunities","volatility")),"ATR relative to recent median"],
+    ["Impulse", learningCheckText(learningCheck(decision,"opportunities","impulse")),"Directional leg ÷ ATR"],
+    ["Regime stability", learningCheckText(learningCheck(decision,"opportunities","regime_stability")),"Recent regime consistency"]
+  ] : activeLearningLesson === "entry" ? [
+    ["M15 opportunity", opportunity.approved === true ? "APPROVED" : opportunity.approved === false ? "NOT APPROVED" : "Not supplied","Upstream opportunity gate"],
+    ["Entry timing", learningCheckText(learningCheck(decision,"entry_timing","confirmation")),"Actual Django check, if supplied"],
+    ["Entry quality", fmt(val(timing,"quality")),"Django timing-stage output"],
+    ["Spread", fmt(val(timing,"spread_points")),"Broker points; unavailable if not supplied"]
+  ] : activeLearningLesson === "risk" ? [
+    ["Risk stage", fmt(val(risk,"status")),"Actual Django risk verdict"],
+    ["Stop check", learningCheckText(learningCheck(decision,"risk_management","stop")),"Stop-loss validation"],
+    ["Reward / risk", learningCheckText(learningCheck(decision,"risk_management","reward_risk")),"Configured R:R gate"],
+    ["Daily loss", learningCheckText(learningCheck(decision,"risk_management","daily_loss")),"Daily loss protection"]
+  ] : [
+    ["Decision ID", fmt(val(decision,"decision_id")),"Immutable decision reference"],
+    ["Model version", fmt(val(decision,"model_version")),"Model provenance"],
+    ["Decision time (UTC)", utc(decision.created_at),"Saved Django timestamp"],
+    ["Outcome record", "Not linked in this feed","No realized R/P&L inferred"]
+  ];
+  $("learningLiveValues").innerHTML = items.map(([label,value,note]) => '<div class="learning-live"><span>'+esc(label)+'</span><strong>'+esc(value)+'</strong><small>'+esc(note)+'</small></div>').join("");
+  const created = decision.created_at ? new Date(decision.created_at) : null;
+  const ageSeconds = created && Number.isFinite(created.getTime()) ? Math.max(0,Math.floor((Date.now()-created.getTime())/1000)) : null;
+  const feed = $("learningFeedStatus");
+  feed.className = "learning-status " + (ageSeconds !== null && ageSeconds <= 90 ? "pass" : "wait");
+  feed.textContent = ageSeconds === null ? "TIMESTAMP UNAVAILABLE" : ageSeconds <= 90 ? "RECENT DJANGO DECISION" : "LAST SAVED DECISION · " + Math.floor(ageSeconds/60) + " MIN AGO";
+  $("learningLiveNote").textContent = "Decision timestamp: " + (created ? utc(decision.created_at) : "unavailable") + ". Dashboard refreshes every 10 seconds. A saved decision is not a tick-by-tick candle feed.";
+}
+document.querySelectorAll(".learning-tab").forEach(button => button.addEventListener("click", () => {
+  activeLearningLesson = button.dataset.lesson;
+  if (window.latestLearningDecision) renderLearning(window.latestLearningDecision);
+}));
+
 function renderRisk(decision) {
   const risk = stage(decision, "risk_management");
   const timing = stage(decision, "entry_timing");
@@ -780,6 +902,11 @@ async function refresh() {
       scannerDecisions = [];
       scannerPage = 1;
       renderOpportunityTable();
+      window.latestLearningDecision = null;
+      $("learningFeedStatus").className = "learning-status wait";
+      $("learningFeedStatus").textContent = "WAITING FOR DECISION";
+      $("learningLiveValues").innerHTML = '<div class="small">No saved Django decision is available.</div>';
+      $("learningLiveNote").textContent = "No live lesson evidence is available until Django saves a decision.";
       $("decisionFlow").innerHTML = '<div class="small">No saved decision stages are available yet.</div>';
       $("flowSummary").className = "flow-summary";
       $("flowSummary").textContent = "Waiting for the first Django decision.";
@@ -791,6 +918,8 @@ async function refresh() {
     }
 
     const latest = decisions[0];
+    window.latestLearningDecision = latest;
+    renderLearning(latest);
     renderDecisionFlow(latest);
     const latestFeatures = latest.features || {};
     const latestTiming = stage(latest, "entry_timing");
