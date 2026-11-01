@@ -210,15 +210,6 @@ function renderDecisionRow(decision, index) {
 }
 
 
-const FLOW_ENTRY_ORDER = [
-  ["spread_absolute", "Absolute spread limit"],
-  ["freshness", "Signal freshness"],
-  ["invalidation", "Invalidation and risk room"],
-  ["chase", "Price chase protection"],
-  ["spread_volatility", "Spread versus volatility / risk"],
-  ["spread_risk", "Spread versus risk distance"],
-  ["quality", "Entry quality"]
-];
 const prettyCheck = name => String(name || "unnamed_check").replace(/_/g, " ").replace(/(^| )([a-z])/g, (_, space, letter) => space + letter.toUpperCase());
 const stageChecks = stageResult => Array.isArray(stageResult?.checks) ? stageResult.checks : [];
 const stageState = stageResult => {
