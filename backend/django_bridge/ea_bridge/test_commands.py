@@ -73,7 +73,7 @@ class EACommandApiTests(TestCase):
         command = EACommand.objects.create(
             command_id="cmd-ready", instance_id=self.scope["instance_id"],
             account_login=self.scope["account_login"], symbol="XAUUSD_o",
-            action=EACommand.Action.OPEN,
+            action=EACommand.Action.NOOP,
             payload={"direction": "BUY", "volume": "0.01", "stop_loss": 2300, "take_profit": 2310},
             decision_id="decision-test", risk_verdict_id="risk-test",
             execution_authorized=True, expires_at=now + timedelta(minutes=1),
