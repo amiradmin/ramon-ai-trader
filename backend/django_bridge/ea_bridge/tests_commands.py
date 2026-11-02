@@ -1,12 +1,12 @@
 import json
-from datetime import timedelta
+from datetime import date, timedelta
 
 from .command_producer import _is_demo_account
 
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from .models import EACommand
+from .models import AccountDailyBaseline, EACommand, EAHeartbeat
 
 
 class DemoAccountGateTests(TestCase):
@@ -41,6 +41,39 @@ class EACommandEndpointTests(TestCase):
             "expires_at": timezone.now() + timedelta(minutes=1),
         }
 
+    def create_fresh_heartbeat(self, **overrides):
+        now = timezone.now()
+        payload = {
+            "server_name": "Demo-Server",
+            "account_trade_mode": 0,
+            "broker_day": date.today().isoformat(),
+            "quote_time": now.isoformat(),
+            "quote": {"bid": "2400.0", "ask": "2400.2", "point": "0.01"},
+            "account": {"balance": "10000.0", "equity": "10000.0"},
+            "positions": [],
+        }
+        payload.update(overrides.pop("payload", {}))
+        EAHeartbeat.objects.update_or_create(
+            instance_id="ea-test-1",
+            defaults={
+                "account_login": "12345", "server_name": "Demo-Server",
+                "symbol": "XAUUSD_o", "status": "TELEMETRY_OK",
+                "terminal_connected": True, "trade_allowed": True,
+                "last_seen": now, "payload": payload, **overrides,
+            },
+        )
+        AccountDailyBaseline.objects.get_or_create(
+            account_login="12345", server_name="Demo-Server",
+            broker_day=date.today(),
+            defaults={"opening_balance": "10000.00", "source_instance_id": "ea-test-1"},
+        )
+
+    def poll_payload(self, **overrides):
+        value = {"instance_id": "ea-test-1", "account_login": "12345",
+                 "server_name": "Demo-Server", "symbol": "XAUUSD_o"}
+        value.update(overrides)
+        return value
+
     def create_command(self, **overrides):
         values = dict(
             command_id="cmd-test-1",
@@ -57,12 +90,12 @@ class EACommandEndpointTests(TestCase):
         values.update(overrides)
         return EACommand.objects.create(**values)
 
-    @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_EXECUTION_ENABLED=False)
+    @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_CREATION_ENABLED=False, RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
     def test_poll_is_fail_closed_by_default(self):
         self.create_command()
         response = self.client.post(
             self.next_url,
-            data=json.dumps({"instance_id": "ea-test-1", "account_login": "12345"}),
+            data=json.dumps(self.poll_payload()),
             content_type="application/json",
             **self.headers,
         )
@@ -72,12 +105,12 @@ class EACommandEndpointTests(TestCase):
         self.assertIsNone(response.json()["command"])
         self.assertEqual(EACommand.objects.get().state, EACommand.State.PENDING)
 
-    @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
+    @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_CREATION_ENABLED=True, RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
     def test_poll_scopes_command_to_instance_and_account(self):
         self.create_command()
         response = self.client.post(
             self.next_url,
-            data=json.dumps({"instance_id": "other-instance", "account_login": "12345"}),
+            data=json.dumps(self.poll_payload(instance_id="other-instance")),
             content_type="application/json",
             **self.headers,
         )
@@ -87,6 +120,7 @@ class EACommandEndpointTests(TestCase):
 
     @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
     def test_poll_claims_only_authorized_unexpired_command(self):
+        self.create_fresh_heartbeat()
         self.create_command(command_id="unauthorized", execution_authorized=False)
         self.create_command(
             command_id="expired", expires_at=timezone.now() - timedelta(seconds=1)
@@ -94,7 +128,7 @@ class EACommandEndpointTests(TestCase):
         valid = self.create_command(command_id="valid")
         response = self.client.post(
             self.next_url,
-            data=json.dumps({"instance_id": "ea-test-1", "account_login": "12345"}),
+            data=json.dumps(self.poll_payload()),
             content_type="application/json",
             **self.headers,
         )
@@ -106,6 +140,7 @@ class EACommandEndpointTests(TestCase):
 
     @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
     def test_ack_is_account_scoped_and_terminal_ack_is_idempotent(self):
+        self.create_fresh_heartbeat()
         self.create_command()
         wrong_scope = self.client.post(
             self.ack_url,
