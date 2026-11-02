@@ -42,6 +42,21 @@ def _build_pipeline():
         config=OpportunityConfig(
             require_closed_flag=True,
             impulse_start_mode=opt("RAMON_IMPULSE_START_MODE", "LAST_SWING_LOW"),
+            # LiteFinance publishes XAUUSD sessions in broker-server time:
+            # Mon 01:06-23:59, Tue-Fri 01:02-23:59, closed Sat/Sun.
+            # Europe/Helsinki tracks the broker's UTC+2/UTC+3 server clock.
+            # Keep this configurable for broker schedule/DST changes.
+            session_timezone=opt("RAMON_MARKET_SESSION_TIMEZONE", "Europe/Helsinki"),
+            session_hours=opt(
+                "RAMON_MARKET_SESSION_HOURS",
+                (
+                    (0, 1, 6, 23, 59),
+                    (1, 1, 2, 23, 59),
+                    (2, 1, 2, 23, 59),
+                    (3, 1, 2, 23, 59),
+                    (4, 1, 2, 23, 59),
+                ),
+            ),
         ),
         accepted_store=_SIGNAL_MEMORY if dedupe else None,
         accepted_lock=_SIGNAL_MEMORY_LOCK if dedupe else None,
