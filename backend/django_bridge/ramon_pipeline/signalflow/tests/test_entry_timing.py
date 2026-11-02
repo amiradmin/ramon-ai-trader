@@ -34,6 +34,30 @@ class LegacyEntryTimingTests(TestCase):
         self.assertEqual((result["quality"], result["spread_points"]), (0.8, 20.0))
         self.assertEqual((result["status"], result["timing"]), ("ACCEPTED", "ENTER_NOW"))
 
+    def test_result_exposes_the_exact_entry_timing_thresholds(self):
+        config = EntryTimingConfig(
+            max_signal_age_bars=2.0,
+            max_chase_atr=0.4,
+            min_risk_room_atr=0.3,
+            max_spread_atr=0.15,
+            max_spread_to_risk=0.2,
+        )
+        result = EntryTimer(
+            minimum_quality=0.72,
+            maximum_spread_points=42.0,
+            config=config,
+        ).evaluate(self.legacy, {"entry_quality": 0.9, "spread_points": 20})
+
+        self.assertEqual(result["thresholds"], {
+            "max_signal_age_bars": 2.0,
+            "max_chase_atr": 0.4,
+            "min_risk_room_atr": 0.3,
+            "max_spread_atr": 0.15,
+            "max_spread_to_risk": 0.2,
+            "minimum_quality": 0.72,
+            "maximum_spread_points": 42.0,
+        })
+
     def test_original_reason_codes_are_preserved(self):
         timer = EntryTimer()
         cases = (
