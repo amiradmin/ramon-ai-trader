@@ -502,6 +502,8 @@ string BuildTelemetry()
       +"\"ea_version\":\""+RAMON_COMMAND_EA_VERSION+"\","
       +"\"instance_id\":\""+JsonEscape(InstanceId)+"\","
       +"\"account_login\":\""+IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN))+"\","
+      +"\"account_trade_mode\":"+IntegerToString((int)AccountInfoInteger(ACCOUNT_TRADE_MODE))+","
+
       +"\"server_name\":\""+JsonEscape(server_name)+"\","
       +"\"broker_day\":\""+broker_day+"\",\"broker_time\":"+IntegerToString((long)server_now)+","
       +"\"symbol\":\""+JsonEscape(_Symbol)+"\",\"timeframe\":\""+TfName(_Period)+"\","
@@ -535,6 +537,10 @@ bool SafeOpen(const string command_json,const string command_id,ulong &ticket_ou
    double volume=JsonNumber(command_json,"volume",0);
    double sl=JsonNumber(command_json,"stop_loss",0);
    double tp=JsonNumber(command_json,"take_profit",0);
+   // Match Django's single-position-at-a-time OPEN policy; fail closed if any
+   // position exists on the account, not only on the chart symbol.
+   if(PositionsTotal()>0)
+   { reason="OPEN_POSITION_ALREADY_EXISTS"; return false; }
    MqlTick tick;
    if(!SymbolInfoTick(_Symbol,tick) || tick.bid<=0 || tick.ask<tick.bid)
    { reason="INVALID_QUOTE"; return false; }
@@ -727,7 +733,9 @@ bool ProcessCommand(const string response)
 void PollCommands()
 {
    string body="{\"instance_id\":\""+JsonEscape(InstanceId)+"\","
-      +"\"account_login\":\""+IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN))+"\"}";
+      +"\"account_login\":\""+IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN))+"\","
+      +"\"server_name\":\""+JsonEscape(AccountInfoString(ACCOUNT_SERVER))+"\","
+      +"\"symbol\":\""+JsonEscape(_Symbol)+"\"}";
    string response;
    if(!PostJson("/commands/next",body,response)) return;
    if(StringFind(response,"\"command\":null")>=0 || StringFind(response,"\"command\": null")>=0) return;
