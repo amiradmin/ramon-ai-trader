@@ -120,6 +120,7 @@ def _dashboard_execution_state(latest_symbol=""):
     max_age = int(getattr(settings, "RAMON_EA_HEARTBEAT_MAX_AGE_SECONDS", 90))
     heartbeat_age = None
     heartbeat_fresh = None
+    telemetry_ready = None
     terminal_connected = None
     trade_allowed = None
     demo_account = None
@@ -131,6 +132,7 @@ def _dashboard_execution_state(latest_symbol=""):
             last_seen = last_seen.replace(tzinfo=timezone.utc)
         heartbeat_age = max(0, int((now - last_seen).total_seconds()))
         heartbeat_fresh = heartbeat_age <= max_age
+        telemetry_ready = heartbeat.status == "TELEMETRY_OK"
         terminal_connected = bool(heartbeat.terminal_connected)
         trade_allowed = bool(heartbeat.trade_allowed)
         payload = heartbeat.payload if isinstance(heartbeat.payload, dict) else {}
@@ -165,6 +167,7 @@ def _dashboard_execution_state(latest_symbol=""):
         command_creation,
         command_execution,
         heartbeat_fresh is True,
+        telemetry_ready is True,
         terminal_connected is True,
         trade_allowed is True,
         demo_account is True,
@@ -205,6 +208,13 @@ def _dashboard_execution_state(latest_symbol=""):
             "No EA heartbeat has been received." if heartbeat is None else
             "Latest heartbeat age is " + str(heartbeat_age) + " seconds; maximum accepted age is " + str(max_age) + " seconds.",
             {"age_seconds": heartbeat_age, "maximum_age_seconds": max_age},
+        ),
+        check(
+            "telemetry_status",
+            "EA telemetry status",
+            telemetry_ready,
+            "No heartbeat is available." if heartbeat is None else
+            ("EA telemetry is healthy." if telemetry_ready else "EA telemetry status is not TELEMETRY_OK."),
         ),
         check(
             "terminal_connected",
@@ -248,6 +258,7 @@ def _dashboard_execution_state(latest_symbol=""):
         "command_execution_enabled": command_execution,
         "heartbeat_age_seconds": heartbeat_age,
         "heartbeat_fresh": heartbeat_fresh,
+        "telemetry_ready": telemetry_ready,
         "terminal_connected": terminal_connected,
         "terminal_trade_allowed": trade_allowed,
         "demo_account_confirmed": demo_account,
