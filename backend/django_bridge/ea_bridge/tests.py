@@ -796,3 +796,14 @@ class DashboardDataTests(TestCase):
         stale_checks = {item["name"]: item for item in stale["checks"]}
         self.assertFalse(stale_checks["ea_heartbeat"]["passed"])
         self.assertEqual(stale_checks["ea_heartbeat"]["status"], "BLOCKED")
+
+class DashboardTemplateTests(TestCase):
+    def test_decision_flow_template_uses_live_payload_instead_of_static_catalogue(self):
+        response = self.client.get("/api/ea/v1/dashboard")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "decisionStageEntries")
+        self.assertContains(response, "flowMetricsMarkup")
+        self.assertContains(response, "renderDecisionVariableGuide(latest, data.execution || {})")
+        self.assertNotContains(response, "DECISION_VARIABLE_GROUPS")
+        self.assertNotContains(response, "orderedEntryFlowChecks")
+        self.assertNotContains(response, "orderedRiskFlowChecks")
