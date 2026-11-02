@@ -285,7 +285,7 @@ string BuildBarsJson()
       if(i<copied-1) out+=",";
       datetime utc=(datetime)((long)rates[i].time-server_utc_offset);
       if(_Period==PERIOD_M15) utc=NormalizeM15Utc(utc);
-      out+="{\"timestamp\":\""+IsoUtc(utc)+"\",
+      out+="{\"timestamp\":\""+IsoUtc(utc)+"\","
          +"\"open\":"+DoubleToString(rates[i].open,_Digits)+","
          +"\"high\":"+DoubleToString(rates[i].high,_Digits)+","
          +"\"low\":"+DoubleToString(rates[i].low,_Digits)+","
