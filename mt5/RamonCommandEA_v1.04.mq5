@@ -335,13 +335,14 @@ string BuildDecisionBarsJson()
    return out+"]";
 }
 
-bool CalculateBrokerDayOpeningBalance(double &opening_balance,int &deal_count)
+bool CalculateBrokerDayOpeningBalance(const datetime server_now,const double balance_before,
+                                       double &opening_balance,int &deal_count)
 {
    opening_balance=0.0;
    deal_count=0;
 
-   datetime server_now=TimeTradeServer();
-   if(server_now<=0) return false;
+   if(server_now<=0 || !MathIsValidNumber(balance_before) || balance_before<=0.0)
+      return false;
 
    MqlDateTime broker_day_parts;
    if(!TimeToStruct(server_now,broker_day_parts)) return false;
@@ -350,9 +351,6 @@ bool CalculateBrokerDayOpeningBalance(double &opening_balance,int &deal_count)
    broker_day_parts.sec=0;
    datetime broker_day_start=StructToTime(broker_day_parts);
    if(broker_day_start<=0 || broker_day_start>server_now) return false;
-
-   double balance_before=AccountInfoDouble(ACCOUNT_BALANCE);
-   if(!MathIsValidNumber(balance_before) || balance_before<=0.0) return false;
 
    ResetLastError();
    if(!HistorySelect(broker_day_start,server_now)) return false;
@@ -578,6 +576,7 @@ string BuildTelemetry()
    if(!SymbolInfoTick(_Symbol,tick) || tick.bid<=0 || tick.ask<tick.bid) return "";
    double point=SymbolInfoDouble(_Symbol,SYMBOL_POINT);
    if(point<=0) return "";
+   double baseline_balance_snapshot=AccountInfoDouble(ACCOUNT_BALANCE);
    datetime server_now=TimeTradeServer();
    long server_utc_offset=0;
    if(server_now<=0 || !GetServerUtcOffsetSeconds(server_utc_offset)) return "";
@@ -589,6 +588,7 @@ string BuildTelemetry()
    double broker_day_opening_balance=0.0;
    int broker_day_deal_count=0;
    bool broker_day_history_complete=CalculateBrokerDayOpeningBalance(
+      server_now,baseline_balance_snapshot,
       broker_day_opening_balance,broker_day_deal_count);
    string account="{\"currency\":\""+JsonEscape(AccountInfoString(ACCOUNT_CURRENCY))+"\","
       +"\"balance\":"+DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),2)+","
