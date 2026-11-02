@@ -78,6 +78,32 @@ _CALCULATION_RULES = {
     },
 }
 
+def _complete_stage_checks(stages: dict[str, Any]) -> None:
+    """Keep every documented gate visible, even when a prerequisite was not reached.
+
+    Missing checks are marked NOT_EVALUATED. This audit metadata never changes
+    approval, status, sizing, or execution authorization.
+    """
+    for stage_name, rules in _CALCULATION_RULES.items():
+        stage = stages.get(stage_name)
+        if not isinstance(stage, dict):
+            continue
+        checks = stage.setdefault("checks", [])
+        if not isinstance(checks, list):
+            continue
+        existing = {
+            str(item.get("name", "")).lower()
+            for item in checks if isinstance(item, dict)
+        }
+        for name in rules:
+            if name not in existing:
+                checks.append({
+                    "name": name,
+                    "passed": None,
+                    "status": "NOT_EVALUATED",
+                    "detail": "Not evaluated in this decision snapshot; an earlier gate or prerequisite prevented evaluation.",
+                })
+
 def _plain_config(config: Any) -> dict[str, Any]:
     if config is None:
         return {}
@@ -169,6 +195,8 @@ class SignalFlowPipeline:
         timing = self.entry_timer.evaluate(opportunity, market)
         risk = self._evaluate_risk(market, bool(opportunity.get("approved") and timing.get("approved")), opportunity, timing)
         stages = {"opportunities": opportunity, "entry_timing": timing, "risk_management": risk}
+        # Keep every documented gate visible; missing gates remain NOT_EVALUATED.
+        _complete_stage_checks(stages)
         # Attach auditable calculation metadata after all verdicts are complete.
         # Metadata is descriptive only and cannot alter any stage approval.
         _attach_calculation_metadata(stages, {
