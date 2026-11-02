@@ -220,6 +220,92 @@ class ServerDailyBaselineTelemetryTests(TestCase):
         self.assertFalse(MarketBar.objects.filter(source="m15-conflicting-ea").exists())
 
     @override_settings(EA_BEARER_TOKEN="test-token")
+    def test_first_telemetry_bootstraps_baseline_from_complete_broker_history(self):
+        payload = self._payload(date.today())
+        payload.update({
+            "broker_day_history_complete": True,
+            "broker_day_opening_balance": "10000.00",
+            "broker_day_deal_count": 1,
+        })
+        response = self.client.post(
+            self.url, data=json.dumps(payload),
+            content_type="application/json", **self.headers,
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        baseline = AccountDailyBaseline.objects.get(
+            account_login="98765432",
+            server_name="LiteFinance-MT5-Demo",
+            broker_day=date.today(),
+        )
+        self.assertEqual(str(baseline.opening_balance), "10000.00")
+        self.assertEqual(baseline.capture_method, "BROKER_HISTORY_DERIVED")
+        self.assertEqual(baseline.source_instance_id, "baseline-rollover-ea")
+
+    @override_settings(EA_BEARER_TOKEN="test-token")
+    def test_incomplete_broker_history_does_not_bootstrap_baseline(self):
+        payload = self._payload(date.today())
+        payload.update({
+            "broker_day_history_complete": False,
+            "broker_day_opening_balance": "10000.00",
+            "broker_day_deal_count": 1,
+        })
+        response = self.client.post(
+            self.url, data=json.dumps(payload),
+            content_type="application/json", **self.headers,
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertFalse(AccountDailyBaseline.objects.filter(
+            account_login="98765432",
+            server_name="LiteFinance-MT5-Demo",
+            broker_day=date.today(),
+        ).exists())
+
+    @override_settings(EA_BEARER_TOKEN="test-token")
+    def test_invalid_complete_broker_history_is_rejected(self):
+        payload = self._payload(date.today())
+        payload.update({
+            "broker_day_history_complete": True,
+            "broker_day_opening_balance": "0",
+            "broker_day_deal_count": 0,
+        })
+        response = self.client.post(
+            self.url, data=json.dumps(payload),
+            content_type="application/json", **self.headers,
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("broker_day_opening_balance must be positive", response.json()["error"])
+        self.assertFalse(AccountDailyBaseline.objects.filter(
+            account_login="98765432",
+            server_name="LiteFinance-MT5-Demo",
+            broker_day=date.today(),
+        ).exists())
+
+    @override_settings(EA_BEARER_TOKEN="test-token")
+    def test_broker_history_does_not_overwrite_existing_baseline(self):
+        baseline = AccountDailyBaseline.objects.create(
+            account_login="98765432",
+            server_name="LiteFinance-MT5-Demo",
+            broker_day=date.today(),
+            opening_balance="9900.00",
+            source_instance_id="manual-verified",
+            capture_method="MANUAL_BROKER_VERIFIED",
+        )
+        payload = self._payload(date.today())
+        payload.update({
+            "broker_day_history_complete": True,
+            "broker_day_opening_balance": "10000.00",
+            "broker_day_deal_count": 1,
+        })
+        response = self.client.post(
+            self.url, data=json.dumps(payload),
+            content_type="application/json", **self.headers,
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        baseline.refresh_from_db()
+        self.assertEqual(str(baseline.opening_balance), "9900.00")
+        self.assertEqual(baseline.capture_method, "MANUAL_BROKER_VERIFIED")
+
+    @override_settings(EA_BEARER_TOKEN="test-token")
     def test_continuous_rollover_records_previous_balance_as_immutable_baseline(self):
         yesterday = date.today() - timedelta(days=1)
         EAHeartbeat.objects.create(
