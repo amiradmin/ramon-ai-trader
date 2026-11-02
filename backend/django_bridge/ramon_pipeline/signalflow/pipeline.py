@@ -43,10 +43,15 @@ _CALCULATION_RULES = {
         "freshness": "Signal age (bars) = (latest completed bar time − signal bar time) / timeframe seconds. Reject future signal times and pass only when age <= max_signal_age_bars.",
         "invalidation": "Room to invalidation (ATR) = (entry quote − invalidation price) × direction sign / setup ATR. Price must remain on the valid side and room must be >= min_risk_room_atr.",
         "chase": "Chase distance (ATR) = (entry quote − signal reference price) × direction sign / setup ATR. Pass when distance <= max_chase_atr.",
-        "spread": "Absolute spread (points) = (ask − bid) / point. Pass when spread <= maximum_spread_points.",
+        "spread_absolute": "Absolute spread (points) = (ask − bid) / point (or the supplied spread_points when no quote is available). Pass when 0 <= spread <= maximum_spread_points.",
         "spread_volatility": "Spread fraction of ATR = ((ask − bid) / point × point) / setup ATR. Pass when fraction <= max_spread_atr.",
         "spread_risk": "Spread-to-risk = spread price / directional distance from entry quote to invalidation. Pass when ratio <= max_spread_to_risk.",
         "price_checks": "When a complete bid, ask and point quote is unavailable, price-dependent invalidation, chase and relative-spread checks are skipped (or rejected when require_quote is enabled).",
+        "quote_required": "Require valid positive bid, ask and point values before quote-dependent timing checks can run.",
+        "invalid_opportunity_setup": "Require an approved BUY/SELL setup with finite positive ATR, reference price and invalidation price; invalidation must be on the protective side of the reference price.",
+        "signal_time_unavailable": "When require_signal_time is enabled, both signal time and latest bar time must be present to calculate signal age.",
+        "signal_time_invalid": "Signal age must be non-negative: (latest completed bar time − signal bar time) / timeframe seconds >= 0.",
+        "signal_expired": "Signal age in bars must be <= max_signal_age_bars.",
         "quality": "If supplied quality is accepted, use market.entry_quality. Otherwise quality = 0.40 × spread_eff + 0.35 × location + 0.25 × freshness, where spread_eff = 1 − 0.5 × clip(spread_ATR / max_spread_atr), location = 1 − 0.5 × clip(max(chase_ATR, 0) / max_chase_atr), and freshness = 1 − age_bars / (max_signal_age_bars + 1). Pass when 0 <= quality <= 1 and quality >= minimum_quality.",
     },
     "risk_management": {
@@ -56,6 +61,21 @@ _CALCULATION_RULES = {
         "daily_loss": "When server-derived daily_loss_percent is supplied, pass only when daily_loss_percent < max_daily_loss_percent; otherwise this guard is explicitly skipped.",
         "portfolio_risk": "Available headroom = max_total_risk_percent − open_risk_percent. When open_risk_percent is supplied, require headroom > 0 and cap this trade's risk percent to headroom; otherwise this guard is explicitly skipped.",
         "sizing": "Effective risk percent = min(requested risk percent, maximum_risk_percent, available portfolio headroom when supplied). Risk budget = account balance × effective risk percent / 100. Raw lots = risk budget / (stop points × point value per lot); cap at max_volume, round down to volume_step, and reject if below min_volume. Estimated risk = rounded lots × stop points × point value per lot and must not exceed budget.",
+        "invalid_opportunity_setup": "Require an approved BUY/SELL opportunity with finite positive ATR, invalidation price, reference price and symbol point; invalidation must be on the protective side of the reference price.",
+        "missing_or_invalid_risk_input": "All required account, volume, stop and symbol inputs must be present and numeric.",
+        "non_finite_risk_input": "All required account, volume, stop and symbol inputs must be finite numbers.",
+        "non_positive_or_inconsistent_risk_input": "Balance, requested risk percent, stop distance, point value, volume step and minimum volume must be positive; maximum volume must be >= minimum volume.",
+        "entry_beyond_stop": "Directional distance from selected entry price to calculated stop price must be > 0.",
+        "stop_too_tight": "Structural stop distance normalized by ATR must be >= min_stop_atr.",
+        "stop_too_wide": "Structural stop distance normalized by ATR must be <= max_stop_atr.",
+        "stop_below_broker_minimum": "Planned stop distance in points must be >= broker stop_level_points.",
+        "reward_risk_too_low": "take_profit_points / stop_loss_points must be >= min_reward_risk.",
+        "daily_loss_limit_reached": "Server-derived daily_loss_percent must be < max_daily_loss_percent.",
+        "portfolio_risk_limit_reached": "max_total_risk_percent − open_risk_percent must be > 0.",
+        "risk_budget_below_minimum_volume": "After capping at max_volume and rounding down to volume_step, calculated volume must be >= min_volume; never round up to the broker minimum.",
+        "risk_budget_exceeded": "Estimated risk from rounded volume must be <= calculated risk budget.",
+        "upstream_stage_rejected": "Risk sizing is not evaluated unless both Opportunities and Entry Timing have approved.",
+        "invalid_opportunity_setup": "Require an approved BUY/SELL opportunity with finite positive ATR, invalidation price, reference price and symbol point; invalidation must be on the protective side of the reference price.",
     },
 }
 
@@ -66,7 +86,11 @@ def _plain_config(config: Any) -> dict[str, Any]:
     return {key: list(value) if isinstance(value, tuple) else value for key, value in values.items()}
 
 def _attach_calculation_metadata(
-    stages: dict[str, Any], configs: Mapping[str, Mapping[str, Any]], market: Mapping[str, Any]
+    stages: dict[str, Any],
+    configs: Mapping[str, Mapping[str, Any]],
+    market: Mapping[str, Any],
+    opportunity: Mapping[str, Any],
+    timing: Mapping[str, Any],
 ) -> None:
     """Attach server-authored rules plus actual per-decision inputs; never changes verdicts."""
 
@@ -95,6 +119,14 @@ def _attach_calculation_metadata(
                     "observed_check_metrics": check.get("metrics", {}),
                     "stage_values": stage_inputs,
                     "configured_thresholds": stage.get("thresholds", {}) or configs.get(stage_name, {}),
+                    "upstream_opportunity_setup": opportunity.get("setup", {}),
+                    "upstream_entry_timing": {
+                        key: timing[key]
+                        for key in ("quote_price", "entry_price", "side", "signal_age_bars",
+                                    "room_to_invalidation_atr", "chase_atr", "spread_points",
+                                    "spread_atr_fraction", "spread_to_risk", "quality")
+                        if key in timing
+                    },
                     "market_inputs": {
                         key: market[key]
                         for key in (
@@ -149,7 +181,7 @@ class SignalFlowPipeline:
                              "require_quote": getattr(self.entry_timer, "require_quote", None)},
             "risk_management": {**_plain_config(getattr(self.risk_manager, "config", None)),
                                 "maximum_risk_percent": getattr(self.risk_manager, "maximum_risk_percent", None)},
-        }, market)
+        }, market, opportunity, timing)
         approved = all(bool(stages[name].get("approved")) for name in _STAGE_ORDER)
         action = opportunity.get("side", "HOLD") if approved else "HOLD"
         rejected_by = next((name for name in _STAGE_ORDER if not stages[name].get("approved")), None)
