@@ -65,7 +65,9 @@ def _plain_config(config: Any) -> dict[str, Any]:
     values = vars(config) if hasattr(config, "__dict__") else {}
     return {key: list(value) if isinstance(value, tuple) else value for key, value in values.items()}
 
-def _attach_calculation_metadata(stages: dict[str, Any], configs: Mapping[str, Mapping[str, Any]]) -> None:
+def _attach_calculation_metadata(
+    stages: dict[str, Any], configs: Mapping[str, Mapping[str, Any]], market: Mapping[str, Any]
+) -> None:
     """Attach server-authored rules plus actual per-decision inputs; never changes verdicts."""
 
     for stage_name, stage in stages.items():
@@ -93,6 +95,17 @@ def _attach_calculation_metadata(stages: dict[str, Any], configs: Mapping[str, M
                     "observed_check_metrics": check.get("metrics", {}),
                     "stage_values": stage_inputs,
                     "configured_thresholds": stage.get("thresholds", {}) or configs.get(stage_name, {}),
+                    "market_inputs": {
+                        key: market[key]
+                        for key in (
+                            "symbol", "timeframe", "bid", "ask", "point", "spread_points",
+                            "entry_quality", "account_balance", "risk_percent", "stop_loss_points",
+                            "point_value_per_lot", "volume_step", "min_volume", "max_volume",
+                            "stop_level_points", "take_profit_points", "open_risk_percent",
+                            "daily_loss_percent",
+                        )
+                        if key in market
+                    },
                 },
                 "result": "PASS" if check.get("passed") is True else "FAIL" if check.get("passed") is False else "NOT_EVALUATED",
                 "source": "django_signalflow",
@@ -136,7 +149,7 @@ class SignalFlowPipeline:
                              "require_quote": getattr(self.entry_timer, "require_quote", None)},
             "risk_management": {**_plain_config(getattr(self.risk_manager, "config", None)),
                                 "maximum_risk_percent": getattr(self.risk_manager, "maximum_risk_percent", None)},
-        })
+        }, market)
         approved = all(bool(stages[name].get("approved")) for name in _STAGE_ORDER)
         action = opportunity.get("side", "HOLD") if approved else "HOLD"
         rejected_by = next((name for name in _STAGE_ORDER if not stages[name].get("approved")), None)
