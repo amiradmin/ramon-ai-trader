@@ -9,6 +9,32 @@ from .models import AccountDailyBaseline, EACommand, EAEvent, EAHeartbeat, Marke
 from ramon_pipeline.management.commands.consume_ramon_streams import Command
 
 
+class DemoOpportunityProfileTests(TestCase):
+    def test_expanded_opportunity_profile_is_demo_only_and_keeps_risk_limits(self):
+        from .decision import _build_pipeline
+
+        demo = _build_pipeline(demo_mode=True)
+        standard = _build_pipeline(demo_mode=False)
+
+        self.assertEqual(demo.opportunities.minimum_score, 0.48)
+        self.assertEqual(demo.opportunities.config.adx_trending, 10.0)
+        self.assertEqual(demo.opportunities.config.adx_ranging, 8.0)
+        self.assertEqual(demo.opportunities.config.min_impulse_atr, 1.2)
+        self.assertEqual(demo.opportunities.config.min_retracement, 0.15)
+        self.assertEqual(demo.entry_timer.minimum_quality, 0.48)
+        self.assertEqual(demo.entry_timer.maximum_spread_points, 100.0)
+
+        self.assertEqual(standard.opportunities.minimum_score, 0.55)
+        self.assertEqual(standard.opportunities.config.adx_trending, 12.0)
+        self.assertEqual(standard.entry_timer.minimum_quality, 0.55)
+
+        # Discovery is relaxed; account and portfolio risk remain unchanged.
+        self.assertEqual(demo.risk_manager.maximum_risk_percent, 0.5)
+        self.assertEqual(demo.risk_manager.config.max_total_risk_percent, 2.0)
+        self.assertEqual(demo.risk_manager.config.max_daily_loss_percent, 3.0)
+        self.assertEqual(demo.risk_manager.config.min_reward_risk, 1.2)
+
+
 class EAIngestionTests(TestCase):
     def setUp(self):
         self.url = "/api/ea/v1/events"

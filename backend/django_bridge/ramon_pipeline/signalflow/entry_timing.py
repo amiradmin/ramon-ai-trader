@@ -42,10 +42,10 @@ class EntryTimingConfig:
     """
 
     max_signal_age_bars: float = 1.0  # completed bars allowed between the signal bar and now
-    max_chase_atr: float = 0.65  # how far price may run beyond the signal close
-    min_risk_room_atr: float = 0.20  # entry must stay at least this far from the invalidation level
-    max_spread_atr: float = 0.25  # spread as a fraction of ATR
-    max_spread_to_risk: float = 0.30  # spread as a fraction of the distance to invalidation
+    max_chase_atr: float = 0.5  # how far price may run beyond the signal close
+    min_risk_room_atr: float = 0.25  # entry must stay at least this far from the invalidation level
+    max_spread_atr: float = 0.20  # spread as a fraction of ATR
+    max_spread_to_risk: float = 0.25  # spread as a fraction of the distance to invalidation
     # Validation / safety options. Defaults keep the original behaviour.
     require_signal_time: bool = False  # reject (instead of skipping freshness) when signal/latest bar time is missing
     ignore_supplied_quality: bool = False  # always compute quality from spread/chase/freshness, never take market["entry_quality"]
@@ -81,7 +81,7 @@ class EntryTimer:
     def __init__(
         self,
         minimum_quality: float = 0.55,
-        maximum_spread_points: float = 80.0,
+        maximum_spread_points: float = 50.0,
         *,
         config: EntryTimingConfig | None = None,
         require_quote: bool = False,

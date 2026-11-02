@@ -24,8 +24,12 @@ _SIGNAL_MEMORY = OrderedDict()
 _SIGNAL_MEMORY_LOCK = threading.Lock()
 
 
-def _build_pipeline():
+def _build_pipeline(*, demo_mode=False):
     """Build the SignalFlow pipeline for one request.
+
+    The expanded opportunity profile is selected only from explicit broker telemetry
+    identifying an MT5 demo account. It relaxes discovery and entry-quality thresholds,
+    never the directional structure, closed-bar, quote, account, or risk guards.
 
     Always on (fail-closed, no change to decisions for a well-formed request): the closed-bar
     flag must be explicitly True, the signal time must be known for the freshness check, and a
@@ -38,8 +42,30 @@ def _build_pipeline():
         return getattr(settings, name, default)
 
     dedupe = bool(opt("RAMON_DEDUPE_SIGNALS", False))
+    # Demo profile broadens setup discovery without weakening the hard safety gates.
+    opportunity_profile = ({
+        "adx_trending": 10.0,
+        "adx_ranging": 8.0,
+        "min_ema_separation_atr": 0.12,
+        "support_tolerance_atr": 0.75,
+        "min_impulse_atr": 1.2,
+        "min_retracement": 0.15,
+        "max_retracement": 0.88,
+        "zone_tolerance_atr": 0.55,
+        "max_bars_since_pullback_low": 10,
+        "rsi_overbought": 80.0,
+    } if demo_mode else {})
+    entry_profile = ({
+        "max_signal_age_bars": 1.5,
+        "max_chase_atr": 0.85,
+        "min_risk_room_atr": 0.15,
+        "max_spread_atr": 0.30,
+        "max_spread_to_risk": 0.40,
+    } if demo_mode else {})
     detector = OpportunityDetector(
+        minimum_score=0.48 if demo_mode else 0.55,
         config=OpportunityConfig(
+            **opportunity_profile,
             require_closed_flag=True,
             impulse_start_mode=opt("RAMON_IMPULSE_START_MODE", "LAST_SWING_LOW"),
             # LiteFinance publishes XAUUSD sessions in broker-server time:
@@ -62,8 +88,11 @@ def _build_pipeline():
         accepted_lock=_SIGNAL_MEMORY_LOCK if dedupe else None,
     )
     timer = EntryTimer(
+        minimum_quality=0.48 if demo_mode else 0.55,
+        maximum_spread_points=100.0 if demo_mode else 80.0,
         require_quote=True,
         config=EntryTimingConfig(
+            **entry_profile,
             require_signal_time=True,
             ignore_supplied_quality=bool(opt("RAMON_USE_COMPUTED_ENTRY_QUALITY", False)),
         ),
@@ -184,12 +213,17 @@ def decision(request):
         account_snapshot_balance = None
 
         heartbeat = None
+        is_demo_account = False
         if instance_id and account_login:
             heartbeat = EAHeartbeat.objects.filter(instance_id=instance_id).first()
 
         if heartbeat is not None:
             age = (timezone.now() - heartbeat.last_seen).total_seconds()
             snapshot = heartbeat.payload if isinstance(heartbeat.payload, dict) else {}
+            is_demo_account = (
+                type(snapshot.get("account_trade_mode")) is int
+                and snapshot.get("account_trade_mode") == 0
+            )
             account_snapshot = snapshot.get("account", {})
             positions_snapshot = snapshot.get("positions", [])
             broker_day_raw = snapshot.get("broker_day")
@@ -266,7 +300,8 @@ def decision(request):
         # The client value is required for protocol compatibility, but never used to
         # authorize trading. The daily-loss guard receives only the server-derived value.
         market["daily_loss_percent"] = server_daily_loss_percent
-        result=_build_pipeline().run(market)
+        strategy_profile = "DEMO_EXPANDED" if is_demo_account else "STANDARD"
+        result = _build_pipeline(demo_mode=is_demo_account).run(market)
         if not risk_guards_complete:
             action = "WAIT"
             reason = "RISK_INPUTS_INCOMPLETE"
@@ -294,6 +329,7 @@ def decision(request):
           "approved": bool(result["approved"]),
           "stages": result["stages"],
           "opportunity_input_path": "completed_ohlc_structural",
+          "strategy_profile": strategy_profile,
           "structural_candle_count": len(bars),
           "market_snapshot": {
             "symbol": symbol,
@@ -417,6 +453,7 @@ def decision(request):
           record.action, record.rationale_code, key, bar_time, bid, ask, atr, median,
           spread, confidence, risk_approved,
         )
+        response["strategy_profile"] = strategy_profile
         response["command_created"] = command_created
         response["command_available"] = bool(command is not None and command.state == "PENDING" and command.expires_at > timezone.now())
         response["command_reason"] = command_reason
