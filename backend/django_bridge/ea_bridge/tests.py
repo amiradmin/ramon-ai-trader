@@ -876,6 +876,7 @@ class DashboardDataTests(TestCase):
         self.assertTrue(execution["command_creation_enabled"])
         self.assertFalse(execution["command_execution_enabled"])
         self.assertTrue(checks["ea_heartbeat"]["passed"])
+        self.assertTrue(checks["telemetry_status"]["passed"])
         self.assertTrue(checks["terminal_connected"]["passed"])
         self.assertFalse(checks["terminal_trade_allowed"]["passed"])
         self.assertTrue(checks["demo_account"]["passed"])
