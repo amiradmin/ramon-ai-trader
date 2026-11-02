@@ -46,6 +46,25 @@
 .flow-metrics b{font-size:8px;color:var(--muted);font-weight:600}
 .flow-metrics code{font-size:8px;color:#dce8f8;overflow-wrap:anywhere}
 .flow-check.pass em{color:var(--green)}.flow-check.wait em{color:var(--amber)}.flow-check.blocked em{color:var(--red)}
+.flow-check-details{grid-column:2 / 4;margin-top:7px;border:1px solid #29384c;border-radius:7px;background:#0b131e;min-width:0}
+.flow-check-details>summary{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 9px;cursor:pointer;list-style:none;color:#9fc0f5;font-size:9px;font-weight:800}
+.flow-check-details>summary::-webkit-details-marker{display:none}
+.flow-check-details>summary:after{content:"＋";color:var(--blue);font-size:12px}
+.flow-check-details[open]>summary:after{content:"−"}
+.flow-check-details>summary span{margin-left:auto;color:var(--muted);font-size:8px;font-weight:500}
+.flow-check-detail-content{padding:0 9px 9px;min-width:0}
+.flow-check-detail-content .math-label{display:block;margin:8px 0 4px;color:var(--muted);font-size:8px;letter-spacing:.5px;text-transform:uppercase}
+.flow-formula{display:block;padding:8px;border-radius:6px;background:#111d2b;color:#dce8f8;font:10px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
+.flow-unavailable{margin:4px 0;color:var(--amber);font-size:9px}
+.flow-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}
+.flow-detail-cell{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;min-width:0;padding:6px 7px;border:1px solid #26364a;border-radius:5px;background:#111a26}
+.flow-detail-cell span{color:var(--muted);font-size:8px;overflow-wrap:anywhere}
+.flow-detail-cell code{color:#dce8f8;font-size:9px;text-align:right;overflow-wrap:anywhere;white-space:pre-wrap}
+.flow-calculation-result{display:flex;justify-content:space-between;gap:10px;margin-top:7px;padding:8px;border:1px solid #34445a;border-radius:6px;background:#111a26}
+.flow-calculation-result span{color:var(--muted);font-size:9px}
+.flow-calculation-result strong{color:var(--green);font-size:10px;text-align:right;overflow-wrap:anywhere}
+.flow-calculation-note{margin:8px 0 0;color:var(--muted);font-size:8px;line-height:1.5}
+@media(max-width:620px){.flow-detail-grid{grid-template-columns:1fr}}
 .flow-math{grid-column:2 / 4;margin-top:5px;padding:7px 8px;border-left:2px solid #40536d;background:#0c1420;border-radius:0 6px 6px 0;min-width:0}
 .flow-math .math-label{display:block;color:var(--muted);font-size:8px;letter-spacing:.55px;text-transform:uppercase;margin:2px 0}
 .flow-math code{display:block;color:#dce8f8;font:10px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:normal;overflow-wrap:anywhere}
@@ -386,6 +405,60 @@ function flowMetricsMarkup(metrics) {
     '<span><b>' + esc(prettyCheck(key)) + '</b><code>' + esc(flowValue(value)) + '</code></span>'
   ).join("") + '</div>';
 }
+function flowDetailText(value) {
+  if (value === null || value === undefined || value === "") return "Unavailable";
+  if (typeof value === "object") return JSON.stringify(value, null, 2);
+  return String(value);
+}
+function flowDetailRows(source, prefix = "", depth = 0, rows = []) {
+  if (source === null || source === undefined || depth > 3) return rows;
+  if (Array.isArray(source)) {
+    source.forEach((value, index) => flowDetailRows(value, prefix ? prefix + "[" + index + "]" : "[" + index + "]", depth + 1, rows));
+  } else if (typeof source === "object") {
+    for (const [key, value] of Object.entries(source)) {
+      const name = prefix ? prefix + " · " + prettyCheck(key) : prettyCheck(key);
+      if (value !== null && typeof value === "object") flowDetailRows(value, name, depth + 1, rows);
+      else rows.push([name, flowDetailText(value)]);
+    }
+  } else {
+    rows.push([prefix || "Value", flowDetailText(source)]);
+  }
+  return rows;
+}
+function flowCheckCalculationMarkup(check, state, detail) {
+  const calculation = check.calculation && typeof check.calculation === "object" ? check.calculation : {};
+  const formula = check.formula ?? calculation.formula ?? check.expression ?? check.rule ?? check.condition_formula;
+  const inputs = check.inputs ?? calculation.inputs ?? check.metrics ?? check.values;
+  const result = calculation.result ?? check.calculated_value ?? check.result ?? check.actual ?? check.value;
+  const rows = flowDetailRows(inputs);
+  const extra = {};
+  for (const [key, value] of Object.entries(calculation)) {
+    if (!["formula", "inputs", "result"].includes(key)) extra[key] = value;
+  }
+  const extraRows = flowDetailRows(extra);
+  const hasFormula = formula !== undefined && formula !== null && formula !== "";
+  const formulaMarkup = hasFormula
+    ? '<code class="flow-formula">' + esc(flowDetailText(formula)) + '</code>'
+    : '<p class="flow-unavailable">Formula was not included in the Django response for this condition.</p>';
+  const inputMarkup = rows.length
+    ? '<div class="flow-detail-grid">' + rows.map(([name, value]) =>
+        '<div class="flow-detail-cell"><span>' + esc(name) + '</span><code>' + esc(value) + '</code></div>'
+      ).join("") + '</div>'
+    : '<p class="flow-unavailable">No calculation inputs or live metrics were supplied.</p>';
+  const resultMarkup = result !== undefined
+    ? '<div class="flow-calculation-result"><span>Calculated result</span><strong>' + esc(flowDetailText(result)) + '</strong></div>'
+    : '<div class="flow-calculation-result"><span>Django condition verdict</span><strong>' + esc(state.toUpperCase()) + '</strong></div>';
+  const extraMarkup = extraRows.length
+    ? '<span class="math-label">Additional calculation details</span><div class="flow-detail-grid">' + extraRows.map(([name, value]) =>
+        '<div class="flow-detail-cell"><span>' + esc(name) + '</span><code>' + esc(value) + '</code></div>'
+      ).join("") + '</div>' : "";
+  return '<details class="flow-check-details"><summary>Formula &amp; live calculation <span>Expand</span></summary>' +
+    '<div class="flow-check-detail-content"><span class="math-label">Formula / rule</span>' + formulaMarkup +
+    '<span class="math-label">Live inputs supplied by Django</span>' + inputMarkup +
+    resultMarkup + extraMarkup +
+    '<p class="flow-calculation-note">Values and verdict are displayed from the latest saved Django decision; the dashboard does not recalculate or alter the strategy.</p>' +
+    '</div></details>';
+}
 function flowCheckMarkup(check, state, displayName) {
   const label = displayName || check.display_name || check.label || prettyCheck(check.name);
   const detail = check.detail || check.explanation || check.message ||
@@ -397,7 +470,8 @@ function flowCheckMarkup(check, state, displayName) {
     "Live decision check returned by Django.";
   return '<div class="flow-check ' + css + '"><span class="flow-check-dot"></span><div>' +
     '<strong class="flow-tooltip" data-tooltip="' + esc(tooltip) + '" title="' + esc(tooltip) + '" tabindex="0">' + esc(label) + '</strong>' +
-    '<p>' + esc(detail) + '</p>' + flowMetricsMarkup(check.metrics) + '</div><em>' + tag + '</em></div>';
+    '<p>' + esc(detail) + '</p>' + flowMetricsMarkup(check.metrics) +
+    flowCheckCalculationMarkup(check, css, detail) + '</div><em>' + tag + '</em></div>';
 }
 function flowStageMarkup(title, stageResult, checks, fallback, forcedState) {
   const state = forcedState || stageState(stageResult);
