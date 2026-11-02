@@ -502,7 +502,8 @@ string BuildTelemetry()
       +"\"ea_version\":\""+RAMON_COMMAND_EA_VERSION+"\","
       +"\"instance_id\":\""+JsonEscape(InstanceId)+"\","
       +"\"account_login\":\""+IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN))+"\","
-      +"\"account_trade_mode\":"+IntegerToString((int)AccountInfoInteger(ACCOUNT_TRADE_MODE))+",\n      +"\"server_name\":\""+JsonEscape(server_name)+"\","
+      +"\"account_trade_mode\":"+IntegerToString((int)AccountInfoInteger(ACCOUNT_TRADE_MODE))+",
+      +"\"server_name\":\""+JsonEscape(server_name)+"\","
       +"\"broker_day\":\""+broker_day+"\",\"broker_time\":"+IntegerToString((long)server_now)+","
       +"\"symbol\":\""+JsonEscape(_Symbol)+"\",\"timeframe\":\""+TfName(_Period)+"\","
       +"\"quote\":{\"bid\":"+DoubleToString(tick.bid,_Digits)+",\"ask\":"+DoubleToString(tick.ask,_Digits)+",\"point\":"+DoubleToString(point,_Digits)+"},"
