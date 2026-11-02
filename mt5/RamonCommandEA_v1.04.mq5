@@ -8,7 +8,7 @@
 input string ApiBaseUrl = "http://127.0.0.1:8017/api/ea/v1";
 input string DjangoBearerToken = "";       // Set locally in MT5; never commit a real token.
 input string InstanceId = "ramon-command-ea-1";
-input bool EnableCommandExecution = false; // Must remain false until demo validation is complete.
+input bool EnableCommandExecution = true;  // Demo-only: SafeOpen rejects every non-demo account.
 input int TimerSeconds = 15;
 input int DecisionIntervalSeconds = 30; // Django decision requests, independent of telemetry polling.
 input int BarsToSend = 128;
