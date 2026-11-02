@@ -351,6 +351,9 @@ bool CalculateBrokerDayOpeningBalance(double &opening_balance,int &deal_count)
    datetime broker_day_start=StructToTime(broker_day_parts);
    if(broker_day_start<=0 || broker_day_start>server_now) return false;
 
+   double balance_before=AccountInfoDouble(ACCOUNT_BALANCE);
+   if(!MathIsValidNumber(balance_before) || balance_before<=0.0) return false;
+
    ResetLastError();
    if(!HistorySelect(broker_day_start,server_now)) return false;
 
@@ -383,6 +386,11 @@ bool CalculateBrokerDayOpeningBalance(double &opening_balance,int &deal_count)
    }
 
    double current_balance=AccountInfoDouble(ACCOUNT_BALANCE);
+   // Avoid pairing a history snapshot with a balance changed during the read.
+   if(!MathIsValidNumber(current_balance) ||
+      MathAbs(current_balance-balance_before)>0.005)
+      return false;
+
    opening_balance=current_balance-net_cashflow;
    if(!MathIsValidNumber(opening_balance) || opening_balance<=0.0)
       return false;
