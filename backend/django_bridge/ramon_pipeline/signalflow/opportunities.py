@@ -223,7 +223,6 @@ def _expected_session_bars_between(
     zone = ZoneInfo(config.session_timezone)
     schedule = {entry[0]: entry[1:] for entry in config.session_hours}
     candidate = (int(previous_time // bar_seconds) + 1) * bar_seconds
-    next_utc = datetime.fromtimestamp(next_time, tz=timezone.utc)
     missing = 0
     while candidate < next_time:
         candle_open_utc = datetime.fromtimestamp(candidate, tz=timezone.utc)
