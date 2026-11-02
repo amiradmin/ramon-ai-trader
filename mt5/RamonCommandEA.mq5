@@ -502,7 +502,7 @@ string BuildTelemetry()
       +"\"ea_version\":\""+RAMON_COMMAND_EA_VERSION+"\","
       +"\"instance_id\":\""+JsonEscape(InstanceId)+"\","
       +"\"account_login\":\""+IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN))+"\","
-      +"\"account_trade_mode\":"+IntegerToString((int)AccountInfoInteger(ACCOUNT_TRADE_MODE))+",
+      +"\"account_trade_mode\":"+IntegerToString((int)AccountInfoInteger(ACCOUNT_TRADE_MODE))+",\"
       +"\"server_name\":\""+JsonEscape(server_name)+"\","
       +"\"broker_day\":\""+broker_day+"\",\"broker_time\":"+IntegerToString((long)server_now)+","
       +"\"symbol\":\""+JsonEscape(_Symbol)+"\",\"timeframe\":\""+TfName(_Period)+"\","
@@ -535,7 +535,8 @@ bool SafeOpen(const string command_json,const string command_id,ulong &ticket_ou
    string side=JsonString(command_json,"side","");
    double volume=JsonNumber(command_json,"volume",0);
    double sl=JsonNumber(command_json,"stop_loss",0);
-   double tp=JsonNumber(command_json,"take_profit",0);\n   // Match Django's single-position-at-a-time OPEN policy; fail closed if any
+   double tp=JsonNumber(command_json,"take_profit",0);
+   // Match Django's single-position-at-a-time OPEN policy; fail closed if any
    // position exists on the account, not only on the chart symbol.
    if(PositionsTotal()>0)
    { reason="OPEN_POSITION_ALREADY_EXISTS"; return false; }
