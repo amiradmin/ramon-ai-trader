@@ -118,7 +118,7 @@ class EACommandEndpointTests(TestCase):
         self.assertIsNone(response.json()["command"])
         self.assertEqual(EACommand.objects.get().state, EACommand.State.PENDING)
 
-    @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
+    @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_CREATION_ENABLED=True, RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
     def test_poll_claims_only_authorized_unexpired_command(self):
         self.create_fresh_heartbeat()
         self.create_command(command_id="unauthorized", execution_authorized=False)
@@ -138,7 +138,7 @@ class EACommandEndpointTests(TestCase):
         self.assertEqual(valid.__class__.objects.get(command_id="valid").state, EACommand.State.CLAIMED)
         self.assertEqual(valid.__class__.objects.get(command_id="expired").state, EACommand.State.EXPIRED)
 
-    @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
+    @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_CREATION_ENABLED=True, RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
     def test_ack_is_account_scoped_and_terminal_ack_is_idempotent(self):
         self.create_fresh_heartbeat()
         self.create_command()
@@ -155,7 +155,7 @@ class EACommandEndpointTests(TestCase):
 
         self.client.post(
             self.next_url,
-            data=json.dumps({"instance_id": "ea-test-1", "account_login": "12345"}),
+            data=json.dumps(self.poll_payload()),
             content_type="application/json",
             **self.headers,
         )
