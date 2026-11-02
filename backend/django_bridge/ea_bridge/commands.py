@@ -1,8 +1,9 @@
-"""Authenticated command polling and acknowledgement endpoints.
+"""Authenticated polling and acknowledgement for Django-authorized EA commands.
 
-No endpoint creates a trade command. Command creation must be wired to an
-explicitly approved strategy + risk-verdict path in a later integration step.
-Execution is disabled unless RAMON_EA_COMMAND_EXECUTION_ENABLED is true.
+The decision pipeline may create an OPEN command only after strategy approval,
+a passing risk verdict, and server-side account validation. This module only
+delivers those durable commands; it never creates or independently approves trades.
+Execution remains gated by RAMON_EA_COMMAND_EXECUTION_ENABLED.
 """
 import json
 
