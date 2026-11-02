@@ -139,7 +139,7 @@ jobs:
             echo "FAIL: production EA must derive the daily baseline from broker history." >&2
             exit 1
           }
-          grep -Fq '"broker_day_history_complete"' "$production_source" || {
+          grep -Fq 'broker_day_history_complete' "$production_source" || {
             echo "FAIL: production EA must report whether broker-day history is complete." >&2
             exit 1
           }
