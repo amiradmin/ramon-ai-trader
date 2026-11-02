@@ -105,6 +105,11 @@ class OpportunityConfig:
     zone_tolerance_atr: float = 0.40
     max_bars_since_pullback_low: int = 8
     rsi_overbought: float = 75.0  # mirrored (100 - x) for shorts
+    # Confirmed breakout/retest alternative to the EMA pullback setup.
+    breakout_lookback: int = 20
+    breakout_buffer_atr: float = 0.10
+    breakout_retest_tolerance_atr: float = 0.25
+    breakout_max_retest_bars: int = 3
     # Validation / safety options. Defaults keep the original behaviour.
     # require_closed_flag: treat a missing/None ``last_bar_closed`` as "not confirmed closed"
     # (fail closed) instead of assuming the newest candle is complete.
@@ -115,6 +120,12 @@ class OpportunityConfig:
     impulse_start_mode: str = "LAST_SWING_LOW"
 
     def __post_init__(self) -> None:
+        if self.breakout_lookback < 5:
+            raise ValueError("breakout_lookback must be at least 5")
+        if self.breakout_buffer_atr < 0 or self.breakout_retest_tolerance_atr <= 0:
+            raise ValueError("breakout buffer must be non-negative and retest tolerance positive")
+        if self.breakout_max_retest_bars < 1:
+            raise ValueError("breakout_max_retest_bars must be positive")
         if self.impulse_start_mode not in ("LAST_SWING_LOW", "LOWEST_SINCE_PRIOR_HIGH"):
             raise ValueError("impulse_start_mode must be LAST_SWING_LOW or LOWEST_SINCE_PRIOR_HIGH")
         if self.pivot_window < 1:
@@ -970,6 +981,148 @@ class OpportunityDetector:
             _check(checks, "volatility", False, vol_text + " (spike)", metrics={"value": round(atr_ratio, 3), "threshold": f"{config.atr_ratio_min:.2f}–{config.atr_ratio_max:.2f}", "minimum": config.atr_ratio_min, "maximum": config.atr_ratio_max, "factor": "ATR / recent ATR median"})
             return finish(DEFERRED, "VOLATILITY_SPIKE", vol_text + ", wait for volatility to settle", side)
         _check(checks, "volatility", True, vol_text, metrics={"value": round(atr_ratio, 3), "threshold": f"{config.atr_ratio_min:.2f}–{config.atr_ratio_max:.2f}", "minimum": config.atr_ratio_min, "maximum": config.atr_ratio_max, "factor": "ATR / recent ATR median"})
+
+        # 3. Alternative setup: confirmed breakout -> retest -> continuation.
+        # This is evaluated only inside an already-confirmed directional regime and
+        # after the shared data, bar-close, regime-stability and volatility gates.
+        # The breakout level is calculated exclusively from candles before the
+        # breakout candle; the current candle is the confirmation candle.
+        if sign > 0:
+            breakout_high, breakout_low, breakout_close = bars.high, bars.low, bars.close
+        else:
+            breakout_high = [-value for value in bars.low]
+            breakout_low = [-value for value in bars.high]
+            breakout_close = [-value for value in bars.close]
+
+        breakout_candidate = None
+        first_breakout = max(config.breakout_lookback, t - config.breakout_max_retest_bars - 1)
+        for breakout_index in range(t - 2, first_breakout - 1, -1):
+            range_start = breakout_index - config.breakout_lookback
+            if range_start < 0:
+                continue
+            level = max(breakout_high[range_start:breakout_index])
+            breakout_atr = ind.atr[breakout_index]
+            if not math.isfinite(breakout_atr) or breakout_atr <= 0:
+                continue
+            breakout_buffer = config.breakout_buffer_atr * breakout_atr
+            if breakout_close[breakout_index] <= level + breakout_buffer:
+                continue
+            for retest_index in range(breakout_index + 1, t):
+                retest_age = retest_index - breakout_index
+                if retest_age > config.breakout_max_retest_bars:
+                    break
+                tolerance = config.breakout_retest_tolerance_atr * atr
+                retest_gap = breakout_low[retest_index] - level
+                if retest_gap > tolerance or retest_gap < -tolerance:
+                    continue
+                if breakout_close[retest_index] < level:
+                    continue
+                if any(value < level for value in breakout_close[retest_index:t + 1]):
+                    continue
+                if breakout_close[t] <= breakout_high[retest_index]:
+                    continue
+                breakout_candidate = (breakout_index, retest_index, level, retest_gap)
+                break
+            if breakout_candidate is not None:
+                break
+
+        if breakout_candidate is not None:
+            breakout_index, retest_index, breakout_level, retest_gap = breakout_candidate
+            rsi_dir = ind.rsi[t] if sign > 0 else 100.0 - ind.rsi[t]
+            retest_distance_atr = abs(retest_gap) / atr
+            breakout_extension_atr = (breakout_close[t] - breakout_level) / atr
+            components["trend"] = _trend_component(sign, regime)
+            components["pullback"] = 1.0 - 0.5 * clip(
+                retest_distance_atr / config.breakout_retest_tolerance_atr
+            )
+            components["momentum"] = _momentum_component(rsi_dir, breakout_extension_atr)
+            score = _weighted_score(components)
+            _check(
+                checks, "breakout_retest", True,
+                f"breakout level retested within {retest_distance_atr:.2f} ATR and current close confirmed continuation",
+                metrics={
+                    "breakout_level": round(sign * breakout_level, 5),
+                    "breakout_bar_time": _time_out(bars.times[breakout_index]),
+                    "retest_bar_time": _time_out(bars.times[retest_index]),
+                    "retest_gap_atr": round(retest_gap / atr, 3),
+                    "confirmation_close": round(bars.close[t], 5),
+                },
+            )
+            if rsi_dir > config.rsi_overbought:
+                detail = f"breakout continuation momentum is overextended (directional RSI {rsi_dir:.0f})"
+                _check(checks, "momentum", False, detail, metrics={"value": round(rsi_dir, 2), "threshold": config.rsi_overbought, "factor": "directional RSI"})
+                return finish(DEFERRED, "MOMENTUM_OVEREXTENDED", detail, side)
+            _check(checks, "momentum", True, f"directional RSI {rsi_dir:.0f} is not overextended", metrics={"value": round(rsi_dir, 2), "threshold": config.rsi_overbought, "factor": "directional RSI"})
+            if score < self.minimum_score:
+                detail = f"breakout/retest score {score:.2f} is below the minimum {self.minimum_score:.2f}"
+                _check(checks, "score", False, detail, metrics={"value": round(score, 4), "threshold": self.minimum_score, "factor": "weighted breakout/retest score (0-1)"})
+                return finish(REJECTED, "SETUP_SCORE_TOO_LOW", detail, side)
+            _check(checks, "score", True, f"breakout/retest score {score:.2f} >= {self.minimum_score:.2f}", metrics={"value": round(score, 4), "threshold": self.minimum_score, "factor": "weighted breakout/retest score (0-1)"})
+
+            anchor_time = bars.times[breakout_index]
+            signal_key = f"{symbol}|{timeframe}|{side}|BREAKOUT_RETEST|{anchor_time}"
+            with self._lock:
+                earlier = self._accepted.get(signal_key)
+            if earlier is not None and earlier != bar_time:
+                detail = "this breakout/retest already produced a signal on an earlier bar"
+                _check(checks, "duplicate", False, detail)
+                return finish(REJECTED, "DUPLICATE_SIGNAL", detail, side)
+            _check(checks, "duplicate", True, "no earlier signal for this breakout/retest")
+
+            setup = {
+                "type": "BREAKOUT_RETEST",
+                "side": side,
+                "anchor_time": _time_out(anchor_time),
+                "breakout_level": round(sign * breakout_level, 5),
+                "retest_extreme_price": round(sign * breakout_low[retest_index], 5),
+                "bars_since_breakout": t - breakout_index,
+                "bars_since_retest": t - retest_index,
+                "reference_price": bars.close[t],
+                "invalidation_price": round(sign * breakout_low[retest_index], 5),
+                "atr": round(atr, 5),
+                "rsi": round(ind.rsi[t], 2),
+                "atr_ratio": round(atr_ratio, 3),
+            }
+            extra: dict[str, Any] = {"setup": setup}
+            reason = "BREAKOUT_RETEST_CONFIRMED"
+            if self.use_statistical_forecasts or bool(market.get("use_statistical_forecasts", False)):
+                forecast = self._evaluate_forecasts(
+                    market, side, bar_time=bar_time, tolerance=bars.interval / 2.0
+                )
+                extra["forecasting"] = forecast
+                if not forecast.get("approved", False):
+                    reject_reason = forecast.get("reason", "FORECAST_REJECTED")
+                    _check(checks, "forecast", False, forecast.get("detail", reject_reason))
+                    return finish(_forecast_status(reject_reason), reject_reason,
+                                  f"breakout/retest passed technical gates but forecasts do not support it ({reject_reason})",
+                                  side, **extra)
+                _check(checks, "forecast", True, "ARIMA and SARIMA agree with the breakout direction")
+                reason = "BREAKOUT_RETEST_CONFIRMED_WITH_FORECAST"
+            with self._lock:
+                self._accepted[signal_key] = bar_time
+                self._accepted.move_to_end(signal_key)
+                while len(self._accepted) > 512:
+                    self._accepted.popitem(last=False)
+            signal_id = hashlib.sha256(f"{signal_key}|{bar_time}".encode()).hexdigest()[:16]
+            explanation = (
+                f"{side} accepted: confirmed close beyond the prior {config.breakout_lookback}-bar range, "
+                f"retest held the breakout level, and the latest completed candle closed through the retest high; "
+                f"directional RSI {rsi_dir:.0f}, ATR {atr_ratio:.2f}x baseline; score {score:.2f}"
+            )
+            return done(
+                ACCEPTED,
+                reason,
+                side=side,
+                candidate_side=side,
+                score=score,
+                regime=regime_info,
+                components={k: round(v, 4) for k, v in components.items()},
+                signal_bar_time=_time_out(bar_time),
+                signal_id=signal_id,
+                dedupe_key=signal_key,
+                explanation=explanation,
+                **extra,
+            )
 
         # 3. Pullback geometry, oriented so "up" is the trade direction ---------
         if sign > 0:
