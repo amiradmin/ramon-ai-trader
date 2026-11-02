@@ -482,8 +482,8 @@ class MarketRegimeTests(TestCase):
 
     def test_default_regime_thresholds_are_published_from_detector_configuration(self):
         result = OpportunityDetector().evaluate(snapshot(make_bars(LONG_SETUP)))
-        self.assertEqual(result["regime"]["adx_trending_threshold"], 14.0)
-        self.assertEqual(result["regime"]["adx_ranging_threshold"], 14.0)
+        self.assertEqual(result["regime"]["adx_trending_threshold"], 12.0)
+        self.assertEqual(result["regime"]["adx_ranging_threshold"], 10.0)
 
     def test_regime_moves_from_bullish_to_uncertain_to_bearish_on_a_reversal(self):
         bars = make_bars(UPTREND + DOWNTREND)
