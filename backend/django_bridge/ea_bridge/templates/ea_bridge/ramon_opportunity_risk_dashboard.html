@@ -371,7 +371,7 @@ const stageState = stageResult => {
   return "idle";
 };
 function flowCheckState(check, stageResult) {
-  if (check?.notReached === true) return "idle";
+  if (check?.notReached === true || String(check?.status || "").toUpperCase() === "NOT_EVALUATED") return "idle";
   if (check?.passed === true) return "pass";
   const ownStatus = String(check?.status || check?.state || "").toUpperCase();
   if (["WAIT", "WAITING", "DEFERRED", "PENDING"].includes(ownStatus)) return "wait";
@@ -482,10 +482,12 @@ function flowCheckCalculationMarkup(check, state, stageResult, decision, stageNa
 function flowCheckMarkup(check, state, displayName, stageResult, decision, stageName) {
   const label = displayName || check.display_name || check.label || prettyCheck(check.name);
   const detail = check.detail || check.explanation || check.message ||
-    (check.notReached ? "Upcoming — waiting for the preceding stage to pass." : "Django did not supply a diagnostic detail.");
+    (check.notReached ? "Upcoming — waiting for the preceding stage to pass." :
+    String(check.status || "").toUpperCase() === "NOT_EVALUATED" ? "Not evaluated in this decision snapshot." : "Django did not supply a diagnostic detail.");
   const css = check.notReached ? "idle" : state;
   const tag = css === "pass" ? "PASS" : css === "wait" ? "WAIT" :
-    css === "blocked" ? "BLOCKED" : check.notReached ? "UPCOMING" : "UNAVAILABLE";
+    css === "blocked" ? "BLOCKED" : check.notReached ? "UPCOMING" :
+    String(check.status || "").toUpperCase() === "NOT_EVALUATED" ? "NOT EVALUATED" : "UNAVAILABLE";
   const tooltip = check.description || check.help || check.tooltip || detail ||
     "Live decision check returned by Django.";
   return '<div class="flow-check ' + css + '"><span class="flow-check-dot"></span><div>' +
