@@ -16,17 +16,28 @@ class EAHeartbeat(models.Model):
 
 
 class AccountDailyBaseline(models.Model):
-    """Immutable server-recorded opening balance for one broker account/day.
+    """Immutable opening balance for one exact broker account/server/day.
 
-    Created only on a continuous, authenticated telemetry observation across a
-    broker-day rollover. Missing rollover observations deliberately leave the day
-    unbaselined, so the decision API remains fail-closed.
+    Baselines are captured from complete broker deal history when available,
+    otherwise from a continuous observed rollover or explicit broker verification.
+    Missing or incomplete history never falls back to current balance/equity.
     """
+    CAPTURE_METHOD_CHOICES = [
+        ("BROKER_HISTORY_DERIVED", "Broker history derived"),
+        ("ROLLOVER_CONTINUITY", "Continuous rollover"),
+        ("MANUAL_BROKER_VERIFIED", "Manual broker verified"),
+    ]
+
     account_login = models.CharField(max_length=32)
     server_name = models.CharField(max_length=128)
     broker_day = models.DateField()
     opening_balance = models.DecimalField(max_digits=24, decimal_places=2)
     source_instance_id = models.CharField(max_length=128)
+    capture_method = models.CharField(
+        max_length=32,
+        choices=CAPTURE_METHOD_CHOICES,
+        default="ROLLOVER_CONTINUITY",
+    )
     captured_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

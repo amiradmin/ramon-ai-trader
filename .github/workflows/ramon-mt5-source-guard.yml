@@ -26,11 +26,11 @@ jobs:
         run: |
           set -euo pipefail
           bash -n scripts/update_build_ramon.sh
-          grep -Fq 'mt5/RamonCommandEA_v1.03.mq5' scripts/update_build_ramon.sh || {
+          grep -Fq 'mt5/RamonCommandEA_v1.04.mq5' scripts/update_build_ramon.sh || {
             echo "FAIL: deployment script must compile the pinned command EA source." >&2
             exit 1
           }
-          grep -Fq 'EA_SOURCES=(mt5/RamonCommandEA_v1.03.mq5)' scripts/update_build_ramon.sh || {
+          grep -Fq 'EA_SOURCES=(mt5/RamonCommandEA_v1.04.mq5)' scripts/update_build_ramon.sh || {
             echo "FAIL: one-command deployment must install only the command EA." >&2
             exit 1
           }
@@ -126,13 +126,29 @@ jobs:
             }
           done
 
-          production_source="mt5/RamonCommandEA_v1.03.mq5"
+          production_source="mt5/RamonCommandEA_v1.04.mq5"
           grep -Fq 'GetServerUtcOffsetSeconds' "$production_source" || {
             echo "FAIL: production EA must use a stable broker-to-UTC offset." >&2
             exit 1
           }
           grep -Fq 'NormalizeM15Utc' "$production_source" || {
             echo "FAIL: production EA must normalize completed M15 timestamps." >&2
+            exit 1
+          }
+          grep -Fq 'CalculateBrokerDayOpeningBalance' "$production_source" || {
+            echo "FAIL: production EA must derive the daily baseline from broker history." >&2
+            exit 1
+          }
+          grep -Fq 'broker_day_history_complete' "$production_source" || {
+            echo "FAIL: production EA must report whether broker-day history is complete." >&2
+            exit 1
+          }
+          grep -Fq 'DEAL_TYPE_CREDIT' "$production_source" || {
+            echo "FAIL: opening-balance calculation must exclude credit-only ledger entries." >&2
+            exit 1
+          }
+          grep -Fq 'balance_before' "$production_source" || {
+            echo "FAIL: opening-balance calculation must reject a changing balance snapshot." >&2
             exit 1
           }
           if grep -Fq 'long server_utc_offset=(long)(server_now-utc_now);' "$production_source"; then
