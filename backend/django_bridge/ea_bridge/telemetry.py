@@ -143,14 +143,47 @@ def telemetry(request):
             account_balance = _decimal(account.get("balance"), "account.balance")
             if account_balance <= 0:
                 raise ValueError("account.balance must be positive for daily risk tracking")
+
+        broker_day_history_complete = p.get("broker_day_history_complete") is True
+        broker_day_opening_balance = None
+        broker_day_deal_count = None
+        if broker_day_history_complete:
+            if broker_day is None or not server_name:
+                raise ValueError("complete broker-day history requires broker_day and server_name")
+            broker_day_opening_balance = _decimal(
+                p.get("broker_day_opening_balance"), "broker_day_opening_balance"
+            )
+            broker_day_deal_count = p.get("broker_day_deal_count")
+            if broker_day_opening_balance <= 0:
+                raise ValueError("broker_day_opening_balance must be positive")
+            if type(broker_day_deal_count) is not int or broker_day_deal_count < 0:
+                raise ValueError("broker_day_deal_count must be a non-negative integer")
     except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         return JsonResponse({"ok": False, "error": str(exc)}, status=400)
 
     with transaction.atomic():
-        # Establish a baseline only across an observed, continuous broker-day rollover.
-        # A missed rollover leaves the new day unbaselined and therefore fail-closed.
         previous = EAHeartbeat.objects.select_for_update().filter(instance_id=instance_id).first()
-        if previous is not None and broker_day is not None and server_name and account_balance is not None:
+
+        # Complete broker-side deal history can bootstrap the current day even when
+        # this EA first connects after midnight. The record remains immutable and is
+        # scoped to the exact login/server/day. Never substitute current balance.
+        baseline_key = {
+            "account_login": account_login,
+            "server_name": server_name,
+            "broker_day": broker_day,
+        }
+        if broker_day_history_complete:
+            AccountDailyBaseline.objects.get_or_create(
+                **baseline_key,
+                defaults={
+                    "opening_balance": broker_day_opening_balance,
+                    "source_instance_id": instance_id,
+                    "capture_method": "BROKER_HISTORY_DERIVED",
+                },
+            )
+        # Backward-compatible fallback: only a fresh, continuous rollover observation
+        # can establish the opening balance when broker history is unavailable.
+        elif previous is not None and broker_day is not None and server_name and account_balance is not None:
             previous_payload = previous.payload if isinstance(previous.payload, dict) else {}
             previous_account = previous_payload.get("account", {})
             previous_day_raw = previous_payload.get("broker_day")
@@ -171,12 +204,11 @@ def telemetry(request):
                 and previous_balance > 0
             ):
                 AccountDailyBaseline.objects.get_or_create(
-                    account_login=account_login,
-                    server_name=server_name,
-                    broker_day=broker_day,
+                    **baseline_key,
                     defaults={
                         "opening_balance": previous_balance,
                         "source_instance_id": instance_id,
+                        "capture_method": "ROLLOVER_CONTINUITY",
                     },
                 )
 
@@ -203,6 +235,11 @@ def telemetry(request):
                     "server_name": server_name,
                     "account_trade_mode": account_trade_mode,
                     "broker_day": broker_day.isoformat() if broker_day else None,
+                    "broker_day_history_complete": broker_day_history_complete,
+                    "broker_day_opening_balance": (
+                        str(broker_day_opening_balance) if broker_day_opening_balance is not None else None
+                    ),
+                    "broker_day_deal_count": broker_day_deal_count,
                     "broker_time": p.get("broker_time"),
                     "account": account,
                     "positions": positions,
