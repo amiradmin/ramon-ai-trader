@@ -245,7 +245,10 @@ class DeferredAndWeakSetupTests(TestCase):
         self.assertEqual(result["checks"][-1]["name"], "score")
 
     def test_ranging_market_is_rejected_for_a_trend_following_strategy(self):
-        result = self.evaluate([(10, 3), (10, -3)] * 10)
+        # This alternating range has ADX below 18 but above the current 14-point
+        # default boundary, so use an explicit 22/18 policy to test RANGING.
+        detector = OpportunityDetector(config=OpportunityConfig(adx_trending=22.0, adx_ranging=18.0))
+        result = detector.evaluate(snapshot(make_bars([(10, 3), (10, -3)] * 10)))
         self.assertEqual(result["status"], "REJECTED")
         self.assertEqual(result["reason"], "MARKET_RANGING")
         self.assertEqual(result["regime"]["label"], "RANGING")
@@ -594,7 +597,7 @@ class ForecastEvidenceTests(TestCase):
         ranging = make_bars([(10, 3), (10, -3)] * 10)
         with patch(ARIMA_PATH) as arima, patch(SARIMA_PATH) as sarima:
             self.assertEqual(self.evaluate(weak)["reason"], "SETUP_SCORE_TOO_LOW")
-            self.assertEqual(self.evaluate(bars=ranging)["reason"], "MARKET_RANGING")
+            self.assertEqual(self.evaluate(bars=ranging)["reason"], "MARKET_UNCERTAIN")
             arima.assert_not_called()
             sarima.assert_not_called()
 
@@ -693,7 +696,7 @@ class LegacyContractTests(TestCase):
             snapshot(make_bars([(10, 3), (10, -3)] * 10), trend="BUY", setup_score=0.99)
         )
         self.assertFalse(result["approved"])
-        self.assertEqual(result["reason"], "MARKET_RANGING")
+        self.assertEqual(result["reason"], "MARKET_UNCERTAIN")
 
     def test_the_default_decision_endpoint_snapshot_shape_still_works(self):
         outcome = SignalFlowPipeline().run({"trend": "BUY", "setup_score": 0.9, "entry_quality": 0.8, "spread_points": 20})
