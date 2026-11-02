@@ -141,11 +141,16 @@ class OpportunityConfig:
                 ZoneInfo(self.session_timezone)
             except (TypeError, ZoneInfoNotFoundError) as exc:
                 raise ValueError("session_timezone must be a valid IANA timezone") from exc
+            if not self.session_hours:
+                raise ValueError("session_hours must contain at least one open weekday")
             weekdays = set()
             for entry in self.session_hours:
-                if len(entry) != 5:
+                if not isinstance(entry, (tuple, list)) or len(entry) != 5:
                     raise ValueError("session hours must be (weekday, open_hour, open_minute, close_hour, close_minute)")
                 weekday, open_hour, open_minute, close_hour, close_minute = entry
+                values = (weekday, open_hour, open_minute, close_hour, close_minute)
+                if any(not isinstance(value, int) or isinstance(value, bool) for value in values):
+                    raise ValueError("session hours must contain integer clock values")
                 if weekday not in range(7) or weekday in weekdays:
                     raise ValueError("session weekdays must be unique values from 0 to 6")
                 if not (0 <= open_hour <= 23 and 0 <= close_hour <= 23 and 0 <= open_minute <= 59 and 0 <= close_minute <= 59):
