@@ -717,3 +717,82 @@ class DjangoDecisionApiTests(TestCase):
         p=self.payload(); p["bars"]=p["bars"][:10]
         r=self.client.post(self.url,data=json.dumps(p),content_type="application/json",**self.headers)
         self.assertEqual(r.status_code,400)
+
+class DashboardDataTests(TestCase):
+    url = "/api/ea/v1/dashboard-data"
+
+    @override_settings(
+        RAMON_EA_COMMAND_CREATION_ENABLED=True,
+        RAMON_EA_COMMAND_EXECUTION_ENABLED=False,
+        RAMON_EA_HEARTBEAT_MAX_AGE_SECONDS=90,
+    )
+    def test_dashboard_exposes_live_execution_checks_without_account_identifiers(self):
+        EAHeartbeat.objects.create(
+            instance_id="dashboard-live-ea",
+            account_login="sensitive-account-id",
+            server_name="private-broker-server",
+            symbol="XAUUSD_o",
+            terminal_connected=True,
+            trade_allowed=False,
+            payload={"account_trade_mode": 0},
+        )
+        StrategyDecisionRecord.objects.create(
+            decision_id="dashboard-decision",
+            symbol="XAUUSD_o",
+            action="WAIT",
+            confidence=0.0,
+            rationale_code="MARKET_UNCERTAIN",
+            model_version="test-model",
+            features={
+                "stages": {
+                    "opportunities": {
+                        "approved": False,
+                        "status": "DEFERRED",
+                        "checks": [
+                            {"name": "regime", "passed": False, "detail": "Live regime result",
+                             "metrics": {"value": 17.5, "threshold": 22.0}},
+                        ],
+                    },
+                },
+            },
+        )
+
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["decisions"][0]["features"]["stages"]["opportunities"]["checks"][0]["metrics"]["value"], 17.5)
+
+        execution = body["execution"]
+        checks = {item["name"]: item for item in execution["checks"]}
+        self.assertFalse(execution["trading_authorization"])
+        self.assertTrue(execution["command_creation_enabled"])
+        self.assertFalse(execution["command_execution_enabled"])
+        self.assertTrue(checks["ea_heartbeat"]["passed"])
+        self.assertTrue(checks["terminal_connected"]["passed"])
+        self.assertFalse(checks["terminal_trade_allowed"]["passed"])
+        self.assertTrue(checks["demo_account"]["passed"])
+        self.assertTrue(checks["symbol_match"]["passed"])
+        self.assertNotIn("sensitive-account-id", json.dumps(execution))
+        self.assertNotIn("private-broker-server", json.dumps(execution))
+
+    @override_settings(RAMON_EA_HEARTBEAT_MAX_AGE_SECONDS=90)
+    def test_dashboard_marks_missing_and_stale_heartbeats_as_waiting_or_blocked(self):
+        missing = self.client.get(self.url).json()["execution"]
+        missing_checks = {item["name"]: item for item in missing["checks"]}
+        self.assertIsNone(missing_checks["ea_heartbeat"]["passed"])
+        self.assertEqual(missing_checks["ea_heartbeat"]["status"], "WAITING")
+
+        heartbeat = EAHeartbeat.objects.create(
+            instance_id="dashboard-stale-ea",
+            symbol="XAUUSD_o",
+            terminal_connected=True,
+            trade_allowed=True,
+            payload={"account_trade_mode": 0},
+        )
+        EAHeartbeat.objects.filter(pk=heartbeat.pk).update(
+            last_seen=timezone.now() - timedelta(seconds=120)
+        )
+        stale = self.client.get(self.url).json()["execution"]
+        stale_checks = {item["name"]: item for item in stale["checks"]}
+        self.assertFalse(stale_checks["ea_heartbeat"]["passed"])
+        self.assertEqual(stale_checks["ea_heartbeat"]["status"], "BLOCKED")
