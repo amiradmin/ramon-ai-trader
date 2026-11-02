@@ -245,8 +245,8 @@ class DeferredAndWeakSetupTests(TestCase):
         self.assertEqual(result["checks"][-1]["name"], "score")
 
     def test_ranging_market_is_rejected_for_a_trend_following_strategy(self):
-        # This alternating range has ADX below 18 but above the current 14-point
-        # default boundary, so use an explicit 22/18 policy to test RANGING.
+        # Keep this fixture focused on the RANGING branch under an explicit 22/18 policy;
+        # the current default 14/14 policy classifies this same snapshot as UNCERTAIN.
         detector = OpportunityDetector(config=OpportunityConfig(adx_trending=22.0, adx_ranging=18.0))
         result = detector.evaluate(snapshot(make_bars([(10, 3), (10, -3)] * 10)))
         self.assertEqual(result["status"], "REJECTED")
@@ -479,6 +479,11 @@ class MarketRegimeTests(TestCase):
         self.assertEqual(regime["pivot_window"], 4)
         self.assertEqual(regime["atr_period"], 10)
         self.assertEqual(regime["atr_baseline_bars"], 80)
+
+    def test_default_regime_thresholds_are_published_from_detector_configuration(self):
+        result = OpportunityDetector().evaluate(snapshot(make_bars(LONG_SETUP)))
+        self.assertEqual(result["regime"]["adx_trending_threshold"], 14.0)
+        self.assertEqual(result["regime"]["adx_ranging_threshold"], 14.0)
 
     def test_regime_moves_from_bullish_to_uncertain_to_bearish_on_a_reversal(self):
         bars = make_bars(UPTREND + DOWNTREND)
