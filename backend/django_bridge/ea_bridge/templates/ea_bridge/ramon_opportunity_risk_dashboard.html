@@ -431,10 +431,21 @@ function collectFlowVariables(source, prefix = "", depth = 0, output = []) {
 function decisionStageEntries(decision) {
   const stages = decision?.features?.stages;
   if (!stages || typeof stages !== "object" || Array.isArray(stages)) return [];
+
+  // Keep the decision pipeline in its semantic order, independent of the
+  // property order returned by Django/JSON. Any additional stages follow
+  // deterministically by key so refreshes cannot reshuffle the flow.
+  const stageOrder = ["opportunities", "entry_timing", "risk_management"];
   return Object.entries(stages).filter(([name, result]) =>
     name !== "learning" && result && typeof result === "object" &&
     (Array.isArray(result.checks) || "approved" in result || "status" in result)
-  );
+  ).sort(([nameA], [nameB]) => {
+    const indexA = stageOrder.indexOf(nameA);
+    const indexB = stageOrder.indexOf(nameB);
+    const rankA = indexA === -1 ? stageOrder.length : indexA;
+    const rankB = indexB === -1 ? stageOrder.length : indexB;
+    return rankA - rankB || nameA.localeCompare(nameB);
+  });
 }
 
 
