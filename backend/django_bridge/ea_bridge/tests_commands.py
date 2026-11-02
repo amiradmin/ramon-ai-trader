@@ -53,6 +53,7 @@ class EACommandEndpointTests(TestCase):
             "positions": [],
         }
         payload.update(overrides.pop("payload", {}))
+        last_seen_override = overrides.get("last_seen")
         EAHeartbeat.objects.update_or_create(
             instance_id="ea-test-1",
             defaults={
@@ -62,6 +63,8 @@ class EACommandEndpointTests(TestCase):
                 "last_seen": now, "payload": payload, **overrides,
             },
         )
+        if last_seen_override is not None:
+            EAHeartbeat.objects.filter(instance_id="ea-test-1").update(last_seen=last_seen_override)
         AccountDailyBaseline.objects.get_or_create(
             account_login="12345", server_name="Demo-Server",
             broker_day=date.today(),
