@@ -43,8 +43,8 @@ class RiskConfig:
 
     stop_buffer_atr: float = 0.25  # distance beyond the invalidation level
     min_stop_atr: float = 0.5  # tighter stops are noise-level
-    max_stop_atr: float = 3.0  # wider stops mean the structure is a poor place to risk
-    min_reward_risk: float = 1.5  # applied only when take_profit_points is supplied
+    max_stop_atr: float = 3.5  # wider stops mean the structure is a poor place to risk
+    min_reward_risk: float = 1.2  # applied only when take_profit_points is supplied
     max_total_risk_percent: float = 2.0  # open risk + this trade, applied when open_risk_percent is supplied
     max_daily_loss_percent: float = 3.0  # halt after this realised loss, applied when daily_loss_percent is supplied
     # Validation / safety options. Defaults keep the original behaviour.
