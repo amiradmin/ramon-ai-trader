@@ -646,13 +646,18 @@ const FLOW_ABBREVIATION_TOOLTIPS = {
 };
 function decorateDecisionFlowTooltips(markup) {
   const keys = Object.keys(FLOW_ABBREVIATION_TOOLTIPS).sort((a,b) => b.length-a.length);
-  const pattern = new RegExp("\\b(" + keys.join("|") + ")\\b", "g");
+  // Match acronyms case-insensitively because prettyCheck() title-cases live
+  // field names (for example ADX -> Adx and EMA -> Ema).
+  const pattern = new RegExp("\\b(" + keys.join("|") + ")\\b", "gi");
   return markup.split(/(<[^>]*>)/g).map(part => {
     if (part.startsWith("<") && part.endsWith(">")) return part;
-    return part.replace(pattern, token =>
-      '<abbr class="flow-abbr" tabindex="0" title="' + esc(FLOW_ABBREVIATION_TOOLTIPS[token]) +
-      '" data-tooltip="' + esc(FLOW_ABBREVIATION_TOOLTIPS[token]) + '">' + token + '</abbr>'
-    );
+    return part.replace(pattern, token => {
+      const description = FLOW_ABBREVIATION_TOOLTIPS[token.toUpperCase()];
+      if (!description) return token;
+      return '<abbr class="flow-abbr" tabindex="0" title="' + esc(description) +
+        '" aria-label="' + esc(token + ". " + description) +
+        '" data-tooltip="' + esc(description) + '">' + token + '</abbr>';
+    });
   }).join("");
 }
 renderDecisionVariableGuide(null);
