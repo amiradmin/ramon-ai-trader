@@ -18,7 +18,7 @@
 .flow-legend{display:flex;gap:10px;flex-wrap:wrap;color:var(--muted);font-size:10px}
 .flow-legend span{display:inline-flex;align-items:center;gap:5px}
 .flow-legend i{width:7px;height:7px;border-radius:50%;display:inline-block;background:currentColor}
-.flow-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:24px;align-items:stretch}
+.flow-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:24px;align-items:stretch}
 .flow-stage{position:relative;min-width:0;background:#0d141e;border:1px solid #29384c;border-radius:12px;padding:13px}
 .flow-stage:not(:last-child):after{content:"➜";position:absolute;right:-21px;top:22px;color:#71849d;font-size:17px;font-weight:800}
 .flow-stage-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px}
@@ -41,6 +41,10 @@
 .flow-check strong{font-size:10px;display:block;overflow-wrap:anywhere}
 .flow-check p{font-size:10px;color:var(--muted);margin:2px 0 0;overflow-wrap:anywhere}
 .flow-check em{font-size:8px;font-style:normal;font-weight:900;letter-spacing:.35px;color:var(--muted)}
+.flow-metrics{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
+.flow-metrics span{display:inline-flex;gap:5px;align-items:center;padding:4px 6px;border:1px solid #29384c;border-radius:5px;background:#0b121c;max-width:100%}
+.flow-metrics b{font-size:8px;color:var(--muted);font-weight:600}
+.flow-metrics code{font-size:8px;color:#dce8f8;overflow-wrap:anywhere}
 .flow-check.pass em{color:var(--green)}.flow-check.wait em{color:var(--amber)}.flow-check.blocked em{color:var(--red)}
 .flow-math{grid-column:2 / 4;margin-top:5px;padding:7px 8px;border-left:2px solid #40536d;background:#0c1420;border-radius:0 6px 6px 0;min-width:0}
 .flow-math .math-label{display:block;color:var(--muted);font-size:8px;letter-spacing:.55px;text-transform:uppercase;margin:2px 0}
@@ -335,13 +339,19 @@ function renderDecisionRow(decision, index) {
 }
 
 
-const prettyCheck = name => String(name || "unnamed_check").replace(/_/g, " ").replace(/(^| )([a-z])/g, (_, space, letter) => space + letter.toUpperCase());
+
+const prettyCheck = name => String(name || "unnamed_check")
+  .replace(/_/g, " ")
+  .replace(/(^| )([a-z])/g, (_, space, letter) => space + letter.toUpperCase());
 const stageChecks = stageResult => Array.isArray(stageResult?.checks) ? stageResult.checks : [];
 const stageState = stageResult => {
   if (!stageResult || !Object.keys(stageResult).length) return "idle";
   if (stageResult.approved === true) return "pass";
   const status = String(stageResult.status || "").toUpperCase();
-  return status === "DEFERRED" ? "wait" : status === "REJECTED" ? "blocked" : "idle";
+  if (["ACCEPTED", "APPROVED", "PASS", "PASSED"].includes(status)) return "pass";
+  if (["DEFERRED", "WAIT", "WAITING", "PENDING"].includes(status)) return "wait";
+  if (["REJECTED", "BLOCKED", "FAILED", "FAIL"].includes(status)) return "blocked";
+  return "idle";
 };
 function flowCheckState(check, stageResult) {
   if (check?.notReached === true) return "idle";
@@ -349,565 +359,132 @@ function flowCheckState(check, stageResult) {
   const ownStatus = String(check?.status || check?.state || "").toUpperCase();
   if (["WAIT", "WAITING", "DEFERRED", "PENDING"].includes(ownStatus)) return "wait";
   if (["BLOCKED", "REJECTED", "FAILED", "FAIL"].includes(ownStatus)) return "blocked";
+  if (check?.passed === false) {
+    return String(stageResult?.status || "").toUpperCase() === "DEFERRED" ? "wait" : "blocked";
+  }
   const stageStatus = String(stageResult?.status || "").toUpperCase();
-  if (stageStatus === "DEFERRED") return "wait";
-  if (stageStatus === "REJECTED") return "blocked";
+  if (["DEFERRED", "WAIT", "WAITING", "PENDING"].includes(stageStatus)) return "wait";
+  if (["REJECTED", "BLOCKED", "FAILED", "FAIL"].includes(stageStatus)) return "blocked";
   return "idle";
 }
+function flowValue(value) {
+  if (value === null || value === undefined || value === "") return "Unavailable";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "number") return Number.isFinite(value)
+    ? value.toLocaleString(undefined, {maximumFractionDigits: 8}) : "Unavailable";
+  if (Array.isArray(value)) return value.length ? value.length + " items" : "Empty";
+  if (typeof value === "object") return Object.keys(value).length ? Object.keys(value).length + " fields" : "Empty";
+  return String(value);
+}
+function flowMetricsMarkup(metrics) {
+  if (!metrics || typeof metrics !== "object" || Array.isArray(metrics)) return "";
+  const entries = Object.entries(metrics);
+  if (!entries.length) return "";
+  return '<div class="flow-metrics">' + entries.map(([key, value]) =>
+    '<span><b>' + esc(prettyCheck(key)) + '</b><code>' + esc(flowValue(value)) + '</code></span>'
+  ).join("") + '</div>';
+}
 function flowCheckMarkup(check, state, displayName) {
-  const label = displayName || prettyCheck(check.name);
-  const detail = check.detail || (check.notReached
-    ? "Not evaluated because an earlier entry-timing gate stopped this stage."
-    : "No diagnostic detail supplied.");
-  const css = check.notReached ? "idle"
-    : state === "pass" ? "pass"
-    : state === "wait" ? "wait"
-    : state === "blocked" ? "blocked" : "idle";
-  const tag = css === "pass" ? "PASS" : css === "wait" ? "WAIT" : css === "blocked" ? "BLOCKED" : "NOT REACHED";
-  const math = check.calculation || "";
-  const tooltip = FLOW_CHECK_TOOLTIPS[check.name] || FLOW_CHECK_TOOLTIPS[String(check.name || "").toLowerCase()] || detail || "Individual Django decision check. Hover for its meaning; the live status is from the latest saved decision.";
-  return `<div class="flow-check ${css}"><span class="flow-check-dot"></span><div><strong class="flow-tooltip" data-tooltip="${esc(tooltip)}" title="${esc(tooltip)}" tabindex="0">${esc(label)}</strong><p>${esc(detail)}</p></div><em>${tag}</em>${math}</div>`;
-}
-function orderedEntryFlowChecks(checks, waitingForOpportunity = false) {
-  const byName = Object.fromEntries(checks.filter(item => item && item.name).map(item => [item.name, item]));
-  const rows = [];
-  const add = (name, label, item, detail) => {
-    if (waitingForOpportunity) {
-      rows.push({name, displayName:label, notReached:true,
-        detail:"Waiting for an approved M15 opportunity. Django has not evaluated this entry-timing check yet."});
-    } else if (item) {
-      rows.push({...item, name, displayName:label});
-    } else {
-      rows.push({name, displayName:label, notReached:true,
-        detail:detail || "Not evaluated because an earlier entry-timing check stopped the stage."});
-    }
-  };
-
-  // Five visible boxes. The absolute spread and quote-relative spread tests
-  // are grouped into one spread box; the backend's checks remain unchanged.
-  add("freshness", "Signal freshness", byName.freshness);
-  add("invalidation", "Invalidation / minimum risk room", byName.invalidation);
-  add("chase", "Price chase protection", byName.chase);
-
-  const spreadParts = [byName.spread_absolute, byName.spread_volatility].filter(Boolean);
-  const spreadFailed = spreadParts.find(item => item.passed !== true);
-  const spreadCheck = spreadParts.length ? {
-    name:"spread_conditions",
-    passed:!spreadFailed,
-    detail:spreadParts.map(item => item.detail || item.name).join(" · ")
-  } : null;
-  if (spreadCheck && !byName.spread_volatility && byName.price_checks) {
-    spreadCheck.detail += " · ATR-relative spread checks skipped because no live quote was supplied";
-  }
-  add("spread_conditions", "Spread conditions", spreadCheck,
-    "Not evaluated because an earlier entry-timing check stopped the stage.");
-
-  add("quality", "Entry quality", byName.quality);
-  return rows;
-}
-function orderedRiskFlowChecks(checks, waitingForUpstream = false) {
-  const byName = Object.fromEntries(checks.filter(item => item && item.name).map(item => [String(item.name).toLowerCase(), item]));
-  const groups = [
-    {name:"stop", label:"Stop placement & broker minimum", aliases:["stop","stop_below_broker_minimum"]},
-    {name:"reward_risk", label:"Reward / risk", aliases:["reward_risk","reward_risk_too_low"]},
-    {name:"daily_loss", label:"Daily loss limit", aliases:["daily_loss","daily_loss_limit_reached"]},
-    {name:"portfolio_risk", label:"Portfolio risk exposure", aliases:["portfolio_risk","portfolio_risk_limit_reached"]},
-    {name:"sizing", label:"Position sizing & risk budget", aliases:["sizing","risk_budget_below_minimum_volume","risk_budget_exceeded"]}
-  ];
-  return groups.map(group => {
-    if (waitingForUpstream) return {
-      name:group.name, displayName:group.label, notReached:true,
-      detail:"Waiting for approved opportunity and entry timing. Django has not evaluated risk yet."
-    };
-    const parts = group.aliases.map(name => byName[name]).filter(Boolean);
-    if (!parts.length) return {
-      name:group.name, displayName:group.label, notReached:true,
-      detail:"Not evaluated because an earlier risk-management check stopped this stage."
-    };
-    const failed = parts.find(item => item.passed !== true);
-    const merged = {
-      name:group.name, displayName:group.label,
-      passed:!failed,
-      detail:parts.map(item => item.detail || item.name).join(" · ")
-    };
-    return merged;
-  });
+  const label = displayName || check.display_name || check.label || prettyCheck(check.name);
+  const detail = check.detail || check.explanation || check.message ||
+    (check.notReached ? "Not evaluated because an upstream stage has not passed." : "Django did not supply a diagnostic detail.");
+  const css = check.notReached ? "idle" : state;
+  const tag = css === "pass" ? "PASS" : css === "wait" ? "WAIT" :
+    css === "blocked" ? "BLOCKED" : check.notReached ? "NOT REACHED" : "UNAVAILABLE";
+  const tooltip = check.description || check.help || check.tooltip || detail ||
+    "Live decision check returned by Django.";
+  return '<div class="flow-check ' + css + '"><span class="flow-check-dot"></span><div>' +
+    '<strong class="flow-tooltip" data-tooltip="' + esc(tooltip) + '" title="' + esc(tooltip) + '" tabindex="0">' + esc(label) + '</strong>' +
+    '<p>' + esc(detail) + '</p>' + flowMetricsMarkup(check.metrics) + '</div><em>' + tag + '</em></div>';
 }
 function flowStageMarkup(title, stageResult, checks, fallback, forcedState) {
   const state = forcedState || stageState(stageResult);
-  const stateLabel = state === "pass" ? "PASSED" : state === "wait" ? "WAITING" : state === "blocked" ? "BLOCKED" : "NOT REACHED";
+  const stateLabel = state === "pass" ? "PASSED" : state === "wait" ? "WAITING" :
+    state === "blocked" ? "BLOCKED" : "NOT REACHED";
   const checkMarkup = checks.length
-    ? checks.map(item => flowCheckMarkup(item, flowCheckState(item, stageResult), item.displayName)).join("")
-    : `<div class="flow-check ${state}"><span class="flow-check-dot"></span><div><strong>${esc(fallback || "No checks returned")}</strong><p>${esc(stageResult?.explanation || stageResult?.reason || "This stage has no saved check details.")}</p></div><em>${state === "blocked" ? "BLOCKED" : state === "wait" ? "WAIT" : stateLabel}</em></div>`;
-  return `<section class="flow-stage ${state === "wait" ? "waiting" : state === "blocked" ? "blocked" : ""}">
-    <div class="flow-stage-head"><div class="flow-stage-title">${esc(title)}</div><span class="flow-state ${state}">${stateLabel}</span></div>
-    <div class="flow-checks">${checkMarkup}</div>
-  </section>`;
+    ? checks.map(item => flowCheckMarkup(item, flowCheckState(item, stageResult), item.displayName || item.display_name)).join("")
+    : '<div class="flow-check ' + state + '"><span class="flow-check-dot"></span><div><strong>' +
+      esc(fallback || "No checks returned") + '</strong><p>' +
+      esc(stageResult?.explanation || stageResult?.reason || "Django supplied no check details for this stage.") +
+      '</p></div><em>' + stateLabel + '</em></div>';
+  return '<section class="flow-stage ' + (state === "wait" ? "waiting" : state === "blocked" ? "blocked" : "") + '">' +
+    '<div class="flow-stage-head"><div class="flow-stage-title">' + esc(title) + '</div><span class="flow-state ' +
+    state + '">' + stateLabel + '</span></div><div class="flow-checks">' + checkMarkup + '</div></section>';
 }
-function entryCalculationMarkup(check, timing, opportunity, decision) {
-  const metrics = timing || {};
-  const thresholds = metrics.thresholds || {};
-  const setup = opportunity?.setup || {};
-  const n = value => typeof value === "number" && Number.isFinite(value) ? value : null;
-  const f = value => value === null ? "NOT SUPPLIED" : Number(value).toLocaleString(undefined, {maximumFractionDigits:6});
-  const limit = name => n(thresholds[name]);
-  const name = String(check?.name || "").toLowerCase();
-  const show = (label, value, suffix="") => `<code>${esc(label)}: ${esc(f(value))}${suffix}</code>`;
-  const status = check?.notReached ? "NOT REACHED" : check?.passed === true ? "PASS" : check?.passed === false ? "BLOCKED / WAIT" : "NOT SUPPLIED";
-  let title = "Entry validation";
-  let formula = "Django evaluates the entry-timing gate using the current opportunity and market snapshot.";
-  let values = "";
-  if (name === "freshness") {
-    const maximumAge = limit("max_signal_age_bars");
-    title = "Signal freshness";
-    formula = `SignalAgeBars = (LatestCompletedBarTime − SignalBarTime) ÷ BarInterval; PASS when 0 ≤ age ≤ ${f(maximumAge)} bars.`;
-    values = show("Signal age (bars)",n(metrics.signal_age_bars)) + show("Configured maximum age (bars)",maximumAge) + `<code>Latest result: ${esc(check?.detail || "NOT SUPPLIED")}</code>`;
-  } else if (name === "invalidation") {
-    const minimumRoom = limit("min_risk_room_atr");
-    title = "Invalidation / minimum risk room";
-    formula = `RoomToInvalidationATR = DirectionalDistance(EntryPrice, InvalidationPrice) ÷ ATR; PASS when price has not crossed invalidation and room ≥ ${f(minimumRoom)} ATR.`;
-    values = show("ATR",n(setup.atr)) + show("Reference price",n(setup.reference_price)) + show("Invalidation price",n(setup.invalidation_price)) + show("Room to invalidation (ATR)",n(metrics.room_to_invalidation_atr)) + show("Configured minimum room (ATR)",minimumRoom) + `<code>Latest result: ${esc(check?.detail || "NOT SUPPLIED")}</code>`;
-  } else if (name === "chase") {
-    const maximumChase = limit("max_chase_atr");
-    title = "Price chase protection";
-    formula = `ChaseATR = DirectionalDistance(EntryPrice, SignalReferencePrice) ÷ ATR; PASS when ChaseATR ≤ ${f(maximumChase)} ATR.`;
-    values = show("Signal reference price",n(setup.reference_price)) + show("ATR",n(setup.atr)) + show("Chase distance (ATR)",n(metrics.chase_atr)) + show("Configured maximum chase (ATR)",maximumChase) + `<code>Latest result: ${esc(check?.detail || "NOT SUPPLIED")}</code>`;
-  } else if (name === "spread_conditions") {
-    const maximumPoints = limit("maximum_spread_points");
-    const maximumSpreadAtr = limit("max_spread_atr");
-    const maximumSpreadRisk = limit("max_spread_to_risk");
-    title = "Spread conditions";
-    formula = `Absolute spread ≤ ${f(maximumPoints)} points; SpreadATR ≤ ${f(maximumSpreadAtr)}; SpreadToRisk ≤ ${f(maximumSpreadRisk)}.`;
-    values = show("Spread (points)",n(metrics.spread_points)) + show("Maximum spread (points)",maximumPoints) + show("Spread / ATR",n(metrics.spread_atr_fraction)) + show("Maximum spread / ATR",maximumSpreadAtr) + show("Spread / risk distance",n(metrics.spread_to_risk)) + show("Maximum spread / risk",maximumSpreadRisk) + `<code>Quote checks: ${esc(metrics.price_checks || "NOT SUPPLIED")}</code><code>Latest result: ${esc(check?.detail || "NOT SUPPLIED")}</code>`;
-  } else if (name === "quality") {
-    const minimumQuality = limit("minimum_quality");
-    title = "Entry quality";
-    formula = `When computed: Quality = 0.40×SpreadEfficiency + 0.35×PriceLocation + 0.25×Freshness; PASS when 0 ≤ quality ≤ 1 and quality ≥ ${f(minimumQuality)}. A supplied quality may be used when configured.`;
-    values = show("Entry quality",n(metrics.quality)) + show("Configured minimum quality",minimumQuality) + `<code>Quality source: ${esc(metrics.quality_source || "NOT SUPPLIED")}</code><code>Latest result: ${esc(check?.detail || "NOT SUPPLIED")}</code>`;
-  } else {
-    values = `<code>${esc(check?.detail || "No diagnostic values supplied by Django.")}</code>`;
-  }
-  return `<details class="entry-details" data-check="${esc(name)}"><summary><span>${esc(title)} · Calculation</span><span class="regime-toggle-hint">Show formula & live values</span></summary><div class="entry-content"><span class="math-label">Validation status</span><code class="math-result">${esc(status)}</code><span class="math-label">Formula / rule</span><code>${esc(formula)}</code><span class="math-label">Live values and thresholds from saved Django decision</span>${values}</div></details>`;
-}
-
-function riskCalculationMarkup(check, risk, decision) {
-  const inputs = decision.features?.risk_calculation_inputs || {};
-  const daily = decision.features?.daily_risk || {};
-  const thresholds = risk.thresholds || {};
-  const n = value => typeof value === "number" && Number.isFinite(value) ? value : null;
-  const f = value => value === null ? "N/A" : Number(value).toLocaleString(undefined, {maximumFractionDigits: 6});
-  const row = (label, formula, calculation, result) =>
-    `<details class="risk-details" data-check="${esc(name)}"><summary><span>${esc(label)} · Calculation</span><span class="regime-toggle-hint">Show formula & live values</span></summary><div class="risk-content"><span class="math-label">Formula / rule</span><code>${esc(formula)}</code><span class="math-label">Live calculation from saved Django decision</span><code>${esc(calculation)}</code>${result ? `<code class="math-result">${esc(result)}</code>` : ""}<span class="math-label">Validation status</span><code class="math-result">${esc(check?.notReached ? "NOT REACHED" : check?.passed === true ? "PASS" : check?.passed === false ? "BLOCKED / WAIT" : "NOT SUPPLIED")}</code></div></details>`;
-  const name = String(check?.name || "").toLowerCase();
-  const balance = n(inputs.account_balance);
-  const requestedPct = n(inputs.risk_percent);
-  const effectivePct = n(risk.risk_percent);
-  const stopPoints = n(risk.stop_points);
-  const pointValue = n(inputs.point_value_per_lot);
-  const budget = n(risk.risk_budget);
-  const volume = n(risk.volume);
-  const rawVolume = budget !== null && stopPoints > 0 && pointValue > 0 ? budget / (stopPoints * pointValue) : null;
-  const tpPoints = n(inputs.take_profit_points);
-  const rr = n(risk.reward_risk);
-  const stopPrice = n(risk.stop_price);
-  const setup = stage(decision, "opportunities").setup || {};
-  const atr = n(setup.atr);
-  const invalidation = n(setup.invalidation_price);
-  const dailyLoss = n(daily.loss_percent);
-  const openingBalance = n(daily.opening_balance);
-  const equity = n(daily.current_equity);
-
-  if (name === "stop") {
-    if (stopPrice !== null && risk.stop_source === "STRUCTURAL" && atr !== null && invalidation !== null) {
-      const buffer = n(inputs.stop_buffer_atr) ?? n(thresholds.stop_buffer_atr);
-      const multiplier = buffer;
-      const side = String(risk.side || stage(decision, "opportunities").side || "").toUpperCase();
-      const expression = side === "SELL" ? "SL = Invalidation + (ATR × Buffer)" : "SL = Invalidation − (ATR × Buffer)";
-      const calculation = buffer === null ? "Stop-buffer threshold was not supplied by Django." : side === "SELL"
-        ? `${f(invalidation)} + (${f(atr)} × ${f(multiplier)}) = ${f(stopPrice)}`
-        : `${f(invalidation)} − (${f(atr)} × ${f(multiplier)}) = ${f(stopPrice)}`;
-      const minStopAtr = n(thresholds.min_stop_atr);
-      const maxStopAtr = n(thresholds.max_stop_atr);
-      return row("Stop loss", expression + `; allowed stop range: ${f(minStopAtr)}–${f(maxStopAtr)} ATR`, calculation,
-        `Stop distance = ${f(stopPoints)} points · Stop ATR = ${f(risk.stop_atr)} · Stop price = ${f(stopPrice)}`);
+function collectFlowVariables(source, prefix = "", depth = 0, output = []) {
+  if (!source || typeof source !== "object" || Array.isArray(source) || depth > 2) return output;
+  const ignored = new Set(["checks", "explanation", "reason", "status", "approved", "side",
+    "candidate_side", "signal_bar_time", "dedupe_key", "signal_id", "forecasting"]);
+  for (const [key, value] of Object.entries(source)) {
+    if (ignored.has(key)) continue;
+    const name = prefix ? prefix + "." + key : key;
+    if (value && typeof value === "object" && !Array.isArray(value) && depth < 2) {
+      collectFlowVariables(value, name, depth + 1, output);
+    } else if (value === null || ["string", "number", "boolean"].includes(typeof value)) {
+      output.push([name, flowValue(value)]);
     }
-    return row("Stop distance", "StopPoints = |EntryPrice − StopLoss| ÷ Point",
-      stopPoints === null ? "N/A — risk stage did not return stop_points" : `Django-calculated stop distance = ${f(stopPoints)} points`,
-      stopPrice === null ? "Stop price: N/A" : `Stop price = ${f(stopPrice)}`);
   }
-  if (name === "sizing") {
-    const budgetLine = budget !== null && balance !== null && effectivePct !== null
-      ? `${f(balance)} × ${f(effectivePct)} ÷ 100 = ${f(budget)}`
-      : "N/A — Django did not return all sizing values";
-    const volumeLine = rawVolume !== null
-      ? `${f(budget)} ÷ (${f(stopPoints)} × ${f(pointValue)}) = ${f(rawVolume)} lots before broker-step rounding`
-      : "N/A — budget, stop points or point value unavailable";
-    const step = n(inputs.volume_step);
-    const rounded = volume !== null && step !== null
-      ? `Approved volume = ${f(volume)} lots (step ${f(step)}; broker limits applied by Django)`
-      : `Approved volume = ${f(volume)} lots`;
-    return row("Risk budget", `RiskBudget = Balance × min(RequestedRiskPercent, MaximumRiskPercent) ÷ 100; maximum = ${f(n(thresholds.maximum_risk_percent))}%`, budgetLine,
-      volumeLine + " · " + rounded);
-  }
-  if (name === "reward_risk") {
-    const line = tpPoints !== null && stopPoints !== null && stopPoints > 0
-      ? `${f(tpPoints)} ÷ ${f(stopPoints)} = ${f(rr)}`
-      : "N/A — take-profit points or stop points unavailable";
-    const minimumRR = n(thresholds.min_reward_risk);
-    return row("Reward / risk", `RR = TakeProfitDistance ÷ StopLossDistance; PASS when RR ≥ ${f(minimumRR)}`, line,
-      rr === null ? "Django RR result: N/A" : `Django RR = ${f(rr)} · configured minimum = ${f(minimumRR)}`);
-  }
-  if (name === "daily_loss") {
-    const line = openingBalance !== null && equity !== null && dailyLoss !== null
-      ? `max(0, (${f(openingBalance)} − ${f(equity)}) ÷ ${f(openingBalance)} × 100) = ${f(dailyLoss)}%`
-      : `Server-calculated daily loss = ${f(dailyLoss)}%`;
-    const maximumDailyLoss = n(thresholds.max_daily_loss_percent);
-    return row("Daily loss", `DailyLoss% = max(0, (OpeningBalance − CurrentEquity) ÷ OpeningBalance × 100); halt when loss ≥ ${f(maximumDailyLoss)}%`, line,
-      check.detail || `Configured daily-loss limit = ${f(maximumDailyLoss)}%`);
-  }
-  if (name === "portfolio_risk") {
-    const openRisk = n(inputs.open_risk_percent);
-    const maximumTotalRisk = n(thresholds.max_total_risk_percent);
-    return row("Portfolio exposure", `AvailableHeadroom = MaxTotalRiskPercent − OpenRiskPercent; maximum total = ${f(maximumTotalRisk)}%`,
-      openRisk === null ? "N/A — open risk percentage was not supplied" : `${f(openRisk)}% open risk · ${check.detail || "headroom evaluated by Django"}`,
-      `Portfolio limit decision remains authoritative in Django · configured maximum = ${f(maximumTotalRisk)}%`);
-  }
-  if (name === "stop_below_broker_minimum") {
-    const minStop = n(inputs.stop_level_points);
-    return row("Broker minimum stop", "StopPoints ≥ BrokerMinimumStopPoints",
-      stopPoints !== null && minStop !== null ? `${f(stopPoints)} ≥ ${f(minStop)} points` : "N/A — broker minimum or stop distance unavailable",
-      check.detail || "Broker stop-level validation");
-  }
-  return "";
+  return output;
 }
-
-function opportunityRegimeCalculation(check, opportunity) {
-  if (String(check?.name || "").toLowerCase() !== "regime") return "";
-  const regime = opportunity?.regime || {};
-  const metrics = check?.metrics || {};
-  const n = value => typeof value === "number" && Number.isFinite(value) ? value : null;
-  const f = value => value === null ? "N/A" : Number(value).toLocaleString(undefined, {maximumFractionDigits: 3});
-  const state = passed => passed === null ? "unknown" : passed ? "pass" : "fail";
-  const metric = (label, value, passed, suffix = "") =>
-    `<div class="regime-metric"><span>${esc(label)}</span><code class="regime-value ${state(passed)}">${esc(value)}${esc(suffix)}</code><b class="regime-verdict ${state(passed)}">${passed === null ? "N/A" : passed ? "PASS" : "FAIL"}</b></div>`;
-  const term = (name, description, alignRight = false) =>
-    `<span class="regime-term${alignRight ? " align-right" : ""}" tabindex="0" role="note" aria-label="${esc(name + ": " + description)}" data-tooltip="${esc(description)}">${esc(name)}</span>`;
-  const trendThreshold = n(regime.adx_trending_threshold) ??
-    (metrics.factor === "ADX; trend threshold" ? n(metrics.threshold) : null);
-  const rangeThreshold = n(regime.adx_ranging_threshold) ??
-    (metrics.factor === "ADX; ranging threshold" ? n(metrics.threshold) : null);
-  const adxPeriod = n(regime.adx_period);
-  const minSeparation = n(regime.min_ema_separation_atr);
-  const supportTolerance = n(regime.support_tolerance_atr);
-  const slopeLookback = n(regime.slope_lookback);
-  const pivotWindow = n(regime.pivot_window);
-  const adx = n(regime.adx);
-  const separation = n(regime.ema_separation_atr);
-  const slope = n(regime.ema_slope_atr);
-  const emaBias = String(regime.ema_bias || "N/A").toUpperCase();
-  const structure = String(regime.structure || "N/A").toUpperCase();
-  const label = String(regime.label || "N/A").toUpperCase();
-  const trendText = f(trendThreshold);
-  const rangeText = f(rangeThreshold);
-  const separationText = f(minSeparation);
-  const supportText = f(supportTolerance);
-  const adxTip = `ADX(${adxPeriod === null ? "configured period" : adxPeriod}) measures trend strength, not direction. Django's current decision thresholds are trending ≥ ${trendText} and ranging < ${rangeText}. The final label also depends on EMA bias and confirmed swing structure.`;
-  const emaTip = `EMA bias is directional only when all conditions agree. BULL: EMA20 − EMA50 ≥ ${separationText} ATR, EMA50 slope over ${slopeLookback === null ? "configured" : slopeLookback} bars > 0, and close > EMA50 − ${supportText} ATR. BEAR is mirrored. Otherwise the bias is NEUTRAL.`;
-  const structureTip = `Django uses confirmed swing highs and lows (${pivotWindow === null ? "configured number of" : pivotWindow} bars on each side). BULLISH requires a Higher High AND Higher Low; BEARISH requires a Lower High AND Lower Low. Otherwise structure is MIXED, or UNKNOWN if there are too few confirmed swings. Opposite-direction structure blocks that regime; MIXED/UNKNOWN does not.`;
-  const adxPass = adx === null || trendThreshold === null ? null : adx >= trendThreshold;
-  const rangePass = adx === null || rangeThreshold === null ? null : adx < rangeThreshold;
-  const emaPass = ["BULL", "BEAR"].includes(emaBias) ? true : null;
-  const separationPass = separation === null || minSeparation === null ? null :
-    (emaBias === "BEAR" ? separation <= -minSeparation : emaBias === "BULL" ? separation >= minSeparation : false);
-  const slopePass = slope === null ? null : (emaBias === "BEAR" ? slope < 0 : emaBias === "BULL" ? slope > 0 : false);
-  const structureCompatible = emaBias === "BEAR" ? structure !== "BULLISH" :
-    emaBias === "BULL" ? structure !== "BEARISH" : null;
-  const emaDescription = emaBias === "BEAR" ? "EMA20 below EMA50" : emaBias === "BULL" ? "EMA20 above EMA50" : "EMA direction not classified";
-  const structureDescription = structure === "BEARISH" ? "Lower High AND Lower Low" :
-    structure === "BULLISH" ? "Higher High AND Higher Low" : structure;
-  const trendLine = adx === null ? "ADX unavailable — Django did not return a numeric value." :
-    trendThreshold === null ? `ADX = ${f(adx)}; the configured trend threshold was not supplied in this saved decision.` :
-    `ADX ${f(adx)} ≥ ${trendText} → ${adxPass ? "TRUE · trend strength confirmed" : "FALSE · trend threshold not reached"}`;
-  const rangeLine = adx === null ? "ADX unavailable — Django did not return a numeric value." :
-    rangeThreshold === null ? `The configured ranging threshold was not supplied in this saved decision.` :
-    `ADX ${f(adx)} < ${rangeText} → ${rangePass ? "TRUE · below the ranging boundary" : "FALSE · not below the ranging boundary"}`;
-  const rangingFallback = emaBias === "NEUTRAL" && ["MIXED", "UNKNOWN"].includes(structure) && adxPass === false;
-  let finalReason = `Django's authoritative regime label is ${label}.`;
-  if (label === "UNCERTAIN" && emaBias === "BEAR" && structure === "BULLISH") {
-    const strength = adxPass === true ? "ADX trend strength passed" : adxPass === false ? "ADX trend strength did not pass" : "ADX trend strength is unavailable";
-    finalReason = `${strength}, but bearish EMA bias conflicts with bullish confirmed structure. Django keeps the regime UNCERTAIN.`;
-  } else if (label === "UNCERTAIN" && emaBias === "BULL" && structure === "BEARISH") {
-    const strength = adxPass === true ? "ADX trend strength passed" : adxPass === false ? "ADX trend strength did not pass" : "ADX trend strength is unavailable";
-    finalReason = `${strength}, but bullish EMA bias conflicts with bearish confirmed structure. Django keeps the regime UNCERTAIN.`;
-  } else if (label === "UNCERTAIN" && emaBias === "NEUTRAL") {
-    finalReason = adxPass === true
-      ? "ADX trend strength passed, but EMA bias is NEUTRAL; Django does not confirm a directional regime."
-      : "EMA bias is NEUTRAL and the directional regime conditions are not fully confirmed; Django keeps the result UNCERTAIN.";
-  } else if (label === "RANGING" && rangePass === true) {
-    finalReason = "ADX is below Django's configured ranging boundary. The opportunity is blocked as RANGING.";
-  } else if (label === "RANGING" && rangingFallback) {
-    finalReason = "EMA bias is NEUTRAL and structure is MIXED/UNKNOWN without a confirmed trend. Django classifies the market as RANGING.";
-  } else if (label === "BULLISH" || label === "BEARISH") {
-    finalReason = `${label} trend conditions passed Django's ADX, EMA-bias and structure-compatibility rules.`;
-  }
-  const outcomeClass = ["BULLISH", "BEARISH"].includes(label) ? "pass" : label === "RANGING" ? "fail" : "unknown";
-  return `<details class="flow-math regime-details">
-    <summary><span>Regime calculation · ${esc(label)}</span><span class="regime-toggle-hint">Show formula & live values <span aria-hidden="true">＋</span></span></summary>
-    <div class="regime-content">
-      <span class="math-label">1 · Exact Django regime decision rules</span>
-      <code>TRENDING = ${term("ADX", adxTip)} ≥ ${esc(trendText)}</code>
-      <code>BULLISH = TRENDING AND ${term("EMA bias", emaTip)} = BULL AND ${term("Structure", structureTip, true)} ≠ BEARISH</code>
-      <code>BEARISH = TRENDING AND EMA bias = BEAR AND Structure ≠ BULLISH</code>
-      <code>RANGING = ADX < ${esc(rangeText)} OR (EMA bias = NEUTRAL AND Structure ∈ {MIXED, UNKNOWN} AND NOT TRENDING)</code>
-      <code>Otherwise = UNCERTAIN</code>
-      <span class="math-label">2 · Trend strength · ADX(${adxPeriod === null ? "N/A" : esc(adxPeriod)})</span>
-      ${metric("Trending boundary", adx === null ? "N/A" : `${f(adx)} ≥ ${trendText}`, adxPass)}
-      <code class="regime-explain">${esc(trendLine)}</code>
-      ${metric("Ranging boundary", adx === null ? "N/A" : `${f(adx)} < ${rangeText}`, rangePass)}
-      <code class="regime-explain">${esc(rangeLine)}</code>
-      <span class="math-label">3 · EMA direction · ${term("EMA bias", emaTip)} · normalized by ATR</span>
-      <code>Separation = (EMA20 − EMA50) ÷ ATR; EMA50 slope = (EMA50 now − EMA50 ${slopeLookback === null ? "configured lookback" : slopeLookback + " bars ago"}) ÷ ATR</code>
-      ${metric(`${emaDescription} · separation`, separation === null ? "N/A" : `${f(separation)} ATR · configured minimum = ${separationText} ATR`, separationPass)}
-      ${metric("EMA50 slope direction", slope === null ? "N/A" : `${f(slope)} ATR ${emaBias === "BEAR" ? "< 0" : "> 0"}`, slopePass)}
-      <code class="regime-explain">Close location filter: Close ${emaBias === "BEAR" ? "<" : ">"} EMA50 ${emaBias === "BEAR" ? "+" : "−"} ${supportText} × ATR · included in Django's EMA bias classification.</code>
-      <div class="regime-metric"><span>Django EMA bias</span><code class="regime-value ${emaPass === null ? "unknown" : "pass"}">${esc(emaBias)}</code><b class="regime-verdict ${emaPass === null ? "unknown" : "pass"}">${emaPass === null ? "N/A" : "CLASSIFIED"}</b></div>
-      <span class="math-label">4 · Market structure · ${term("Structure", structureTip)} · confirmed swing points</span>
-      <code>BEARISH structure = Lower High AND Lower Low</code>
-      <code>BULLISH structure = Higher High AND Higher Low</code>
-      <div class="regime-metric"><span>Confirmed swing structure</span><code class="regime-value ${structure === "UNKNOWN" || structure === "N/A" ? "unknown" : "pass"}">${esc(structureDescription)}</code><b class="regime-verdict ${structure === "UNKNOWN" || structure === "N/A" ? "unknown" : "pass"}">${structure === "UNKNOWN" || structure === "N/A" ? "N/A" : "CLASSIFIED"}</b></div>
-      ${metric("Structure compatibility with EMA direction", structureCompatible === null ? "Not directionally classifiable" : structureCompatible ? "Compatible" : "Opposite structure blocks this direction", structureCompatible)}
-      <span class="math-label">5 · Final Django regime result</span>
-      <code class="regime-result ${outcomeClass}">Django regime = ${esc(label)}</code>
-      <code class="regime-explain">${esc(finalReason)} The final label is returned by Django; this panel explains the saved decision and does not recalculate or override it.</code>
-    </div>
-  </details>`;
-}
-
-function opportunityVolatilityCalculation(check, opportunity) {
-  if (String(check?.name || "").toLowerCase() !== "volatility") return "";
-  const metrics = check.metrics || {};
-  const regime = opportunity?.regime || {};
-  const n = value => typeof value === "number" && Number.isFinite(value) ? value : null;
-  const f = value => value === null ? "N/A" : Number(value).toLocaleString(undefined, {maximumFractionDigits: 3});
-  const ratio = n(metrics.value);
-  const minimum = n(metrics.minimum);
-  const maximum = n(metrics.maximum);
-  const atrPeriod = n(regime.atr_period);
-  const baselineBars = n(regime.atr_baseline_bars);
-  const passed = check.passed === true ? true : check.passed === false ? false : null;
-  const component = n(opportunity?.components?.volatility);
-  const metric = (label, value, result, note = "") => {
-    const state = result === null ? "unknown" : result ? "pass" : "fail";
-    const verdict = result === null ? "N/A" : result ? "PASS" : "FAIL";
-    return '<div class="regime-metric"><span>' + esc(label) + '</span><code class="regime-value ' + state + '">' + esc(value) + '</code><b class="regime-verdict ' + state + '">' + verdict + '</b></div>' +
-      (note ? '<code class="regime-explain">' + esc(note) + '</code>' : "");
-  };
-  const ratioLine = ratio === null ? "Django did not return a numeric ATR ratio." :
-    minimum === null || maximum === null ? 'ATR ratio = ' + f(ratio) + 'x; configured minimum/maximum were not supplied in this saved decision.' :
-    'ATR ratio = ' + f(ratio) + 'x; acceptable interval is ' + f(minimum) + 'x to ' + f(maximum) + 'x.';
-  const componentLine = component === null ? "Volatility score component was not supplied in this decision." :
-    'Volatility component = ' + f(component) + ' / 1.00; weighted contribution = ' + f(component * 0.15) + ' of the total 0–1 opportunity score (15% weight).';
-  const interpretation = ratio === null ? "Cannot independently evaluate the volatility gate because the ratio is unavailable." :
-    minimum !== null && ratio < minimum ? "Too quiet: opportunity is rejected because ATR is below the configured minimum." :
-    maximum !== null && ratio > maximum ? "Volatility spike: opportunity is deferred until volatility settles." :
-    passed === true ? "Within Django's configured volatility range: the gate passes." :
-    passed === false ? "The volatility gate did not pass; see Django's returned reason." :
-    "The configured volatility limits were not supplied, so this panel will not infer them.";
-  return '<details class="flow-math flow-details volatility-details">' +
-    '<summary><span>Volatility calculation · ' + (ratio === null ? "N/A" : f(ratio) + 'x ATR ratio') + '</span><span class="regime-toggle-hint">Show formula & live values <span aria-hidden="true">＋</span></span></summary>' +
-    '<div class="regime-content">' +
-    '<span class="math-label">1 · Volatility formula</span>' +
-    '<code>ATR ratio = Current ATR(' + (atrPeriod === null ? "configured period" : f(atrPeriod)) + ') ÷ Median of the most recent ' + (baselineBars === null ? "configured baseline" : f(baselineBars)) + ' ATR values</code>' +
-    '<code>Current ATR and its baseline are calculated from completed M15 candles only.</code>' +
-    '<span class="math-label">2 · Live Django calculation</span>' +
-    metric("Current ATR ratio", ratio === null ? "N/A" : f(ratio) + "x", passed, ratioLine) +
-    '<span class="math-label">3 · Acceptance thresholds supplied by Django</span>' +
-    '<code>REJECT if ratio < ' + f(minimum) + 'x · PASS if ' + f(minimum) + 'x ≤ ratio ≤ ' + f(maximum) + 'x · DEFER if ratio > ' + f(maximum) + 'x</code>' +
-    metric("Minimum volatility", ratio === null || minimum === null ? "N/A" : f(ratio) + 'x ≥ ' + f(minimum) + 'x', ratio === null || minimum === null ? null : ratio >= minimum) +
-    metric("Maximum volatility", ratio === null || maximum === null ? "N/A" : f(ratio) + 'x ≤ ' + f(maximum) + 'x', ratio === null || maximum === null ? null : ratio <= maximum) +
-    '<span class="math-label">4 · Effect on opportunity score</span>' +
-    '<code>Volatility weight = 15% of the total opportunity score</code>' +
-    '<code>Score curve breakpoints in the current detector: 0.80x and 1.60x; these are scoring-curve constants, separate from the configurable acceptance limits.</code>' +
-    '<code class="regime-explain">' + esc(componentLine) + '</code>' +
-    '<span class="math-label">5 · Final interpretation</span>' +
-    '<code class="regime-result ' + (passed === true ? "pass" : passed === false ? "fail" : "unknown") + '">' + esc(interpretation) + '</code>' +
-    '</div></details>';
-}
-
-function opportunityRegimeStabilityCalculation(check, opportunity) {
-  if (String(check?.name || "").toLowerCase() !== "regime_stability") return "";
-  const metrics = check.metrics || {};
-  const regime = opportunity?.regime || {};
-  const lookback = Number.isFinite(Number(metrics.threshold)) ? Number(metrics.threshold) :
-    Number.isFinite(Number(metrics.value)) ? Number(metrics.value) : null;
-  const current = String(regime.label || "N/A").toUpperCase();
-  const previous = String(regime.previous_label || "N/A").toUpperCase();
-  const opposite = current === "BULLISH" ? "BEARISH" : current === "BEARISH" ? "BULLISH" : null;
-  const passed = check.passed === true ? true : check.passed === false ? false : null;
-  const state = value => value === null ? "unknown" : value ? "pass" : "fail";
-  const metric = (label, value, result) => '<div class="regime-metric"><span>' + esc(label) + '</span><code class="regime-value ' + state(result) + '">' + esc(value) + '</code><b class="regime-verdict ' + state(result) + '">' + (result === null ? "N/A" : result ? "PASS" : "FAIL") + '</b></div>';
-  const lookbackText = lookback === null ? "configured lookback" : lookback + " completed M15 bars";
-  const canCompare = Boolean(opposite) && previous !== "N/A";
-  const comparisonPass = canCompare ? previous !== opposite : null;
-  const comparison = !canCompare ? "Previous regime label is not available in the Django response." :
-    previous + (comparisonPass ? " is not opposite to " : " is opposite to ") + current + ".";
-  const explanation = passed === true ? "No opposite regime was detected at the lookback point; the current trend passes the stability gate." :
-    passed === false ? "The lookback regime was opposite to the current trend. Django defers the setup until the reversal is established." :
-    "Django did not provide enough information to determine the stability result.";
-  return '<details class="flow-math flow-details regime-stability-details">' +
-    '<summary><span>Regime Stability calculation · ' + esc(passed === true ? "STABLE" : passed === false ? "OPPOSITE REGIME" : "N/A") + '</span><span class="regime-toggle-hint">Show formula & live values <span aria-hidden="true">＋</span></span></summary>' +
-    '<div class="regime-content">' +
-    '<span class="math-label">1 · Stability rule</span>' +
-    '<code>PASS when the regime ' + esc(lookbackText) + ' ago is NOT opposite to the current bullish/bearish regime.</code>' +
-    '<code>DEFER when previous regime = opposite of current regime (reversal not yet established).</code>' +
-    '<span class="math-label">2 · Live Django values</span>' +
-    metric("Current regime", current, Boolean(opposite)) +
-    metric("Regime " + (lookback === null ? "lookback" : lookback + " bars") + " ago", previous, canCompare ? comparisonPass : null) +
-    metric("Opposite regime to reject", opposite || "N/A", null) +
-    '<code class="regime-explain">' + esc(comparison) + '</code>' +
-    '<span class="math-label">3 · Decision</span>' +
-    metric("Stability check", passed === null ? "Not evaluated" : passed ? "No opposite regime at lookback" : "Opposite regime detected", passed) +
-    '<code class="regime-result ' + (passed === true ? "pass" : passed === false ? "fail" : "unknown") + '">' + esc(explanation) + '</code>' +
-    '<code class="regime-explain">The comparison uses the regime classified from completed candles only; it does not predict or confirm a reversal by itself.</code>' +
-    '</div></details>';
-}
-
-function opportunityImpulseCalculation(check, opportunity) {
-  if (String(check?.name || "").toLowerCase() !== "impulse") return "";
-  const metrics = check.metrics || {};
-  const value = typeof metrics.value === "number" && Number.isFinite(metrics.value) ? metrics.value : null;
-  const threshold = typeof metrics.threshold === "number" && Number.isFinite(metrics.threshold) ? metrics.threshold : 2.0;
-  const passed = check.passed === true ? true : check.passed === false ? false : null;
-  const status = passed === null ? "unknown" : passed ? "pass" : "fail";
-  const fmt = x => x === null ? "N/A" : Number(x).toFixed(3);
-  const metric = (label, shown, ok) => '<div class="regime-metric"><span>' + esc(label) + '</span><code class="regime-value ' + (ok === null ? "unknown" : ok ? "pass" : "fail") + '">' + esc(shown) + '</code><b class="regime-verdict ' + (ok === null ? "unknown" : ok ? "pass" : "fail") + '">' + (ok === null ? "N/A" : ok ? "PASS" : "FAIL") + '</b></div>';
-  const reason = String(check.reason || check.detail || check.message || "");
-  const stillExtending = /still making new extremes|no pullback has started/i.test(reason);
-  const tooSmall = value !== null && value < threshold;
-  const interpretation = stillExtending ? "WAIT: price is still extending to new extremes. A pullback has not started, so the impulse leg cannot yet be finalized." :
-    value === null ? "Django did not expose a numeric impulse/ATR measurement for this check." :
-    tooSmall ? "REJECT: the measured impulse is smaller than the configured minimum." :
-    passed ? "PASS: a confirmed impulse leg meets the minimum size requirement." :
-    "Impulse check did not pass. See the live Django reason above.";
-  return '<details class="flow-math flow-details impulse-details">' +
-    '<summary><span>Impulse calculation · ' + (value === null ? (stillExtending ? "WAIT" : "N/A") : fmt(value) + ' ATR') + '</span><span class="regime-toggle-hint">Show formula & live values <span aria-hidden="true">＋</span></span></summary>' +
-    '<div class="regime-content">' +
-    '<span class="math-label">1 · Impulse definition</span>' +
-    '<code>Impulse size = Trend-direction swing extreme − preceding confirmed opposite swing point</code>' +
-    '<code>Impulse strength (ATR) = Impulse size ÷ Current ATR(14)</code>' +
-    '<code>Minimum required impulse = ' + fmt(threshold) + ' ATR (Django OpportunityDetector configuration)</code>' +
-    '<span class="math-label">2 · Live Django calculation</span>' +
-    metric("Measured impulse", value === null ? "Not available" : fmt(value) + " ATR", passed) +
-    metric("Minimum impulse", fmt(threshold) + " ATR", value === null ? null : value >= threshold) +
-    '<code class="regime-explain">The current check payload exposes the normalized impulse size and threshold, but not the exact swing prices or raw ATR. Those values are not fabricated here.</code>' +
-    '<span class="math-label">3 · Pullback-start condition</span>' +
-    '<code>WAIT if any later completed candle makes an equal or more extreme trend-direction high/low than the candidate swing extreme.</code>' +
-    metric("New extreme / pullback started", stillExtending ? "New extreme detected · pullback not started" : "No extension reported by this check", stillExtending ? false : passed === null ? null : true) +
-    '<span class="math-label">4 · Final interpretation</span>' +
-    '<code class="regime-result ' + status + '">' + esc(interpretation) + '</code>' +
-    '<code class="regime-explain">Swing points are confirmed using the configured pivot window; the detector uses completed M15 candles and does not use future candles.</code>' +
-    '</div></details>';
+function decisionStageEntries(decision) {
+  const stages = decision?.features?.stages;
+  if (!stages || typeof stages !== "object" || Array.isArray(stages)) return [];
+  return Object.entries(stages).filter(([name, result]) =>
+    name !== "learning" && result && typeof result === "object" &&
+    (Array.isArray(result.checks) || "approved" in result || "status" in result)
+  );
 }
 
 
-const DECISION_VARIABLE_GROUPS = [
-  {title:"01 · Market regime",items:[
-    ["ADX","Average Directional Index: measures trend strength, not bullish or bearish direction. Interpret it with price structure and a configured threshold."],
-    ["ATR regime","Compares current Average True Range with its recent baseline to classify volatility as relatively low, normal, or high."],
-    ["Volatility expansion","Detects whether recent candle ranges or ATR are increasing, indicating a stronger movement in market activity."],
-    ["Volatility contraction","Detects declining ranges or ATR, which can indicate consolidation or a pause before the next move."],
-    ["Trending / ranging classification","Classifies whether price behaviour is directional or predominantly sideways using configured trend and structure evidence."],
-    ["Higher-timeframe regime","Summarizes the broader market state on a higher timeframe so an M15 setup is evaluated in its larger context."]
-  ]},
-  {title:"02 · Trend analysis",items:[
-    ["EMA 20","The 20-period Exponential Moving Average, giving more weight to recent prices and representing the shorter-term trend."],
-    ["EMA 50","The 50-period Exponential Moving Average, representing a slower intermediate trend reference."],
-    ["EMA slopes","Measures whether selected EMAs are rising, falling, or flat; slope magnitude can help distinguish directional movement from noise."],
-    ["Price vs EMA","Measures the position and distance of price relative to an EMA, helping identify trend alignment or extension."],
-    ["Trend direction","Assigns bullish, bearish, or neutral direction from the configured price, EMA, and structure rules."],
-    ["Higher-timeframe alignment","Checks whether the M15 trade direction agrees with the selected higher-timeframe directional bias."]
-  ]},
-  {title:"03 · Structure & opportunity",items:[
-    ["HH / HL","Higher highs and higher lows: a sequence of confirmed swing points commonly associated with bullish structure."],
-    ["LH / LL","Lower highs and lower lows: a sequence of confirmed swing points commonly associated with bearish structure."],
-    ["BOS","Break of Structure: a confirmed break beyond a relevant prior swing level in the direction of a developing move."],
-    ["CHOCH","Change of Character: evidence that the previous structure may be weakening or changing direction; it needs confirmation."],
-    ["Impulse strength","Measures the size and directional quality of the impulse leg, often normalized by ATR to compare across volatility regimes."],
-    ["Pullback depth","Measures how much of the preceding impulse has retraced, often as a fraction or percentage of that impulse."],
-    ["Pullback duration","Counts completed bars from the start of the pullback to assess whether the retracement is brief, mature, or prolonged."],
-    ["Support / resistance distance","Measures the distance from the proposed setup or entry to a relevant support or resistance level."]
-  ]},
-  {title:"04 · Entry timing",items:[
-    ["Trigger candle","The completed candle or candle pattern that satisfies the configured entry trigger in the approved trade direction."],
-    ["Candle body ratio","Candle body size divided by total high-low range; helps describe whether the candle closed with directional conviction."],
-    ["Wick rejection","Measures wick size and location as evidence that price was rejected from a level or zone."],
-    ["Momentum confirmation","Checks whether momentum is recovering or continuing in the intended direction after the pullback."],
-    ["Retest confirmation","Checks whether price revisits a broken level or entry zone and behaves consistently with the proposed direction."],
-    ["Entry-zone distance","Measures how far the current or planned entry is from the defined pullback or trigger zone."],
-    ["Candle-close confirmation","Requires the relevant signal candle to close before confirmation, preventing decisions from relying on an unfinished candle."]
-  ]},
-  {title:"05 · Market quality & execution",items:[
-    ["ATR suitability","Checks whether current volatility is suitable for the strategy's stop distance, target distance, and execution assumptions."],
-    ["Spread","The current bid-ask difference, expressed in broker points or price units; a direct trading cost."],
-    ["Spread / ATR ratio","Normalizes spread by ATR to estimate how large the transaction spread is relative to recent market movement."],
-    ["Estimated slippage","An estimate of the difference between the requested execution price and the likely fill price; it is not a guaranteed value."],
-    ["Commission / fees","Trading charges expected for opening and closing the position, using the broker's applicable contract and account schedule."]
-  ]},
-  {title:"06 · Risk management",items:[
-    ["Risk per trade","The maximum planned monetary loss for one trade, usually derived from account equity or balance and a configured risk fraction."],
-    ["Stop-loss distance","The price distance between the planned entry and protective stop, converted using the symbol's point or tick specification."],
-    ["Lot size","The position volume calculated from permitted monetary risk, stop distance, tick value, and broker volume constraints."],
-    ["Total exposure","The combined open or proposed risk across positions, rather than looking at a new trade in isolation."],
-    ["Daily loss","The account's realized and/or configured daily loss measure compared with the daily loss limit."],
-    ["Maximum drawdown","The decline from a defined account equity peak to a subsequent equity trough, measured against the configured limit."],
-    ["Reward / risk ratio","Expected reward divided by planned risk for the proposed trade, after applying the strategy's entry, stop, and target assumptions."],
-    ["Correlated exposure","Checks whether existing positions or proposed trades share risk drivers, potentially concentrating exposure in the same market move."]
-  ]},
-  {title:"07 · News & trading session",items:[
-    ["High-impact news proximity","Measures time until or since scheduled high-impact events and applies the configured pre-news and post-news restrictions."],
-    ["London / New York session","Identifies the active trading session using the configured market timezone and session boundaries."],
-    ["Rollover period","Detects the broker's daily rollover window, when spreads, liquidity, and financing conditions may become abnormal."],
-    ["Market trading availability","Checks whether the symbol and broker currently permit trading, including session closures and unavailable market conditions."]
-  ]},
-  {title:"08 · Data & system integrity",items:[
-    ["Missing bars","Detects gaps in the expected candle sequence so indicators and structure calculations are not silently based on incomplete history."],
-    ["Stale data","Checks whether the latest received quote or completed candle is too old for a reliable current decision."],
-    ["Duplicate bars","Detects repeated candle timestamps or duplicate records that could distort indicators, signals, and backtests."],
-    ["UTC / time synchronization","Ensures candle, event, news, and decision timestamps use consistent UTC handling and correct bar boundaries."]
-  ]}
-];
-const FLOW_CHECK_TOOLTIPS = {
-  regime:"Classifies the current market context as bullish, bearish, ranging, or uncertain using the strategy's configured regime evidence.",
-  volatility:"Compares current ATR with its recent baseline to assess whether volatility is suitable for the setup.",
-  impulse:"Measures the directional impulse leg, commonly in ATR units, to distinguish a meaningful move from ordinary noise.",
-  regime_stability:"Checks whether recent regime readings are consistent or whether the market state is changing or conflicting.",
-  freshness:"Checks how many completed bars have elapsed since the signal. Old signals must not be entered as if they were fresh.",
-  invalidation:"Checks whether the setup's invalidation level has been crossed and whether enough risk room remains for a valid trade.",
-  chase:"Measures how far price has moved from the signal reference, normalized by ATR, to avoid entering after an extended move.",
-  spread_conditions:"Checks absolute spread and spread relative to volatility and available risk distance. Missing live quote data must not be treated as a pass.",
-  quality:"Summarizes the configured entry-quality evidence. It is a timing assessment, not a substitute for risk authorization.",
-  stop:"Validates stop placement, direction, and broker minimum stop-distance requirements.",
-  reward_risk:"Compares expected reward with planned risk against the configured minimum reward-to-risk threshold.",
-  daily_loss:"Checks current daily loss against the account's configured daily loss limit.",
-  portfolio_risk:"Checks aggregate open and proposed risk against portfolio-level exposure limits.",
-  sizing:"Validates position volume against the calculated risk budget and broker minimum, maximum, and step constraints.",
-  django_authorization:"The final Django-side trading authorization gate. A passed strategy pipeline does not itself grant authorization.",
-  command_gates:"Checks server-side command creation and execution switches before any command can be issued to the MT5 bridge.",
-  ea_heartbeat:"Checks that the MT5 bridge is recently connected and reporting the expected account and terminal identity.",
-  terminal_permissions:"Checks terminal connectivity and whether automated trading permissions are available.",
-  broker_ack:"Confirms whether the broker acknowledged the order and whether an execution or fill was actually reported."
-};
-function renderDecisionVariableGuide() {
+function renderDecisionVariableGuide(decision, execution = {}) {
   const target = $("decisionVariableGuideItems");
   if (!target) return;
-  target.innerHTML = decorateDecisionFlowTooltips(DECISION_VARIABLE_GROUPS.map(group =>
+  const groups = [];
+  for (const [stageName, stageResult] of decisionStageEntries(decision)) {
+    const items = [];
+    for (const check of stageChecks(stageResult)) {
+      const label = check.display_name || check.label || prettyCheck(check.name);
+      const description = check.description || check.help || check.tooltip || check.detail ||
+        "Live check supplied by the Django decision pipeline.";
+      items.push([label, description]);
+      for (const [key, value] of Object.entries(check.metrics || {})) {
+        items.push([label + " · " + prettyCheck(key), "Live value: " + flowValue(value) + "."]);
+      }
+    }
+    for (const [name, value] of collectFlowVariables(stageResult)) {
+      items.push([prettyCheck(name), "Live Django value: " + value + "."]);
+    }
+    if (items.length) groups.push({
+      title: stageResult.title || stageResult.display_name || prettyCheck(stageName),
+      items: items
+    });
+  }
+  const executionItems = [];
+  for (const check of Array.isArray(execution.checks) ? execution.checks : []) {
+    executionItems.push([
+      check.display_name || check.label || prettyCheck(check.name),
+      check.description || check.detail || "Live execution-gate status: " + flowValue(check.status || check.passed) + "."
+    ]);
+    for (const [key, value] of Object.entries(check.metrics || {})) {
+      executionItems.push([prettyCheck(check.name) + " · " + prettyCheck(key), "Live value: " + flowValue(value) + "."]);
+    }
+  }
+  for (const [name, value] of collectFlowVariables(execution)) {
+    executionItems.push([prettyCheck(name), "Live Django runtime value: " + value + "."]);
+  }
+  if (executionItems.length) groups.push({title: execution.title || "Execution boundary", items: executionItems});
+  if (!groups.length) {
+    target.innerHTML = '<div class="small">Waiting for live Django decision variables.</div>';
+    return;
+  }
+  target.innerHTML = groups.map(group =>
     '<section class="variable-group"><h3>' + esc(group.title) + '</h3><div class="variable-items">' +
     group.items.map(([name, description]) =>
       '<span class="variable-chip" tabindex="0" role="note" title="' + esc(description) +
       '" aria-label="' + esc(name + ". " + description) + '" data-tooltip="' + esc(description) +
       '"><span>' + esc(name) + '</span></span>'
     ).join("") + '</div></section>'
-  ).join(""));
+  ).join("");
 }
 
 const FLOW_ABBREVIATION_TOOLTIPS = {
@@ -941,125 +518,66 @@ function decorateDecisionFlowTooltips(markup) {
     );
   }).join("");
 }
-renderDecisionVariableGuide();
-function renderDecisionFlow(decision) {
-  // Preserve the user's expand/collapse choice when the dashboard refreshes.
-  const openDetails = new Set(
-    [...$("decisionFlow").querySelectorAll(".regime-details[open], .volatility-details[open], .regime-stability-details[open], .impulse-details[open], .entry-details[open], .risk-details[open]")].map(node =>
-      node.classList.contains("entry-details") ? "entry:" + node.dataset.check : node.classList.contains("risk-details") ? "risk:" + node.dataset.check : node.classList.contains("volatility-details") ? "volatility" : node.classList.contains("regime-stability-details") ? "regime_stability" : node.classList.contains("impulse-details") ? "impulse" : "regime")
+renderDecisionVariableGuide(null);
+
+function renderDecisionFlow(decision, execution = {}) {
+  const flow = $("decisionFlow");
+  if (!flow) return;
+  const stages = decisionStageEntries(decision);
+  const stageMarkup = stages.map(([name, result], index) => {
+    const title = result.title || result.display_name || prettyCheck(name);
+    return flowStageMarkup(
+      String(index + 1).padStart(2, "0") + " · " + title,
+      result,
+      stageChecks(result),
+      title + " did not return individual checks."
+    );
+  }).join("");
+
+  const executionChecks = Array.isArray(execution.checks) ? execution.checks : [];
+  const executionState = execution.trading_authorization === true &&
+    executionChecks.every(check => check.passed === true) ? "pass" :
+    executionChecks.some(check => check.passed === false ||
+      ["BLOCKED", "REJECTED", "FAILED"].includes(String(check.status || "").toUpperCase()))
+      ? "blocked" : executionChecks.length ? "wait" : "idle";
+  const executionMarkup = flowStageMarkup(
+    execution.title || "Execution boundary",
+    execution,
+    executionChecks,
+    "Django has not supplied execution-gate telemetry.",
+    executionState
   );
-  const opportunity = stage(decision, "opportunities");
-  const timing = stage(decision, "entry_timing");
-  const risk = stage(decision, "risk_management");
-  const oppState = stageState(opportunity);
-  const timingReached = opportunity.approved === true;
-  const riskReached = timingReached && timing.approved === true;
-  const oppChecks = stageChecks(opportunity).map(item => ({
-    ...item,
-    calculation: item.name === "regime"
-      ? opportunityRegimeCalculation(item, opportunity)
-      : item.name === "regime_stability"
-        ? opportunityRegimeStabilityCalculation(item, opportunity)
-        : item.name === "volatility"
-          ? opportunityVolatilityCalculation(item, opportunity)
-          : item.name === "impulse"
-            ? opportunityImpulseCalculation(item, opportunity)
-            : ""
-  }));
-  const timingChecks = orderedEntryFlowChecks(stageChecks(timing), !timingReached).map(item => ({
-    ...item,
-    calculation: entryCalculationMarkup(item, timing, opportunity, decision)
-  }));
-  const riskChecks = stageChecks(risk).map(item => ({
-    ...item,
-    calculation: riskCalculationMarkup(item, risk, decision)
-  }));
+  flow.innerHTML = decorateDecisionFlowTooltips(stageMarkup + executionMarkup);
 
-  const opportunityMarkup = flowStageMarkup("01 · OPPORTUNITY", opportunity, oppChecks,
-    "Opportunity detector did not return individual checks.", oppState);
-  const timingMarkup = flowStageMarkup("02 · ENTRY TIMING", timingReached ? timing : {},
-    timingChecks,
-    "Entry timer returned no individual checks.", timingReached ? stageState(timing) : "idle");
-  const riskDisplayChecks = orderedRiskFlowChecks(riskChecks, !riskReached).map(item => ({
-    ...item,
-    calculation: item.calculation || riskCalculationMarkup(
-      riskChecks.find(check => check.name === item.name) || item, risk, decision
-    )
-  }));
-  const riskMarkup = flowStageMarkup("03 · RISK MANAGEMENT", riskReached ? risk : {},
-    riskDisplayChecks, "Risk manager returned no individual checks.", riskReached ? stageState(risk) : "idle");
-
-  const allPipelineApproved = opportunity.approved === true && timing.approved === true && risk.approved === true;
-  const finalAction = String(decision.action || "").toUpperCase();
-  const finalGuardBlocked = allPipelineApproved && !["BUY", "SELL"].includes(finalAction);
-  // Authorization and broker execution are separate gates. The dashboard feed
-  // currently exposes the Django decision only; it does not expose command-gate
-  // settings, a live EA heartbeat, or a broker acknowledgement. Never infer them.
-  const authChecks = allPipelineApproved
-    ? [
-        {name:"django_authorization", displayName:"Django trading authorization",
-          passed:false, detail: finalGuardBlocked
-            ? `BLOCKED: Django final decision is ${finalAction} (${decision.rationale_code || "reason not supplied"}). No authorization is granted.`
-            : "BLOCKED: the current decision API keeps trading_authorization=false. A passed strategy pipeline is advisory only."},
-        {name:"command_gates", displayName:"Server command-creation / execution gates",
-          notReached:true, detail:"Not exposed by the dashboard feed. Both server-side command gates must be explicitly enabled; no gate state is assumed."},
-        {name:"ea_heartbeat", displayName:"MT5 EA heartbeat & account identity",
-          notReached:true, detail:"Live heartbeat is not included in this dashboard payload. Fresh account, server, symbol and demo-account identity are not confirmed here."},
-        {name:"terminal_permissions", displayName:"MT5 terminal trading permissions",
-          notReached:true, detail:"Terminal connection and Algo Trading permissions are not included in this dashboard payload. No permission is inferred."},
-        {name:"broker_ack", displayName:"Broker order execution & acknowledgement",
-          notReached:true, detail:"No command acknowledgement or broker fill is available in this dashboard payload. No order is reported as sent or filled."}
-      ]
-    : [
-        {name:"django_authorization", displayName:"Django trading authorization", notReached:true,
-          detail:"Waiting for all three upstream Django stages to pass. Authorization is not granted."},
-        {name:"command_gates", displayName:"Server command-creation / execution gates", notReached:true,
-          detail:"Not reached. Server command gates are not evaluated by the dashboard until upstream approval."},
-        {name:"ea_heartbeat", displayName:"MT5 EA heartbeat & account identity", notReached:true,
-          detail:"Not reached. A fresh MT5 heartbeat and matching account identity have not been confirmed here."},
-        {name:"terminal_permissions", displayName:"MT5 terminal trading permissions", notReached:true,
-          detail:"Not reached. Terminal connectivity and trading permissions are not confirmed here."},
-        {name:"broker_ack", displayName:"Broker order execution & acknowledgement", notReached:true,
-          detail:"Not reached. No broker execution or fill is implied."}
-      ];
-  const authMarkup = flowStageMarkup("04 · AUTHORIZATION / MT5",
-    allPipelineApproved ? {approved:false, status:"BLOCKED",
-      explanation:"Django authorization is false; MT5 execution is not confirmed."} : {},
-    authChecks, "", allPipelineApproved ? "blocked" : "idle");
-  $("decisionFlow").innerHTML = decorateDecisionFlowTooltips(opportunityMarkup + timingMarkup + riskMarkup + authMarkup);
-  $("decisionFlow").querySelectorAll(".regime-details, .volatility-details, .regime-stability-details, .impulse-details, .entry-details, .risk-details").forEach(node => {
-    const key = node.classList.contains("entry-details") ? "entry:" + node.dataset.check : node.classList.contains("risk-details") ? "risk:" + node.dataset.check : node.classList.contains("volatility-details") ? "volatility" : node.classList.contains("regime-stability-details") ? "regime_stability" : node.classList.contains("impulse-details") ? "impulse" : "regime";
-    node.open = openDetails.has(key);
-  });
-
+  const failedStage = stages.find(([, result]) => ["wait", "blocked"].includes(stageState(result)));
+  const allPipelineApproved = stages.length > 0 && stages.every(([, result]) => result.approved === true);
   let summaryState = "idle";
-  let summaryText = "No current decision is available.";
-  if (oppState === "wait" || oppState === "blocked") {
-    summaryState = oppState;
-    summaryText = `Opportunity stage is ${oppState.toUpperCase()}: ${val(opportunity, "reason")} — ${val(opportunity, "explanation")}`;
-  } else if (timingReached && ["wait","blocked"].includes(stageState(timing))) {
-    summaryState = stageState(timing);
-    summaryText = `Entry timing is ${summaryState.toUpperCase()}: ${val(timing, "reason")} — ${val(timing, "explanation")}`;
-  } else if (riskReached && ["wait","blocked"].includes(stageState(risk))) {
-    summaryState = stageState(risk);
-    summaryText = `Risk management is ${summaryState.toUpperCase()}: ${val(risk, "reason")} — ${val(risk, "explanation")}`;
-  } else if (finalGuardBlocked) {
+  let summaryText = "No current decision stages are available.";
+  if (failedStage) {
+    const name = failedStage[0];
+    const result = failedStage[1];
+    summaryState = stageState(result);
+    summaryText = prettyCheck(name) + " is " + summaryState.toUpperCase() + ": " +
+      (result.reason || "reason unavailable") + " — " +
+      (result.explanation || result.detail || "No explanation supplied by Django.");
+  } else if (execution.trading_authorization !== true) {
     summaryState = "blocked";
-    summaryText = `All SignalFlow stages passed, but Django's final guard blocked the decision: ${finalAction} — ${val(decision, "rationale_code")}.`;
-  } else if (allPipelineApproved) {
+    summaryText = execution.authorization_detail ||
+      "Django trading authorization is false. Strategy approval does not independently authorize MT5 execution.";
+  } else if (allPipelineApproved && executionState === "pass") {
     summaryState = "pass";
-    summaryText = "All three Django pipeline stages passed. Trading authorization remains false and no MT5 order is confirmed.";
-  } else if (oppState === "pass" && !timingReached) {
-    summaryText = "Opportunity found; entry timing has not yet approved an entry.";
-  } else {
-    summaryText = `Pipeline is not approved. Current decision: ${val(decision, "rationale_code")}.`;
+    summaryText = "All returned Django stages and execution-boundary checks passed.";
+  } else if (allPipelineApproved) {
+    summaryState = executionState === "wait" ? "wait" : "blocked";
+    summaryText = "Strategy stages passed, but one or more execution-boundary checks are not approved.";
+  } else if (stages.length) {
+    summaryText = "The Django pipeline has not approved every stage.";
   }
-  $("flowSummary").className = `flow-summary ${summaryState}`;
-  $("flowSummary").innerHTML = `<strong>ACTIVE PROCESS STATUS:</strong> ${esc(summaryText)}`;
+  $("flowSummary").className = "flow-summary " + summaryState;
+  $("flowSummary").innerHTML = '<strong>ACTIVE PROCESS STATUS:</strong> ' + esc(summaryText);
 }
 
-
-const learningLessons = {
+const learningLessons = {const learningLessons = {
   opportunity: {
     title: "Finding the right opportunity · M15",
     body: '<p>Start with the market context. A trend-following pullback setup needs a directional regime, a meaningful impulse, acceptable volatility, and evidence that price has begun to pull back—not merely continued extending.</p><ul><li><b>Regime:</b> classify bullish, bearish, ranging, or uncertain conditions.</li><li><b>Volatility:</b> compare current ATR(14) with its recent median.</li><li><b>Structure:</b> inspect confirmed swing highs and lows.</li><li><b>Impulse:</b> measure the directional leg in ATR units.</li><li><b>Stability:</b> check that the recent regime is not opposite to the current one.</li></ul><p><b>Lesson:</b> a strong trend alone is not an entry. Wait for the pullback and the entry trigger.</p>'
@@ -1269,7 +787,8 @@ async function refresh() {
     const latest = decisions[0];
     window.latestLearningDecision = latest;
     renderLearning(latest);
-    renderDecisionFlow(latest);
+    renderDecisionFlow(latest, data.execution || {});
+    renderDecisionVariableGuide(latest, data.execution || {});
     const latestFeatures = latest.features || {};
     const latestTiming = stage(latest, "entry_timing");
     const latestRisk = stage(latest, "risk_management");
