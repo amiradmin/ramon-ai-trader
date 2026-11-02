@@ -38,6 +38,10 @@
 @keyframes flow-check-blocked{0%,100%{opacity:1;background:#321923;border-color:#ff7185;box-shadow:0 0 0 1px rgba(255,113,133,.55),0 0 18px rgba(255,113,133,.34)}50%{opacity:.55;background:#111a26;border-color:#ff304f;box-shadow:0 0 0 2px rgba(255,113,133,.82),0 0 26px rgba(255,45,79,.58)}}
 .flow-check.pass .flow-check-dot{background:var(--green)}.flow-check.wait .flow-check-dot{background:var(--amber)}
 .flow-check.blocked .flow-check-dot{background:var(--red)}.flow-check.idle .flow-check-dot{background:#65748a}
+/* Upcoming pipeline steps stay visible but visually inactive until Django reaches them. */
+.flow-stage.upcoming,.flow-check.idle{filter:grayscale(1);opacity:.58}
+.flow-stage.upcoming .flow-state.idle{background:#202b39;color:#8c9bb0}
+.flow-check.idle em{color:#8c9bb0}
 .flow-check strong{font-size:10px;display:block;overflow-wrap:anywhere}
 .flow-check p{font-size:10px;color:var(--muted);margin:2px 0 0;overflow-wrap:anywhere}
 .flow-check em{font-size:8px;font-style:normal;font-weight:900;letter-spacing:.35px;color:var(--muted)}
@@ -458,7 +462,7 @@ function flowCheckCalculationMarkup(check, state, stageResult, decision, stageNa
   const valuesMarkup = rows.length
     ? rows.map(([key, value]) => '<code>' + esc(key) + ': ' + esc(value) + '</code>').join("")
     : '<code class="flow-unavailable">No numeric inputs were returned for this condition.</code>';
-  const verdict = check.notReached ? "NOT REACHED" :
+  const verdict = check.notReached ? "UPCOMING" :
     check.passed === true ? "PASS" : check.passed === false ? "FAIL / WAIT" :
     String(check.status || state).toUpperCase();
   const result = calculation.result ?? check.calculated_value ?? check.result;
@@ -478,10 +482,10 @@ function flowCheckCalculationMarkup(check, state, stageResult, decision, stageNa
 function flowCheckMarkup(check, state, displayName, stageResult, decision, stageName) {
   const label = displayName || check.display_name || check.label || prettyCheck(check.name);
   const detail = check.detail || check.explanation || check.message ||
-    (check.notReached ? "Not evaluated because an upstream stage has not passed." : "Django did not supply a diagnostic detail.");
+    (check.notReached ? "Upcoming — waiting for the preceding stage to pass." : "Django did not supply a diagnostic detail.");
   const css = check.notReached ? "idle" : state;
   const tag = css === "pass" ? "PASS" : css === "wait" ? "WAIT" :
-    css === "blocked" ? "BLOCKED" : check.notReached ? "NOT REACHED" : "UNAVAILABLE";
+    css === "blocked" ? "BLOCKED" : check.notReached ? "UPCOMING" : "UNAVAILABLE";
   const tooltip = check.description || check.help || check.tooltip || detail ||
     "Live decision check returned by Django.";
   return '<div class="flow-check ' + css + '"><span class="flow-check-dot"></span><div>' +
@@ -492,7 +496,7 @@ function flowCheckMarkup(check, state, displayName, stageResult, decision, stage
 function flowStageMarkup(title, stageResult, checks, fallback, forcedState, decision, stageName) {
   const state = forcedState || stageState(stageResult);
   const stateLabel = state === "pass" ? "PASSED" : state === "wait" ? "WAITING" :
-    state === "blocked" ? "BLOCKED" : "NOT REACHED";
+    state === "blocked" ? "BLOCKED" : "UPCOMING";
   const checkMarkup = checks.length
     ? checks.map(item => flowCheckMarkup(item, flowCheckState(item, stageResult), item.displayName || item.display_name,
       stageResult, decision, stageName)).join("")
@@ -500,7 +504,7 @@ function flowStageMarkup(title, stageResult, checks, fallback, forcedState, deci
       esc(fallback || "No checks returned") + '</strong><p>' +
       esc(stageResult?.explanation || stageResult?.reason || "Django supplied no check details for this stage.") +
       '</p></div><em>' + stateLabel + '</em></div>';
-  return '<section class="flow-stage ' + (state === "wait" ? "waiting" : state === "blocked" ? "blocked" : "") + '">' +
+  return '<section class="flow-stage ' + (state === "wait" ? "waiting" : state === "blocked" ? "blocked" : state === "idle" ? "upcoming" : "") + '">' +
     '<div class="flow-stage-head"><div class="flow-stage-title">' + esc(title) + '</div><span class="flow-state ' +
     state + '">' + stateLabel + '</span></div><div class="flow-checks">' + checkMarkup + '</div></section>';
 }
