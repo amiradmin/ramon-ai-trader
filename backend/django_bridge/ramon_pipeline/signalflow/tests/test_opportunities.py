@@ -228,7 +228,7 @@ class DeferredAndWeakSetupTests(TestCase):
         self.assertIn("waiting", result["explanation"])
 
     def test_shallow_pullback_is_deferred(self):
-        result = self.evaluate(UPTREND + [(12, 11), (4, -2.0), (2, 1.5)])
+        result = self.evaluate(UPTREND + [(12, 11), (4, -2.0), (2, 1.5)], config=OpportunityConfig(min_retracement=0.35))
         self.assertEqual(result["status"], "DEFERRED")
         self.assertEqual(result["reason"], "PULLBACK_NOT_DEEP_ENOUGH")
 
