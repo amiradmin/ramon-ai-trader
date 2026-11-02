@@ -801,6 +801,50 @@ class DashboardDataTests(TestCase):
         self.assertNotIn("sensitive-account-id", json.dumps(execution))
         self.assertNotIn("private-broker-server", json.dumps(execution))
 
+    @override_settings(
+        RAMON_EA_COMMAND_CREATION_ENABLED=True,
+        RAMON_EA_COMMAND_EXECUTION_ENABLED=True,
+        RAMON_EA_HEARTBEAT_MAX_AGE_SECONDS=90,
+    )
+    def test_dashboard_reports_command_authorization_ready_for_fresh_demo_ea(self):
+        EAHeartbeat.objects.create(
+            instance_id="dashboard-authorized-ea",
+            account_login="private-account-id",
+            server_name="private-demo-server",
+            symbol="XAUUSD_o",
+            status="TELEMETRY_OK",
+            terminal_connected=True,
+            trade_allowed=True,
+            payload={"account_trade_mode": 0},
+        )
+        StrategyDecisionRecord.objects.create(
+            decision_id="dashboard-authorized-decision",
+            symbol="XAUUSD_o",
+            action="WAIT",
+            confidence=0.0,
+            rationale_code="NO_SETUP_YET",
+            model_version="test-model",
+            features={},
+        )
+
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        execution = response.json()["execution"]
+        checks = {item["name"]: item for item in execution["checks"]}
+
+        self.assertTrue(execution["trading_authorization"])
+        self.assertTrue(checks["django_authorization"]["passed"])
+        self.assertIn("individually risk-approved", execution["authorization_detail"])
+        self.assertTrue(checks["ea_heartbeat"]["passed"])
+        self.assertTrue(checks["terminal_connected"]["passed"])
+        self.assertTrue(checks["terminal_trade_allowed"]["passed"])
+        self.assertTrue(checks["demo_account"]["passed"])
+        self.assertTrue(checks["symbol_match"]["passed"])
+        # Dashboard readiness is not itself an order authorization.
+        self.assertFalse(EACommand.objects.exists())
+        self.assertNotIn("private-account-id", json.dumps(execution))
+        self.assertNotIn("private-demo-server", json.dumps(execution))
+
     @override_settings(RAMON_EA_HEARTBEAT_MAX_AGE_SECONDS=90)
     def test_dashboard_marks_missing_and_stale_heartbeats_as_waiting_or_blocked(self):
         missing = self.client.get(self.url).json()["execution"]
