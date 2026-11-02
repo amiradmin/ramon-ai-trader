@@ -46,25 +46,17 @@
 .flow-metrics b{font-size:8px;color:var(--muted);font-weight:600}
 .flow-metrics code{font-size:8px;color:#dce8f8;overflow-wrap:anywhere}
 .flow-check.pass em{color:var(--green)}.flow-check.wait em{color:var(--amber)}.flow-check.blocked em{color:var(--red)}
-.flow-check-details{grid-column:2 / 4;margin-top:7px;border:1px solid #29384c;border-radius:7px;background:#0b131e;min-width:0}
-.flow-check-details>summary{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 9px;cursor:pointer;list-style:none;color:#9fc0f5;font-size:9px;font-weight:800}
-.flow-check-details>summary::-webkit-details-marker{display:none}
-.flow-check-details>summary:after{content:"＋";color:var(--blue);font-size:12px}
-.flow-check-details[open]>summary:after{content:"−"}
-.flow-check-details>summary span{margin-left:auto;color:var(--muted);font-size:8px;font-weight:500}
+.flow-check-details{grid-column:2 / 4;margin-top:5px;padding:0;border-left:2px solid #40536d;background:#0c1420;border-radius:0 6px 6px 0;min-width:0}
+.flow-check-details summary{display:flex;justify-content:space-between;align-items:center;gap:10px;cursor:pointer;list-style:none;padding:8px 9px;color:#dce8f8;font-size:9px;font-weight:800}
+.flow-check-details summary::-webkit-details-marker{display:none}
+.flow-check-details summary:after{content:"＋";color:var(--blue);font-size:13px}
+.flow-check-details[open] summary:after{content:"−"}
+.flow-check-details .regime-toggle-hint{margin-left:auto;color:var(--muted);font-size:8px;font-weight:500}
 .flow-check-detail-content{padding:0 9px 9px;min-width:0}
-.flow-check-detail-content .math-label{display:block;margin:8px 0 4px;color:var(--muted);font-size:8px;letter-spacing:.5px;text-transform:uppercase}
-.flow-formula{display:block;padding:8px;border-radius:6px;background:#111d2b;color:#dce8f8;font:10px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
-.flow-unavailable{margin:4px 0;color:var(--amber);font-size:9px}
-.flow-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}
-.flow-detail-cell{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;min-width:0;padding:6px 7px;border:1px solid #26364a;border-radius:5px;background:#111a26}
-.flow-detail-cell span{color:var(--muted);font-size:8px;overflow-wrap:anywhere}
-.flow-detail-cell code{color:#dce8f8;font-size:9px;text-align:right;overflow-wrap:anywhere;white-space:pre-wrap}
-.flow-calculation-result{display:flex;justify-content:space-between;gap:10px;margin-top:7px;padding:8px;border:1px solid #34445a;border-radius:6px;background:#111a26}
-.flow-calculation-result span{color:var(--muted);font-size:9px}
-.flow-calculation-result strong{color:var(--green);font-size:10px;text-align:right;overflow-wrap:anywhere}
-.flow-calculation-note{margin:8px 0 0;color:var(--muted);font-size:8px;line-height:1.5}
-@media(max-width:620px){.flow-detail-grid{grid-template-columns:1fr}}
+.flow-check-detail-content .math-label{display:block;color:var(--muted);font-size:8px;letter-spacing:.55px;text-transform:uppercase;margin:8px 0 4px}
+.flow-check-detail-content code{display:block;color:#dce8f8;font:10px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:normal;overflow-wrap:anywhere;margin:3px 0}
+.flow-check-detail-content .math-result{color:var(--green)}
+.flow-check-detail-content .flow-unavailable{color:var(--amber);font-size:9px}
 .flow-math{grid-column:2 / 4;margin-top:5px;padding:7px 8px;border-left:2px solid #40536d;background:#0c1420;border-radius:0 6px 6px 0;min-width:0}
 .flow-math .math-label{display:block;color:var(--muted);font-size:8px;letter-spacing:.55px;text-transform:uppercase;margin:2px 0}
 .flow-math code{display:block;color:#dce8f8;font:10px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:normal;overflow-wrap:anywhere}
@@ -425,41 +417,98 @@ function flowDetailRows(source, prefix = "", depth = 0, rows = []) {
   }
   return rows;
 }
-function flowCheckCalculationMarkup(check, state, detail) {
-  const calculation = check.calculation && typeof check.calculation === "object" ? check.calculation : {};
-  const formula = check.formula ?? calculation.formula ?? check.expression ?? check.rule ?? check.condition_formula;
-  const inputs = check.inputs ?? calculation.inputs ?? check.metrics ?? check.values;
-  const result = calculation.result ?? check.calculated_value ?? check.result ?? check.actual ?? check.value;
-  const rows = flowDetailRows(inputs);
-  const extra = {};
-  for (const [key, value] of Object.entries(calculation)) {
-    if (!["formula", "inputs", "result"].includes(key)) extra[key] = value;
+const FLOW_CHECK_FORMULAS = {
+  opportunities: {
+    regime: "Classify the market from ADX trend/range boundaries, EMA direction and confirmed swing-structure compatibility.",
+    regime_stability: "The prior classified regime at the configured lookback must not be opposite to the current bullish/bearish regime.",
+    volatility: "ATR ratio = current ATR ÷ recent ATR median; the ratio must remain between the configured minimum and maximum.",
+    impulse: "Impulse strength (ATR) = confirmed directional impulse-leg size ÷ current ATR; compare with the configured minimum.",
+    pullback_depth: "Retracement (%) = pullback distance ÷ confirmed impulse-leg size × 100; compare with the configured minimum and maximum.",
+    trend_support: "Completed pullback closes must remain within the configured ATR support tolerance of the slow EMA, in the trade direction.",
+    value_zone: "Distance from the pullback extreme to the fast EMA zone, normalized by ATR, must not exceed the configured zone tolerance.",
+    freshness: "Bars since the confirmed pullback extreme must not exceed the configured maximum.",
+    resumption: "A completed candle must close back through the fast EMA and confirm against the preceding close, mirrored for trade direction.",
+    momentum: "Directional RSI must not exceed the configured overbought boundary.",
+    score: "Weighted opportunity score = sum of configured component weights × component scores; compare with the configured minimum score.",
+    duplicate: "Only one accepted signal is allowed for the same impulse/pullback identity.",
+    data_valid: "Market data must satisfy the configured candle count, ordering, finiteness and OHLC validity requirements.",
+    bar_complete: "Only completed candles are eligible for structural decision-making."
+  },
+  entry_timing: {
+    freshness: "Signal age (bars) = elapsed time from signal candle to latest completed candle ÷ timeframe interval; compare with max_signal_age_bars.",
+    invalidation: "Room to invalidation (ATR) = directional distance from live entry quote to invalidation price ÷ ATR; compare with min_risk_room_atr.",
+    chase: "Chase distance (ATR) = directional distance from live entry quote to signal reference price ÷ ATR; compare with max_chase_atr.",
+    price_checks: "Quote-dependent checks require a complete bid, ask and point; missing quote data must not be interpreted as a pass.",
+    spread_conditions: "Validate absolute spread points, spread ÷ ATR and spread ÷ distance to invalidation against the configured limits.",
+    quality: "Entry quality is compared with the configured minimum_quality; the reported quality_source identifies its source."
+  },
+  risk_management: {
+    stop: "Stop distance (points) = absolute entry-to-stop price distance ÷ symbol point; structural stop placement also uses the configured ATR buffer.",
+    stop_below_broker_minimum: "Planned stop distance must be greater than or equal to the broker-reported minimum stop distance.",
+    reward_risk: "Reward-to-risk = take-profit distance (points) ÷ stop-loss distance (points); compare with min_reward_risk.",
+    daily_loss: "Django compares the server-derived daily loss percentage with max_daily_loss_percent.",
+    portfolio_risk: "Available risk headroom = max_total_risk_percent − current open_risk_percent; effective risk is capped by available headroom.",
+    sizing: "Risk budget = account balance × effective risk percent ÷ 100. Raw volume uses risk budget ÷ (stop points × point value per lot), then rounds down to broker volume step and limits."
   }
-  const extraRows = flowDetailRows(extra);
-  const hasFormula = formula !== undefined && formula !== null && formula !== "";
-  const formulaMarkup = hasFormula
-    ? '<code class="flow-formula">' + esc(flowDetailText(formula)) + '</code>'
-    : '<p class="flow-unavailable">Formula was not included in the Django response for this condition.</p>';
-  const inputMarkup = rows.length
-    ? '<div class="flow-detail-grid">' + rows.map(([name, value]) =>
-        '<div class="flow-detail-cell"><span>' + esc(name) + '</span><code>' + esc(value) + '</code></div>'
-      ).join("") + '</div>'
-    : '<p class="flow-unavailable">No calculation inputs or live metrics were supplied.</p>';
+};
+function flowCheckCalculationMarkup(check, state, stageResult, decision, stageName) {
+  const name = String(check?.name || "").toLowerCase();
+  const calculation = check.calculation && typeof check.calculation === "object" ? check.calculation : {};
+  const formula = check.formula ?? calculation.formula ?? check.expression ??
+    check.rule ?? check.condition_formula ?? FLOW_CHECK_FORMULAS[stageName]?.[name];
+  const live = {};
+  if (check.metrics && typeof check.metrics === "object") live["Observed check metrics"] = check.metrics;
+  if (stageResult.thresholds && typeof stageResult.thresholds === "object") live["Configured thresholds from Django"] = stageResult.thresholds;
+
+  const pick = (source, keys) => {
+    const selected = {};
+    for (const key of keys) if (source && source[key] !== undefined) selected[key] = source[key];
+    return selected;
+  };
+  if (stageName === "opportunities") {
+    Object.assign(live, pick(stageResult, ["score", "side", "regime", "setup", "components", "signal_bar_time"]));
+  } else if (stageName === "entry_timing") {
+    Object.assign(live, pick(stageResult, [
+      "signal_age_bars", "room_to_invalidation_atr", "chase_atr", "spread_points",
+      "spread_atr_fraction", "spread_to_risk", "quality", "quality_source",
+      "price_checks", "quote_price", "side", "entry_price"
+    ]));
+  } else if (stageName === "risk_management") {
+    Object.assign(live, pick(stageResult, [
+      "side", "entry_price", "stop_price", "stop_source", "stop_points", "stop_atr",
+      "take_profit_points", "reward_risk", "risk_percent", "risk_budget",
+      "estimated_risk", "volume", "risk_capped"
+    ]));
+    const features = decision?.features || {};
+    if (features.risk_calculation_inputs) live["Risk inputs received by Django"] = features.risk_calculation_inputs;
+    if (features.daily_risk) live["Server daily-risk baseline"] = features.daily_risk;
+  }
+  if (calculation.inputs && typeof calculation.inputs === "object") live["Calculation inputs"] = calculation.inputs;
+  const rows = flowDetailRows(live);
+  const formulaMarkup = formula
+    ? '<code>' + esc(flowDetailText(formula)) + '</code>'
+    : '<code class="flow-unavailable">The exact formula/rule was not supplied for this condition.</code>';
+  const valuesMarkup = rows.length
+    ? rows.map(([key, value]) => '<code>' + esc(key) + ': ' + esc(value) + '</code>').join("")
+    : '<code class="flow-unavailable">No numeric inputs were returned for this condition.</code>';
+  const verdict = check.notReached ? "NOT REACHED" :
+    check.passed === true ? "PASS" : check.passed === false ? "FAIL / WAIT" :
+    String(check.status || state).toUpperCase();
+  const result = calculation.result ?? check.calculated_value ?? check.result;
   const resultMarkup = result !== undefined
-    ? '<div class="flow-calculation-result"><span>Calculated result</span><strong>' + esc(flowDetailText(result)) + '</strong></div>'
-    : '<div class="flow-calculation-result"><span>Django condition verdict</span><strong>' + esc(state.toUpperCase()) + '</strong></div>';
-  const extraMarkup = extraRows.length
-    ? '<span class="math-label">Additional calculation details</span><div class="flow-detail-grid">' + extraRows.map(([name, value]) =>
-        '<div class="flow-detail-cell"><span>' + esc(name) + '</span><code>' + esc(value) + '</code></div>'
-      ).join("") + '</div>' : "";
-  return '<details class="flow-check-details"><summary>Formula &amp; live calculation <span>Expand</span></summary>' +
+    ? '<code class="math-result">Django calculation result: ' + esc(flowDetailText(result)) + '</code>'
+    : '<code class="math-result">Django verdict: ' + esc(verdict) + '</code>';
+  const detailMarkup = check.detail
+    ? '<code>Decision detail: ' + esc(check.detail) + '</code>' : "";
+  return '<details class="flow-check-details" data-check-key="' + esc(stageName + ":" + name) + '">' +
+    '<summary><span>' + esc(prettyCheck(name)) + ' · Calculation</span><span class="regime-toggle-hint">Show formula &amp; live values</span></summary>' +
     '<div class="flow-check-detail-content"><span class="math-label">Formula / rule</span>' + formulaMarkup +
-    '<span class="math-label">Live inputs supplied by Django</span>' + inputMarkup +
-    resultMarkup + extraMarkup +
-    '<p class="flow-calculation-note">Values and verdict are displayed from the latest saved Django decision; the dashboard does not recalculate or alter the strategy.</p>' +
+    '<span class="math-label">Live values and configured thresholds · Django decision</span>' + valuesMarkup +
+    resultMarkup + detailMarkup +
+    '<code class="flow-unavailable">Values and verdict are read from the saved Django decision. The dashboard does not recalculate or override the strategy.</code>' +
     '</div></details>';
 }
-function flowCheckMarkup(check, state, displayName) {
+function flowCheckMarkup(check, state, displayName, stageResult, decision, stageName) {
   const label = displayName || check.display_name || check.label || prettyCheck(check.name);
   const detail = check.detail || check.explanation || check.message ||
     (check.notReached ? "Not evaluated because an upstream stage has not passed." : "Django did not supply a diagnostic detail.");
@@ -471,14 +520,15 @@ function flowCheckMarkup(check, state, displayName) {
   return '<div class="flow-check ' + css + '"><span class="flow-check-dot"></span><div>' +
     '<strong class="flow-tooltip" data-tooltip="' + esc(tooltip) + '" title="' + esc(tooltip) + '" tabindex="0">' + esc(label) + '</strong>' +
     '<p>' + esc(detail) + '</p>' + flowMetricsMarkup(check.metrics) +
-    flowCheckCalculationMarkup(check, css, detail) + '</div><em>' + tag + '</em></div>';
+    flowCheckCalculationMarkup(check, css, stageResult, decision, stageName) + '</div><em>' + tag + '</em></div>';
 }
-function flowStageMarkup(title, stageResult, checks, fallback, forcedState) {
+function flowStageMarkup(title, stageResult, checks, fallback, forcedState, decision, stageName) {
   const state = forcedState || stageState(stageResult);
   const stateLabel = state === "pass" ? "PASSED" : state === "wait" ? "WAITING" :
     state === "blocked" ? "BLOCKED" : "NOT REACHED";
   const checkMarkup = checks.length
-    ? checks.map(item => flowCheckMarkup(item, flowCheckState(item, stageResult), item.displayName || item.display_name)).join("")
+    ? checks.map(item => flowCheckMarkup(item, flowCheckState(item, stageResult), item.displayName || item.display_name,
+      stageResult, decision, stageName)).join("")
     : '<div class="flow-check ' + state + '"><span class="flow-check-dot"></span><div><strong>' +
       esc(fallback || "No checks returned") + '</strong><p>' +
       esc(stageResult?.explanation || stageResult?.reason || "Django supplied no check details for this stage.") +
@@ -610,6 +660,9 @@ renderDecisionVariableGuide(null);
 function renderDecisionFlow(decision, execution = {}) {
   const flow = $("decisionFlow");
   if (!flow) return;
+  const openDetails = new Set(
+    [...flow.querySelectorAll(".flow-check-details[open]")].map(node => node.dataset.checkKey)
+  );
   const stages = decisionStageEntries(decision);
   const stageMarkup = stages.map(([name, result], index) => {
     const title = result.title || result.display_name || prettyCheck(name);
@@ -617,7 +670,10 @@ function renderDecisionFlow(decision, execution = {}) {
       String(index + 1).padStart(2, "0") + " · " + title,
       result,
       stageChecks(result),
-      title + " did not return individual checks."
+      title + " did not return individual checks.",
+      undefined,
+      decision,
+      name
     );
   }).join("");
 
@@ -632,9 +688,14 @@ function renderDecisionFlow(decision, execution = {}) {
     execution,
     executionChecks,
     "Django has not supplied execution-gate telemetry.",
-    executionState
+    executionState,
+    decision,
+    "execution"
   );
   flow.innerHTML = decorateDecisionFlowTooltips(stageMarkup + executionMarkup);
+  flow.querySelectorAll(".flow-check-details").forEach(node => {
+    node.open = openDetails.has(node.dataset.checkKey);
+  });
 
   const failedStage = stages.find(([, result]) => ["wait", "blocked"].includes(stageState(result)));
   const allPipelineApproved = stages.length > 0 && stages.every(([, result]) => result.approved === true);
