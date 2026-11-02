@@ -103,16 +103,30 @@ class EntryTimer:
 
     def evaluate(self, opportunity: Mapping[str, Any], market: Mapping[str, Any]) -> dict[str, Any]:
         if not isinstance(opportunity, Mapping) or not opportunity.get("approved"):
-            return self._result(REJECTED, "NO_APPROVED_OPPORTUNITY", detail="no approved opportunity to time")
-        if not isinstance(market, Mapping):
-            return self._result(REJECTED, "INVALID_ENTRY_METRICS", detail="market snapshot must be a mapping")
-        setup = opportunity.get("setup")
-        try:
-            if isinstance(setup, Mapping):
-                return self._evaluate_structured(opportunity, setup, market)
-            return self._evaluate_legacy(opportunity, market)
-        except _Invalid as exc:
-            return self._result(REJECTED, exc.reason, detail=exc.detail, opportunity=opportunity)
+            result = self._result(REJECTED, "NO_APPROVED_OPPORTUNITY", detail="no approved opportunity to time")
+        elif not isinstance(market, Mapping):
+            result = self._result(REJECTED, "INVALID_ENTRY_METRICS", detail="market snapshot must be a mapping")
+        else:
+            setup = opportunity.get("setup")
+            try:
+                if isinstance(setup, Mapping):
+                    result = self._evaluate_structured(opportunity, setup, market)
+                else:
+                    result = self._evaluate_legacy(opportunity, market)
+            except _Invalid as exc:
+                result = self._result(REJECTED, exc.reason, detail=exc.detail, opportunity=opportunity)
+
+        # The dashboard and audit record consume this same server-owned configuration.
+        result["thresholds"] = {
+            "max_signal_age_bars": self.config.max_signal_age_bars,
+            "max_chase_atr": self.config.max_chase_atr,
+            "min_risk_room_atr": self.config.min_risk_room_atr,
+            "max_spread_atr": self.config.max_spread_atr,
+            "max_spread_to_risk": self.config.max_spread_to_risk,
+            "minimum_quality": self.minimum_quality,
+            "maximum_spread_points": self.maximum_spread_points,
+        }
+        return result
 
     # ------------------------------------------------------------------
     # Result helper

@@ -452,6 +452,31 @@ class MarketRegimeTests(TestCase):
         result = OpportunityDetector().evaluate(snapshot(bars[:cut]))
         return result["regime"]["label"], result
 
+    def test_regime_payload_exposes_the_exact_detector_configuration(self):
+        config = OpportunityConfig(
+            adx_trending=20.0,
+            adx_ranging=16.0,
+            adx_period=12,
+            min_ema_separation_atr=0.4,
+            support_tolerance_atr=0.6,
+            slope_lookback=8,
+            pivot_window=4,
+            atr_period=10,
+            atr_baseline_bars=80,
+        )
+        result = OpportunityDetector(config=config).evaluate(snapshot(make_bars(LONG_SETUP)))
+        regime = result["regime"]
+
+        self.assertEqual(regime["adx_trending_threshold"], 20.0)
+        self.assertEqual(regime["adx_ranging_threshold"], 16.0)
+        self.assertEqual(regime["adx_period"], 12)
+        self.assertEqual(regime["min_ema_separation_atr"], 0.4)
+        self.assertEqual(regime["support_tolerance_atr"], 0.6)
+        self.assertEqual(regime["slope_lookback"], 8)
+        self.assertEqual(regime["pivot_window"], 4)
+        self.assertEqual(regime["atr_period"], 10)
+        self.assertEqual(regime["atr_baseline_bars"], 80)
+
     def test_regime_moves_from_bullish_to_uncertain_to_bearish_on_a_reversal(self):
         bars = make_bars(UPTREND + DOWNTREND)
         before, _ = self.regime_at(bars, 150)

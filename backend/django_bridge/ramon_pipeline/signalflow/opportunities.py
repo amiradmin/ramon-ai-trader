@@ -89,8 +89,8 @@ class OpportunityConfig:
     pivot_window: int = 3  # bars on each side needed to confirm a swing point
     slope_lookback: int = 10
     # Regime
-    adx_trending: float = 22.0
-    adx_ranging: float = 18.0
+    adx_trending: float = 14.0
+    adx_ranging: float = 14.0
     min_ema_separation_atr: float = 0.3
     support_tolerance_atr: float = 0.5
     regime_lookback: int = 8  # compare with the regime this many bars ago
@@ -907,6 +907,15 @@ class OpportunityDetector:
         previous = _classify_regime(bars, ind, t - config.regime_lookback, config)
         regime_info = {
             **regime.as_dict(),
+            "adx_trending_threshold": config.adx_trending,
+            "adx_ranging_threshold": config.adx_ranging,
+            "adx_period": config.adx_period,
+            "min_ema_separation_atr": config.min_ema_separation_atr,
+            "support_tolerance_atr": config.support_tolerance_atr,
+            "slope_lookback": config.slope_lookback,
+            "pivot_window": config.pivot_window,
+            "atr_period": config.atr_period,
+            "atr_baseline_bars": config.atr_baseline_bars,
             "previous_label": previous.label,
             "regime_changed": previous.label != regime.label,
         }
@@ -955,12 +964,12 @@ class OpportunityDetector:
         # 2. Volatility -----------------------------------------------------
         vol_text = f"ATR is {atr_ratio:.2f}x its recent median"
         if atr_ratio < config.atr_ratio_min:
-            _check(checks, "volatility", False, vol_text + " (too quiet)", metrics={"value": round(atr_ratio, 3), "threshold": f"{config.atr_ratio_min:.2f}–{config.atr_ratio_max:.2f}", "factor": "ATR / recent ATR median"})
+            _check(checks, "volatility", False, vol_text + " (too quiet)", metrics={"value": round(atr_ratio, 3), "threshold": f"{config.atr_ratio_min:.2f}–{config.atr_ratio_max:.2f}", "minimum": config.atr_ratio_min, "maximum": config.atr_ratio_max, "factor": "ATR / recent ATR median"})
             return finish(REJECTED, "VOLATILITY_TOO_LOW", vol_text + ", too quiet to trade", side)
         if atr_ratio > config.atr_ratio_max:
-            _check(checks, "volatility", False, vol_text + " (spike)", metrics={"value": round(atr_ratio, 3), "threshold": f"{config.atr_ratio_min:.2f}–{config.atr_ratio_max:.2f}", "factor": "ATR / recent ATR median"})
+            _check(checks, "volatility", False, vol_text + " (spike)", metrics={"value": round(atr_ratio, 3), "threshold": f"{config.atr_ratio_min:.2f}–{config.atr_ratio_max:.2f}", "minimum": config.atr_ratio_min, "maximum": config.atr_ratio_max, "factor": "ATR / recent ATR median"})
             return finish(DEFERRED, "VOLATILITY_SPIKE", vol_text + ", wait for volatility to settle", side)
-        _check(checks, "volatility", True, vol_text, metrics={"value": round(atr_ratio, 3), "threshold": f"{config.atr_ratio_min:.2f}–{config.atr_ratio_max:.2f}", "factor": "ATR / recent ATR median"})
+        _check(checks, "volatility", True, vol_text, metrics={"value": round(atr_ratio, 3), "threshold": f"{config.atr_ratio_min:.2f}–{config.atr_ratio_max:.2f}", "minimum": config.atr_ratio_min, "maximum": config.atr_ratio_max, "factor": "ATR / recent ATR median"})
 
         # 3. Pullback geometry, oriented so "up" is the trade direction ---------
         if sign > 0:

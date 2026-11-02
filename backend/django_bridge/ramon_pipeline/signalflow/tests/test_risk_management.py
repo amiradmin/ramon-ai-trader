@@ -40,6 +40,27 @@ class LegacyRiskTests(TestCase):
         self.assertEqual(result["risk_percent"], 0.5)
         self.assertEqual((result["status"], result["stop_source"]), ("ACCEPTED", "SUPPLIED"))
 
+    def test_result_exposes_the_exact_risk_policy_thresholds(self):
+        config = RiskConfig(
+            stop_buffer_atr=0.3,
+            min_stop_atr=0.6,
+            max_stop_atr=2.8,
+            min_reward_risk=1.8,
+            max_total_risk_percent=1.5,
+            max_daily_loss_percent=2.5,
+        )
+        result = RiskManager(maximum_risk_percent=0.75, config=config).evaluate(legacy_market(), True)
+
+        self.assertEqual(result["thresholds"], {
+            "maximum_risk_percent": 0.75,
+            "stop_buffer_atr": 0.3,
+            "min_stop_atr": 0.6,
+            "max_stop_atr": 2.8,
+            "min_reward_risk": 1.8,
+            "max_total_risk_percent": 1.5,
+            "max_daily_loss_percent": 2.5,
+        })
+
     def test_requested_risk_is_capped_and_flagged(self):
         result = RiskManager().evaluate(legacy_market(risk_percent=5.0), True)
         self.assertEqual(result["risk_percent"], 0.5)

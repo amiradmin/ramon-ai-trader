@@ -446,9 +446,11 @@ function flowStageMarkup(title, stageResult, checks, fallback, forcedState) {
 }
 function entryCalculationMarkup(check, timing, opportunity, decision) {
   const metrics = timing || {};
+  const thresholds = metrics.thresholds || {};
   const setup = opportunity?.setup || {};
   const n = value => typeof value === "number" && Number.isFinite(value) ? value : null;
   const f = value => value === null ? "NOT SUPPLIED" : Number(value).toLocaleString(undefined, {maximumFractionDigits:6});
+  const limit = name => n(thresholds[name]);
   const name = String(check?.name || "").toLowerCase();
   const show = (label, value, suffix="") => `<code>${esc(label)}: ${esc(f(value))}${suffix}</code>`;
   const status = check?.notReached ? "NOT REACHED" : check?.passed === true ? "PASS" : check?.passed === false ? "BLOCKED / WAIT" : "NOT SUPPLIED";
@@ -456,34 +458,42 @@ function entryCalculationMarkup(check, timing, opportunity, decision) {
   let formula = "Django evaluates the entry-timing gate using the current opportunity and market snapshot.";
   let values = "";
   if (name === "freshness") {
+    const maximumAge = limit("max_signal_age_bars");
     title = "Signal freshness";
-    formula = "SignalAgeBars = (LatestCompletedBarTime − SignalBarTime) ÷ BarInterval; PASS when 0 ≤ age ≤ max_signal_age_bars (default 1.0).";
-    values = show("Signal age (bars)",n(metrics.signal_age_bars)) + show("Configured maximum",null) + `<code>Latest result: ${esc(check?.detail || "NOT SUPPLIED")}</code>`;
+    formula = `SignalAgeBars = (LatestCompletedBarTime − SignalBarTime) ÷ BarInterval; PASS when 0 ≤ age ≤ ${f(maximumAge)} bars.`;
+    values = show("Signal age (bars)",n(metrics.signal_age_bars)) + show("Configured maximum age (bars)",maximumAge) + `<code>Latest result: ${esc(check?.detail || "NOT SUPPLIED")}</code>`;
   } else if (name === "invalidation") {
+    const minimumRoom = limit("min_risk_room_atr");
     title = "Invalidation / minimum risk room";
-    formula = "RoomToInvalidationATR = DirectionalDistance(EntryPrice, InvalidationPrice) ÷ ATR; PASS when price has not crossed invalidation and room ≥ min_risk_room_atr (default 0.25).";
-    values = show("ATR",n(setup.atr)) + show("Reference price",n(setup.reference_price)) + show("Invalidation price",n(setup.invalidation_price)) + show("Room to invalidation (ATR)",n(metrics.room_to_invalidation_atr)) + `<code>Latest result: ${esc(check?.detail || "NOT SUPPLIED")}</code>`;
+    formula = `RoomToInvalidationATR = DirectionalDistance(EntryPrice, InvalidationPrice) ÷ ATR; PASS when price has not crossed invalidation and room ≥ ${f(minimumRoom)} ATR.`;
+    values = show("ATR",n(setup.atr)) + show("Reference price",n(setup.reference_price)) + show("Invalidation price",n(setup.invalidation_price)) + show("Room to invalidation (ATR)",n(metrics.room_to_invalidation_atr)) + show("Configured minimum room (ATR)",minimumRoom) + `<code>Latest result: ${esc(check?.detail || "NOT SUPPLIED")}</code>`;
   } else if (name === "chase") {
+    const maximumChase = limit("max_chase_atr");
     title = "Price chase protection";
-    formula = "ChaseATR = DirectionalDistance(EntryPrice, SignalReferencePrice) ÷ ATR; PASS when ChaseATR ≤ max_chase_atr (default 0.50).";
-    values = show("Signal reference price",n(setup.reference_price)) + show("ATR",n(setup.atr)) + show("Chase distance (ATR)",n(metrics.chase_atr)) + `<code>Latest result: ${esc(check?.detail || "NOT SUPPLIED")}</code>`;
+    formula = `ChaseATR = DirectionalDistance(EntryPrice, SignalReferencePrice) ÷ ATR; PASS when ChaseATR ≤ ${f(maximumChase)} ATR.`;
+    values = show("Signal reference price",n(setup.reference_price)) + show("ATR",n(setup.atr)) + show("Chase distance (ATR)",n(metrics.chase_atr)) + show("Configured maximum chase (ATR)",maximumChase) + `<code>Latest result: ${esc(check?.detail || "NOT SUPPLIED")}</code>`;
   } else if (name === "spread_conditions") {
+    const maximumPoints = limit("maximum_spread_points");
+    const maximumSpreadAtr = limit("max_spread_atr");
+    const maximumSpreadRisk = limit("max_spread_to_risk");
     title = "Spread conditions";
-    formula = "Absolute spread ≤ maximum_spread_points (default 50); SpreadATR = (SpreadPoints × Point) ÷ ATR ≤ 0.20; SpreadToRisk = (SpreadPoints × Point) ÷ DistanceToInvalidation ≤ 0.25.";
-    values = show("Spread (points)",n(metrics.spread_points)) + show("Spread / ATR",n(metrics.spread_atr_fraction)) + show("Spread / risk distance",n(metrics.spread_to_risk)) + `<code>Quote checks: ${esc(metrics.price_checks || "NOT SUPPLIED")}</code><code>Latest result: ${esc(check?.detail || "NOT SUPPLIED")}</code>`;
+    formula = `Absolute spread ≤ ${f(maximumPoints)} points; SpreadATR ≤ ${f(maximumSpreadAtr)}; SpreadToRisk ≤ ${f(maximumSpreadRisk)}.`;
+    values = show("Spread (points)",n(metrics.spread_points)) + show("Maximum spread (points)",maximumPoints) + show("Spread / ATR",n(metrics.spread_atr_fraction)) + show("Maximum spread / ATR",maximumSpreadAtr) + show("Spread / risk distance",n(metrics.spread_to_risk)) + show("Maximum spread / risk",maximumSpreadRisk) + `<code>Quote checks: ${esc(metrics.price_checks || "NOT SUPPLIED")}</code><code>Latest result: ${esc(check?.detail || "NOT SUPPLIED")}</code>`;
   } else if (name === "quality") {
+    const minimumQuality = limit("minimum_quality");
     title = "Entry quality";
-    formula = "When computed: Quality = 0.40×SpreadEfficiency + 0.35×PriceLocation + 0.25×Freshness; PASS when 0 ≤ quality ≤ 1 and quality ≥ minimum_quality (default 0.65). A supplied quality may be used when configured.";
-    values = show("Entry quality",n(metrics.quality)) + `<code>Quality source: ${esc(metrics.quality_source || "NOT SUPPLIED")}</code><code>Latest result: ${esc(check?.detail || "NOT SUPPLIED")}</code>`;
+    formula = `When computed: Quality = 0.40×SpreadEfficiency + 0.35×PriceLocation + 0.25×Freshness; PASS when 0 ≤ quality ≤ 1 and quality ≥ ${f(minimumQuality)}. A supplied quality may be used when configured.`;
+    values = show("Entry quality",n(metrics.quality)) + show("Configured minimum quality",minimumQuality) + `<code>Quality source: ${esc(metrics.quality_source || "NOT SUPPLIED")}</code><code>Latest result: ${esc(check?.detail || "NOT SUPPLIED")}</code>`;
   } else {
     values = `<code>${esc(check?.detail || "No diagnostic values supplied by Django.")}</code>`;
   }
-  return `<details class="entry-details" data-check="${esc(name)}"><summary><span>${esc(title)} · Calculation</span><span class="regime-toggle-hint">Show formula & live values</span></summary><div class="entry-content"><span class="math-label">Validation status</span><code class="math-result">${esc(status)}</code><span class="math-label">Formula / rule</span><code>${esc(formula)}</code><span class="math-label">Live values from saved Django decision</span>${values}</div></details>`;
+  return `<details class="entry-details" data-check="${esc(name)}"><summary><span>${esc(title)} · Calculation</span><span class="regime-toggle-hint">Show formula & live values</span></summary><div class="entry-content"><span class="math-label">Validation status</span><code class="math-result">${esc(status)}</code><span class="math-label">Formula / rule</span><code>${esc(formula)}</code><span class="math-label">Live values and thresholds from saved Django decision</span>${values}</div></details>`;
 }
 
 function riskCalculationMarkup(check, risk, decision) {
   const inputs = decision.features?.risk_calculation_inputs || {};
   const daily = decision.features?.daily_risk || {};
+  const thresholds = risk.thresholds || {};
   const n = value => typeof value === "number" && Number.isFinite(value) ? value : null;
   const f = value => value === null ? "N/A" : Number(value).toLocaleString(undefined, {maximumFractionDigits: 6});
   const row = (label, formula, calculation, result) =>
@@ -509,14 +519,17 @@ function riskCalculationMarkup(check, risk, decision) {
 
   if (name === "stop") {
     if (stopPrice !== null && risk.stop_source === "STRUCTURAL" && atr !== null && invalidation !== null) {
-      const buffer = n(inputs.stop_buffer_atr);
-      const multiplier = buffer === null ? 0.25 : buffer;
+      const buffer = n(inputs.stop_buffer_atr) ?? n(thresholds.stop_buffer_atr);
+      const multiplier = buffer;
       const side = String(risk.side || stage(decision, "opportunities").side || "").toUpperCase();
       const expression = side === "SELL" ? "SL = Invalidation + (ATR × Buffer)" : "SL = Invalidation − (ATR × Buffer)";
-      const calculation = side === "SELL"
+      const calculation = buffer === null ? "Stop-buffer threshold was not supplied by Django." : side === "SELL"
         ? `${f(invalidation)} + (${f(atr)} × ${f(multiplier)}) = ${f(stopPrice)}`
         : `${f(invalidation)} − (${f(atr)} × ${f(multiplier)}) = ${f(stopPrice)}`;
-      return row("Stop loss", expression, calculation, `Stop distance = ${f(stopPoints)} points · Stop price = ${f(stopPrice)}`);
+      const minStopAtr = n(thresholds.min_stop_atr);
+      const maxStopAtr = n(thresholds.max_stop_atr);
+      return row("Stop loss", expression + `; allowed stop range: ${f(minStopAtr)}–${f(maxStopAtr)} ATR`, calculation,
+        `Stop distance = ${f(stopPoints)} points · Stop ATR = ${f(risk.stop_atr)} · Stop price = ${f(stopPrice)}`);
     }
     return row("Stop distance", "StopPoints = |EntryPrice − StopLoss| ÷ Point",
       stopPoints === null ? "N/A — risk stage did not return stop_points" : `Django-calculated stop distance = ${f(stopPoints)} points`,
@@ -533,28 +546,31 @@ function riskCalculationMarkup(check, risk, decision) {
     const rounded = volume !== null && step !== null
       ? `Approved volume = ${f(volume)} lots (step ${f(step)}; broker limits applied by Django)`
       : `Approved volume = ${f(volume)} lots`;
-    return row("Risk budget", "RiskBudget = Balance × EffectiveRiskPercent ÷ 100", budgetLine,
+    return row("Risk budget", `RiskBudget = Balance × min(RequestedRiskPercent, MaximumRiskPercent) ÷ 100; maximum = ${f(n(thresholds.maximum_risk_percent))}%`, budgetLine,
       volumeLine + " · " + rounded);
   }
   if (name === "reward_risk") {
     const line = tpPoints !== null && stopPoints !== null && stopPoints > 0
       ? `${f(tpPoints)} ÷ ${f(stopPoints)} = ${f(rr)}`
       : "N/A — take-profit points or stop points unavailable";
-    return row("Reward / risk", "RR = TakeProfitDistance ÷ StopLossDistance", line,
-      rr === null ? "Django RR result: N/A" : `Django RR = ${f(rr)} · minimum required is enforced by Django`);
+    const minimumRR = n(thresholds.min_reward_risk);
+    return row("Reward / risk", `RR = TakeProfitDistance ÷ StopLossDistance; PASS when RR ≥ ${f(minimumRR)}`, line,
+      rr === null ? "Django RR result: N/A" : `Django RR = ${f(rr)} · configured minimum = ${f(minimumRR)}`);
   }
   if (name === "daily_loss") {
     const line = openingBalance !== null && equity !== null && dailyLoss !== null
       ? `max(0, (${f(openingBalance)} − ${f(equity)}) ÷ ${f(openingBalance)} × 100) = ${f(dailyLoss)}%`
       : `Server-calculated daily loss = ${f(dailyLoss)}%`;
-    return row("Daily loss", "DailyLoss% = max(0, (OpeningBalance − CurrentEquity) ÷ OpeningBalance × 100)", line,
-      check.detail || "Limit evaluation is performed by Django");
+    const maximumDailyLoss = n(thresholds.max_daily_loss_percent);
+    return row("Daily loss", `DailyLoss% = max(0, (OpeningBalance − CurrentEquity) ÷ OpeningBalance × 100); halt when loss ≥ ${f(maximumDailyLoss)}%`, line,
+      check.detail || `Configured daily-loss limit = ${f(maximumDailyLoss)}%`);
   }
   if (name === "portfolio_risk") {
     const openRisk = n(inputs.open_risk_percent);
-    return row("Portfolio exposure", "AvailableHeadroom = MaxTotalRiskPercent − OpenRiskPercent",
+    const maximumTotalRisk = n(thresholds.max_total_risk_percent);
+    return row("Portfolio exposure", `AvailableHeadroom = MaxTotalRiskPercent − OpenRiskPercent; maximum total = ${f(maximumTotalRisk)}%`,
       openRisk === null ? "N/A — open risk percentage was not supplied" : `${f(openRisk)}% open risk · ${check.detail || "headroom evaluated by Django"}`,
-      "Portfolio limit decision remains authoritative in Django");
+      `Portfolio limit decision remains authoritative in Django · configured maximum = ${f(maximumTotalRisk)}%`);
   }
   if (name === "stop_below_broker_minimum") {
     const minStop = n(inputs.stop_level_points);
@@ -568,6 +584,7 @@ function riskCalculationMarkup(check, risk, decision) {
 function opportunityRegimeCalculation(check, opportunity) {
   if (String(check?.name || "").toLowerCase() !== "regime") return "";
   const regime = opportunity?.regime || {};
+  const metrics = check?.metrics || {};
   const n = value => typeof value === "number" && Number.isFinite(value) ? value : null;
   const f = value => value === null ? "N/A" : Number(value).toLocaleString(undefined, {maximumFractionDigits: 3});
   const state = passed => passed === null ? "unknown" : passed ? "pass" : "fail";
@@ -575,57 +592,93 @@ function opportunityRegimeCalculation(check, opportunity) {
     `<div class="regime-metric"><span>${esc(label)}</span><code class="regime-value ${state(passed)}">${esc(value)}${esc(suffix)}</code><b class="regime-verdict ${state(passed)}">${passed === null ? "N/A" : passed ? "PASS" : "FAIL"}</b></div>`;
   const term = (name, description, alignRight = false) =>
     `<span class="regime-term${alignRight ? " align-right" : ""}" tabindex="0" role="note" aria-label="${esc(name + ": " + description)}" data-tooltip="${esc(description)}">${esc(name)}</span>`;
-  const adxTip = "ADX(14) measures trend strength, not direction. Django treats ADX ≥ 22 as trending and ADX < 18 as ranging evidence. Values from 18 to below 22 are a transition zone; the final label also depends on EMA bias and confirmed swing structure.";
-  const emaTip = "EMA bias is directional only when all conditions agree. BULL: EMA20 − EMA50 ≥ 0.3 ATR, EMA50 slope over 10 bars > 0, and close > EMA50 − 0.5 ATR. BEAR is mirrored: separation ≤ −0.3 ATR, slope < 0, and close < EMA50 + 0.5 ATR. Otherwise the bias is NEUTRAL.";
-  const structureTip = "Django uses confirmed swing highs and lows (3 bars on each side by default). BULLISH requires a Higher High AND Higher Low; BEARISH requires a Lower High AND Lower Low. Otherwise structure is MIXED, or UNKNOWN if there are too few confirmed swings. Opposite-direction structure blocks that regime; MIXED/UNKNOWN does not.";
+  const trendThreshold = n(regime.adx_trending_threshold) ??
+    (metrics.factor === "ADX; trend threshold" ? n(metrics.threshold) : null);
+  const rangeThreshold = n(regime.adx_ranging_threshold) ??
+    (metrics.factor === "ADX; ranging threshold" ? n(metrics.threshold) : null);
+  const adxPeriod = n(regime.adx_period);
+  const minSeparation = n(regime.min_ema_separation_atr);
+  const supportTolerance = n(regime.support_tolerance_atr);
+  const slopeLookback = n(regime.slope_lookback);
+  const pivotWindow = n(regime.pivot_window);
   const adx = n(regime.adx);
-  const trendThreshold = 22.0;
-  const rangeThreshold = 18.0;
   const separation = n(regime.ema_separation_atr);
   const slope = n(regime.ema_slope_atr);
   const emaBias = String(regime.ema_bias || "N/A").toUpperCase();
   const structure = String(regime.structure || "N/A").toUpperCase();
   const label = String(regime.label || "N/A").toUpperCase();
-  const adxPass = adx === null ? null : adx >= trendThreshold;
+  const trendText = f(trendThreshold);
+  const rangeText = f(rangeThreshold);
+  const separationText = f(minSeparation);
+  const supportText = f(supportTolerance);
+  const adxTip = `ADX(${adxPeriod === null ? "configured period" : adxPeriod}) measures trend strength, not direction. Django's current decision thresholds are trending ≥ ${trendText} and ranging < ${rangeText}. The final label also depends on EMA bias and confirmed swing structure.`;
+  const emaTip = `EMA bias is directional only when all conditions agree. BULL: EMA20 − EMA50 ≥ ${separationText} ATR, EMA50 slope over ${slopeLookback === null ? "configured" : slopeLookback} bars > 0, and close > EMA50 − ${supportText} ATR. BEAR is mirrored. Otherwise the bias is NEUTRAL.`;
+  const structureTip = `Django uses confirmed swing highs and lows (${pivotWindow === null ? "configured number of" : pivotWindow} bars on each side). BULLISH requires a Higher High AND Higher Low; BEARISH requires a Lower High AND Lower Low. Otherwise structure is MIXED, or UNKNOWN if there are too few confirmed swings. Opposite-direction structure blocks that regime; MIXED/UNKNOWN does not.`;
+  const adxPass = adx === null || trendThreshold === null ? null : adx >= trendThreshold;
+  const rangePass = adx === null || rangeThreshold === null ? null : adx < rangeThreshold;
   const emaPass = ["BULL", "BEAR"].includes(emaBias) ? true : null;
-  const structurePass = structure === "BEARISH" || structure === "BULLISH" ? true : null;
-  const isBear = label === "BEARISH";
-  const isBull = label === "BULLISH";
-  const trendLine = adx === null
-    ? "ADX unavailable — Django did not return a numeric value."
-    : `ADX ${f(adx)} ≥ ${f(trendThreshold)} → ${adxPass ? "TRUE · trend strength confirmed" : "FALSE · trend threshold not reached"}`;
-  const separationPass = separation === null ? null : (emaBias === "BEAR" ? separation <= -0.3 : emaBias === "BULL" ? separation >= 0.3 : false);
+  const separationPass = separation === null || minSeparation === null ? null :
+    (emaBias === "BEAR" ? separation <= -minSeparation : emaBias === "BULL" ? separation >= minSeparation : false);
   const slopePass = slope === null ? null : (emaBias === "BEAR" ? slope < 0 : emaBias === "BULL" ? slope > 0 : false);
+  const structureCompatible = emaBias === "BEAR" ? structure !== "BULLISH" :
+    emaBias === "BULL" ? structure !== "BEARISH" : null;
   const emaDescription = emaBias === "BEAR" ? "EMA20 below EMA50" : emaBias === "BULL" ? "EMA20 above EMA50" : "EMA direction not classified";
-  const structureDescription = structure === "BEARISH"
-    ? "Lower High AND Lower Low"
-    : structure === "BULLISH"
-      ? "Higher High AND Higher Low"
-      : structure;
-  const overallPass = adxPass === null ? null : adxPass && ((isBear && emaBias === "BEAR" && structure !== "BULLISH") || (isBull && emaBias === "BULL" && structure !== "BEARISH"));
-  const outcomeClass = label === "BEARISH" ? "fail" : label === "BULLISH" ? "pass" : "unknown";
+  const structureDescription = structure === "BEARISH" ? "Lower High AND Lower Low" :
+    structure === "BULLISH" ? "Higher High AND Higher Low" : structure;
+  const trendLine = adx === null ? "ADX unavailable — Django did not return a numeric value." :
+    trendThreshold === null ? `ADX = ${f(adx)}; the configured trend threshold was not supplied in this saved decision.` :
+    `ADX ${f(adx)} ≥ ${trendText} → ${adxPass ? "TRUE · trend strength confirmed" : "FALSE · trend threshold not reached"}`;
+  const rangeLine = adx === null ? "ADX unavailable — Django did not return a numeric value." :
+    rangeThreshold === null ? `The configured ranging threshold was not supplied in this saved decision.` :
+    `ADX ${f(adx)} < ${rangeText} → ${rangePass ? "TRUE · below the ranging boundary" : "FALSE · not below the ranging boundary"}`;
+  const rangingFallback = emaBias === "NEUTRAL" && ["MIXED", "UNKNOWN"].includes(structure) && adxPass === false;
+  let finalReason = `Django's authoritative regime label is ${label}.`;
+  if (label === "UNCERTAIN" && emaBias === "BEAR" && structure === "BULLISH") {
+    const strength = adxPass === true ? "ADX trend strength passed" : adxPass === false ? "ADX trend strength did not pass" : "ADX trend strength is unavailable";
+    finalReason = `${strength}, but bearish EMA bias conflicts with bullish confirmed structure. Django keeps the regime UNCERTAIN.`;
+  } else if (label === "UNCERTAIN" && emaBias === "BULL" && structure === "BEARISH") {
+    const strength = adxPass === true ? "ADX trend strength passed" : adxPass === false ? "ADX trend strength did not pass" : "ADX trend strength is unavailable";
+    finalReason = `${strength}, but bullish EMA bias conflicts with bearish confirmed structure. Django keeps the regime UNCERTAIN.`;
+  } else if (label === "UNCERTAIN" && emaBias === "NEUTRAL") {
+    finalReason = adxPass === true
+      ? "ADX trend strength passed, but EMA bias is NEUTRAL; Django does not confirm a directional regime."
+      : "EMA bias is NEUTRAL and the directional regime conditions are not fully confirmed; Django keeps the result UNCERTAIN.";
+  } else if (label === "RANGING" && rangePass === true) {
+    finalReason = "ADX is below Django's configured ranging boundary. The opportunity is blocked as RANGING.";
+  } else if (label === "RANGING" && rangingFallback) {
+    finalReason = "EMA bias is NEUTRAL and structure is MIXED/UNKNOWN without a confirmed trend. Django classifies the market as RANGING.";
+  } else if (label === "BULLISH" || label === "BEARISH") {
+    finalReason = `${label} trend conditions passed Django's ADX, EMA-bias and structure-compatibility rules.`;
+  }
+  const outcomeClass = ["BULLISH", "BEARISH"].includes(label) ? "pass" : label === "RANGING" ? "fail" : "unknown";
   return `<details class="flow-math regime-details">
     <summary><span>Regime calculation · ${esc(label)}</span><span class="regime-toggle-hint">Show formula & live values <span aria-hidden="true">＋</span></span></summary>
     <div class="regime-content">
-      <span class="math-label">1 · Regime decision formula</span>
-      <code>BEARISH = (${term("ADX", adxTip)} ≥ 22) AND (${term("EMA bias", emaTip)} = BEAR) AND (${term("Structure", structureTip, true)} ≠ BULLISH)</code>
-      <code>BULLISH = (${term("ADX", adxTip)} ≥ 22) AND (${term("EMA bias", emaTip)} = BULL) AND (${term("Structure", structureTip, true)} ≠ BEARISH)</code>
-      <span class="math-label">2 · Trend strength · ${term("ADX", adxTip)}</span>
-      ${metric("ADX threshold", adx === null ? "N/A" : `${f(adx)} ≥ ${f(trendThreshold)}`, adxPass)}
+      <span class="math-label">1 · Exact Django regime decision rules</span>
+      <code>TRENDING = ${term("ADX", adxTip)} ≥ ${esc(trendText)}</code>
+      <code>BULLISH = TRENDING AND ${term("EMA bias", emaTip)} = BULL AND ${term("Structure", structureTip, true)} ≠ BEARISH</code>
+      <code>BEARISH = TRENDING AND EMA bias = BEAR AND Structure ≠ BULLISH</code>
+      <code>RANGING = ADX < ${esc(rangeText)} OR (EMA bias = NEUTRAL AND Structure ∈ {MIXED, UNKNOWN} AND NOT TRENDING)</code>
+      <code>Otherwise = UNCERTAIN</code>
+      <span class="math-label">2 · Trend strength · ADX(${adxPeriod === null ? "N/A" : esc(adxPeriod)})</span>
+      ${metric("Trending boundary", adx === null ? "N/A" : `${f(adx)} ≥ ${trendText}`, adxPass)}
       <code class="regime-explain">${esc(trendLine)}</code>
-      <span class="math-label">3 · EMA direction · ${term("EMA Bias", emaTip)} · normalized by ATR</span>
-      <code>Separation = (EMA20 − EMA50) ÷ ATR; EMA50 slope = (EMA50 now − EMA50 10 bars ago) ÷ ATR</code>
-      ${metric(`${emaDescription} · separation`, separation === null ? "N/A" : `${f(separation)} ATR ${emaBias === "BEAR" ? "≤ −0.300" : "≥ +0.300"} ATR`, separationPass)}
+      ${metric("Ranging boundary", adx === null ? "N/A" : `${f(adx)} < ${rangeText}`, rangePass)}
+      <code class="regime-explain">${esc(rangeLine)}</code>
+      <span class="math-label">3 · EMA direction · ${term("EMA bias", emaTip)} · normalized by ATR</span>
+      <code>Separation = (EMA20 − EMA50) ÷ ATR; EMA50 slope = (EMA50 now − EMA50 ${slopeLookback === null ? "configured lookback" : slopeLookback + " bars ago"}) ÷ ATR</code>
+      ${metric(`${emaDescription} · separation`, separation === null ? "N/A" : `${f(separation)} ATR · configured minimum = ${separationText} ATR`, separationPass)}
       ${metric("EMA50 slope direction", slope === null ? "N/A" : `${f(slope)} ATR ${emaBias === "BEAR" ? "< 0" : "> 0"}`, slopePass)}
-      <code class="regime-explain">Close location filter: Close ${emaBias === "BEAR" ? "<" : ">"} EMA50 ${emaBias === "BEAR" ? "+ 0.5 × ATR" : "− 0.5 × ATR"} · included in Django's EMA bias classification.</code>
+      <code class="regime-explain">Close location filter: Close ${emaBias === "BEAR" ? "<" : ">"} EMA50 ${emaBias === "BEAR" ? "+" : "−"} ${supportText} × ATR · included in Django's EMA bias classification.</code>
       <div class="regime-metric"><span>Django EMA bias</span><code class="regime-value ${emaPass === null ? "unknown" : "pass"}">${esc(emaBias)}</code><b class="regime-verdict ${emaPass === null ? "unknown" : "pass"}">${emaPass === null ? "N/A" : "CLASSIFIED"}</b></div>
       <span class="math-label">4 · Market structure · ${term("Structure", structureTip)} · confirmed swing points</span>
       <code>BEARISH structure = Lower High AND Lower Low</code>
       <code>BULLISH structure = Higher High AND Higher Low</code>
-      <div class="regime-metric"><span>Confirmed swing structure</span><code class="regime-value ${structurePass === null ? "unknown" : structure === "BEARISH" ? "fail" : "pass"}">${esc(structureDescription)}</code><b class="regime-verdict ${structurePass === null ? "unknown" : "pass"}">${structurePass === null ? "N/A" : "CONFIRMED"}</b></div>
+      <div class="regime-metric"><span>Confirmed swing structure</span><code class="regime-value ${structure === "UNKNOWN" || structure === "N/A" ? "unknown" : "pass"}">${esc(structureDescription)}</code><b class="regime-verdict ${structure === "UNKNOWN" || structure === "N/A" ? "unknown" : "pass"}">${structure === "UNKNOWN" || structure === "N/A" ? "N/A" : "CLASSIFIED"}</b></div>
+      ${metric("Structure compatibility with EMA direction", structureCompatible === null ? "Not directionally classifiable" : structureCompatible ? "Compatible" : "Opposite structure blocks this direction", structureCompatible)}
       <span class="math-label">5 · Final Django regime result</span>
-      <code class="regime-result ${outcomeClass}">${esc(`ADX ≥ 22 AND EMA bias = ${emaBias} AND structure compatible → Django regime = ${label}`)}</code>
-      <code class="regime-explain">${esc(adx === null ? "Cannot independently evaluate the complete rule: ADX is unavailable." : `Trend threshold: ${adxPass ? "PASS" : "FAIL"} · EMA bias: ${emaBias} · Structure: ${structure} · Final label is the value returned by Django.`)}</code>
+      <code class="regime-result ${outcomeClass}">Django regime = ${esc(label)}</code>
+      <code class="regime-explain">${esc(finalReason)} The final label is returned by Django; this panel explains the saved decision and does not recalculate or override it.</code>
     </div>
   </details>`;
 }
@@ -633,43 +686,48 @@ function opportunityRegimeCalculation(check, opportunity) {
 function opportunityVolatilityCalculation(check, opportunity) {
   if (String(check?.name || "").toLowerCase() !== "volatility") return "";
   const metrics = check.metrics || {};
+  const regime = opportunity?.regime || {};
   const n = value => typeof value === "number" && Number.isFinite(value) ? value : null;
   const f = value => value === null ? "N/A" : Number(value).toLocaleString(undefined, {maximumFractionDigits: 3});
   const ratio = n(metrics.value);
-  const minimum = 0.6;
-  const maximum = 2.5;
+  const minimum = n(metrics.minimum);
+  const maximum = n(metrics.maximum);
+  const atrPeriod = n(regime.atr_period);
+  const baselineBars = n(regime.atr_baseline_bars);
   const passed = check.passed === true ? true : check.passed === false ? false : null;
   const component = n(opportunity?.components?.volatility);
-  const metric = (label, value, passed, note = "") => {
-    const state = passed === null ? "unknown" : passed ? "pass" : "fail";
-    const result = passed === null ? "N/A" : passed ? "PASS" : "FAIL";
-    return '<div class="regime-metric"><span>' + esc(label) + '</span><code class="regime-value ' + state + '">' + esc(value) + '</code><b class="regime-verdict ' + state + '">' + result + '</b></div>' +
+  const metric = (label, value, result, note = "") => {
+    const state = result === null ? "unknown" : result ? "pass" : "fail";
+    const verdict = result === null ? "N/A" : result ? "PASS" : "FAIL";
+    return '<div class="regime-metric"><span>' + esc(label) + '</span><code class="regime-value ' + state + '">' + esc(value) + '</code><b class="regime-verdict ' + state + '">' + verdict + '</b></div>' +
       (note ? '<code class="regime-explain">' + esc(note) + '</code>' : "");
   };
   const ratioLine = ratio === null ? "Django did not return a numeric ATR ratio." :
+    minimum === null || maximum === null ? 'ATR ratio = ' + f(ratio) + 'x; configured minimum/maximum were not supplied in this saved decision.' :
     'ATR ratio = ' + f(ratio) + 'x; acceptable interval is ' + f(minimum) + 'x to ' + f(maximum) + 'x.';
   const componentLine = component === null ? "Volatility score component was not supplied in this decision." :
     'Volatility component = ' + f(component) + ' / 1.00; weighted contribution = ' + f(component * 0.15) + ' of the total 0–1 opportunity score (15% weight).';
   const interpretation = ratio === null ? "Cannot independently evaluate the volatility gate because the ratio is unavailable." :
-    ratio < minimum ? "Too quiet: opportunity is rejected because ATR is below the minimum." :
-    ratio > maximum ? "Volatility spike: opportunity is deferred until volatility settles." :
-    "Within the allowed volatility range: the volatility gate passes.";
+    minimum !== null && ratio < minimum ? "Too quiet: opportunity is rejected because ATR is below the configured minimum." :
+    maximum !== null && ratio > maximum ? "Volatility spike: opportunity is deferred until volatility settles." :
+    passed === true ? "Within Django's configured volatility range: the gate passes." :
+    passed === false ? "The volatility gate did not pass; see Django's returned reason." :
+    "The configured volatility limits were not supplied, so this panel will not infer them.";
   return '<details class="flow-math flow-details volatility-details">' +
     '<summary><span>Volatility calculation · ' + (ratio === null ? "N/A" : f(ratio) + 'x ATR ratio') + '</span><span class="regime-toggle-hint">Show formula & live values <span aria-hidden="true">＋</span></span></summary>' +
     '<div class="regime-content">' +
     '<span class="math-label">1 · Volatility formula</span>' +
-    '<code>ATR ratio = Current ATR(14) ÷ Median of the most recent 100 ATR(14) values</code>' +
+    '<code>ATR ratio = Current ATR(' + (atrPeriod === null ? "configured period" : f(atrPeriod)) + ') ÷ Median of the most recent ' + (baselineBars === null ? "configured baseline" : f(baselineBars)) + ' ATR values</code>' +
     '<code>Current ATR and its baseline are calculated from completed M15 candles only.</code>' +
     '<span class="math-label">2 · Live Django calculation</span>' +
     metric("Current ATR ratio", ratio === null ? "N/A" : f(ratio) + "x", passed, ratioLine) +
-    '<code class="regime-explain">The check returns the ratio; separate raw ATR and median values are not exposed in this decision payload.</code>' +
-    '<span class="math-label">3 · Acceptance thresholds</span>' +
-    '<code>REJECT if ratio < 0.60x · PASS if 0.60x ≤ ratio ≤ 2.50x · DEFER if ratio > 2.50x</code>' +
-    metric("Minimum volatility", ratio === null ? "N/A" : f(ratio) + 'x ≥ ' + f(minimum) + 'x', ratio === null ? null : ratio >= minimum, ratio === null ? "Ratio unavailable" : "Minimum threshold check") +
-    metric("Maximum volatility", ratio === null ? "N/A" : f(ratio) + 'x ≤ ' + f(maximum) + 'x', ratio === null ? null : ratio <= maximum, ratio === null ? "Ratio unavailable" : "Maximum threshold check") +
+    '<span class="math-label">3 · Acceptance thresholds supplied by Django</span>' +
+    '<code>REJECT if ratio < ' + f(minimum) + 'x · PASS if ' + f(minimum) + 'x ≤ ratio ≤ ' + f(maximum) + 'x · DEFER if ratio > ' + f(maximum) + 'x</code>' +
+    metric("Minimum volatility", ratio === null || minimum === null ? "N/A" : f(ratio) + 'x ≥ ' + f(minimum) + 'x', ratio === null || minimum === null ? null : ratio >= minimum) +
+    metric("Maximum volatility", ratio === null || maximum === null ? "N/A" : f(ratio) + 'x ≤ ' + f(maximum) + 'x', ratio === null || maximum === null ? null : ratio <= maximum) +
     '<span class="math-label">4 · Effect on opportunity score</span>' +
     '<code>Volatility weight = 15% of the total opportunity score</code>' +
-    '<code>Component score: 0 below 0.60x; ramps to 1.00 between 0.60x and 0.80x; remains 1.00 from 0.80x to 1.60x; then declines to 0 at 2.50x.</code>' +
+    '<code>Score curve breakpoints in the current detector: 0.80x and 1.60x; these are scoring-curve constants, separate from the configurable acceptance limits.</code>' +
     '<code class="regime-explain">' + esc(componentLine) + '</code>' +
     '<span class="math-label">5 · Final interpretation</span>' +
     '<code class="regime-result ' + (passed === true ? "pass" : passed === false ? "fail" : "unknown") + '">' + esc(interpretation) + '</code>' +
