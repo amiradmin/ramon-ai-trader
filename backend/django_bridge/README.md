@@ -61,7 +61,7 @@ All timestamps stored by Django use UTC. The EA's `observed_utc_epoch` field is 
 
 ## Daily-risk baseline recovery
 
-If the decision endpoint reports `DAILY_LOSS_BASELINE_UNAVAILABLE`, follow [`docs/operations/daily-risk-baseline-recovery.md`](../../docs/operations/daily-risk-baseline-recovery.md). The baseline must be the broker-verified opening balance for the exact account, server, and broker-local date; current equity/balance is not a safe substitute. Keep command creation and execution disabled while diagnosing.
+If the decision endpoint reports `DAILY_LOSS_BASELINE_UNAVAILABLE`, follow [`docs/operations/daily-risk-baseline-recovery.md`](../../docs/operations/daily-risk-baseline-recovery.md). The command EA can derive the broker-day opening balance from complete broker deal history, including balance-affecting deal components, and Django records it immutably for the exact account/server/day. If history selection or validation fails, the system remains fail-closed; never substitute current equity or balance. Keep command creation and execution disabled while diagnosing.
 
 ## Safety / rollout
 
