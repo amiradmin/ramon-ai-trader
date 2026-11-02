@@ -207,6 +207,54 @@ class ValidSetupTests(TestCase):
         self.assertEqual(outcome["stages"]["entry_timing"]["reason"], "NO_APPROVED_OPPORTUNITY")
 
 
+class BreakoutRetestTests(TestCase):
+    def breakout_bars(self):
+        bars = make_bars(UPTREND)
+        level = max(bar["high"] for bar in bars[-20:])
+        atr = 2.0
+        start = bars[-1]["time"] + 900
+        bars.extend([
+            {"time": start, "open": level + 0.5, "high": level + 1.3, "low": level + 0.3, "close": level + 1.0},
+            {"time": start + 900, "open": level + 0.4, "high": level + 0.6, "low": level - 0.1, "close": level + 0.2},
+            {"time": start + 1800, "open": level + 0.3, "high": level + 0.9, "low": level + 0.2, "close": level + 0.7},
+        ])
+        return bars
+
+    @patch("ramon_pipeline.signalflow.opportunities._classify_regime")
+    def test_confirmed_breakout_retest_is_an_independent_approved_setup(self, classify):
+        classify.return_value = opportunities_module._Regime(
+            "BULLISH", "BULL", "BULLISH", 25.0, 0.5, 0.5
+        )
+        bars = self.breakout_bars()
+        result = OpportunityDetector().evaluate(snapshot(bars))
+
+        self.assertTrue(result["approved"], result["explanation"])
+        self.assertEqual(result["reason"], "BREAKOUT_RETEST_CONFIRMED")
+        self.assertEqual(result["side"], "BUY")
+        self.assertEqual(result["setup"]["type"], "BREAKOUT_RETEST")
+        self.assertLess(result["setup"]["invalidation_price"], result["setup"]["reference_price"])
+        self.assertIn("breakout_retest", [check["name"] for check in result["checks"]])
+        self.assertFalse({"volume", "lots", "stop_loss", "take_profit", "entry_price"} & set(result))
+        self.assertEqual(classify.call_count, 2)
+
+    @patch("ramon_pipeline.signalflow.opportunities._classify_regime")
+    def test_breakout_without_a_confirmed_retest_does_not_approve(self, classify):
+        classify.return_value = opportunities_module._Regime(
+            "BULLISH", "BULL", "BULLISH", 25.0, 0.5, 0.5
+        )
+        bars = make_bars(UPTREND)
+        level = max(bar["high"] for bar in bars[-20:])
+        start = bars[-1]["time"] + 900
+        bars.extend([
+            {"time": start, "open": level + 0.5, "high": level + 1.3, "low": level + 0.3, "close": level + 1.0},
+            {"time": start + 900, "open": level + 1.0, "high": level + 1.5, "low": level + 0.8, "close": level + 1.2},
+            {"time": start + 1800, "open": level + 1.1, "high": level + 1.6, "low": level + 0.9, "close": level + 1.4},
+        ])
+        result = OpportunityDetector().evaluate(snapshot(bars))
+        self.assertNotEqual(result.get("setup", {}).get("type"), "BREAKOUT_RETEST")
+        self.assertFalse(result["approved"])
+
+
 class DeferredAndWeakSetupTests(TestCase):
     def evaluate(self, legs, **kwargs):
         return OpportunityDetector(**kwargs).evaluate(snapshot(make_bars(legs)))
