@@ -158,12 +158,33 @@ def _dashboard_execution_state(latest_symbol=""):
             item["metrics"] = metrics
         return item
 
+    # The dashboard feed is read-only; that does not mean the EA execution
+    # path is disabled. Django may authorize only a specific, risk-approved
+    # command after all account/terminal prerequisites are satisfied.
+    authorization_ready = all((
+        command_creation,
+        command_execution,
+        heartbeat_fresh is True,
+        terminal_connected is True,
+        trade_allowed is True,
+        demo_account is True,
+        symbol_matches is True,
+    ))
+
     checks = [
         check(
             "django_authorization",
-            "Django trading authorization",
-            False,
-            "Trading authorization is disabled by the current read-only dashboard contract.",
+            "Django command authorization",
+            authorization_ready,
+            (
+                "Django command authorization is ready. Individual OPEN commands still require "
+                "a fresh approved strategy decision, a passing risk verdict, and server-side "
+                "account validation; dashboard and decision responses do not execute trades."
+                if authorization_ready else
+                "Command authorization is not ready. Both server command gates, a fresh "
+                "connected demo-account heartbeat, terminal trading permission, and a matching "
+                "EA/decision symbol are required."
+            ),
         ),
         check(
             "command_creation",
@@ -216,8 +237,13 @@ def _dashboard_execution_state(latest_symbol=""):
     ]
     return {
         "title": "Execution boundary",
-        "trading_authorization": False,
-        "authorization_detail": "Django trading authorization is false. Strategy approval does not independently authorize MT5 execution.",
+        "trading_authorization": authorization_ready,
+        "authorization_detail": (
+            "Django command authorization is ready; only an individually risk-approved, "
+            "account-scoped pending command can authorize MT5 execution."
+            if authorization_ready else
+            "Django command authorization is not ready; one or more execution prerequisites are blocked."
+        ),
         "command_creation_enabled": command_creation,
         "command_execution_enabled": command_execution,
         "heartbeat_age_seconds": heartbeat_age,
