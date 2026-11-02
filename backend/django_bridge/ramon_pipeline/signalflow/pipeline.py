@@ -17,6 +17,89 @@ from .learning import Learning
 from .opportunities import OpportunityDetector
 from .risk_management import RiskManager
 
+# Server-owned calculation definitions. These describe the rules implemented by the
+# corresponding stage methods; per-decision operands and active thresholds are attached
+# from the actual stage result/config below. The dashboard must never supply fallbacks.
+_CALCULATION_RULES = {
+    "opportunities": {
+        "symbol": "Pass when the symbol starts with one of OpportunityConfig.symbol_prefixes (unless the prefix filter is disabled).",
+        "data_valid": "Validate completed OHLC bars, chronological timestamps, finite prices, candle ranges, required history, and configured recent-gap limits; indicator validity also requires finite ATR, ADX and RSI with ATR > 0.",
+        "bar_complete": "Pass only when last_bar_closed is not False and, when require_closed_flag is enabled, last_bar_closed is exactly True.",
+        "regime": "Compute EMA separation = (EMA_fast − EMA_slow) / ATR and slow-EMA slope = (EMA_slow[t] − EMA_slow[t − slope_lookback]) / ATR. Derive EMA bias using min_ema_separation_atr, support_tolerance_atr and slope sign; derive confirmed swing structure using pivot_window. Trending = ADX >= adx_trending. Classify BULLISH/BEARISH only when bias and structure are compatible and trending; classify RANGING when ADX < adx_ranging or the neutral/mixed/unknown fallback applies; otherwise UNCERTAIN.",
+        "regime_stability": "Pass unless the regime regime_lookback bars ago is opposite to the current BULLISH/BEARISH regime.",
+        "volatility": "ATR ratio = current ATR / median of finite ATR values in the last atr_baseline_bars. Pass when atr_ratio_min <= ratio <= atr_ratio_max.",
+        "impulse": "Impulse size (ATR) = (oriented confirmed swing-high price − oriented confirmed swing-low price) / current ATR. The latest swing high must no longer be extending and the ratio must be >= min_impulse_atr.",
+        "pullback_depth": "Retracement fraction = (oriented impulse high − oriented pullback low) / impulse size. Pass when min_retracement <= fraction <= max_retracement and the pullback does not break the impulse origin.",
+        "trend_support": "For every completed candle from the impulse high through the current bar, require oriented close >= oriented slow EMA − support_tolerance_atr × current ATR.",
+        "value_zone": "Value-zone gap (ATR) = max(0, oriented pullback low − oriented fast EMA at the pullback extreme) / current ATR. Pass when gap <= zone_tolerance_atr.",
+        "freshness": "Bars since pullback extreme = current bar index − pullback-extreme index. Pass when this count <= max_bars_since_pullback_low.",
+        "resumption": "Require at least one completed bar after the pullback extreme, with oriented current close > oriented fast EMA and oriented current close > previous oriented close.",
+        "momentum": "Directional RSI = RSI for BUY, or 100 − RSI for SELL. Pass when directional RSI <= rsi_overbought.",
+        "score": "Weighted opportunity score = sum(component_weight[name] × component_score[name]) for trend, strength, pullback, momentum and volatility. Pass when score >= minimum_score.",
+        "duplicate": "Pass when no earlier accepted signal exists for the same symbol, timeframe, side and impulse-anchor timestamp.",
+        "forecast": "Optional forecast veto: pass only when the enabled ARIMA/SARIMA evidence accepts the already-approved technical direction; forecasts cannot create an opportunity.",
+    },
+    "entry_timing": {
+        "freshness": "Signal age (bars) = (latest completed bar time − signal bar time) / timeframe seconds. Reject future signal times and pass only when age <= max_signal_age_bars.",
+        "invalidation": "Room to invalidation (ATR) = (entry quote − invalidation price) × direction sign / setup ATR. Price must remain on the valid side and room must be >= min_risk_room_atr.",
+        "chase": "Chase distance (ATR) = (entry quote − signal reference price) × direction sign / setup ATR. Pass when distance <= max_chase_atr.",
+        "spread": "Absolute spread (points) = (ask − bid) / point. Pass when spread <= maximum_spread_points.",
+        "spread_volatility": "Spread fraction of ATR = ((ask − bid) / point × point) / setup ATR. Pass when fraction <= max_spread_atr.",
+        "spread_risk": "Spread-to-risk = spread price / directional distance from entry quote to invalidation. Pass when ratio <= max_spread_to_risk.",
+        "price_checks": "When a complete bid, ask and point quote is unavailable, price-dependent invalidation, chase and relative-spread checks are skipped (or rejected when require_quote is enabled).",
+        "quality": "If supplied quality is accepted, use market.entry_quality. Otherwise quality = 0.40 × spread_eff + 0.35 × location + 0.25 × freshness, where spread_eff = 1 − 0.5 × clip(spread_ATR / max_spread_atr), location = 1 − 0.5 × clip(max(chase_ATR, 0) / max_chase_atr), and freshness = 1 − age_bars / (max_signal_age_bars + 1). Pass when 0 <= quality <= 1 and quality >= minimum_quality.",
+    },
+    "risk_management": {
+        "stop": "Structural stop = invalidation price − direction_sign × stop_buffer_atr × setup ATR (SELL stop may additionally be moved by ask − bid when short_stop_spread_adjust is enabled). Stop distance = (entry price − stop price) × direction_sign; normalize by ATR and require min_stop_atr <= stop_ATR <= max_stop_atr. Legacy mode uses supplied stop_loss_points.",
+        "stop_below_broker_minimum": "Pass when planned stop distance in points >= broker stop_level_points.",
+        "reward_risk": "Reward-to-risk = take_profit_points / stop_loss_points. When take_profit_points is supplied, require ratio >= min_reward_risk; otherwise this guard is explicitly skipped.",
+        "daily_loss": "When server-derived daily_loss_percent is supplied, pass only when daily_loss_percent < max_daily_loss_percent; otherwise this guard is explicitly skipped.",
+        "portfolio_risk": "Available headroom = max_total_risk_percent − open_risk_percent. When open_risk_percent is supplied, require headroom > 0 and cap this trade's risk percent to headroom; otherwise this guard is explicitly skipped.",
+        "sizing": "Effective risk percent = min(requested risk percent, maximum_risk_percent, available portfolio headroom when supplied). Risk budget = account balance × effective risk percent / 100. Raw lots = risk budget / (stop points × point value per lot); cap at max_volume, round down to volume_step, and reject if below min_volume. Estimated risk = rounded lots × stop points × point value per lot and must not exceed budget.",
+    },
+}
+
+def _plain_config(config: Any) -> dict[str, Any]:
+    if config is None:
+        return {}
+    values = vars(config) if hasattr(config, "__dict__") else {}
+    return {key: list(value) if isinstance(value, tuple) else value for key, value in values.items()}
+
+def _attach_calculation_metadata(stages: dict[str, Any], configs: Mapping[str, Mapping[str, Any]]) -> None:
+    """Attach server-authored rules plus actual per-decision inputs; never changes verdicts."""
+
+    for stage_name, stage in stages.items():
+        if not isinstance(stage, dict):
+            continue
+        checks = stage.get("checks")
+        if not isinstance(checks, list):
+            continue
+        stage_inputs = {}
+        for key in ("regime", "components", "setup", "score", "side", "signal_bar_time",
+                    "signal_age_bars", "room_to_invalidation_atr", "chase_atr", "spread_points",
+                    "spread_atr_fraction", "spread_to_risk", "quality", "quality_source",
+                    "quote_price", "entry_price", "stop_price", "stop_points", "stop_atr",
+                    "stop_source", "take_profit_points", "reward_risk", "risk_percent",
+                    "risk_budget", "estimated_risk", "volume", "risk_capped"):
+            if key in stage:
+                stage_inputs[key] = stage[key]
+        for check in checks:
+            if not isinstance(check, dict):
+                continue
+            name = str(check.get("name", "")).lower()
+            calculation = {
+                "formula": _CALCULATION_RULES.get(stage_name, {}).get(name),
+                "inputs": {
+                    "observed_check_metrics": check.get("metrics", {}),
+                    "stage_values": stage_inputs,
+                    "configured_thresholds": stage.get("thresholds", {}) or configs.get(stage_name, {}),
+                },
+                "result": "PASS" if check.get("passed") is True else "FAIL" if check.get("passed") is False else "NOT_EVALUATED",
+                "source": "django_signalflow",
+            }
+            check["calculation"] = calculation
+
+
 CONTRACT_VERSION = "2"
 _STAGE_ORDER = ("opportunities", "entry_timing", "risk_management")
 
@@ -42,6 +125,18 @@ class SignalFlowPipeline:
         timing = self.entry_timer.evaluate(opportunity, market)
         risk = self._evaluate_risk(market, bool(opportunity.get("approved") and timing.get("approved")), opportunity, timing)
         stages = {"opportunities": opportunity, "entry_timing": timing, "risk_management": risk}
+        # Attach auditable calculation metadata after all verdicts are complete.
+        # Metadata is descriptive only and cannot alter any stage approval.
+        _attach_calculation_metadata(stages, {
+            "opportunities": {**_plain_config(getattr(self.opportunities, "config", None)),
+                              "minimum_score": getattr(self.opportunities, "minimum_score", None)},
+            "entry_timing": {**_plain_config(getattr(self.entry_timer, "config", None)),
+                             "minimum_quality": getattr(self.entry_timer, "minimum_quality", None),
+                             "maximum_spread_points": getattr(self.entry_timer, "maximum_spread_points", None),
+                             "require_quote": getattr(self.entry_timer, "require_quote", None)},
+            "risk_management": {**_plain_config(getattr(self.risk_manager, "config", None)),
+                                "maximum_risk_percent": getattr(self.risk_manager, "maximum_risk_percent", None)},
+        })
         approved = all(bool(stages[name].get("approved")) for name in _STAGE_ORDER)
         action = opportunity.get("side", "HOLD") if approved else "HOLD"
         rejected_by = next((name for name in _STAGE_ORDER if not stages[name].get("approved")), None)
