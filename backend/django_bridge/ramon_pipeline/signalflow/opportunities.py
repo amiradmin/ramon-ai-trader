@@ -89,22 +89,22 @@ class OpportunityConfig:
     pivot_window: int = 3  # bars on each side needed to confirm a swing point
     slope_lookback: int = 10
     # Regime
-    adx_trending: float = 14.0
-    adx_ranging: float = 14.0
-    min_ema_separation_atr: float = 0.3
-    support_tolerance_atr: float = 0.5
+    adx_trending: float = 12.0
+    adx_ranging: float = 10.0
+    min_ema_separation_atr: float = 0.20
+    support_tolerance_atr: float = 0.65
     regime_lookback: int = 8  # compare with the regime this many bars ago
     # Volatility
     atr_baseline_bars: int = 100
     atr_ratio_min: float = 0.6
     atr_ratio_max: float = 2.5
     # Pullback geometry
-    min_impulse_atr: float = 2.0
-    min_retracement: float = 0.30
-    max_retracement: float = 0.786
-    zone_tolerance_atr: float = 0.25
-    max_bars_since_pullback_low: int = 6
-    rsi_overbought: float = 70.0  # mirrored (100 - x) for shorts
+    min_impulse_atr: float = 1.5
+    min_retracement: float = 0.20
+    max_retracement: float = 0.82
+    zone_tolerance_atr: float = 0.40
+    max_bars_since_pullback_low: int = 8
+    rsi_overbought: float = 75.0  # mirrored (100 - x) for shorts
     # Validation / safety options. Defaults keep the original behaviour.
     # require_closed_flag: treat a missing/None ``last_bar_closed`` as "not confirmed closed"
     # (fail closed) instead of assuming the newest candle is complete.
@@ -551,7 +551,7 @@ def _forecast_status(reason: str) -> str:
 class OpportunityDetector:
     def __init__(
         self,
-        minimum_score: float = 0.65,
+        minimum_score: float = 0.55,
         *,
         use_statistical_forecasts: bool = False,
         forecast_limit: int = 200,
