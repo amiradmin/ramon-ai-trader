@@ -38,7 +38,7 @@ import logging
 import math
 import threading
 from datetime import datetime, time as datetime_time, timezone
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from collections import OrderedDict
 from dataclasses import dataclass
 from statistics import median
