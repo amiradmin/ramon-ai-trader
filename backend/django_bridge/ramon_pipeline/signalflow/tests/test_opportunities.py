@@ -368,6 +368,59 @@ class InvalidDataTests(TestCase):
             bar["time"] += 900 * 30
         self.reject(gapped, "DATA_GAP_IN_RECENT_BARS")
 
+    def test_litefinance_weekend_closure_is_not_counted_as_missing_market_bars(self):
+        config = OpportunityConfig(
+            session_timezone="Europe/Helsinki",
+            session_hours=(
+                (0, 1, 6, 23, 59),
+                (1, 1, 2, 23, 59),
+                (2, 1, 2, 23, 59),
+                (3, 1, 2, 23, 59),
+                (4, 1, 2, 23, 59),
+            ),
+        )
+        friday_last = datetime(2026, 10, 30, 20, 45, tzinfo=timezone.utc).timestamp()
+        monday_first = datetime(2026, 11, 1, 23, 0, tzinfo=timezone.utc).timestamp()
+        missing = opportunities_module._expected_session_bars_between(
+            friday_last, monday_first, config
+        )
+        self.assertLessEqual(missing, config.max_gap_intervals)
+
+    def test_missing_candles_during_an_open_session_still_fail_closed(self):
+        config = OpportunityConfig(
+            session_timezone="Europe/Helsinki",
+            session_hours=(
+                (0, 1, 6, 23, 59),
+                (1, 1, 2, 23, 59),
+                (2, 1, 2, 23, 59),
+                (3, 1, 2, 23, 59),
+                (4, 1, 2, 23, 59),
+            ),
+        )
+        start = datetime(2026, 11, 2, 10, 0, tzinfo=timezone.utc).timestamp()
+        missing = opportunities_module._expected_session_bars_between(
+            start, start + 15 * 900, config
+        )
+        self.assertGreater(missing, config.max_gap_intervals)
+
+    def test_parser_accepts_a_normal_litefinance_weekend_gap(self):
+        config = OpportunityConfig(
+            session_timezone="Europe/Helsinki",
+            session_hours=(
+                (0, 1, 6, 23, 59),
+                (1, 1, 2, 23, 59),
+                (2, 1, 2, 23, 59),
+                (3, 1, 2, 23, 59),
+                (4, 1, 2, 23, 59),
+            ),
+        )
+        bars = [dict(bar) for bar in self.bars]
+        start = datetime(2026, 10, 29, 12, 15, tzinfo=timezone.utc).timestamp()
+        for index, bar in enumerate(bars):
+            bar["time"] = start + index * 900 + (50 * 3600 if index >= 131 else 0)
+        parsed = opportunities_module._parse_bars(bars, config)
+        self.assertEqual(len(parsed.times), len(bars))
+
     def test_flat_prices_cannot_be_analysed(self):
         flat = [{"time": 1_700_000_000 + 900 * i, "high": 2400.0, "low": 2400.0, "close": 2400.0} for i in range(150)]
         self.reject(flat, "INVALID_MARKET_DATA")
