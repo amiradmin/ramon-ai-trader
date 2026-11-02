@@ -216,8 +216,10 @@ class EACommandDeliveryHardeningTests(TestCase):
         self.heartbeat_payload["account"]["equity"] = str(equity)
         self.heartbeat.payload = self.heartbeat_payload
         self.heartbeat.save(update_fields=["payload"])
-        self.create_open_command(equity=equity, command_id="cmd-at-loss-limit")
-        command = EACommand.objects.get(command_id="cmd-at-loss-limit")
+        command = EACommand.objects.get(command_id="cmd-delivery-test")
+        decision = StrategyDecisionRecord.objects.get(decision_id=command.decision_id)
+        decision.features["account_snapshot"]["equity"] = str(equity)
+        decision.save(update_fields=["features"])
         self.poll()
         command.refresh_from_db()
         self.assertEqual(command.result["reason"], "DAILY_LOSS_LIMIT_REACHED")
@@ -232,23 +234,23 @@ class EACommandDeliveryHardeningTests(TestCase):
         self.assertEqual(command.result["reason"], "ACCOUNT_EQUITY_CHANGED_AFTER_DECISION")
 
     def test_command_payload_must_match_approved_risk_verdict(self):
-        self.create_open_command(
-            command_id="cmd-tampered",
-            command_payload={
-                "side": "SELL",
-                "volume": "0.10",
-                "stop_loss": "2401.0",
-                "take_profit": "2398.0",
-            },
-        )
-        command = EACommand.objects.get(command_id="cmd-tampered")
+        command = EACommand.objects.get(command_id="cmd-delivery-test")
+        command.payload = {
+            "side": "SELL",
+            "volume": "0.10",
+            "stop_loss": "2401.0",
+            "take_profit": "2398.0",
+        }
+        command.save(update_fields=["payload"])
         self.poll()
         command.refresh_from_db()
         self.assertEqual(command.result["reason"], "COMMAND_VOLUME_DOES_NOT_MATCH_RISK_VERDICT")
 
     def test_unapproved_risk_verdict_is_rejected(self):
-        self.create_open_command(verdict_approved=False, command_id="cmd-unapproved")
-        command = EACommand.objects.get(command_id="cmd-unapproved")
+        command = EACommand.objects.get(command_id="cmd-delivery-test")
+        verdict = RiskVerdictRecord.objects.get(pk=command.risk_verdict_id)
+        verdict.approved = False
+        verdict.save(update_fields=["approved"])
         self.poll()
         command.refresh_from_db()
         self.assertEqual(command.result["reason"], "APPROVED_RISK_VERDICT_UNAVAILABLE")
