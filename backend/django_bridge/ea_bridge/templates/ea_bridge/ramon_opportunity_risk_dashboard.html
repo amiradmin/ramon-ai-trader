@@ -417,45 +417,12 @@ function flowDetailRows(source, prefix = "", depth = 0, rows = []) {
   }
   return rows;
 }
-const FLOW_CHECK_FORMULAS = {
-  opportunities: {
-    regime: "Classify the market from ADX trend/range boundaries, EMA direction and confirmed swing-structure compatibility.",
-    regime_stability: "The prior classified regime at the configured lookback must not be opposite to the current bullish/bearish regime.",
-    volatility: "ATR ratio = current ATR ÷ recent ATR median; the ratio must remain between the configured minimum and maximum.",
-    impulse: "Impulse strength (ATR) = confirmed directional impulse-leg size ÷ current ATR; compare with the configured minimum.",
-    pullback_depth: "Retracement (%) = pullback distance ÷ confirmed impulse-leg size × 100; compare with the configured minimum and maximum.",
-    trend_support: "Completed pullback closes must remain within the configured ATR support tolerance of the slow EMA, in the trade direction.",
-    value_zone: "Distance from the pullback extreme to the fast EMA zone, normalized by ATR, must not exceed the configured zone tolerance.",
-    freshness: "Bars since the confirmed pullback extreme must not exceed the configured maximum.",
-    resumption: "A completed candle must close back through the fast EMA and confirm against the preceding close, mirrored for trade direction.",
-    momentum: "Directional RSI must not exceed the configured overbought boundary.",
-    score: "Weighted opportunity score = sum of configured component weights × component scores; compare with the configured minimum score.",
-    duplicate: "Only one accepted signal is allowed for the same impulse/pullback identity.",
-    data_valid: "Market data must satisfy the configured candle count, ordering, finiteness and OHLC validity requirements.",
-    bar_complete: "Only completed candles are eligible for structural decision-making."
-  },
-  entry_timing: {
-    freshness: "Signal age (bars) = elapsed time from signal candle to latest completed candle ÷ timeframe interval; compare with max_signal_age_bars.",
-    invalidation: "Room to invalidation (ATR) = directional distance from live entry quote to invalidation price ÷ ATR; compare with min_risk_room_atr.",
-    chase: "Chase distance (ATR) = directional distance from live entry quote to signal reference price ÷ ATR; compare with max_chase_atr.",
-    price_checks: "Quote-dependent checks require a complete bid, ask and point; missing quote data must not be interpreted as a pass.",
-    spread_conditions: "Validate absolute spread points, spread ÷ ATR and spread ÷ distance to invalidation against the configured limits.",
-    quality: "Entry quality is compared with the configured minimum_quality; the reported quality_source identifies its source."
-  },
-  risk_management: {
-    stop: "Stop distance (points) = absolute entry-to-stop price distance ÷ symbol point; structural stop placement also uses the configured ATR buffer.",
-    stop_below_broker_minimum: "Planned stop distance must be greater than or equal to the broker-reported minimum stop distance.",
-    reward_risk: "Reward-to-risk = take-profit distance (points) ÷ stop-loss distance (points); compare with min_reward_risk.",
-    daily_loss: "Django compares the server-derived daily loss percentage with max_daily_loss_percent.",
-    portfolio_risk: "Available risk headroom = max_total_risk_percent − current open_risk_percent; effective risk is capped by available headroom.",
-    sizing: "Risk budget = account balance × effective risk percent ÷ 100. Raw volume uses risk budget ÷ (stop points × point value per lot), then rounds down to broker volume step and limits."
-  }
-};
 function flowCheckCalculationMarkup(check, state, stageResult, decision, stageName) {
   const name = String(check?.name || "").toLowerCase();
   const calculation = check.calculation && typeof check.calculation === "object" ? check.calculation : {};
-  const formula = check.formula ?? calculation.formula ?? check.expression ??
-    check.rule ?? check.condition_formula ?? FLOW_CHECK_FORMULAS[stageName]?.[name];
+  // Formula/rule definitions must come from the saved Django calculation payload.
+  // Never substitute a dashboard-side description.
+  const formula = calculation.formula;
   const live = {};
   if (check.metrics && typeof check.metrics === "object") live["Observed check metrics"] = check.metrics;
   if (stageResult.thresholds && typeof stageResult.thresholds === "object") live["Configured thresholds from Django"] = stageResult.thresholds;
