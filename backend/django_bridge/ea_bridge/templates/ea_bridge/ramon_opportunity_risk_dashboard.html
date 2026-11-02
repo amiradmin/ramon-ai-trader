@@ -634,9 +634,15 @@ function opportunityRegimeCalculation(check, opportunity) {
   const rangingFallback = emaBias === "NEUTRAL" && ["MIXED", "UNKNOWN"].includes(structure) && adxPass === false;
   let finalReason = `Django's authoritative regime label is ${label}.`;
   if (label === "UNCERTAIN" && emaBias === "BEAR" && structure === "BULLISH") {
-    finalReason = "Trend strength may pass, but bearish EMA bias conflicts with bullish confirmed structure. Django keeps the regime UNCERTAIN.";
+    const strength = adxPass === true ? "ADX trend strength passed" : adxPass === false ? "ADX trend strength did not pass" : "ADX trend strength is unavailable";
+    finalReason = `${strength}, but bearish EMA bias conflicts with bullish confirmed structure. Django keeps the regime UNCERTAIN.`;
   } else if (label === "UNCERTAIN" && emaBias === "BULL" && structure === "BEARISH") {
-    finalReason = "Trend strength may pass, but bullish EMA bias conflicts with bearish confirmed structure. Django keeps the regime UNCERTAIN.";
+    const strength = adxPass === true ? "ADX trend strength passed" : adxPass === false ? "ADX trend strength did not pass" : "ADX trend strength is unavailable";
+    finalReason = `${strength}, but bullish EMA bias conflicts with bearish confirmed structure. Django keeps the regime UNCERTAIN.`;
+  } else if (label === "UNCERTAIN" && emaBias === "NEUTRAL") {
+    finalReason = adxPass === true
+      ? "ADX trend strength passed, but EMA bias is NEUTRAL; Django does not confirm a directional regime."
+      : "EMA bias is NEUTRAL and the directional regime conditions are not fully confirmed; Django keeps the result UNCERTAIN.";
   } else if (label === "RANGING" && rangePass === true) {
     finalReason = "ADX is below Django's configured ranging boundary. The opportunity is blocked as RANGING.";
   } else if (label === "RANGING" && rangingFallback) {
