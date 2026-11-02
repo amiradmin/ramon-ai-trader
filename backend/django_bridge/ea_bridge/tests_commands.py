@@ -249,6 +249,30 @@ class EACommandEndpointTests(TestCase):
         command.refresh_from_db()
         self.assertEqual(command.result["reason"], "ACCOUNT_SERVER_MISMATCH")
 
+    @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_CREATION_ENABLED=True, RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
+    def test_symbol_mismatch_is_rejected(self):
+        self.create_fresh_heartbeat()
+        command = self.create_command()
+        response = self.client.post(
+            self.next_url, data=json.dumps(self.poll_payload(symbol="EURUSD")),
+            content_type="application/json", **self.headers,
+        )
+        self.assertIsNone(response.json()["command"])
+        command.refresh_from_db()
+        self.assertEqual(command.result["reason"], "ACCOUNT_SYMBOL_MISMATCH")
+
+    @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_CREATION_ENABLED=True, RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
+    def test_terminal_trade_permission_must_be_enabled(self):
+        self.create_fresh_heartbeat(trade_allowed=False)
+        command = self.create_command()
+        response = self.client.post(
+            self.next_url, data=json.dumps(self.poll_payload()),
+            content_type="application/json", **self.headers,
+        )
+        self.assertIsNone(response.json()["command"])
+        command.refresh_from_db()
+        self.assertEqual(command.result["reason"], "TERMINAL_TRADE_PERMISSION_DENIED")
+
     @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_EXECUTION_ENABLED=False)
     def test_missing_token_is_rejected(self):
         response = self.client.post(
