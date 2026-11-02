@@ -347,6 +347,8 @@ const stageChecks = stageResult => Array.isArray(stageResult?.checks) ? stageRes
 const stageState = stageResult => {
   if (!stageResult || !Object.keys(stageResult).length) return "idle";
   if (stageResult.approved === true) return "pass";
+  const reason = String(stageResult.reason || "").toUpperCase();
+  if (["UPSTREAM_STAGE_REJECTED", "NO_APPROVED_OPPORTUNITY"].includes(reason)) return "idle";
   const status = String(stageResult.status || "").toUpperCase();
   if (["ACCEPTED", "APPROVED", "PASS", "PASSED"].includes(status)) return "pass";
   if (["DEFERRED", "WAIT", "WAITING", "PENDING"].includes(status)) return "wait";
