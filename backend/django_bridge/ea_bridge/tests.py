@@ -146,6 +146,80 @@ class ServerDailyBaselineTelemetryTests(TestCase):
         }
 
     @override_settings(EA_BEARER_TOKEN="test-token")
+    def test_m15_timestamp_jitter_is_canonicalized_and_deduplicated(self):
+        payload = self._payload(date.today())
+        payload["instance_id"] = "m15-canonical-ea"
+        payload["bars"] = [
+            {
+                "timestamp": "2026-11-02T03:30:08Z",
+                "open": "2320.00", "high": "2321.00", "low": "2319.00",
+                "close": "2320.35", "volume": "123", "closed": True,
+            },
+            {
+                "timestamp": "2026-11-02T03:30:54Z",
+                "open": "2320.00", "high": "2321.00", "low": "2319.00",
+                "close": "2320.35", "volume": "123", "closed": True,
+            },
+        ]
+        first = self.client.post(
+            self.url, data=json.dumps(payload),
+            content_type="application/json", **self.headers,
+        )
+        self.assertEqual(first.status_code, 200, first.content)
+        self.assertEqual(first.json()["stored_bars"], 1)
+
+        payload["bars"] = [dict(payload["bars"][0], timestamp="2026-11-02T03:31:39Z")]
+        second = self.client.post(
+            self.url, data=json.dumps(payload),
+            content_type="application/json", **self.headers,
+        )
+        self.assertEqual(second.status_code, 200, second.content)
+        self.assertEqual(second.json()["stored_bars"], 1)
+
+        bars = MarketBar.objects.filter(
+            source="m15-canonical-ea", symbol="XAUUSD_o", timeframe="M15",
+        )
+        self.assertEqual(bars.count(), 1)
+        self.assertEqual(bars.get().timestamp.isoformat(), "2026-11-02T03:30:00+00:00")
+
+    @override_settings(EA_BEARER_TOKEN="test-token")
+    def test_m15_timestamp_outside_tolerance_is_rejected(self):
+        payload = self._payload(date.today())
+        payload["instance_id"] = "m15-out-of-tolerance-ea"
+        payload["bars"] = [{
+            "timestamp": "2026-11-02T03:33:00Z",
+            "open": "2320.00", "high": "2321.00", "low": "2319.00",
+            "close": "2320.35", "volume": "123", "closed": True,
+        }]
+        response = self.client.post(
+            self.url, data=json.dumps(payload),
+            content_type="application/json", **self.headers,
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("within 120 seconds", response.json()["error"])
+        self.assertFalse(MarketBar.objects.filter(source="m15-out-of-tolerance-ea").exists())
+
+    @override_settings(EA_BEARER_TOKEN="test-token")
+    def test_conflicting_bars_in_one_m15_bucket_are_rejected(self):
+        payload = self._payload(date.today())
+        payload["instance_id"] = "m15-conflicting-ea"
+        base = {
+            "open": "2320.00", "high": "2321.00", "low": "2319.00",
+            "close": "2320.35", "volume": "123", "closed": True,
+        }
+        payload["bars"] = [
+            dict(base, timestamp="2026-11-02T03:30:08Z"),
+            dict(base, timestamp="2026-11-02T03:30:54Z", close="2320.45"),
+        ]
+        response = self.client.post(
+            self.url, data=json.dumps(payload),
+            content_type="application/json", **self.headers,
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("conflicts with another candle", response.json()["error"])
+        self.assertFalse(MarketBar.objects.filter(source="m15-conflicting-ea").exists())
+
+    @override_settings(EA_BEARER_TOKEN="test-token")
     def test_continuous_rollover_records_previous_balance_as_immutable_baseline(self):
         yesterday = date.today() - timedelta(days=1)
         EAHeartbeat.objects.create(

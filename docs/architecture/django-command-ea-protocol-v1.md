@@ -44,6 +44,28 @@ A telemetry message should contain:
 
 Use event IDs for deduplication. Validate OHLC invariants (high >= open/close/low, low <= open/close/high), positive prices and timezone-aware timestamps. Never treat an incomplete candle as a completed bar.
 
+## M15 timestamp integrity
+
+For completed M15 telemetry and decision bars, the EA converts broker-server
+bar times to UTC using a broker/UTC offset sampled around the UTC clock read and
+quantized to whole minutes. It then normalizes the resulting M15 timestamp to
+the nearest 900-second UTC boundary. This prevents second-level clock sampling
+jitter from creating multiple database rows for one candle.
+
+Django applies an independent guard: an M15 timestamp must be within 120 seconds
+of a 15-minute boundary. Accepted timestamps are stored at that canonical UTC
+boundary. Repeated reports for the same canonical timestamp update the existing
+bar; duplicate bars within one telemetry payload are collapsed when OHLCV agrees.
+Conflicting OHLCV values for the same canonical M15 timestamp, or timestamps
+outside the tolerance, reject the telemetry request. Other timeframes retain
+their original timestamp handling.
+
+This is timestamp-integrity protection, not a historical-data migration. It
+does not rewrite or delete existing MarketBar rows. The current-offset conversion
+also does not by itself reconstruct historical broker UTC offsets across a
+broker daylight-saving transition; that requires broker-specific historical
+timezone evidence.
+
 ## Command envelope
 
 Every command has a unique immutable command_id, protocol version, target instance_id, account scope, symbol, action, created_at, expires_at, decision reference, risk-verdict reference, and an explicit authorization field. Unknown fields may be ignored only when doing so cannot change execution semantics.

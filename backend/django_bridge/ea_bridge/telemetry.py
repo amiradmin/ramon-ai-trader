@@ -3,7 +3,7 @@
 Telemetry is observational only and never grants trading authorization.
 """
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal, InvalidOperation
 
 from django.conf import settings
@@ -38,6 +38,23 @@ def _decimal(value, name):
     return result
 
 
+M15_INTERVAL_SECONDS = 15 * 60
+M15_TIMESTAMP_TOLERANCE_SECONDS = 120
+
+
+def _normalize_m15_timestamp(stamp, field_name):
+    """Canonicalize small timestamp jitter without accepting a wrong candle."""
+    epoch = stamp.timestamp()
+    boundary_epoch = int((epoch + M15_INTERVAL_SECONDS / 2) // M15_INTERVAL_SECONDS) * M15_INTERVAL_SECONDS
+    drift_seconds = abs(epoch - boundary_epoch)
+    if drift_seconds > M15_TIMESTAMP_TOLERANCE_SECONDS:
+        raise ValueError(
+            f"{field_name} must be within "
+            f"{M15_TIMESTAMP_TOLERANCE_SECONDS} seconds of an M15 boundary"
+        )
+    return datetime.fromtimestamp(boundary_epoch, tz=dt_timezone.utc)
+
+
 @csrf_exempt
 @require_POST
 def telemetry(request):
@@ -67,6 +84,8 @@ def telemetry(request):
         if bid <= 0 or ask < bid or point <= 0:
             raise ValueError("invalid quote values")
         normalized_bars = []
+        m15_bars_by_timestamp = {}
+        is_m15 = timeframe.upper() == "M15"
         for index, bar in enumerate(bars):
             if not isinstance(bar, dict) or bar.get("closed") is not True:
                 raise ValueError(f"bars[{index}] must be a completed candle")
@@ -80,7 +99,23 @@ def telemetry(request):
             vol = _decimal(bar.get("volume", 0), f"bars[{index}].volume")
             if min(o, h, lo, c) <= 0 or vol < 0 or h < max(o, c, lo) or lo > min(o, c, h):
                 raise ValueError(f"bars[{index}] has invalid OHLCV values")
-            normalized_bars.append((stamp, o, h, lo, c, vol))
+            values = (o, h, lo, c, vol)
+            if is_m15:
+                stamp = _normalize_m15_timestamp(stamp, f"bars[{index}].timestamp")
+                previous_values = m15_bars_by_timestamp.get(stamp)
+                if previous_values is not None and previous_values != values:
+                    raise ValueError(
+                        f"bars[{index}] conflicts with another candle at "
+                        f"normalized M15 timestamp {stamp.isoformat()}"
+                    )
+                m15_bars_by_timestamp[stamp] = values
+            else:
+                normalized_bars.append((stamp, *values))
+        if is_m15:
+            normalized_bars.extend(
+                (stamp, *values)
+                for stamp, values in sorted(m15_bars_by_timestamp.items())
+            )
         account = p.get("account", {})
         positions = p.get("positions", [])
         if not isinstance(account, dict) or not isinstance(positions, list) or len(positions) > 500:
