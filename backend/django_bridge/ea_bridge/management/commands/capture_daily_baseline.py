@@ -76,6 +76,7 @@ class Command(BaseCommand):
                     defaults={
                         "opening_balance": opening_balance,
                         "source_instance_id": source_instance_id,
+                        "capture_method": "MANUAL_BROKER_VERIFIED",
                     },
                 )
         except IntegrityError as exc:
