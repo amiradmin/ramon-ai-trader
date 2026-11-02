@@ -744,6 +744,88 @@ class DjangoDecisionApiTests(TestCase):
         r=self.client.post(self.url,data=json.dumps(p),content_type="application/json",**self.headers)
         self.assertEqual(r.status_code,400)
 
+class CommandPollingTests(TestCase):
+    url = "/api/ea/v1/commands/next"
+    headers = {"HTTP_AUTHORIZATION": "Bearer test-token"}
+
+    @override_settings(
+        EA_BEARER_TOKEN="test-token",
+        RAMON_EA_COMMAND_EXECUTION_ENABLED=True,
+    )
+    def test_next_command_delivers_only_authorized_pending_command_to_matching_account(self):
+        command = EACommand.objects.create(
+            command_id="ramon-open-test-001",
+            instance_id="command-poll-ea",
+            account_login="12345678",
+            symbol="XAUUSD_o",
+            action=EACommand.Action.OPEN,
+            payload={
+                "side": "BUY",
+                "volume": 0.01,
+                "stop_loss": 2300.0,
+                "take_profit": 2310.0,
+            },
+            decision_id="decision-test-001",
+            risk_verdict_id="risk-test-001",
+            execution_authorized=True,
+            expires_at=timezone.now() + timedelta(seconds=60),
+        )
+        response = self.client.post(
+            self.url,
+            data=json.dumps({
+                "instance_id": "command-poll-ea",
+                "account_login": "12345678",
+            }),
+            content_type="application/json",
+            **self.headers,
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        body = response.json()
+        self.assertTrue(body["trading_authorization"])
+        self.assertTrue(body["commands_enabled"])
+        self.assertTrue(body["command"]["execution_authorized"])
+        self.assertEqual(body["command"]["command_id"], command.command_id)
+        command.refresh_from_db()
+        self.assertEqual(command.state, EACommand.State.CLAIMED)
+
+    @override_settings(
+        EA_BEARER_TOKEN="test-token",
+        RAMON_EA_COMMAND_EXECUTION_ENABLED=True,
+    )
+    def test_next_command_never_delivers_unauthorized_or_other_account_command(self):
+        EACommand.objects.create(
+            command_id="ramon-open-unauthorized",
+            instance_id="command-poll-ea",
+            account_login="12345678",
+            symbol="XAUUSD_o",
+            action=EACommand.Action.OPEN,
+            payload={"side": "BUY"},
+            execution_authorized=False,
+            expires_at=timezone.now() + timedelta(seconds=60),
+        )
+        EACommand.objects.create(
+            command_id="ramon-open-other-account",
+            instance_id="command-poll-ea",
+            account_login="87654321",
+            symbol="XAUUSD_o",
+            action=EACommand.Action.OPEN,
+            payload={"side": "BUY"},
+            execution_authorized=True,
+            expires_at=timezone.now() + timedelta(seconds=60),
+        )
+        response = self.client.post(
+            self.url,
+            data=json.dumps({
+                "instance_id": "command-poll-ea",
+                "account_login": "12345678",
+            }),
+            content_type="application/json",
+            **self.headers,
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertIsNone(response.json()["command"])
+        self.assertFalse(response.json()["trading_authorization"])
+
 class DashboardDataTests(TestCase):
     url = "/api/ea/v1/dashboard-data"
 
