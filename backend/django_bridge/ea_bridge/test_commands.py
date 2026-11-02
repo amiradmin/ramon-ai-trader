@@ -99,7 +99,7 @@ class EACommandApiTests(TestCase):
         self.assertEqual(command.state, EACommand.State.CLAIMED)
         self.assertIsNotNone(command.claimed_at)
 
-    @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
+    @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_CREATION_ENABLED=True, RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
     def test_expired_pending_command_is_marked_expired(self):
         command = EACommand.objects.create(
             command_id="cmd-expired", instance_id=self.scope["instance_id"],
@@ -113,7 +113,7 @@ class EACommandApiTests(TestCase):
         command.refresh_from_db()
         self.assertEqual(command.state, EACommand.State.EXPIRED)
 
-    @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
+    @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_CREATION_ENABLED=True, RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
     def test_ack_is_scoped_and_terminal_duplicate_is_idempotent(self):
         command = EACommand.objects.create(
             command_id="cmd-ack", instance_id=self.scope["instance_id"],
@@ -130,7 +130,7 @@ class EACommandApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["duplicate"])
 
-    @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
+    @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_CREATION_ENABLED=True, RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
     def test_ack_cannot_access_command_for_another_account(self):
         EACommand.objects.create(
             command_id="cmd-private", instance_id=self.scope["instance_id"],
@@ -142,7 +142,7 @@ class EACommandApiTests(TestCase):
         ))
         self.assertEqual(response.status_code, 404)
 
-    @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
+    @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_CREATION_ENABLED=True, RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
     def test_rejects_invalid_transition_from_claimed_to_pending(self):
         EACommand.objects.create(
             command_id="cmd-transition", instance_id=self.scope["instance_id"],
