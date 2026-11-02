@@ -112,10 +112,128 @@ def dashboard(request):
     return render(request, "ea_bridge/ramon_opportunity_risk_dashboard.html")
 
 
+
+def _dashboard_execution_state(latest_symbol=""):
+    """Return read-only, current execution-boundary telemetry for the dashboard."""
+    now = datetime.now(timezone.utc)
+    heartbeat = EAHeartbeat.objects.order_by("-last_seen").first()
+    max_age = int(getattr(settings, "RAMON_EA_HEARTBEAT_MAX_AGE_SECONDS", 90))
+    heartbeat_age = None
+    heartbeat_fresh = None
+    terminal_connected = None
+    trade_allowed = None
+    demo_account = None
+    symbol_matches = None
+
+    if heartbeat is not None:
+        last_seen = heartbeat.last_seen
+        if last_seen.tzinfo is None or last_seen.utcoffset() is None:
+            last_seen = last_seen.replace(tzinfo=timezone.utc)
+        heartbeat_age = max(0, int((now - last_seen).total_seconds()))
+        heartbeat_fresh = heartbeat_age <= max_age
+        terminal_connected = bool(heartbeat.terminal_connected)
+        trade_allowed = bool(heartbeat.trade_allowed)
+        payload = heartbeat.payload if isinstance(heartbeat.payload, dict) else {}
+        trade_mode = payload.get("account_trade_mode")
+        if isinstance(trade_mode, str):
+            demo_account = trade_mode.strip().upper() == "DEMO"
+        elif isinstance(trade_mode, int) and not isinstance(trade_mode, bool):
+            demo_account = trade_mode == 0
+        if latest_symbol and heartbeat.symbol:
+            symbol_matches = heartbeat.symbol.strip().upper() == latest_symbol.strip().upper()
+
+    command_creation = bool(getattr(settings, "RAMON_EA_COMMAND_CREATION_ENABLED", False))
+    command_execution = bool(getattr(settings, "RAMON_EA_COMMAND_EXECUTION_ENABLED", False))
+
+    def check(name, label, passed, detail, metrics=None):
+        status = "ACCEPTED" if passed is True else "BLOCKED" if passed is False else "WAITING"
+        item = {
+            "name": name,
+            "display_name": label,
+            "passed": passed,
+            "status": status,
+            "detail": detail,
+        }
+        if metrics:
+            item["metrics"] = metrics
+        return item
+
+    checks = [
+        check(
+            "django_authorization",
+            "Django trading authorization",
+            False,
+            "Trading authorization is disabled by the current read-only dashboard contract.",
+        ),
+        check(
+            "command_creation",
+            "Server command-creation gate",
+            command_creation,
+            "RAMON_EA_COMMAND_CREATION_ENABLED is " + ("enabled." if command_creation else "disabled."),
+        ),
+        check(
+            "command_execution",
+            "Server command-execution gate",
+            command_execution,
+            "RAMON_EA_COMMAND_EXECUTION_ENABLED is " + ("enabled." if command_execution else "disabled."),
+        ),
+        check(
+            "ea_heartbeat",
+            "EA heartbeat freshness",
+            heartbeat_fresh,
+            "No EA heartbeat has been received." if heartbeat is None else
+            "Latest heartbeat age is " + str(heartbeat_age) + " seconds; maximum accepted age is " + str(max_age) + " seconds.",
+            {"age_seconds": heartbeat_age, "maximum_age_seconds": max_age},
+        ),
+        check(
+            "terminal_connected",
+            "MT5 terminal connection",
+            terminal_connected,
+            "No heartbeat is available." if heartbeat is None else
+            ("MT5 terminal reports connected." if terminal_connected else "MT5 terminal reports disconnected."),
+        ),
+        check(
+            "terminal_trade_allowed",
+            "Terminal Algo Trading permission",
+            trade_allowed,
+            "No heartbeat is available." if heartbeat is None else
+            ("Terminal reports trading permission enabled." if trade_allowed else "Terminal reports trading permission disabled."),
+        ),
+        check(
+            "demo_account",
+            "Demo-account mode",
+            demo_account,
+            "Account trade mode was not supplied by the latest heartbeat." if demo_account is None else
+            ("Heartbeat confirms demo-account mode." if demo_account else "Heartbeat does not identify a demo account."),
+        ),
+        check(
+            "symbol_match",
+            "EA / decision symbol match",
+            symbol_matches,
+            "A current decision symbol and EA heartbeat symbol are both required." if symbol_matches is None else
+            ("EA symbol matches the latest decision." if symbol_matches else "EA symbol does not match the latest decision."),
+        ),
+    ]
+    return {
+        "title": "Execution boundary",
+        "trading_authorization": False,
+        "authorization_detail": "Django trading authorization is false. Strategy approval does not independently authorize MT5 execution.",
+        "command_creation_enabled": command_creation,
+        "command_execution_enabled": command_execution,
+        "heartbeat_age_seconds": heartbeat_age,
+        "heartbeat_fresh": heartbeat_fresh,
+        "terminal_connected": terminal_connected,
+        "terminal_trade_allowed": trade_allowed,
+        "demo_account_confirmed": demo_account,
+        "symbol_matches": symbol_matches,
+        "checks": checks,
+    }
+
+
 @require_GET
 def dashboard_data(request):
     """Read-only JSON feed for the local Ramon dashboard."""
-    rows = StrategyDecisionRecord.objects.order_by("-created_at")[:50]
+    rows = list(StrategyDecisionRecord.objects.order_by("-created_at")[:50])
     decisions = []
     for row in rows:
         decisions.append({
@@ -128,4 +246,9 @@ def dashboard_data(request):
             "created_at": row.created_at.isoformat() if row.created_at else None,
             "features": row.features if isinstance(row.features, dict) else {},
         })
-    return JsonResponse({"ok": True, "decisions": decisions})
+    latest_symbol = decisions[0]["symbol"] if decisions else ""
+    return JsonResponse({
+        "ok": True,
+        "decisions": decisions,
+        "execution": _dashboard_execution_state(latest_symbol),
+    })
