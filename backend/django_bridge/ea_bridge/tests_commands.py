@@ -169,6 +169,83 @@ class EACommandEndpointTests(TestCase):
         self.assertFalse(first.json()["duplicate"])
         self.assertTrue(second.json()["duplicate"])
 
+    @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_CREATION_ENABLED=True, RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
+    def test_stale_heartbeat_rejects_pending_command(self):
+        self.create_fresh_heartbeat(last_seen=timezone.now() - timedelta(seconds=120))
+        command = self.create_command()
+        response = self.client.post(
+            self.next_url, data=json.dumps(self.poll_payload()),
+            content_type="application/json", **self.headers,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["command"])
+        command.refresh_from_db()
+        self.assertEqual(command.state, EACommand.State.REJECTED)
+        self.assertEqual(command.result["reason"], "ACCOUNT_TELEMETRY_STALE")
+
+    @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_CREATION_ENABLED=True, RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
+    def test_live_account_is_rejected(self):
+        self.create_fresh_heartbeat(payload={"account_trade_mode": 2})
+        command = self.create_command()
+        response = self.client.post(
+            self.next_url, data=json.dumps(self.poll_payload()),
+            content_type="application/json", **self.headers,
+        )
+        self.assertIsNone(response.json()["command"])
+        command.refresh_from_db()
+        self.assertEqual(command.result["reason"], "DEMO_ACCOUNT_REQUIRED")
+
+    @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_CREATION_ENABLED=True, RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
+    def test_open_command_is_rejected_when_any_position_exists(self):
+        self.create_fresh_heartbeat(payload={"positions": [{"ticket": "77"}]})
+        command = self.create_command()
+        response = self.client.post(
+            self.next_url, data=json.dumps(self.poll_payload()),
+            content_type="application/json", **self.headers,
+        )
+        self.assertIsNone(response.json()["command"])
+        command.refresh_from_db()
+        self.assertEqual(command.result["reason"], "OPEN_POSITION_RISK_UNVERIFIED")
+
+    @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_CREATION_ENABLED=True, RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
+    def test_stale_quote_is_rejected(self):
+        self.create_fresh_heartbeat(payload={
+            "quote_time": (timezone.now() - timedelta(seconds=90)).isoformat(),
+        })
+        command = self.create_command()
+        response = self.client.post(
+            self.next_url, data=json.dumps(self.poll_payload()),
+            content_type="application/json", **self.headers,
+        )
+        self.assertIsNone(response.json()["command"])
+        command.refresh_from_db()
+        self.assertEqual(command.result["reason"], "QUOTE_STALE")
+
+    @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_CREATION_ENABLED=True, RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
+    def test_missing_daily_baseline_is_rejected(self):
+        self.create_fresh_heartbeat()
+        AccountDailyBaseline.objects.all().delete()
+        command = self.create_command()
+        response = self.client.post(
+            self.next_url, data=json.dumps(self.poll_payload()),
+            content_type="application/json", **self.headers,
+        )
+        self.assertIsNone(response.json()["command"])
+        command.refresh_from_db()
+        self.assertEqual(command.result["reason"], "DAILY_LOSS_BASELINE_UNAVAILABLE")
+
+    @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_CREATION_ENABLED=True, RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
+    def test_request_server_and_symbol_must_match_fresh_heartbeat(self):
+        self.create_fresh_heartbeat()
+        command = self.create_command()
+        response = self.client.post(
+            self.next_url, data=json.dumps(self.poll_payload(server_name="Wrong-Server")),
+            content_type="application/json", **self.headers,
+        )
+        self.assertIsNone(response.json()["command"])
+        command.refresh_from_db()
+        self.assertEqual(command.result["reason"], "ACCOUNT_SERVER_MISMATCH")
+
     @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_EXECUTION_ENABLED=False)
     def test_missing_token_is_rejected(self):
         response = self.client.post(
