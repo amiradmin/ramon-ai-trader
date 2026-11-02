@@ -212,7 +212,7 @@ class EACommandDeliveryHardeningTests(TestCase):
 
     def test_daily_loss_limit_is_rechecked_at_delivery(self):
         threshold = Decimal(str(RiskConfig().max_daily_loss_percent))
-        equity = self.baseline.opening_balance * (Decimal("1") - threshold / Decimal("100"))
+        equity = Decimal(str(self.baseline.opening_balance)) * (Decimal("1") - threshold / Decimal("100"))
         self.heartbeat_payload["account"]["equity"] = str(equity)
         self.heartbeat.payload = self.heartbeat_payload
         self.heartbeat.save(update_fields=["payload"])
