@@ -363,6 +363,11 @@ bool CalculateBrokerDayOpeningBalance(double &opening_balance,int &deal_count)
       ulong deal=HistoryDealGetTicket(i);
       if(deal==0) return false;
 
+      long deal_type=0;
+      if(!HistoryDealGetInteger(deal,DEAL_TYPE,deal_type)) return false;
+      // CREDIT changes the separate account-credit ledger, not ACCOUNT_BALANCE.
+      if((ENUM_DEAL_TYPE)deal_type==DEAL_TYPE_CREDIT) continue;
+
       double profit=0.0;
       double swap=0.0;
       double commission=0.0;
