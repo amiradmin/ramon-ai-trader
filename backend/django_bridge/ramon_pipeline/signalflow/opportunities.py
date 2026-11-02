@@ -37,6 +37,8 @@ import hashlib
 import logging
 import math
 import threading
+from datetime import datetime, time as datetime_time, timezone
+from zoneinfo import ZoneInfo
 from collections import OrderedDict
 from dataclasses import dataclass
 from statistics import median
@@ -73,6 +75,11 @@ class OpportunityConfig:
     max_gap_intervals: float = 8.0  # largest tolerated hole in the recent bars
     gap_window: int = 40
     symbol_prefixes: tuple[str, ...] | None = ("XAUUSD",)  # None disables the check
+    # Optional broker-local trading sessions. When configured, only missing M15
+    # candles that overlap an open session count toward the recent-gap safety limit.
+    # Entries are (weekday, open_hour, open_minute, close_hour, close_minute), Monday=0.
+    session_timezone: str | None = None
+    session_hours: tuple[tuple[int, int, int, int, int], ...] | None = None
     # Indicators
     fast_ema: int = 20
     slow_ema: int = 50
@@ -127,6 +134,25 @@ class OpportunityConfig:
             raise ValueError("adx_ranging must be positive and not above adx_trending")
         if not 0.0 < self.atr_ratio_min < self.atr_ratio_max:
             raise ValueError("atr ratio bounds must satisfy 0 < min < max")
+        if (self.session_timezone is None) != (self.session_hours is None):
+            raise ValueError("session_timezone and session_hours must be configured together")
+        if self.session_hours is not None:
+            try:
+                ZoneInfo(self.session_timezone)
+            except (TypeError, ZoneInfoNotFoundError) as exc:
+                raise ValueError("session_timezone must be a valid IANA timezone") from exc
+            weekdays = set()
+            for entry in self.session_hours:
+                if len(entry) != 5:
+                    raise ValueError("session hours must be (weekday, open_hour, open_minute, close_hour, close_minute)")
+                weekday, open_hour, open_minute, close_hour, close_minute = entry
+                if weekday not in range(7) or weekday in weekdays:
+                    raise ValueError("session weekdays must be unique values from 0 to 6")
+                if not (0 <= open_hour <= 23 and 0 <= close_hour <= 23 and 0 <= open_minute <= 59 and 0 <= close_minute <= 59):
+                    raise ValueError("session hours must be valid clock values")
+                if (close_hour, close_minute) <= (open_hour, open_minute):
+                    raise ValueError("session close must be later than session open")
+                weekdays.add(weekday)
 
 
 @dataclass(frozen=True)
@@ -173,6 +199,48 @@ class _Regime:
 # Input validation
 # ---------------------------------------------------------------------------
 
+def _expected_session_bars_between(
+    previous_time: float,
+    next_time: float,
+    config: OpportunityConfig,
+    *,
+    bar_seconds: int = 900,
+) -> int:
+    """Count missing M15 candle opens that overlap configured broker sessions.
+
+    Timestamps are Unix instants. Session boundaries are interpreted in the
+    broker's IANA timezone, so DST transitions are handled by zoneinfo. A candle
+    is expected when its 15-minute interval overlaps an open session, including
+    the first partially-open candle (e.g. a 01:00 candle for a 01:02 session).
+    """
+    if config.session_timezone is None or config.session_hours is None:
+        raise ValueError("broker sessions are not configured")
+    zone = ZoneInfo(config.session_timezone)
+    schedule = {entry[0]: entry[1:] for entry in config.session_hours}
+    candidate = (int(previous_time // bar_seconds) + 1) * bar_seconds
+    next_utc = datetime.fromtimestamp(next_time, tz=timezone.utc)
+    missing = 0
+    while candidate < next_time:
+        candle_open_utc = datetime.fromtimestamp(candidate, tz=timezone.utc)
+        candle_close_utc = datetime.fromtimestamp(candidate + bar_seconds, tz=timezone.utc)
+        local_open = candle_open_utc.astimezone(zone)
+        session = schedule.get(local_open.weekday())
+        if session is not None:
+            open_hour, open_minute, close_hour, close_minute = session
+            local_session_open = datetime.combine(
+                local_open.date(), datetime_time(open_hour, open_minute), tzinfo=zone
+            )
+            local_session_close = datetime.combine(
+                local_open.date(), datetime_time(close_hour, close_minute), tzinfo=zone
+            )
+            session_open_utc = local_session_open.astimezone(timezone.utc)
+            session_close_utc = local_session_close.astimezone(timezone.utc)
+            if candle_open_utc < session_close_utc and candle_close_utc > session_open_utc:
+                missing += 1
+        candidate += bar_seconds
+    return missing
+
+
 def _time_out(value: float) -> int | float:
     return int(value) if float(value).is_integer() else value
 
@@ -213,8 +281,21 @@ def _parse_bars(raw: Any, config: OpportunityConfig) -> _Bars:
         close.append(c)
     gaps = [b - a for a, b in zip(times, times[1:])]
     interval = median(gaps)
-    recent = gaps[-config.gap_window:]
-    if recent and max(recent) > config.max_gap_intervals * interval:
+    recent_start = max(0, len(gaps) - config.gap_window)
+    recent = gaps[recent_start:]
+    if config.session_hours is not None:
+        session_gaps = [
+            _expected_session_bars_between(times[index], times[index + 1], config)
+            for index in range(recent_start, len(times) - 1)
+        ]
+        worst_missing = max(session_gaps, default=0)
+        if worst_missing > config.max_gap_intervals:
+            raise InvalidMarketData(
+                "DATA_GAP_IN_RECENT_BARS",
+                f"{worst_missing} expected M15 bars are missing during broker trading sessions "
+                f"in the last {len(recent)} intervals",
+            )
+    elif recent and max(recent) > config.max_gap_intervals * interval:
         raise InvalidMarketData(
             "DATA_GAP_IN_RECENT_BARS",
             f"a gap of {max(recent) / interval:.1f} bar intervals exists in the last {len(recent)} bars",
