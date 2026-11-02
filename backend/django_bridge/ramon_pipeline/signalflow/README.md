@@ -16,7 +16,7 @@ closed trade ─────► learning ──► validated, de-duplicated outc
 | File | Responsibility |
 | --- | --- |
 | `pipeline.py` | `SignalFlowPipeline.run(market, outcome=None)` – orchestration only |
-| `opportunities.py` | Regime (bullish / bearish / ranging / uncertain) + trend-following pullback setups, scored and explained |
+| `opportunities.py` | Regime (bullish / bearish / ranging / uncertain) + trend-following pullback and confirmed breakout/retest setups, scored and explained |
 | `entry_timing.py` | Is a *quote-level* entry acceptable now? freshness, invalidation, chasing, spread |
 | `risk_management.py` | Structural stop placement and position size; account guards |
 | `learning.py` | Outcome validation, optional storage, leak-safe statistics, advisory findings |
@@ -25,6 +25,8 @@ closed trade ─────► learning ──► validated, de-duplicated outc
 | `tests/` | One test module per stage plus `test_pipeline.py` and `test_common.py` |
 
 Import from the package: `from ramon_pipeline.signalflow import SignalFlowPipeline, OpportunityDetector, ...`.
+The structural detector supports two independent setup shapes inside the same confirmed directional regime: (1) a trend pullback into the EMA value zone with a confirmed resumption, and (2) a breakout beyond the preceding range, a later retest that holds the breakout level, and a completed continuation candle beyond the retest extreme. The breakout range excludes the breakout candle; the retest and confirmation must be completed candles. Both setup types emit the same structural `setup` contract and proceed through the unchanged Entry Timing and Risk Management stages. The breakout path does not bypass account guards, command authorization, or execution controls. Its defaults (`breakout_lookback=20`, `breakout_buffer_atr=0.10`, `breakout_retest_tolerance_atr=0.25`, `breakout_max_retest_bars=3`) are starting priors, not profitability claims; validate with chronological replay and demo forward testing.
+
 The older shims `ramon_pipeline.arima` / `ramon_pipeline.sarima` and the Redis stream code in
 `ramon_pipeline/pipeline.py` are unrelated to this package and unchanged.
 
