@@ -143,6 +143,14 @@ jobs:
             echo "FAIL: production EA must report whether broker-day history is complete." >&2
             exit 1
           }
+          grep -Fq 'DEAL_TYPE_CREDIT' "$production_source" || {
+            echo "FAIL: opening-balance calculation must exclude credit-only ledger entries." >&2
+            exit 1
+          }
+          grep -Fq 'balance_before' "$production_source" || {
+            echo "FAIL: opening-balance calculation must reject a changing balance snapshot." >&2
+            exit 1
+          }
           if grep -Fq 'long server_utc_offset=(long)(server_now-utc_now);' "$production_source"; then
             echo "FAIL: production EA still uses the jitter-prone raw clock difference." >&2
             exit 1
