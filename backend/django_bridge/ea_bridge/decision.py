@@ -179,6 +179,7 @@ def decision(request):
         server_daily_loss_percent = None
         daily_baseline_day = ""
         daily_baseline_balance = None
+        daily_baseline_capture_method = ""
         daily_current_equity = None
         account_snapshot_balance = None
 
@@ -241,6 +242,7 @@ def decision(request):
                         else:
                             daily_baseline_day = broker_day.isoformat()
                             daily_baseline_balance = float(baseline.opening_balance)
+                            daily_baseline_capture_method = baseline.capture_method
                             # Equity drawdown from the server-recorded opening balance
                             # includes both realized and current floating losses.
                             server_daily_loss_percent = max(
@@ -310,6 +312,7 @@ def decision(request):
             "baseline_available": server_daily_loss_percent is not None,
             "broker_day": daily_baseline_day,
             "opening_balance": daily_baseline_balance,
+            "capture_method": daily_baseline_capture_method,
             "current_equity": daily_current_equity,
             "loss_percent": server_daily_loss_percent,
             "source": "SERVER_BASELINE_EQUITY_DRAWDOWN" if server_daily_loss_percent is not None else "UNAVAILABLE_FAIL_CLOSED",
@@ -390,6 +393,7 @@ def decision(request):
                 "account_state_reason": account_state_reason,
                 "daily_baseline_day": daily_baseline_day,
                 "daily_baseline_balance": daily_baseline_balance,
+                "daily_baseline_capture_method": daily_baseline_capture_method,
                 "server_daily_loss_percent": server_daily_loss_percent,
                 "risk_stage": risk_stage,
             },
