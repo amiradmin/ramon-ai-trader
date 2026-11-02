@@ -185,7 +185,7 @@
 
 <section class="flow-shell" aria-labelledby="flowTitle">
   <div class="flow-head"><div><h2 id="flowTitle">Decision process flow</h2><p>Follow the actual Django evaluation from market opportunity to execution boundary.</p></div>
-    <div class="flow-legend"><span style="color:var(--green)"><i></i>PASS</span><span style="color:var(--amber)"><i></i>WAIT</span><span style="color:var(--red)"><i></i>BLOCKED</span><span><i></i>NOT REACHED</span></div>
+    <div class="flow-legend"><span style="color:var(--green)"><i></i>PASS</span><span style="color:var(--amber)"><i></i>WAIT</span><span style="color:var(--red)"><i></i>BLOCKED</span><span><i></i>UPCOMING</span></div>
   </div>
   <div class="card">
     <div id="decisionFlow" class="flow-grid" aria-live="polite"><div class="small">Waiting for the latest Django decision…</div></div>
@@ -493,12 +493,13 @@ function flowCheckMarkup(check, state, displayName, stageResult, decision, stage
     '<p>' + esc(detail) + '</p>' + flowMetricsMarkup(check.metrics) +
     flowCheckCalculationMarkup(check, css, stageResult, decision, stageName) + '</div><em>' + tag + '</em></div>';
 }
-function flowStageMarkup(title, stageResult, checks, fallback, forcedState, decision, stageName) {
-  const state = forcedState || stageState(stageResult);
+function flowStageMarkup(title, stageResult, checks, fallback, forcedState, decision, stageName, upcoming = false) {
+  const state = upcoming ? "idle" : (forcedState || stageState(stageResult));
+  const visibleChecks = upcoming ? checks.map(check => ({...check, notReached: true})) : checks;
   const stateLabel = state === "pass" ? "PASSED" : state === "wait" ? "WAITING" :
     state === "blocked" ? "BLOCKED" : "UPCOMING";
-  const checkMarkup = checks.length
-    ? checks.map(item => flowCheckMarkup(item, flowCheckState(item, stageResult), item.displayName || item.display_name,
+  const checkMarkup = visibleChecks.length
+    ? visibleChecks.map(item => flowCheckMarkup(item, upcoming ? "idle" : flowCheckState(item, stageResult), item.displayName || item.display_name,
       stageResult, decision, stageName)).join("")
     : '<div class="flow-check ' + state + '"><span class="flow-check-dot"></span><div><strong>' +
       esc(fallback || "No checks returned") + '</strong><p>' +
@@ -640,8 +641,14 @@ function renderDecisionFlow(decision, execution = {}) {
     [...flow.querySelectorAll(".flow-check-details[open]")].map(node => node.dataset.checkKey)
   );
   const stages = decisionStageEntries(decision);
+  const stageResults = Object.fromEntries(stages);
+  const opportunityApproved = stageResults.opportunities?.approved === true;
+  const entryApproved = stageResults.entry_timing?.approved === true;
   const stageMarkup = stages.map(([name, result], index) => {
     const title = result.title || result.display_name || prettyCheck(name);
+    // Downstream cards remain fully visible, but visually inactive until every upstream gate passes.
+    const upstreamPending = name === "entry_timing" ? !opportunityApproved :
+      name === "risk_management" ? !(opportunityApproved && entryApproved) : false;
     return flowStageMarkup(
       String(index + 1).padStart(2, "0") + " · " + title,
       result,
@@ -649,7 +656,8 @@ function renderDecisionFlow(decision, execution = {}) {
       title + " did not return individual checks.",
       undefined,
       decision,
-      name
+      name,
+      upstreamPending
     );
   }).join("");
 
