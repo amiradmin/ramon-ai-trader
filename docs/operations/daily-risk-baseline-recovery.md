@@ -24,10 +24,12 @@ On each telemetry cycle, the EA selects broker deal history from broker-local mi
 
 ```text
 opening balance = current account balance
-                - sum(deal profit + swap + commission + fee)
+                - sum(balance-affecting deal profit + swap + commission + fee)
+
+Credit-only ledger entries are excluded because they do not change ACCOUNT_BALANCE.
 ```
 
-The EA marks history complete only when history selection and every required deal-property read succeeds and the resulting opening balance is finite and positive. Django validates the explicit completeness flag, amount, and deal count before creating an immutable `BROKER_HISTORY_DERIVED` baseline. This allows first-time attachment after midnight and does not depend on observing the rollover.
+The EA marks history complete only when history selection and every required deal-property read succeeds, the account balance remains unchanged while history is read, and the resulting opening balance is finite and positive. Django validates the explicit completeness flag, amount, and deal count before creating an immutable `BROKER_HISTORY_DERIVED` baseline. This allows first-time attachment after midnight and does not depend on observing the rollover.
 
 If broker history is unavailable or invalid, the EA sends telemetry without a complete-history assertion. Django retains the existing continuous-rollover fallback (same account/server, consecutive broker dates, and no more than 90 seconds between observations). Otherwise no baseline is created and decisions remain `WAIT`.
 
