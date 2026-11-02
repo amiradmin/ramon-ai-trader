@@ -777,6 +777,8 @@ async function refresh() {
       $("decisionFlow").innerHTML = '<div class="small">No saved decision stages are available yet.</div>';
       $("flowSummary").className = "flow-summary";
       $("flowSummary").textContent = "Waiting for the first Django decision.";
+      renderDecisionFlow(null, data.execution || {});
+      renderDecisionVariableGuide(null, data.execution || {});
       $("statEntryQuality").textContent = "Unavailable";
       $("statRisk").textContent = "Unavailable";
       ["riskBudget", "dailyLossLimit", "rrGate", "stopRequired", "spreadStatus", "newsGuard", "duplicateCheck"]
