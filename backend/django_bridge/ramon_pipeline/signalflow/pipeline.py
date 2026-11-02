@@ -61,7 +61,6 @@ _CALCULATION_RULES = {
         "daily_loss": "When server-derived daily_loss_percent is supplied, pass only when daily_loss_percent < max_daily_loss_percent; otherwise this guard is explicitly skipped.",
         "portfolio_risk": "Available headroom = max_total_risk_percent − open_risk_percent. When open_risk_percent is supplied, require headroom > 0 and cap this trade's risk percent to headroom; otherwise this guard is explicitly skipped.",
         "sizing": "Effective risk percent = min(requested risk percent, maximum_risk_percent, available portfolio headroom when supplied). Risk budget = account balance × effective risk percent / 100. Raw lots = risk budget / (stop points × point value per lot); cap at max_volume, round down to volume_step, and reject if below min_volume. Estimated risk = rounded lots × stop points × point value per lot and must not exceed budget.",
-        "invalid_opportunity_setup": "Require an approved BUY/SELL opportunity with finite positive ATR, invalidation price, reference price and symbol point; invalidation must be on the protective side of the reference price.",
         "missing_or_invalid_risk_input": "All required account, volume, stop and symbol inputs must be present and numeric.",
         "non_finite_risk_input": "All required account, volume, stop and symbol inputs must be finite numbers.",
         "non_positive_or_inconsistent_risk_input": "Balance, requested risk percent, stop distance, point value, volume step and minimum volume must be positive; maximum volume must be >= minimum volume.",
