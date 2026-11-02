@@ -1,8 +1,7 @@
 """Authenticated command polling and acknowledgement endpoints.
 
-No endpoint creates a trade command. Command creation must be wired to an
-explicitly approved strategy + risk-verdict path in a later integration step.
-Execution is disabled unless RAMON_EA_COMMAND_EXECUTION_ENABLED is true.
+Commands are created only by the explicitly gated strategy + risk-verdict path.
+Delivery requires both command-creation and command-execution feature flags.
 """
 import json
 from datetime import date
@@ -172,7 +171,6 @@ def next_command(request):
                     state=EACommand.State.PENDING,
                     expires_at__gt=now,
                     execution_authorized=True,
-                    symbol=symbol,
                 )
                 .order_by("created_at")
                 .first()
