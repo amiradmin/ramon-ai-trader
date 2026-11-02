@@ -107,15 +107,28 @@ class RiskManager:
         entry: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         if not upstream_approved:
-            return self._reject(REJECTED, "UPSTREAM_STAGE_REJECTED", "an earlier stage did not approve this trade", [])
-        checks: list[dict[str, Any]] = []
-        if not isinstance(market, Mapping):
-            return self._reject(REJECTED, "MISSING_OR_INVALID_RISK_INPUT", "market snapshot must be a mapping", checks)
-        try:
-            return self._size(market, opportunity, entry, checks)
-        except _Reject as exc:
-            checks.append({"name": exc.reason.lower(), "passed": False, "detail": exc.detail})
-            return self._reject(exc.status, exc.reason, exc.detail, checks, **exc.fields)
+            result = self._reject(REJECTED, "UPSTREAM_STAGE_REJECTED", "an earlier stage did not approve this trade", [])
+        elif not isinstance(market, Mapping):
+            result = self._reject(REJECTED, "MISSING_OR_INVALID_RISK_INPUT", "market snapshot must be a mapping", [])
+        else:
+            checks: list[dict[str, Any]] = []
+            try:
+                result = self._size(market, opportunity, entry, checks)
+            except _Reject as exc:
+                checks.append({"name": exc.reason.lower(), "passed": False, "detail": exc.detail})
+                result = self._reject(exc.status, exc.reason, exc.detail, checks, **exc.fields)
+
+        # Keep the dashboard, audit trail and risk verdict on the same policy values.
+        result["thresholds"] = {
+            "maximum_risk_percent": self.maximum_risk_percent,
+            "stop_buffer_atr": self.config.stop_buffer_atr,
+            "min_stop_atr": self.config.min_stop_atr,
+            "max_stop_atr": self.config.max_stop_atr,
+            "min_reward_risk": self.config.min_reward_risk,
+            "max_total_risk_percent": self.config.max_total_risk_percent,
+            "max_daily_loss_percent": self.config.max_daily_loss_percent,
+        }
+        return result
 
     @staticmethod
     def _reject(status: str, reason: str, detail: str, checks: list[dict[str, Any]], **fields: Any) -> dict[str, Any]:
