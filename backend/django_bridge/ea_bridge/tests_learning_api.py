@@ -44,7 +44,7 @@ class LearningOutcomeApiTests(TestCase):
         StrategyDecisionRecord.objects.create(
             decision_id="decision-ticket-001", symbol="XAUUSD_o", action="BUY",
             confidence=0.75, rationale_code="SIGNALFLOW_APPROVED",
-            model_version="test-v1", features={"regime": "BULLISH"},
+            model_version="test-v1", features={"strategy_profile": "BALANCED", "stages": {"opportunities": {"regime": {"label": "BULLISH"}, "setup": {"type": "PULLBACK"}, "signal_id": "signal-001", "score": 0.82, "reason": "OPPORTUNITY_FOUND_WITH_FORECAST_CONFIRMATION"}}},
         )
         EACommand.objects.create(
             command_id="ramon-open-" + "a" * 32,
