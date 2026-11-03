@@ -158,6 +158,14 @@ jobs:
             exit 1
           fi
 
+          grep -Fq 'PollLearningOutcomes();' "$production_source"
+          grep -Fq 'HistorySelectByPosition(position_id)' "$production_source"
+          grep -Fq 'GlobalVariablesFlush();' "$production_source"
+          grep -Fq 'DEAL_FEE' "$production_source"
+          grep -Fq 'PostJson("/learning/outcomes"' "$production_source"
+          grep -Fq 'broker_ticket' "$production_source"
+          grep -Fq 'RamonCommandEA v1.06' "$production_source"
+
           echo "Static safety contract passed. This does not replace MetaEditor compilation or demo validation."
 
   compile-mql5:
