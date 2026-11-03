@@ -7,7 +7,8 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 from .auth import BearerTokenRequired
 from django.utils import timezone
-from .models import AccountDailyBaseline, StrategyDecisionRecord, EAHeartbeat, RiskVerdictRecord
+from .models import AccountDailyBaseline, StrategyDecisionRecord, EAHeartbeat, RiskVerdictRecord, DecisionThresholdConfig
+from .thresholds import defaults_for
 
 logger = logging.getLogger(__name__)
 import threading
@@ -25,63 +26,46 @@ _SIGNAL_MEMORY_LOCK = threading.Lock()
 
 
 def _build_pipeline(*, demo_mode=False):
-    """Build the SignalFlow pipeline for one request.
+    """Build the Django-owned pipeline from persisted profile-specific thresholds.
 
-    The expanded opportunity profile is selected only from explicit broker telemetry
-    identifying an MT5 demo account. It relaxes discovery and entry-quality thresholds,
-    never the directional structure, closed-bar, quote, account, or risk guards.
-
-    Always on (fail-closed, no change to decisions for a well-formed request): the closed-bar
-    flag must be explicitly True, the signal time must be known for the freshness check, and a
-    structural stop never silently falls back to a caller-supplied stop.
-    Opt-in via settings (default off, so live behaviour is unchanged until you enable them):
-      RAMON_DEDUPE_SIGNALS, RAMON_USE_COMPUTED_ENTRY_QUALITY,
-      RAMON_SHORT_STOP_SPREAD_ADJUST, RAMON_IMPULSE_START_MODE.
+    Only strategy tuning values are editable. Account risk ceilings, daily-loss
+    protections, structural validation, quote requirements and execution guards
+    remain code-owned hard protections.
     """
     def opt(name, default):
         return getattr(settings, name, default)
 
     dedupe = bool(opt("RAMON_DEDUPE_SIGNALS", False))
-    # Expanded discovery is opt-out for demo accounts; "standard" restores live thresholds.
-    # This profile changes candidate discovery/entry quality only, never account or risk guards.
     relaxed = (
         bool(demo_mode)
         and str(opt("RAMON_DEMO_PROFILE", "expanded")).strip().lower() != "standard"
     )
-    opportunity_profile = ({
-        "adx_trending": 10.0,
-        "adx_ranging": 8.0,
-        "min_ema_separation_atr": 0.06,
-        "support_tolerance_atr": 1.00,
-        "min_impulse_atr": 0.80,
-        "min_retracement": 0.05,
-        "max_retracement": 0.95,
-        "zone_tolerance_atr": 0.90,
-        "max_bars_since_pullback_low": 16,
-        "rsi_overbought": 85.0,
-        "breakout_lookback": 12,
-        "breakout_buffer_atr": 0.00,
-        "breakout_retest_tolerance_atr": 0.50,
-        "breakout_max_retest_bars": 6,
-    } if relaxed else {})
-    entry_profile = ({
-        "max_signal_age_bars": 1.5,
-        "max_chase_atr": 0.85,
-        "min_risk_room_atr": 0.15,
-        "max_spread_atr": 0.30,
-        "max_spread_to_risk": 0.40,
-    } if relaxed else {})
+    profile = "demo" if relaxed else "standard"
+    threshold_values = defaults_for(profile)
+    saved = DecisionThresholdConfig.objects.filter(profile=profile).first()
+    if saved and isinstance(saved.values, dict):
+        for group, updates in saved.values.items():
+            if group in threshold_values and isinstance(updates, dict):
+                threshold_values[group].update({
+                    key: value for key, value in updates.items()
+                    if key in threshold_values[group]
+                })
+
+    opportunity_values = dict(threshold_values["opportunities"])
+    minimum_score = float(opportunity_values.pop("minimum_score"))
+    entry_values = dict(threshold_values["entry_timing"])
+    minimum_quality = float(entry_values.pop("minimum_quality"))
+    maximum_spread_points = float(entry_values.pop("maximum_spread_points"))
+    risk_values = dict(threshold_values["risk_management"])
+
     detector = OpportunityDetector(
-        minimum_score=0.42 if relaxed else 0.55,
+        minimum_score=minimum_score,
         demo_mode=demo_mode,
         config=OpportunityConfig(
-            **opportunity_profile,
+            **opportunity_values,
             require_closed_flag=True,
             impulse_start_mode=opt("RAMON_IMPULSE_START_MODE", "LAST_SWING_LOW"),
-            # LiteFinance publishes XAUUSD sessions in broker-server time:
-            # Mon 01:06-23:59, Tue-Fri 01:02-23:59, closed Sat/Sun.
-            # Europe/Helsinki tracks the broker's UTC+2/UTC+3 server clock.
-            # Keep this configurable for broker schedule/DST changes.
+            # LiteFinance publishes XAUUSD sessions in broker-server time.
             session_timezone=opt("RAMON_MARKET_SESSION_TIMEZONE", "Europe/Helsinki"),
             session_hours=opt(
                 "RAMON_MARKET_SESSION_HOURS",
@@ -98,17 +82,18 @@ def _build_pipeline(*, demo_mode=False):
         accepted_lock=_SIGNAL_MEMORY_LOCK if dedupe else None,
     )
     timer = EntryTimer(
-        minimum_quality=0.42 if relaxed else 0.55,
-        maximum_spread_points=100.0 if relaxed else 80.0,
+        minimum_quality=minimum_quality,
+        maximum_spread_points=maximum_spread_points,
         require_quote=True,
         config=EntryTimingConfig(
-            **entry_profile,
+            **entry_values,
             require_signal_time=True,
             ignore_supplied_quality=bool(opt("RAMON_USE_COMPUTED_ENTRY_QUALITY", False)),
         ),
     )
     risk = RiskManager(
         config=RiskConfig(
+            **risk_values,
             strict_structural=True,
             short_stop_spread_adjust=bool(opt("RAMON_SHORT_STOP_SPREAD_ADJUST", False)),
         )
