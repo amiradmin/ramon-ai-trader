@@ -120,6 +120,23 @@
 .flow-summary.blocked{border-color:var(--red);color:var(--red)}
 .flow-summary.pass{border-color:#286b55;color:var(--green)}
 .flow-note{font-size:10px;color:var(--muted);margin-top:9px}
+
+.threshold-editor{margin-top:11px;padding:9px;border:1px solid #30435b;border-radius:9px;background:#101a27}
+.threshold-editor-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px}
+.threshold-editor-head strong{font-size:9px;letter-spacing:.4px;text-transform:uppercase;color:#b8c6d8}
+.threshold-editor-grid{display:grid;gap:7px}
+.threshold-row{display:grid;grid-template-columns:minmax(0,1fr) 94px;gap:8px;align-items:center;padding:6px 7px;border:1px solid #26364a;border-radius:7px;background:#0c1420}
+.threshold-row label{font-size:9px;color:#dce8f8;cursor:help}
+.threshold-row small{display:block;color:var(--muted);font-size:8px;margin-top:2px;line-height:1.4}
+.threshold-row input{width:100%;min-width:0;background:#080f18;color:#fff;border:1px solid #40536d;border-radius:6px;padding:7px;font:11px ui-monospace,monospace}
+.threshold-row input:focus{outline:2px solid rgba(126,170,255,.45);border-color:var(--blue)}
+.threshold-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}
+.threshold-actions button{border:1px solid #40536d;border-radius:6px;background:#17263a;color:#dce8f8;padding:6px 9px;font-size:9px;font-weight:800;cursor:pointer}
+.threshold-actions button.primary{background:#24466b;border-color:#4f80b9}
+.threshold-actions button:disabled{opacity:.5;cursor:wait}
+.threshold-status{font-size:9px;color:var(--muted);margin-top:6px;min-height:13px}
+.threshold-status.error{color:var(--red)}.threshold-status.success{color:var(--green)}
+
 @media(max-width:1050px){.flow-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.flow-stage:nth-child(2):after{display:none}}
 @media(max-width:620px){.flow-grid{grid-template-columns:1fr;gap:18px}.flow-stage:not(:last-child):after{content:"↓";right:auto;left:50%;top:auto;bottom:-19px;transform:translateX(-50%)}}
 @media(prefers-reduced-motion:reduce){.flow-stage.waiting,.flow-stage.blocked,.flow-state.wait,.flow-state.blocked,.flow-check.wait,.flow-check.blocked{animation:none;transform:none;opacity:1;filter:none}}
@@ -196,6 +213,7 @@
   </div>
   <div class="card">
     <div id="decisionFlow" class="flow-grid" aria-live="polite"><div class="small">Waiting for the latest Django decision…</div></div>
+    <div id="thresholdEditorStatus" class="threshold-status" role="status" aria-live="polite">Loading Django strategy thresholds…</div>
     <div id="flowSummary" class="flow-summary">Waiting for decision diagnostics…</div>
     <div class="flow-note">The diagram is read-only. A passed strategy pipeline is not broker authorization and does not mean an MT5 order was sent.</div>
     <details class="variable-guide" id="decisionVariableGuide">
@@ -547,6 +565,72 @@ function opportunityDetectorMarkup(stageResult) {
     card("Trend Pullback", pullbackState, pullbackLabel, pullbackDetail) +
     card("Breakout / Retest", breakoutState, breakoutLabel, breakoutDetail) + '</div>';
 }
+let thresholdConfig = null;
+let thresholdDraft = null;
+let thresholdExecution = {};
+function thresholdEditorMarkup(stageName) {
+  if (!thresholdConfig || !["opportunities","entry_timing","risk_management"].includes(stageName)) return "";
+  const group = thresholdConfig.groups.find(item => item.key === stageName);
+  if (!group) return "";
+  const values = thresholdDraft || thresholdConfig.values;
+  const rows = group.items.map(item => {
+    const value = values?.[stageName]?.[item.key] ?? item.value;
+    return '<div class="threshold-row"><label for="threshold-' + esc(stageName + "-" + item.key) +
+      '" title="' + esc(item.description) + '">' + esc(item.label) +
+      '<small>' + esc(item.description) + ' · ' + esc(item.unit) + '</small></label>' +
+      '<input type="number" id="threshold-' + esc(stageName + "-" + item.key) +
+      '" data-threshold-group="' + esc(stageName) + '" data-threshold-key="' + esc(item.key) +
+      '" min="' + esc(item.min) + '" max="' + esc(item.max) + '" step="' + esc(item.step) +
+      '" value="' + esc(value) + '" aria-label="' + esc(item.label + ", " + item.unit) + '"></div>';
+  }).join("");
+  return '<details class="threshold-editor"><summary class="threshold-editor-head"><strong>Edit ' +
+    esc(group.title) + ' thresholds</strong><span class="small">Django · ' + esc(thresholdConfig.profile.toUpperCase()) +
+    '</span></summary><div class="threshold-editor-grid">' + rows + '</div><div class="threshold-actions">' +
+    '<button type="button" class="primary" data-threshold-save="' + esc(stageName) + '">Save thresholds</button>' +
+    '<button type="button" data-threshold-reset="true">Reset profile defaults</button></div>' +
+    '<div class="threshold-status" data-threshold-status="' + esc(stageName) + '">Changes apply to the next Django decision.</div></details>';
+}
+async function loadDecisionThresholds() {
+  const response = await fetch("/api/ea/v1/decision-thresholds", {cache:"no-store"});
+  const data = await response.json();
+  if (!response.ok || !data.ok) throw new Error(data.error || "Could not load thresholds");
+  thresholdConfig = data;
+  thresholdDraft = JSON.parse(JSON.stringify(data.values));
+}
+async function saveDecisionThresholds(reset = false) {
+  const buttons = [...document.querySelectorAll("[data-threshold-save], [data-threshold-reset]")];
+  buttons.forEach(button => button.disabled = true);
+  const status = $("thresholdEditorStatus");
+  if (status) { status.className = "threshold-status"; status.textContent = reset ? "Restoring defaults…" : "Saving thresholds…"; }
+  try {
+    const response = await fetch("/api/ea/v1/decision-thresholds", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(reset ? {action:"reset"} : {values:thresholdDraft})
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || "Threshold update failed");
+    thresholdConfig = data;
+    thresholdDraft = JSON.parse(JSON.stringify(data.values));
+    if (status) { status.className = "threshold-status success"; status.textContent = reset ? "Defaults restored. The next decision will use them." : "Saved in Django. The next decision cycle will use these values."; }
+    if (window.latestLearningDecision) renderDecisionFlow(window.latestLearningDecision, thresholdExecution);
+  } catch (error) {
+    if (status) { status.className = "threshold-status error"; status.textContent = error.message; }
+  } finally {
+    buttons.forEach(button => button.disabled = false);
+  }
+}
+document.addEventListener("input", event => {
+  const input = event.target.closest("[data-threshold-group][data-threshold-key]");
+  if (!input || !thresholdDraft) return;
+  const value = Number(input.value);
+  if (Number.isFinite(value)) thresholdDraft[input.dataset.thresholdGroup][input.dataset.thresholdKey] = value;
+});
+document.addEventListener("click", event => {
+  const save = event.target.closest("[data-threshold-save]");
+  const reset = event.target.closest("[data-threshold-reset]");
+  if (save) saveDecisionThresholds(false);
+  if (reset) saveDecisionThresholds(true);
+});
 function flowStageMarkup(title, stageResult, checks, fallback, forcedState, decision, stageName, upcoming = false) {
   const state = upcoming ? "idle" : (forcedState || stageState(stageResult));
   const visibleChecks = upcoming ? checks.map(check => ({...check, notReached: true})) : checks;
@@ -563,7 +647,7 @@ function flowStageMarkup(title, stageResult, checks, fallback, forcedState, deci
     '<div class="flow-stage-head"><div class="flow-stage-title">' + esc(title) + '</div><span class="flow-state ' +
     state + '">' + stateLabel + '</span></div>' +
     (stageName === "opportunities" ? opportunityDetectorMarkup(stageResult) : "") +
-    '<div class="flow-checks">' + checkMarkup + '</div></section>';
+    '<div class="flow-checks">' + checkMarkup + '</div>' + thresholdEditorMarkup(stageName) + '</section>';
 }
 function collectFlowVariables(source, prefix = "", depth = 0, output = []) {
   if (!source || typeof source !== "object" || Array.isArray(source) || depth > 2) return output;
@@ -696,6 +780,7 @@ function renderDecisionFlow(decision, execution = {}) {
   const openDetails = new Set(
     [...flow.querySelectorAll(".flow-check-details[open]")].map(node => node.dataset.checkKey)
   );
+  thresholdExecution = execution;
   const stages = decisionStageEntries(decision);
   const stageResults = Object.fromEntries(stages);
   const opportunityApproved = stageResults.opportunities?.approved === true;
@@ -1005,7 +1090,7 @@ async function refresh() {
     $("status").innerHTML = `<span class="negative">Could not load decision data: ${esc(error.message)}</span>`;
   }
 }
-refresh();
+loadDecisionThresholds().then(() => refresh()).catch(error => { const status = $("thresholdEditorStatus"); if (status) { status.className = "threshold-status error"; status.textContent = error.message; } refresh(); });
 setInterval(refresh, 10000);
 </script>
 </body>
