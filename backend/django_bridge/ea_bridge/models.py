@@ -176,3 +176,52 @@ class DecisionThresholdConfig(models.Model):
 
     class Meta:
         ordering = ["profile"]
+
+
+class LearningTradeOutcome(models.Model):
+    """Immutable, idempotently ingested closed-trade outcome used by assisted learning."""
+    trade_id = models.CharField(max_length=128, unique=True)
+    decision_id = models.CharField(max_length=128, blank=True, default="", db_index=True)
+    instance_id = models.CharField(max_length=128, blank=True, default="", db_index=True)
+    account_login = models.CharField(max_length=32, blank=True, default="")
+    symbol = models.CharField(max_length=32, blank=True, default="", db_index=True)
+    realized_pnl = models.DecimalField(max_digits=24, decimal_places=8)
+    risk_amount = models.DecimalField(max_digits=24, decimal_places=8, null=True, blank=True)
+    r_multiple = models.DecimalField(max_digits=18, decimal_places=8, null=True, blank=True)
+    opened_at = models.DateTimeField(null=True, blank=True)
+    closed_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    tags = models.JSONField(default=dict, blank=True)
+    execution_metrics = models.JSONField(default=dict, blank=True)
+    decision_snapshot = models.JSONField(default=dict, blank=True)
+    received_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-closed_at", "-received_at"]
+        indexes = [
+            models.Index(fields=["symbol", "-closed_at"], name="learn_out_symbol_close_idx"),
+            models.Index(fields=["decision_id"], name="learn_out_decision_idx"),
+        ]
+
+
+class LearningRecommendation(models.Model):
+    """Human-reviewed learning hypothesis. Acceptance only authorizes a backtest."""
+    class Status(models.TextChoices):
+        OPEN = "OPEN", "Open"
+        ACCEPTED_FOR_BACKTEST = "ACCEPTED_FOR_BACKTEST", "Accepted for backtest"
+        REJECTED = "REJECTED", "Rejected"
+
+    fingerprint = models.CharField(max_length=64, unique=True)
+    finding_code = models.CharField(max_length=96, db_index=True)
+    severity = models.CharField(max_length=16, default="INFO")
+    title = models.CharField(max_length=180)
+    detail = models.TextField()
+    evidence = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=32, choices=Status.choices, default=Status.OPEN, db_index=True)
+    reviewer = models.CharField(max_length=150, blank=True, default="")
+    review_note = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["status", "-created_at"], name="learn_reco_status_idx")]
