@@ -54,6 +54,23 @@ class DjangoOutcomeStore:
                     "features": decision.features if isinstance(decision.features, dict) else {},
                     "created_at": decision.created_at.isoformat() if decision.created_at else None,
                 }
+                features = snapshot["features"]
+                stages = features.get("stages") if isinstance(features.get("stages"), dict) else {}
+                opportunity = stages.get("opportunities") if isinstance(stages.get("opportunities"), dict) else {}
+                regime = opportunity.get("regime") if isinstance(opportunity.get("regime"), dict) else {}
+                setup = opportunity.get("setup") if isinstance(opportunity.get("setup"), dict) else {}
+                derived_tags = {
+                    "regime": regime.get("label"),
+                    "setup_type": setup.get("type"),
+                    "signal_id": opportunity.get("signal_id"),
+                    "score": opportunity.get("score"),
+                    "strategy_profile": features.get("strategy_profile"),
+                    "model_version": snapshot.get("model_version"),
+                    "forecast_confirmed": opportunity.get("reason") == "OPPORTUNITY_FOUND_WITH_FORECAST_CONFIRMATION",
+                }
+                for key, value in derived_tags.items():
+                    if value is not None and key not in tags:
+                        tags[key] = value
         try:
             with transaction.atomic():
                 LearningTradeOutcome.objects.create(
