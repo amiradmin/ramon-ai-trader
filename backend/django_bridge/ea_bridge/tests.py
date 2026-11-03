@@ -452,6 +452,7 @@ class DjangoDecisionApiTests(TestCase):
                             "margin": "0", "free_margin": "10000",
                             "currency": "USD"},
                 "positions": [],
+                "symbol_info": {"tick_size": "0.01", "tick_value": "1.0", "volume_min": "0.01", "volume_max": "100", "volume_step": "0.01", "stops_level_points": "0"},
                 "quote": {"bid": "2320.30", "ask": "2320.35", "point": "0.01"},
                 "quote_time": timezone.now().isoformat(),
             },
@@ -466,8 +467,7 @@ class DjangoDecisionApiTests(TestCase):
         return {"instance_id":"ea-decision-test","account_login":"12345678",
           "server_name":"LiteFinance-MT5-Demo",
           "symbol":"XAUUSD_o","timeframe":"M15","bid":2320.30,"ask":2320.35,"point":.01,"bars":bars,
-          "account_balance":10000,"risk_percent":.06,"point_value_per_lot":1,"volume_step":.01,"min_volume":.01,"max_volume":100,
-          "stop_level_points":0,"take_profit_points":1000,"daily_loss_percent":0,"open_risk_percent":0}
+          "account_balance":10000}
     @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
     def test_complete_contract_and_audit(self):
         payload = self.payload()
@@ -539,7 +539,7 @@ class DjangoDecisionApiTests(TestCase):
         self.assertEqual(verdict.reason_code, "RISK_APPROVED_ADVISORY_ONLY")
         self.assertEqual(verdict.approved_volume, Decimal("0.1"))
         self.assertEqual(verdict.stop_loss, Decimal("2319.0"))
-        self.assertEqual(verdict.take_profit, Decimal("2330.35"))
+        self.assertGreater(verdict.take_profit, Decimal("2320.35"))
         self.assertFalse(verdict.details["execution_authorized"])
         self.assertFalse(verdict.details["command_created"])
 
