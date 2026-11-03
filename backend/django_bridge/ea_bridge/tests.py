@@ -945,6 +945,81 @@ class CommandPollingTests(TestCase):
         self.assertIsNone(response.json()["command"])
         self.assertFalse(response.json()["trading_authorization"])
 
+    @override_settings(
+        EA_BEARER_TOKEN="test-token",
+        RAMON_EA_COMMAND_EXECUTION_ENABLED=True,
+        RAMON_EA_HEARTBEAT_MAX_AGE_SECONDS=90,
+    )
+    def test_next_command_blocks_stale_heartbeat(self):
+        heartbeat = EAHeartbeat.objects.create(
+            instance_id="command-poll-ea",
+            account_login="12345678",
+            server_name="LiteFinance-MT5-Demo",
+            symbol="XAUUSD_o",
+            status="TELEMETRY_OK",
+            terminal_connected=True,
+            trade_allowed=True,
+            payload={"server_name": "LiteFinance-MT5-Demo", "account_trade_mode": 0},
+        )
+        EAHeartbeat.objects.filter(pk=heartbeat.pk).update(
+            last_seen=timezone.now() - timedelta(seconds=120)
+        )
+        EACommand.objects.create(
+            command_id="ramon-open-stale-heartbeat",
+            instance_id="command-poll-ea",
+            account_login="12345678",
+            symbol="XAUUSD_o",
+            action=EACommand.Action.OPEN,
+            payload={"side": "BUY", "volume": 0.01},
+            execution_authorized=True,
+            expires_at=timezone.now() + timedelta(seconds=60),
+        )
+        response = self.client.post(
+            self.url,
+            data=json.dumps({"instance_id": "command-poll-ea", "account_login": "12345678"}),
+            content_type="application/json",
+            **self.headers,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["command"])
+        self.assertEqual(response.json()["authorization_reason"], "HEARTBEAT_STALE")
+
+    @override_settings(
+        EA_BEARER_TOKEN="test-token",
+        RAMON_EA_COMMAND_EXECUTION_ENABLED=True,
+    )
+    def test_next_command_blocks_non_demo_heartbeat(self):
+        EAHeartbeat.objects.create(
+            instance_id="command-poll-ea",
+            account_login="12345678",
+            server_name="LiteFinance-MT5-Live",
+            symbol="XAUUSD_o",
+            status="TELEMETRY_OK",
+            terminal_connected=True,
+            trade_allowed=True,
+            payload={"server_name": "LiteFinance-MT5-Live", "account_trade_mode": 1},
+        )
+        EACommand.objects.create(
+            command_id="ramon-open-live-account",
+            instance_id="command-poll-ea",
+            account_login="12345678",
+            symbol="XAUUSD_o",
+            action=EACommand.Action.OPEN,
+            payload={"side": "BUY", "volume": 0.01},
+            execution_authorized=True,
+            expires_at=timezone.now() + timedelta(seconds=60),
+        )
+        response = self.client.post(
+            self.url,
+            data=json.dumps({"instance_id": "command-poll-ea", "account_login": "12345678"}),
+            content_type="application/json",
+            **self.headers,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["command"])
+        self.assertEqual(response.json()["authorization_reason"], "DEMO_ACCOUNT_REQUIRED")
+
+
 class DashboardDataTests(TestCase):
     url = "/api/ea/v1/dashboard-data"
 
