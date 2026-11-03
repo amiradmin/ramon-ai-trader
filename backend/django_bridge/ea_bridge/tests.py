@@ -5,9 +5,87 @@ from datetime import date, timedelta
 from unittest.mock import Mock, patch
 from django.test import TestCase, override_settings
 from django.utils import timezone
-from .models import AccountDailyBaseline, EACommand, EAEvent, EAHeartbeat, MarketBar, RiskVerdictRecord, StrategyDecisionRecord
+from .models import AccountDailyBaseline, EACommand, EAEvent, EAHeartbeat, MarketBar, RiskVerdictRecord, StrategyDecisionRecord, DecisionThresholdConfig
 from ramon_pipeline.management.commands.consume_ramon_streams import Command
 
+
+
+
+class DecisionThresholdConfigurationTests(TestCase):
+    url = "/api/ea/v1/decision-thresholds"
+
+    def setUp(self):
+        EAHeartbeat.objects.create(
+            instance_id="threshold-demo-ea",
+            account_login="demo-123",
+            server_name="LiteFinance-MT5-Demo",
+            payload={"account_trade_mode": "DEMO"},
+        )
+
+    def test_get_returns_editable_groups_for_telemetry_selected_demo_profile(self):
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["profile"], "demo")
+        groups = {group["key"]: group for group in data["groups"]}
+        volatility = {item["key"]: item for item in groups["opportunities"]["items"]}
+        self.assertEqual(volatility["atr_ratio_min"]["value"], 0.6)
+        self.assertEqual(volatility["atr_ratio_max"]["value"], 2.5)
+        self.assertIn("entry_timing", groups)
+        self.assertIn("risk_management", groups)
+
+    def test_saved_thresholds_are_applied_to_the_next_django_pipeline(self):
+        response = self.client.post(
+            self.url,
+            data=json.dumps({"values": {
+                "opportunities": {"atr_ratio_min": 0.75, "atr_ratio_max": 2.2},
+                "entry_timing": {"max_chase_atr": 0.7},
+                "risk_management": {"min_reward_risk": 1.5},
+            }}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        from .decision import _build_pipeline
+        pipeline = _build_pipeline(demo_mode=True)
+        self.assertEqual(pipeline.opportunities.config.atr_ratio_min, 0.75)
+        self.assertEqual(pipeline.opportunities.config.atr_ratio_max, 2.2)
+        self.assertEqual(pipeline.entry_timer.config.max_chase_atr, 0.7)
+        self.assertEqual(pipeline.risk_manager.config.min_reward_risk, 1.5)
+        # Editable tuning must not loosen account-level hard risk ceilings.
+        self.assertEqual(pipeline.risk_manager.maximum_risk_percent, 0.5)
+        self.assertEqual(pipeline.risk_manager.config.max_total_risk_percent, 2.0)
+        self.assertEqual(pipeline.risk_manager.config.max_daily_loss_percent, 3.0)
+
+    def test_rejects_invalid_or_non_strategy_thresholds(self):
+        response = self.client.post(
+            self.url,
+            data=json.dumps({"values": {
+                "opportunities": {"atr_ratio_min": 3.0, "atr_ratio_max": 2.0},
+            }}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        response = self.client.post(
+            self.url,
+            data=json.dumps({"values": {
+                "risk_management": {"max_daily_loss_percent": 99},
+            }}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_reset_restores_profile_defaults(self):
+        self.client.post(
+            self.url,
+            data=json.dumps({"values": {"opportunities": {"atr_ratio_min": 0.8}}}),
+            content_type="application/json",
+        )
+        response = self.client.post(
+            self.url, data=json.dumps({"action": "reset"}), content_type="application/json"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["values"]["opportunities"]["atr_ratio_min"], 0.6)
+        self.assertEqual(DecisionThresholdConfig.objects.get(profile="demo").values, {})
 
 class DemoOpportunityProfileTests(TestCase):
     def test_expanded_opportunity_profile_is_demo_only_and_keeps_risk_limits(self):
