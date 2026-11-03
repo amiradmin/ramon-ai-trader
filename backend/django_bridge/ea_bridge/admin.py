@@ -5,6 +5,8 @@ from django.contrib import admin
 from .models import (
     EAEvent,
     EAHeartbeat,
+    LearningRecommendation,
+    LearningTradeOutcome,
     MarketBar,
     OrderIntentRecord,
     RiskVerdictRecord,
@@ -181,6 +183,44 @@ class OrderIntentRecordAdmin(admin.ModelAdmin):
     readonly_fields = ("intent_id", "decision_id", "instance_id", "symbol", "side", "volume", "stop_loss", "take_profit", "state", "broker_ticket", "expires_at", "created_at", "updated_at")
     ordering = ("-created_at",)
     list_per_page = 50
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return True
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+
+@admin.register(LearningTradeOutcome)
+class LearningTradeOutcomeAdmin(admin.ModelAdmin):
+    list_display = ("closed_at", "trade_id", "decision_id", "symbol", "realized_pnl", "r_multiple", "instance_id")
+    list_filter = ("symbol", "closed_at")
+    search_fields = ("trade_id", "decision_id", "symbol", "instance_id", "account_login")
+    readonly_fields = tuple(field.name for field in LearningTradeOutcome._meta.fields)
+    ordering = ("-closed_at",)
+    list_per_page = 50
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return True
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(LearningRecommendation)
+class LearningRecommendationAdmin(admin.ModelAdmin):
+    list_display = ("created_at", "finding_code", "severity", "status", "title", "reviewer")
+    list_filter = ("status", "severity", "finding_code")
+    search_fields = ("finding_code", "title", "detail", "reviewer")
+    readonly_fields = tuple(field.name for field in LearningRecommendation._meta.fields)
+    ordering = ("-created_at",)
 
     def has_add_permission(self, request):
         return False
