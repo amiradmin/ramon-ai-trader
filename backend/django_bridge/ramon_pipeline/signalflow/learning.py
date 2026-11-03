@@ -36,7 +36,8 @@ from .common import InvalidMarketData, parse_timestamp
 _Z_OVERALL = 1.96  # ~95% two-sided
 _Z_SEGMENT = 2.58  # ~99%: stricter because many segments are compared
 _ALLOWED_SIDES = {"BUY", "SELL"}
-_TAG_KEYS = ("side", "regime", "exit_reason", "setup_type", "forecast_confirmed", "signal_id", "score")
+_TAG_KEYS = ("side", "regime", "exit_reason", "setup_type", "forecast_confirmed", "signal_id", "score", "decision_id", "symbol", "strategy_profile", "model_version", "entry_timing", "instance_id", "account_login")
+_METRIC_KEYS = ("mae", "mfe", "entry_efficiency", "exit_efficiency", "spread_points", "slippage_points", "commission", "swap")
 _SEGMENT_KEYS = ("side", "regime", "exit_reason")
 
 
@@ -194,7 +195,7 @@ class Learning:
 
     @staticmethod
     def _same_outcome(a: Mapping[str, Any], b: Mapping[str, Any]) -> bool:
-        keys = ("realized_pnl", "opened_at", "closed_at", "risk_amount", "tags")
+        keys = ("realized_pnl", "opened_at", "closed_at", "risk_amount", "tags", "execution_metrics")
         return all(a.get(k) == b.get(k) for k in keys)
 
     @staticmethod
@@ -228,6 +229,17 @@ class Learning:
             else:
                 value = str(value)
             tags[key] = value
+        execution_metrics: dict[str, float] = {}
+        for key in _METRIC_KEYS:
+            value = outcome.get(key)
+            if value is None:
+                continue
+            number = _finite(value, key)
+            if key in {"mae", "mfe", "entry_efficiency", "exit_efficiency", "spread_points", "slippage_points"} and number < 0:
+                raise _Invalid(f"{key} must be non-negative")
+            if key in {"entry_efficiency", "exit_efficiency"} and number > 1:
+                raise _Invalid(f"{key} must be between 0 and 1")
+            execution_metrics[key] = round(number, 8)
         return {
             "trade_id": trade_id,
             "realized_pnl": pnl,
@@ -236,6 +248,7 @@ class Learning:
             "risk_amount": risk_amount,
             "r_multiple": None if risk_amount is None else round(pnl / risk_amount, 6),
             "tags": tags,
+            "execution_metrics": execution_metrics,
         }
 
     # ------------------------------------------------------------------
