@@ -6,7 +6,7 @@ from django.http import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 from .auth import BearerTokenRequired
-from .models import EAEvent, EAHeartbeat, StrategyDecisionRecord
+from .models import EAEvent, EAHeartbeat, StrategyDecisionRecord, DecisionThresholdConfig
 
 log = logging.getLogger(__name__)
 
@@ -289,3 +289,41 @@ def dashboard_data(request):
         "decisions": decisions,
         "execution": _dashboard_execution_state(latest_symbol),
     })
+
+
+def _active_threshold_profile():
+    """Use broker telemetry to select demo vs standard thresholds; never trust the browser."""
+    heartbeat = EAHeartbeat.objects.order_by("-last_seen").first()
+    payload = heartbeat.payload if heartbeat and isinstance(heartbeat.payload, dict) else {}
+    trade_mode = payload.get("account_trade_mode")
+    is_demo = (
+        isinstance(trade_mode, str) and trade_mode.strip().upper() == "DEMO"
+    ) or (isinstance(trade_mode, int) and not isinstance(trade_mode, bool) and trade_mode == 0)
+    return "demo" if is_demo else "standard"
+
+
+@csrf_exempt
+def decision_thresholds(request):
+    """Read or update the active profile's editable Django strategy thresholds."""
+    from .thresholds import public_schema, validate_values
+
+    profile = _active_threshold_profile()
+    record, _ = DecisionThresholdConfig.objects.get_or_create(profile=profile)
+    if request.method == "GET":
+        return JsonResponse({"ok": True, **public_schema(profile, record.values)})
+    if request.method != "POST":
+        return JsonResponse({"ok": False, "error": "GET or POST required"}, status=405)
+    try:
+        payload = _body(request)
+        if payload.get("action") == "reset":
+            record.values = {}
+            record.save(update_fields=["values", "updated_at"])
+            return JsonResponse({"ok": True, "reset": True, **public_schema(profile, {})})
+        validated = validate_values(payload.get("values"), profile)
+        # Store the complete validated active profile, so a subsequent restart/worker
+        # cannot silently revert to constructor defaults.
+        record.values = validated
+        record.save(update_fields=["values", "updated_at"])
+        return JsonResponse({"ok": True, **public_schema(profile, record.values)})
+    except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return JsonResponse({"ok": False, "error": str(exc)}, status=400)
