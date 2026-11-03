@@ -53,3 +53,4 @@ class TradingConfigTests(TestCase):
         result = detect_additional_opportunity(times, opens, highs, lows, closes, atr, adx, rsi, [], [], "RANGING", setups)
         self.assertEqual(result["type"], "FAILED_BREAKOUT_SWEEP")
         self.assertEqual(result["side"], "SELL")
+        self.assertGreaterEqual(result["score"], 0.55)
