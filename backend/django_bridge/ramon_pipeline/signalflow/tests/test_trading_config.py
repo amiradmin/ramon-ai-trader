@@ -5,6 +5,8 @@ from unittest import TestCase
 
 from ramon_pipeline.signalflow.trading_config import load_trading_config
 from ramon_pipeline.signalflow.additional_setups import detect_additional_opportunity
+from ramon_pipeline.signalflow.entry_timing import EntryTimer
+from ramon_pipeline.signalflow.risk_management import RiskManager
 
 
 class TradingConfigTests(TestCase):
@@ -16,6 +18,12 @@ class TradingConfigTests(TestCase):
         self.assertFalse(setups["session_opening_range_breakout"]["enabled"])
         self.assertFalse(setups["volatility_compression_expansion"]["enabled"])
         self.assertFalse(setups["exhaustion_reversal"]["enabled"])
+
+    def test_entry_and_risk_stages_load_the_central_thresholds(self):
+        self.assertEqual(EntryTimer().config.max_chase_atr, 0.5)
+        self.assertEqual(EntryTimer().maximum_spread_points, 50.0)
+        self.assertEqual(RiskManager().config.min_reward_risk, 1.2)
+        self.assertEqual(RiskManager().maximum_risk_percent, 0.5)
 
     def test_lookahead_cannot_be_enabled(self):
         config = json.loads(Path(__file__).parents[1].joinpath("trading_config.json").read_text())
