@@ -8,7 +8,8 @@ from django.utils import timezone as django_timezone
 
 from ea_bridge.learning_store import DjangoOutcomeStore
 from ea_bridge.models import EACommand, DecisionThresholdConfig, LearningRecommendation, LearningTradeOutcome, StrategyDecisionRecord
-from ramon_pipeline.signalflow.learning import Learning
+from ramon_pipeline.learning import EntryExitAnalyzer, LearningEngine, OptimizationEngine
+from ramon_pipeline.signalflow.learning import InMemoryOutcomeStore, Learning
 
 
 class LearningOutcomeApiTests(TestCase):
@@ -117,6 +118,36 @@ class LearningOutcomeApiTests(TestCase):
         self.assertFalse(payload["analysis"]["strategy_mutation_enabled"])
         self.assertIn("decisions", payload["analysis"])
         self.assertIn("entry_exit", payload["analysis"])
+
+    def test_learning_package_collects_and_analyzes_without_strategy_mutation(self):
+        engine = LearningEngine(InMemoryOutcomeStore())
+        result = engine.collect({
+            "trade_id": "package-trade-1", "realized_pnl": 12,
+            "risk_amount": 10, "closed_at": 1_800_000_000,
+            "decision_id": "package-decision-1", "side": "BUY",
+            "regime": "BULLISH",
+        })
+        self.assertTrue(result["accepted"])
+        report = engine.analyze(min_samples=10)
+        self.assertEqual(report["performance"]["overall"]["trades"], 1)
+        self.assertEqual(report["decisions"]["linked_outcomes"], 1)
+        self.assertFalse(report["auto_apply"])
+        self.assertFalse(report["strategy_mutation_enabled"])
+
+    def test_entry_exit_analysis_does_not_treat_missing_metrics_as_zero(self):
+        report = EntryExitAnalyzer().analyze([{"execution_metrics": {}}])
+        self.assertEqual(report["metrics"]["mae"]["observations"], 0)
+        self.assertEqual(report["metrics"]["mae"]["unavailable"], 1)
+        self.assertIsNone(report["metrics"]["mae"]["average"])
+
+    def test_optimizer_only_returns_human_review_eligibility(self):
+        result = OptimizationEngine().evaluate_candidate(
+            baseline={"trades": 120, "expectancy": 0.1, "max_drawdown": 20},
+            candidate={"trades": 120, "expectancy": 0.2, "max_drawdown": 18},
+        )
+        self.assertTrue(result["eligible_for_review"])
+        self.assertFalse(result["auto_apply"])
+        self.assertFalse(result["live_parameters_changed"])
 
     def test_learning_models_are_registered_read_only_in_admin(self):
         self.assertIn(LearningTradeOutcome, admin.site._registry)
