@@ -15,7 +15,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from .auth import BearerTokenRequired
-from .models import EACommand
+from .models import EACommand, EAHeartbeat
 
 
 TERMINAL_STATES = {
@@ -64,6 +64,40 @@ def next_command(request):
         })
 
     now = timezone.now()
+
+    # Django is the execution authority: never deliver a command based only on
+    # a queued row. Revalidate the live bridge/account state at delivery time.
+    heartbeat = EAHeartbeat.objects.filter(instance_id=instance_id).first()
+    if heartbeat is None:
+        return JsonResponse({
+            "ok": True, "commands_enabled": True, "command": None,
+            "trading_authorization": False, "authorization_reason": "HEARTBEAT_MISSING",
+        })
+    payload = heartbeat.payload if isinstance(heartbeat.payload, dict) else {}
+    trade_mode = payload.get("account_trade_mode")
+    max_age = int(getattr(settings, "RAMON_EA_HEARTBEAT_MAX_AGE_SECONDS", 90))
+    age = (now - heartbeat.last_seen).total_seconds()
+    if age < 0 or age > max_age:
+        reason = "HEARTBEAT_STALE"
+    elif heartbeat.account_login != account_login:
+        reason = "ACCOUNT_LOGIN_MISMATCH"
+    elif not heartbeat.server_name or not str(payload.get("server_name", "")).strip() == heartbeat.server_name:
+        reason = "ACCOUNT_SERVER_MISMATCH"
+    elif heartbeat.status != "TELEMETRY_OK" or not heartbeat.terminal_connected:
+        reason = "TERMINAL_NOT_READY"
+    elif not heartbeat.trade_allowed:
+        reason = "TERMINAL_TRADING_DISABLED"
+    elif type(trade_mode) is not int or trade_mode != 0:
+        reason = "DEMO_ACCOUNT_REQUIRED"
+    else:
+        reason = ""
+
+    if reason:
+        return JsonResponse({
+            "ok": True, "commands_enabled": True, "command": None,
+            "trading_authorization": False, "authorization_reason": reason,
+        })
+
     with transaction.atomic():
         EACommand.objects.filter(
             instance_id=instance_id,
@@ -77,6 +111,7 @@ def next_command(request):
             .filter(
                 instance_id=instance_id,
                 account_login=account_login,
+                symbol=heartbeat.symbol,
                 state=EACommand.State.PENDING,
                 expires_at__gt=now,
                 execution_authorized=True,
