@@ -91,6 +91,10 @@ def _build_pipeline(*, demo_mode=False):
             ignore_supplied_quality=bool(opt("RAMON_USE_COMPUTED_ENTRY_QUALITY", False)),
         ),
     )
+    # EntryTimer preserves legacy file-based defaults when passed its historical
+    # constructor defaults; explicitly pin the Django-persisted values afterwards.
+    timer.minimum_quality = minimum_quality
+    timer.maximum_spread_points = maximum_spread_points
     risk = RiskManager(
         config=RiskConfig(
             **risk_values,
