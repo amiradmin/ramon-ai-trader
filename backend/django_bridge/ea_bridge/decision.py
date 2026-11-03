@@ -120,6 +120,32 @@ def _num(v, name):
     if not math.isfinite(v): raise ValueError(f"{name} must be finite")
     return v
 
+def _apply_demo_risk_policy(market, pipeline, *, demo_mode):
+    """Apply the server-owned demo risk target; never raise the live account's request."""
+    requested = _num(market.get("risk_percent", 0), "risk_percent")
+    maximum = _num(pipeline.risk_manager.maximum_risk_percent, "maximum_risk_percent")
+    if maximum <= 0:
+        raise ValueError("maximum_risk_percent must be positive")
+    if not demo_mode:
+        return {
+            "source": "EA_REQUEST",
+            "requested_risk_percent": requested,
+            "effective_risk_percent": requested,
+            "maximum_risk_percent": maximum,
+        }
+
+    configured = _num(getattr(settings, "RAMON_DEMO_RISK_PERCENT", maximum), "RAMON_DEMO_RISK_PERCENT")
+    if configured <= 0:
+        raise ValueError("RAMON_DEMO_RISK_PERCENT must be positive")
+    effective = min(configured, maximum)
+    market["risk_percent"] = effective
+    return {
+        "source": "SERVER_DEMO_POLICY",
+        "requested_risk_percent": requested,
+        "effective_risk_percent": effective,
+        "maximum_risk_percent": maximum,
+    }
+
 def _ema(values, period):
     alpha=2.0/(period+1); out=values[0]
     for v in values[1:]: out=alpha*v+(1-alpha)*out
@@ -358,7 +384,9 @@ def decision(request):
             if is_demo_account and configured_demo_profile != "standard"
             else "STANDARD"
         )
-        result = _build_pipeline(demo_mode=is_demo_account).run(market)
+        pipeline = _build_pipeline(demo_mode=is_demo_account)
+        risk_policy = _apply_demo_risk_policy(market, pipeline, demo_mode=is_demo_account)
+        result = pipeline.run(market)
         if not risk_guards_complete:
             action = "WAIT"
             reason = "RISK_INPUTS_INCOMPLETE"
@@ -387,6 +415,7 @@ def decision(request):
           "stages": result["stages"],
           "opportunity_input_path": "completed_ohlc_structural",
           "strategy_profile": strategy_profile,
+          "risk_policy": risk_policy,
           "structural_candle_count": len(bars),
           "market_snapshot": {
             "symbol": symbol,
@@ -511,6 +540,7 @@ def decision(request):
           spread, confidence, risk_approved,
         )
         response["strategy_profile"] = strategy_profile
+        response["risk_policy"] = risk_policy
         response["command_created"] = command_created
         response["command_available"] = bool(command is not None and command.state == "PENDING" and command.expires_at > timezone.now())
         response["command_reason"] = command_reason
