@@ -31,6 +31,10 @@ class DecisionThresholdConfigurationTests(TestCase):
         volatility = {item["key"]: item for item in groups["opportunities"]["items"]}
         self.assertEqual(volatility["atr_ratio_min"]["value"], 0.6)
         self.assertEqual(volatility["atr_ratio_max"]["value"], 2.5)
+        risk_items = {item["key"]: item for item in groups["risk_management"]["items"]}
+        self.assertEqual(risk_items["min_reward_risk"]["value"], 1.2)
+        self.assertEqual(risk_items["min_reward_risk"]["min"], 1.0)
+        self.assertEqual(risk_items["min_reward_risk"]["max"], 3.0)
         self.assertIn("entry_timing", groups)
         self.assertIn("risk_management", groups)
 
@@ -75,6 +79,23 @@ class DecisionThresholdConfigurationTests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 400)
+
+    def test_minimum_reward_risk_is_limited_to_one_to_three_r(self):
+        for value in (0.9, 3.1):
+            response = self.client.post(
+                self.url,
+                data=json.dumps({"values": {"risk_management": {"min_reward_risk": value}}}),
+                content_type="application/json",
+            )
+            self.assertEqual(response.status_code, 400)
+
+        response = self.client.post(
+            self.url,
+            data=json.dumps({"values": {"risk_management": {"min_reward_risk": 1.8}}}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["values"]["risk_management"]["min_reward_risk"], 1.8)
 
     def test_reset_restores_profile_defaults(self):
         self.client.post(
