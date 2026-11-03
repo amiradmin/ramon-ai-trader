@@ -237,6 +237,21 @@ class BreakoutRetestTests(TestCase):
         self.assertFalse({"volume", "lots", "stop_loss", "take_profit", "entry_price"} & set(result))
         self.assertEqual(classify.call_count, 2)
 
+    @patch("ramon_pipeline.signalflow.opportunities._pivots", return_value=([], []))
+    @patch("ramon_pipeline.signalflow.opportunities._classify_regime")
+    def test_confirmed_breakout_is_not_blocked_by_pullback_geometry(self, classify, pivots):
+        classify.return_value = opportunities_module._Regime(
+            "BULLISH", "BULL", "MIXED", 15.53, 0.5, 0.5
+        )
+        result = OpportunityDetector().evaluate(snapshot(self.breakout_bars()))
+
+        self.assertTrue(result["approved"], result["explanation"])
+        self.assertEqual(result["side"], "BUY")
+        self.assertEqual(result["setup"]["type"], "BREAKOUT_RETEST")
+        self.assertNotIn("pullback_depth", [check["name"] for check in result["checks"]])
+        pivots.assert_called_once()
+        self.assertEqual(classify.call_count, 2)
+
     @patch("ramon_pipeline.signalflow.opportunities._classify_regime")
     def test_breakout_without_a_confirmed_retest_does_not_approve(self, classify):
         classify.return_value = opportunities_module._Regime(
