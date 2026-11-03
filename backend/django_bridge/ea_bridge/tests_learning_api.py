@@ -34,7 +34,7 @@ class LearningOutcomeApiTests(TestCase):
         self.assertEqual(response.status_code, 201, response.content)
         row = LearningTradeOutcome.objects.get(trade_id="deal-001")
         self.assertEqual(row.decision_snapshot["action"], "BUY")
-        self.assertEqual(row.r_multiple, 1.55)
+        self.assertAlmostEqual(float(row.r_multiple), 1.55)
         self.assertEqual(row.execution_metrics["mae"], 2.0)
         self.assertEqual(row.tags["regime"], "BULLISH")
 
