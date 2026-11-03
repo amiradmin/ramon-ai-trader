@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from .common import ACCEPTED, DEFERRED, REJECTED
+from .trading_config import load_trading_config
 
 _LEGACY_REQUIRED = (
     "account_balance", "risk_percent", "stop_loss_points", "point_value_per_lot",
@@ -91,8 +92,11 @@ class RiskManager:
     def __init__(self, maximum_risk_percent: float = 0.5, *, config: RiskConfig | None = None) -> None:
         if not 0.0 < maximum_risk_percent <= 100.0:
             raise ValueError("maximum_risk_percent must be in (0, 100]")
-        self.maximum_risk_percent = maximum_risk_percent
-        self.config = config or RiskConfig()
+        settings = load_trading_config()["risk_management"]
+        self.maximum_risk_percent = float(settings.get("maximum_risk_percent", maximum_risk_percent)) if maximum_risk_percent == 0.5 else maximum_risk_percent
+        self.config = config or RiskConfig(**{
+            key: settings[key] for key in RiskConfig.__dataclass_fields__ if key in settings
+        })
 
     # ------------------------------------------------------------------
     # Public API
