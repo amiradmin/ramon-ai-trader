@@ -525,11 +525,13 @@ function flowCheckMarkup(check, state, displayName, stageResult, decision, stage
     "Live decision check returned by Django.";
   const isRewardRiskCheck = ["reward_risk", "reward_risk_too_low"].includes(String(check.name || "").toLowerCase());
   const observedRewardRisk = Number(stageResult?.reward_risk);
+  const hasObservedRewardRisk = stageResult?.reward_risk !== null &&
+    stageResult?.reward_risk !== undefined && Number.isFinite(observedRewardRisk);
   const minimumRewardRisk = Number(
     thresholdDraft?.risk_management?.min_reward_risk ??
     thresholdConfig?.values?.risk_management?.min_reward_risk
   );
-  const rewardRiskSummary = isRewardRiskCheck && Number.isFinite(observedRewardRisk)
+  const rewardRiskSummary = isRewardRiskCheck && hasObservedRewardRisk
     ? '<div class="flow-threshold-observed"><strong>Actual RR: ' + esc(observedRewardRisk.toFixed(2)) +
       'R</strong><span>Minimum required: ' + esc(Number.isFinite(minimumRewardRisk) ? minimumRewardRisk.toFixed(2) : "—") +
       'R</span></div>'
