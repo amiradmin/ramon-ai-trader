@@ -7,7 +7,7 @@ The target is the forward log return over a configurable horizon.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from math import isfinite, log, sqrt
+from math import sqrt
 from typing import Mapping, Sequence
 
 import numpy as np
@@ -114,7 +114,7 @@ def evaluate_regression_forecasts(
     log(close[t+horizon] / close[t]). The final holdout is chronological and is
     never shuffled. The zero-return baseline predicts no price change.
     """
-    if isinstance(horizon_bars, bool) or horizon_bars < 1 or horizon_bars > 32:
+    if isinstance(horizon_bars, bool) or not isinstance(horizon_bars, int) or horizon_bars < 1 or horizon_bars > 32:
         raise ValueError("horizon_bars must be an integer between 1 and 32")
     if not 0.1 <= test_fraction <= 0.4:
         raise ValueError("test_fraction must be between 0.1 and 0.4")
@@ -128,11 +128,13 @@ def evaluate_regression_forecasts(
         raise ValueError("not enough labeled candles after lookback and horizon")
     X = features[indices]
     y = np.log(close[indices + horizon_bars] / close[indices])
-    split = int(len(indices) * (1.0 - test_fraction))
-    if split < 25 or len(indices) - split < 5:
+    test_start = int(len(indices) * (1.0 - test_fraction))
+    # Purge training rows whose forward target window overlaps the test period.
+    train_end = test_start - horizon_bars
+    if train_end < 25 or len(indices) - test_start < 5:
         raise ValueError("insufficient chronological train/test observations")
-    X_train, X_test = X[:split], X[split:]
-    y_train, y_test = y[:split], y[split:]
+    X_train, X_test = X[:train_end], X[test_start:]
+    y_train, y_test = y[:train_end], y[test_start:]
 
     models = {
         "ridge": make_pipeline(StandardScaler(), Ridge(alpha=10.0)),
