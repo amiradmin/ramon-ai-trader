@@ -108,6 +108,16 @@ class LearningOutcomeApiTests(TestCase):
         self.assertAlmostEqual(summary["overall"]["expectancy"], 5)
         self.assertEqual(summary["by_regime"]["BULLISH"]["trades"], 3)
 
+    def test_learning_overview_exposes_modular_analysis_report(self):
+        response = self.client.get("/api/ea/v1/learning/overview")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("analysis", payload)
+        self.assertFalse(payload["analysis"]["auto_apply"])
+        self.assertFalse(payload["analysis"]["strategy_mutation_enabled"])
+        self.assertIn("decisions", payload["analysis"])
+        self.assertIn("entry_exit", payload["analysis"])
+
     def test_learning_models_are_registered_read_only_in_admin(self):
         self.assertIn(LearningTradeOutcome, admin.site._registry)
         self.assertIn(LearningRecommendation, admin.site._registry)
