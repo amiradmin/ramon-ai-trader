@@ -513,9 +513,9 @@ function opportunityDetectorMarkup(stageResult) {
     pullbackChecks.find(item => item.passed === true && String(item.status || "").toUpperCase() !== "NOT_EVALUATED");
   let pullbackState = "idle", pullbackLabel = "NOT EVALUATED";
   let pullbackDetail = "Shared prerequisites or an earlier gate prevented pullback evaluation.";
-  if (setupType === "TREND_PULLBACK" && stageResult?.approved === true) {
-    pullbackState = "pass"; pullbackLabel = "APPROVED";
-    pullbackDetail = stageResult.explanation || "Trend-pullback opportunity approved by Django.";
+  if (setupType === "TREND_PULLBACK") {
+    pullbackState = "pass"; pullbackLabel = stageResult?.approved === true ? "APPROVED" : "CONFIRMED";
+    pullbackDetail = stageResult.explanation || "Trend-pullback setup confirmed by Django; inspect downstream checks for the final verdict.";
   } else if (activePullbackCheck) {
     pullbackState = activePullbackCheck.passed === true ? "wait" :
       String(activePullbackCheck.status || "").toUpperCase() === "DEFERRED" ? "wait" : "blocked";
