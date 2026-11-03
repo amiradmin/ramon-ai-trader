@@ -37,6 +37,61 @@ def load_trading_config(path: str | Path | None = None) -> dict[str, Any]:
     score = finder.get("minimum_score")
     if isinstance(score, bool) or not isinstance(score, (int, float)) or not 0 <= score <= 1:
         raise ValueError("opportunity_finder.minimum_score must be between 0 and 1")
+    # Validate supplemental detector parameters before any market evaluation.
+    def positive_number(settings: dict[str, Any], key: str, *, allow_zero: bool = False) -> None:
+        value = settings.get(key)
+        valid = isinstance(value, (int, float)) and not isinstance(value, bool)
+        if not valid or (value < 0 if allow_zero else value <= 0):
+            comparator = "non-negative" if allow_zero else "positive"
+            raise ValueError(f"setup parameter {key} must be a {comparator} number")
+
+    sweep = setups["failed_breakout_sweep"]
+    if int(sweep.get("lookback_bars", 0)) < 5:
+        raise ValueError("failed_breakout_sweep.lookback_bars must be at least 5")
+    positive_number(sweep, "sweep_buffer_atr", allow_zero=True)
+
+    fade = setups["range_edge_fade"]
+    if int(fade.get("lookback_bars", 0)) < 5:
+        raise ValueError("range_edge_fade.lookback_bars must be at least 5")
+    positive_number(fade, "edge_buffer_atr", allow_zero=True)
+    wick_ratio = fade.get("minimum_rejection_wick_ratio")
+    if not isinstance(wick_ratio, (int, float)) or isinstance(wick_ratio, bool) or not 0 <= wick_ratio <= 1:
+        raise ValueError("range_edge_fade.minimum_rejection_wick_ratio must be between 0 and 1")
+
+    session = setups["session_opening_range_breakout"]
+    if int(session.get("opening_range_minutes", 0)) < 15:
+        raise ValueError("session_opening_range_breakout.opening_range_minutes must be at least 15")
+    positive_number(session, "breakout_buffer_atr", allow_zero=True)
+    sessions = session.get("sessions")
+    if not isinstance(sessions, dict) or not sessions:
+        raise ValueError("session_opening_range_breakout.sessions must be a non-empty object")
+    for label, entry in sessions.items():
+        if not isinstance(entry, dict) or not isinstance(entry.get("timezone"), str) or not isinstance(entry.get("open"), str):
+            raise ValueError(f"session {label} must define timezone and open")
+        from datetime import time
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+        try:
+            ZoneInfo(entry["timezone"])
+            time.fromisoformat(entry["open"])
+        except (ValueError, ZoneInfoNotFoundError) as exc:
+            raise ValueError(f"session {label} has an invalid timezone or open time") from exc
+
+    compression = setups["volatility_compression_expansion"]
+    if int(compression.get("compression_lookback_bars", 0)) < 2:
+        raise ValueError("volatility_compression_expansion.compression_lookback_bars must be at least 2")
+    positive_number(compression, "compression_max_atr")
+    positive_number(compression, "expansion_body_atr")
+
+    exhaustion = setups["exhaustion_reversal"]
+    if int(exhaustion.get("extension_lookback_bars", 0)) < 5:
+        raise ValueError("exhaustion_reversal.extension_lookback_bars must be at least 5")
+    positive_number(exhaustion, "minimum_extension_atr")
+    extreme = exhaustion.get("rsi_extreme")
+    if not isinstance(extreme, (int, float)) or isinstance(extreme, bool) or not 50 < extreme <= 100:
+        raise ValueError("exhaustion_reversal.rsi_extreme must be in (50, 100]")
+    if exhaustion.get("require_choch") is not True:
+        raise ValueError("exhaustion_reversal.require_choch must remain true")
+
     validation = data.get("validation", {})
     if validation.get("allow_lookahead") is not False:
         raise ValueError("look-ahead must remain disabled")
