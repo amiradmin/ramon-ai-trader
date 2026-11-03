@@ -1076,7 +1076,7 @@ class OpportunityDetector:
 
         breakout_candidate = None
         first_breakout = max(config.breakout_lookback, t - config.breakout_max_retest_bars - 1)
-        for breakout_index in range(t - 2, first_breakout - 1, -1):
+        for breakout_index in (range(t - 2, first_breakout - 1, -1) if self.trading_settings["opportunity_finder"]["setups"]["breakout_retest"]["enabled"] else ()):
             range_start = breakout_index - config.breakout_lookback
             if range_start < 0:
                 continue
@@ -1208,6 +1208,10 @@ class OpportunityDetector:
             checks, "breakout_retest", False,
             "no confirmed breakout, retest and continuation sequence was found in the recent completed candles",
         )
+
+        if not self.trading_settings["opportunity_finder"]["setups"]["trend_pullback"]["enabled"]:
+            return finish(REJECTED, "NO_ENABLED_SETUP",
+                          "trend pullback is disabled and no other enabled setup was confirmed", side)
 
         # 3. Pullback geometry, oriented so "up" is the trade direction ---------
         if sign > 0:
