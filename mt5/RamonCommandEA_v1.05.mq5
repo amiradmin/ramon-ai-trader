@@ -396,8 +396,8 @@ bool CalculateBrokerDayOpeningBalance(const datetime server_now,const double bal
 
 void RequestDjangoDecision()
 {
-   Print("RamonCommandEA v1.04: decision poll started; symbol=", _Symbol,
-         " timeframe=", TfName(_Period),
+   Print("RamonCommandEA v1.05: Django decision poll; symbol=", _Symbol,
+         " timeframe=", TfName(_Period));
    if(_Period!=PERIOD_M15)
    {
       Print("RamonCommandEA: Django decisions require an M15 chart.");
@@ -419,27 +419,17 @@ void RequestDjangoDecision()
    }
 
    double point=SymbolInfoDouble(_Symbol,SYMBOL_POINT);
+   if(point<=0) return;
 
    string body="{\"protocol_version\":\"ramon-django-decision-v1\","
       +"\"instance_id\":\""+JsonEscape(InstanceId)+"\","
       +"\"account_login\":\""+IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN))+"\","
-      // Match the broker identity sent in telemetry for Django account-state validation.
       +"\"server_name\":\""+JsonEscape(AccountInfoString(ACCOUNT_SERVER))+"\","
       +"\"symbol\":\""+JsonEscape(_Symbol)+"\",\"timeframe\":\"M15\","
       +"\"bid\":"+DoubleToString(tick.bid,_Digits)+","
       +"\"ask\":"+DoubleToString(tick.ask,_Digits)+","
       +"\"point\":"+DoubleToString(point,10)+","
-      +"\"bars\":"+bars+","
-      +"\"account_balance\":"+DoubleToString(balance,2)+","
-      +"\"risk_percent\":"+DoubleToString(risk_percent,8)+","
-      +"\"point_value_per_lot\":"+DoubleToString(point_value_per_lot,8)+","
-      +"\"volume_step\":"+DoubleToString(SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_STEP),8)+","
-      +"\"min_volume\":"+DoubleToString(SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN),8)+","
-      +"\"max_volume\":"+DoubleToString(SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MAX),8)+","
-      +"\"stop_level_points\":"+DoubleToString((double)SymbolInfoInteger(_Symbol,SYMBOL_TRADE_STOPS_LEVEL),2)+","
-      +"\"take_profit_points\":"+DoubleToString(take_profit_points,2)+","
-      +"\"daily_loss_percent\":"+DoubleToString(daily_loss_percent,8)+","
-      +"\"open_risk_percent\":"+DoubleToString(open_risk_percent,8)+"}";
+      +"\"bars\":"+bars+"}";
 
    string response;
    if(!PostJson("/decision",body,response))
