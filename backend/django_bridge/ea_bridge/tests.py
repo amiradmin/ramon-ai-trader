@@ -681,20 +681,18 @@ class DjangoDecisionApiTests(TestCase):
         self.assertIn("stale",r.json()["error"])
 
     @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
-    def test_missing_risk_guards_never_produce_buy_or_sell(self):
+    def test_missing_server_symbol_metadata_never_produces_trade(self):
         p=self.payload()
-        p.pop("daily_loss_percent")
+        heartbeat = EAHeartbeat.objects.get(instance_id="ea-decision-test")
+        heartbeat.payload.pop("symbol_info", None)
+        heartbeat.save(update_fields=["payload"])
         r=self.client.post(self.url,data=json.dumps(p),content_type="application/json",**self.headers)
         self.assertEqual(r.status_code,200,r.content)
         b=r.json()
         self.assertEqual(b["decision"],"WAIT")
         self.assertEqual(b["reason"],"RISK_INPUTS_INCOMPLETE")
         self.assertFalse(b["risk_inputs_complete"])
-        self.assertEqual(b["missing_risk_inputs"], "daily_loss_percent")
-        self.assertEqual(
-            set(b["risk_inputs_received"].split(",")),
-            {"stop_level_points", "take_profit_points", "open_risk_percent"},
-        )
+        self.assertIn("server_symbol_metadata", b["missing_risk_inputs"])
         self.assertFalse(b["risk_approved_advisory_only"])
         self.assertFalse(b["trading_authorization"])
         self.assertFalse(b["execution_enabled"])
