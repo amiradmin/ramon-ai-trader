@@ -166,3 +166,13 @@ class EACommand(models.Model):
             models.Index(fields=["instance_id", "account_login", "state", "created_at"], name="ea_cmd_scope_state_idx"),
             models.Index(fields=["state", "expires_at"], name="ea_cmd_state_exp_idx"),
         ]
+
+
+class DecisionThresholdConfig(models.Model):
+    """Persistent, profile-specific editable strategy thresholds owned by Django."""
+    profile = models.CharField(max_length=16, unique=True)
+    values = models.JSONField(default=dict, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["profile"]
