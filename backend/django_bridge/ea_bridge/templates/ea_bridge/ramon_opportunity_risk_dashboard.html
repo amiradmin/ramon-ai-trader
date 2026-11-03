@@ -136,6 +136,13 @@
 .threshold-actions button:disabled{opacity:.5;cursor:wait}
 .threshold-status{font-size:9px;color:var(--muted);margin-top:6px;min-height:13px}
 .threshold-status.error{color:var(--red)}.threshold-status.success{color:var(--green)}
+.flow-thresholds{margin-top:7px;padding:7px;border:1px solid #34445a;border-radius:7px;background:#0b1420}
+.flow-thresholds-title{font-size:8px;color:var(--muted);font-weight:800;letter-spacing:.4px;text-transform:uppercase;margin-bottom:5px}
+.flow-threshold-control{display:grid;grid-template-columns:minmax(0,1fr) 82px;gap:7px;align-items:center;padding:4px 0}
+.flow-threshold-control label{font-size:8px;color:#b8c6d8}
+.flow-threshold-control input{width:100%;min-width:0;background:#080f18;color:#fff;border:1px solid #40536d;border-radius:5px;padding:5px;font:10px ui-monospace,monospace}
+.flow-threshold-save{margin-top:6px;border:1px solid #40536d;border-radius:5px;background:#17263a;color:#dce8f8;padding:5px 8px;font-size:8px;font-weight:800;cursor:pointer}
+
 
 @media(max-width:1050px){.flow-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.flow-stage:nth-child(2):after{display:none}}
 @media(max-width:620px){.flow-grid{grid-template-columns:1fr;gap:18px}.flow-stage:not(:last-child):after{content:"↓";right:auto;left:50%;top:auto;bottom:-19px;transform:translateX(-50%)}}
@@ -518,6 +525,7 @@ function flowCheckMarkup(check, state, displayName, stageResult, decision, stage
   return '<div class="flow-check ' + css + '"><span class="flow-check-dot"></span><div>' +
     '<strong class="flow-tooltip" data-tooltip="' + esc(tooltip) + '" title="' + esc(tooltip) + '" tabindex="0">' + esc(label) + '</strong>' +
     '<p>' + esc(detail) + '</p>' + flowMetricsMarkup(check.metrics) +
+    thresholdControlsForCheck(stageName, check.name) +
     flowCheckCalculationMarkup(check, css, stageResult, decision, stageName) + '</div><em>' + tag + '</em></div>';
 }
 function opportunityDetectorMarkup(stageResult) {
@@ -589,6 +597,56 @@ function thresholdEditorMarkup(stageName) {
     '<button type="button" class="primary" data-threshold-save="' + esc(stageName) + '">Save thresholds</button>' +
     '<button type="button" data-threshold-reset="true">Reset profile defaults</button></div>' +
     '<div class="threshold-status" data-threshold-status="' + esc(stageName) + '">Changes apply to the next Django decision.</div></details>';
+}
+const CHECK_THRESHOLD_KEYS = {
+  opportunities: {
+    volatility:["atr_ratio_min","atr_ratio_max"],
+    regime:["adx_trending","adx_ranging","min_ema_separation_atr"],
+    impulse:["min_impulse_atr"],
+    pullback_depth:["min_retracement","max_retracement"],
+    trend_support:["support_tolerance_atr"],
+    value_zone:["zone_tolerance_atr"],
+    freshness:["max_bars_since_pullback_low"],
+    momentum:["rsi_overbought"],
+    breakout_retest:["breakout_lookback","breakout_buffer_atr","breakout_retest_tolerance_atr","breakout_max_retest_bars"],
+    opportunity_score:["minimum_score"]
+  },
+  entry_timing: {
+    freshness:["max_signal_age_bars"],
+    signal_freshness:["max_signal_age_bars"],
+    chase:["max_chase_atr"],
+    spread:["maximum_spread_points","max_spread_atr","max_spread_to_risk"],
+    spread_cost:["maximum_spread_points","max_spread_atr","max_spread_to_risk"],
+    risk_room:["min_risk_room_atr"],
+    entry_quality:["minimum_quality"]
+  },
+  risk_management: {
+    stop:["stop_buffer_atr","min_stop_atr","max_stop_atr"],
+    reward_risk:["min_reward_risk"],
+    rr:["min_reward_risk"]
+  }
+};
+function thresholdControlsForCheck(stageName, checkName) {
+  if (!thresholdConfig || !thresholdDraft) return "";
+  const normalized = String(checkName || "").toLowerCase();
+  const keys = CHECK_THRESHOLD_KEYS[stageName]?.[normalized] || [];
+  if (!keys.length) return "";
+  const group = thresholdConfig.groups.find(item => item.key === stageName);
+  const specs = keys.map(key => group?.items.find(item => item.key === key)).filter(Boolean);
+  if (!specs.length) return "";
+  const controls = specs.map(item => {
+    const value = thresholdDraft[stageName][item.key];
+    return '<div class="flow-threshold-control"><label for="inline-' + esc(stageName + "-" + item.key) +
+      '">' + esc(item.label) + ' (' + esc(item.unit) + ')</label><input type="number" id="inline-' +
+      esc(stageName + "-" + item.key) + '" data-threshold-group="' + esc(stageName) +
+      '" data-threshold-key="' + esc(item.key) + '" min="' + esc(item.min) + '" max="' +
+      esc(item.max) + '" step="' + esc(item.step) + '" value="' + esc(value) +
+      '" title="' + esc(item.description) + '"></div>';
+  }).join("");
+  return '<div class="flow-thresholds"><div class="flow-thresholds-title">Editable Django thresholds</div>' +
+    controls + '<button type="button" class="flow-threshold-save" data-threshold-save="' +
+    esc(stageName) + '">Save ' + esc(specs.length === 1 ? "threshold" : "thresholds") +
+    '</button></div>';
 }
 async function loadDecisionThresholds() {
   const response = await fetch("/api/ea/v1/decision-thresholds", {cache:"no-store"});
