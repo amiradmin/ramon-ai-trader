@@ -1,0 +1,136 @@
+"""Causal, opt-in supplemental XAUUSD M15 opportunity detectors.
+
+The functions consume only completed OHLC bars and return a candidate description.
+They do not calculate entries, stops, targets, position size, or authorize execution.
+"""
+from __future__ import annotations
+
+from datetime import datetime, time
+from zoneinfo import ZoneInfo
+from typing import Any, Mapping, Sequence
+import math
+
+
+def _session_open_range(times: Sequence[float], highs: Sequence[float], lows: Sequence[float],
+                         closes: Sequence[float], atr: float, settings: Mapping[str, Any]) -> dict[str, Any] | None:
+    sessions = settings.get("sessions", {})
+    if not sessions:
+        return None
+    now = datetime.fromtimestamp(times[-1], tz=ZoneInfo("UTC"))
+    for label, session in sessions.items():
+        zone = ZoneInfo(session["timezone"])
+        local = now.astimezone(zone)
+        hour, minute = (int(x) for x in session["open"].split(":"))
+        opened = datetime.combine(local.date(), time(hour, minute), tzinfo=zone)
+        start_ts = opened.timestamp()
+        end_ts = start_ts + int(settings["opening_range_minutes"]) * 60
+        # The opening range must be fully completed before a later bar can break it.
+        indices = [i for i, ts in enumerate(times[:-1]) if start_ts <= ts < end_ts]
+        if not indices or times[-1] < end_ts:
+            continue
+        after = [i for i, ts in enumerate(times) if ts >= end_ts]
+        if not after or after[-1] != len(times) - 1:
+            continue
+        top, bottom = max(highs[i] for i in indices), min(lows[i] for i in indices)
+        buffer = float(settings["breakout_buffer_atr"]) * atr
+        if closes[-1] > top + buffer:
+            return {"type": "SESSION_OPENING_RANGE_BREAKOUT", "side": "BUY",
+                    "session": label, "range_high": top, "range_low": bottom,
+                    "opening_range_start": start_ts, "opening_range_end": end_ts}
+        if closes[-1] < bottom - buffer:
+            return {"type": "SESSION_OPENING_RANGE_BREAKOUT", "side": "SELL",
+                    "session": label, "range_high": top, "range_low": bottom,
+                    "opening_range_start": start_ts, "opening_range_end": end_ts}
+    return None
+
+
+def detect_additional_opportunity(times: Sequence[float], opens: Sequence[float],
+        highs: Sequence[float], lows: Sequence[float], closes: Sequence[float],
+        atr_values: Sequence[float], adx_values: Sequence[float], rsi_values: Sequence[float],
+        swing_highs: Sequence[int], swing_lows: Sequence[int], regime_label: str,
+        setups: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Return the first enabled supplemental candidate; all windows exclude future bars."""
+    n = len(closes)
+    if n < 3:
+        return None
+    t = n - 1
+    atr = atr_values[t]
+    if not math.isfinite(atr) or atr <= 0:
+        return None
+
+    # 1. Failed breakout / liquidity sweep: breach a prior confirmed range and close back inside.
+    cfg = setups["failed_breakout_sweep"]
+    if cfg["enabled"]:
+        lookback = int(cfg["lookback_bars"])
+        if t >= lookback:
+            prior_high, prior_low = max(highs[t-lookback:t]), min(lows[t-lookback:t])
+            buffer = float(cfg["sweep_buffer_atr"]) * atr
+            if highs[t] > prior_high + buffer and closes[t] < prior_high:
+                return {"type": "FAILED_BREAKOUT_SWEEP", "side": "SELL", "level": prior_high,
+                        "sweep_extreme": highs[t], "invalidation_price": highs[t]}
+            if lows[t] < prior_low - buffer and closes[t] > prior_low:
+                return {"type": "FAILED_BREAKOUT_SWEEP", "side": "BUY", "level": prior_low,
+                        "sweep_extreme": lows[t], "invalidation_price": lows[t]}
+
+    # 2. Range-edge fade is permitted only in a confirmed ranging regime.
+    cfg = setups["range_edge_fade"]
+    if cfg["enabled"] and regime_label == "RANGING":
+        lookback = int(cfg["lookback_bars"])
+        if t >= lookback:
+            top, bottom = max(highs[t-lookback:t]), min(lows[t-lookback:t])
+            span = max(highs[t] - lows[t], 1e-12)
+            upper_wick = highs[t] - max(opens[t], closes[t])
+            lower_wick = min(opens[t], closes[t]) - lows[t]
+            ratio = float(cfg["minimum_rejection_wick_ratio"])
+            edge = float(cfg["edge_buffer_atr"]) * atr
+            if highs[t] >= top - edge and closes[t] < top and upper_wick / span >= ratio:
+                return {"type": "RANGE_EDGE_FADE", "side": "SELL", "range_high": top,
+                        "range_low": bottom, "invalidation_price": highs[t]}
+            if lows[t] <= bottom + edge and closes[t] > bottom and lower_wick / span >= ratio:
+                return {"type": "RANGE_EDGE_FADE", "side": "BUY", "range_high": top,
+                        "range_low": bottom, "invalidation_price": lows[t]}
+
+    # 3. Session opening range breakout, using IANA zones so DST is handled.
+    cfg = setups["session_opening_range_breakout"]
+    if cfg["enabled"]:
+        candidate = _session_open_range(times, highs, lows, closes, atr, cfg)
+        if candidate:
+            candidate["invalidation_price"] = candidate["range_low"] if candidate["side"] == "BUY" else candidate["range_high"]
+            return candidate
+
+    # 4. Compression followed by a directional expansion candle.
+    cfg = setups["volatility_compression_expansion"]
+    if cfg["enabled"]:
+        lookback = int(cfg["compression_lookback_bars"])
+        if t >= lookback + 1:
+            prior_width = max(highs[t-lookback-1:t-1]) - min(lows[t-lookback-1:t-1])
+            compressed = prior_width <= float(cfg["compression_max_atr"]) * atr * lookback
+            body = abs(closes[t] - opens[t])
+            if compressed and body >= float(cfg["expansion_body_atr"]) * atr:
+                side = "BUY" if closes[t] > opens[t] else "SELL" if closes[t] < opens[t] else None
+                if side:
+                    return {"type": "VOLATILITY_COMPRESSION_EXPANSION", "side": side,
+                            "compression_range": prior_width,
+                            "invalidation_price": lows[t] if side == "BUY" else highs[t]}
+
+    # 5. Exhaustion reversal is last-resort and requires a confirmed swing CHoCH.
+    cfg = setups["exhaustion_reversal"]
+    if cfg["enabled"]:
+        lookback = int(cfg["extension_lookback_bars"])
+        if t >= lookback and math.isfinite(rsi_values[t]):
+            extension = closes[t] - closes[t-lookback]
+            threshold = float(cfg["minimum_extension_atr"]) * atr
+            extreme = float(cfg["rsi_extreme"])
+            if extension >= threshold and rsi_values[t] >= extreme:
+                levels = [i for i in swing_lows if i < t]
+                if levels and closes[t] < lows[levels[-1]]:
+                    return {"type": "EXHAUSTION_REVERSAL", "side": "SELL",
+                            "extension_atr": extension / atr, "choch_level": lows[levels[-1]],
+                            "invalidation_price": highs[t]}
+            if extension <= -threshold and rsi_values[t] <= 100.0 - extreme:
+                levels = [i for i in swing_highs if i < t]
+                if levels and closes[t] > highs[levels[-1]]:
+                    return {"type": "EXHAUSTION_REVERSAL", "side": "BUY",
+                            "extension_atr": abs(extension) / atr, "choch_level": highs[levels[-1]],
+                            "invalidation_price": lows[t]}
+    return None
