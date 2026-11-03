@@ -307,6 +307,17 @@ def decision(request):
                                 daily_baseline_balance = telemetry_opening_balance
                                 daily_baseline_capture_method = "BROKER_HISTORY_TELEMETRY_DEMO"
                                 daily_loss_source = "BROKER_HISTORY_TELEMETRY_DEMO"
+                            elif is_demo_account:
+                                # Explicitly aggressive Demo-only fallback: do not block
+                                # discovery/execution solely because today's baseline and
+                                # complete broker history are unavailable. Daily-loss
+                                # enforcement is unavailable for this session and is
+                                # recorded as such; all other risk gates remain mandatory.
+                                daily_baseline_day = broker_day.isoformat()
+                                daily_baseline_capture_method = "DEMO_NO_BASELINE_BYPASS"
+                                daily_loss_source = "DEMO_NO_BASELINE_BYPASS"
+                                server_daily_loss_percent = None
+                                account_state_reason = ""
                             else:
                                 account_state_reason = "DAILY_LOSS_BASELINE_UNAVAILABLE"
 
