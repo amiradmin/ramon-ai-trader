@@ -39,7 +39,7 @@ class DecisionThresholdConfigurationTests(TestCase):
             self.url,
             data=json.dumps({"values": {
                 "opportunities": {"atr_ratio_min": 0.75, "atr_ratio_max": 2.2},
-                "entry_timing": {"max_chase_atr": 0.7},
+                "entry_timing": {"max_chase_atr": 0.7, "minimum_quality": 0.6, "maximum_spread_points": 90},
                 "risk_management": {"min_reward_risk": 1.5},
             }}),
             content_type="application/json",
@@ -50,6 +50,8 @@ class DecisionThresholdConfigurationTests(TestCase):
         self.assertEqual(pipeline.opportunities.config.atr_ratio_min, 0.75)
         self.assertEqual(pipeline.opportunities.config.atr_ratio_max, 2.2)
         self.assertEqual(pipeline.entry_timer.config.max_chase_atr, 0.7)
+        self.assertEqual(pipeline.entry_timer.minimum_quality, 0.6)
+        self.assertEqual(pipeline.entry_timer.maximum_spread_points, 90)
         self.assertEqual(pipeline.risk_manager.config.min_reward_risk, 1.5)
         # Editable tuning must not loosen account-level hard risk ceilings.
         self.assertEqual(pipeline.risk_manager.maximum_risk_percent, 0.5)
