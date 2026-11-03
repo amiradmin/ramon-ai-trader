@@ -38,6 +38,34 @@ def _decimal(value, name):
     return result
 
 
+def _normalize_symbol_info(value):
+    """Validate broker symbol specifications before persisting them for risk."""
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("symbol_info must be an object")
+
+    required = (
+        "tick_size", "tick_value", "volume_min",
+        "volume_max", "volume_step", "stops_level_points",
+    )
+    normalized = {}
+    for field in required:
+        if field not in value:
+            raise ValueError(f"symbol_info.{field} is required")
+        number = _decimal(value[field], f"symbol_info.{field}")
+        if field == "stops_level_points":
+            if number < 0:
+                raise ValueError("symbol_info.stops_level_points must be non-negative")
+        elif number <= 0:
+            raise ValueError(f"symbol_info.{field} must be positive")
+        normalized[field] = str(number)
+
+    if Decimal(normalized["volume_max"]) < Decimal(normalized["volume_min"]):
+        raise ValueError("symbol_info.volume_max must be >= volume_min")
+    return normalized
+
+
 M15_INTERVAL_SECONDS = 15 * 60
 M15_TIMESTAMP_TOLERANCE_SECONDS = 120
 
@@ -116,6 +144,7 @@ def telemetry(request):
                 (stamp, *values)
                 for stamp, values in sorted(m15_bars_by_timestamp.items())
             )
+        symbol_info = _normalize_symbol_info(p.get("symbol_info"))
         account = p.get("account", {})
         positions = p.get("positions", [])
         if not isinstance(account, dict) or not isinstance(positions, list) or len(positions) > 500:
@@ -242,6 +271,7 @@ def telemetry(request):
                     "broker_day_deal_count": broker_day_deal_count,
                     "broker_time": p.get("broker_time"),
                     "account": account,
+                    "symbol_info": symbol_info,
                     "positions": positions,
                     "last_command_id": str(p.get("last_command_id", ""))[:128],
                 },
