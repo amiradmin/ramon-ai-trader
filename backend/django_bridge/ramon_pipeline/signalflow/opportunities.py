@@ -960,12 +960,28 @@ class OpportunityDetector:
             )
 
         # 0. Supplemental setups: independently gated, opt-in and regime-aware.
+        # Supplemental setups share the core volatility and regime-stability gates.
+        # Range fades are the sole exception to directional-trend requirements.
+        supplemental_settings = {
+            name: dict(settings)
+            for name, settings in self.trading_settings["opportunity_finder"]["setups"].items()
+        }
+        volatility_ready = config.atr_ratio_min <= atr_ratio <= config.atr_ratio_max
+        opposite_regime = "BEARISH" if regime.label == "BULLISH" else "BULLISH"
+        regime_stable = previous.label != opposite_regime
+        for name, settings in supplemental_settings.items():
+            if name == "range_edge_fade":
+                settings["enabled"] = settings["enabled"] and regime.label == "RANGING"
+            elif name == "failed_breakout_sweep":
+                settings["enabled"] = settings["enabled"] and regime.label != "UNCERTAIN" and regime_stable
+            else:
+                settings["enabled"] = settings["enabled"] and regime.label in {"BULLISH", "BEARISH"} and regime_stable
+            settings["enabled"] = settings["enabled"] and volatility_ready
         supplemental = detect_additional_opportunity(
             bars.times,
             [float(bar.get("open", bar.get("close"))) for bar in market["bars"][-len(bars.close):]],
             bars.high, bars.low, bars.close, ind.atr, ind.adx, ind.rsi,
-            ind.swing_highs, ind.swing_lows, regime.label,
-            self.trading_settings["opportunity_finder"]["setups"],
+            ind.swing_highs, ind.swing_lows, regime.label, supplemental_settings,
         )
         if supplemental is not None:
             candidate_side = supplemental["side"]
