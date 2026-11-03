@@ -467,7 +467,7 @@ string BuildPositionsJson()
          +"\"tp\":"+DoubleToString(PositionGetDouble(POSITION_TP),_Digits)+","
          +"\"profit\":"+DoubleToString(PositionGetDouble(POSITION_PROFIT),2)+","
          +"\"tick_size\":"+DoubleToString(SymbolInfoDouble(PositionGetString(POSITION_SYMBOL),SYMBOL_TRADE_TICK_SIZE),10)+","
-         +"\"tick_value\":"+DoubleToString(SymbolInfoDouble(PositionGetString(POSITION_SYMBOL),SYMBOL_TRADE_TICK_VALUE),8)+"}";
+         +"\"tick_value\":"+DoubleToString(SymbolInfoDouble(PositionGetString(POSITION_SYMBOL),SYMBOL_TRADE_TICK_VALUE_LOSS),8)+"}";
    }
    return out+"]";
 }
