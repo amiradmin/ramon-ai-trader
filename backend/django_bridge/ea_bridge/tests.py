@@ -960,3 +960,11 @@ class DashboardTemplateTests(TestCase):
         self.assertNotContains(response, "DECISION_VARIABLE_GROUPS")
         self.assertNotContains(response, "orderedEntryFlowChecks")
         self.assertNotContains(response, "orderedRiskFlowChecks")
+
+    def test_dashboard_exposes_both_opportunity_detection_paths(self):
+        response = self.client.get("/api/ea/v1/dashboard")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "opportunityDetectorMarkup")
+        self.assertContains(response, "Trend Pullback")
+        self.assertContains(response, "Breakout / Retest")
+        self.assertContains(response, "NOT EVALUATED")
