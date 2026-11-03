@@ -67,10 +67,10 @@ def detect_additional_opportunity(times: Sequence[float], opens: Sequence[float]
             buffer = float(cfg["sweep_buffer_atr"]) * atr
             if highs[t] > prior_high + buffer and closes[t] < prior_high:
                 return {"type": "FAILED_BREAKOUT_SWEEP", "side": "SELL", "level": prior_high,
-                        "sweep_extreme": highs[t], "invalidation_price": highs[t]}
+                        "sweep_extreme": highs[t], "invalidation_price": highs[t], "score": 0.60 + min(0.20, (highs[t] - prior_high) / atr * 0.10)}
             if lows[t] < prior_low - buffer and closes[t] > prior_low:
                 return {"type": "FAILED_BREAKOUT_SWEEP", "side": "BUY", "level": prior_low,
-                        "sweep_extreme": lows[t], "invalidation_price": lows[t]}
+                        "sweep_extreme": lows[t], "invalidation_price": lows[t], "score": 0.60 + min(0.20, (prior_low - lows[t]) / atr * 0.10)}
 
     # 2. Range-edge fade is permitted only in a confirmed ranging regime.
     cfg = setups["range_edge_fade"]
@@ -85,10 +85,10 @@ def detect_additional_opportunity(times: Sequence[float], opens: Sequence[float]
             edge = float(cfg["edge_buffer_atr"]) * atr
             if highs[t] >= top - edge and closes[t] < top and upper_wick / span >= ratio:
                 return {"type": "RANGE_EDGE_FADE", "side": "SELL", "range_high": top,
-                        "range_low": bottom, "invalidation_price": highs[t]}
+                        "range_low": bottom, "invalidation_price": highs[t], "score": 0.55 + 0.30 * min(1.0, upper_wick / span)}
             if lows[t] <= bottom + edge and closes[t] > bottom and lower_wick / span >= ratio:
                 return {"type": "RANGE_EDGE_FADE", "side": "BUY", "range_high": top,
-                        "range_low": bottom, "invalidation_price": lows[t]}
+                        "range_low": bottom, "invalidation_price": lows[t], "score": 0.55 + 0.30 * min(1.0, lower_wick / span)}
 
     # 3. Session opening range breakout, using IANA zones so DST is handled.
     cfg = setups["session_opening_range_breakout"]
@@ -96,6 +96,8 @@ def detect_additional_opportunity(times: Sequence[float], opens: Sequence[float]
         candidate = _session_open_range(times, highs, lows, closes, atr, cfg)
         if candidate:
             candidate["invalidation_price"] = candidate["range_low"] if candidate["side"] == "BUY" else candidate["range_high"]
+            extension = abs(closes[-1] - (candidate["range_high"] if candidate["side"] == "BUY" else candidate["range_low"])) / atr
+            candidate["score"] = 0.55 + min(0.25, extension * 0.10)
             return candidate
 
     # 4. Compression followed by a directional expansion candle.
@@ -111,7 +113,7 @@ def detect_additional_opportunity(times: Sequence[float], opens: Sequence[float]
                 if side:
                     return {"type": "VOLATILITY_COMPRESSION_EXPANSION", "side": side,
                             "compression_range": prior_width,
-                            "invalidation_price": lows[t] if side == "BUY" else highs[t]}
+                            "invalidation_price": lows[t] if side == "BUY" else highs[t], "score": 0.55 + min(0.25, body / atr * 0.10)}
 
     # 5. Exhaustion reversal is last-resort and requires a confirmed swing CHoCH.
     cfg = setups["exhaustion_reversal"]
@@ -126,11 +128,11 @@ def detect_additional_opportunity(times: Sequence[float], opens: Sequence[float]
                 if levels and closes[t] < lows[levels[-1]]:
                     return {"type": "EXHAUSTION_REVERSAL", "side": "SELL",
                             "extension_atr": extension / atr, "choch_level": lows[levels[-1]],
-                            "invalidation_price": highs[t]}
+                            "invalidation_price": highs[t], "score": 0.55 + min(0.25, abs(extension) / atr * 0.05)}
             if extension <= -threshold and rsi_values[t] <= 100.0 - extreme:
                 levels = [i for i in swing_highs if i < t]
                 if levels and closes[t] > highs[levels[-1]]:
                     return {"type": "EXHAUSTION_REVERSAL", "side": "BUY",
                             "extension_atr": abs(extension) / atr, "choch_level": highs[levels[-1]],
-                            "invalidation_price": lows[t]}
+                            "invalidation_price": lows[t], "score": 0.55 + min(0.25, abs(extension) / atr * 0.05)}
     return None
