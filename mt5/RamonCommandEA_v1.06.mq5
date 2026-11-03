@@ -1011,7 +1011,7 @@ int OnInit()
    if(!EventSetTimer(MathMax(5,TimerSeconds)))
       return INIT_FAILED;
    Trade.SetAsyncMode(false);
-   Print("RamonCommandEA v1.05 initialized as passive Django bridge",
+   Print("RamonCommandEA v1.06 initialized as passive Django bridge",
          "; timer_seconds=",MathMax(5,TimerSeconds),
          "; decision_interval_seconds=",MathMax(30,DecisionIntervalSeconds),
          ". Strategy and risk policy are server-owned.");
