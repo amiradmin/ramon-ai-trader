@@ -137,7 +137,7 @@
 .threshold-status{font-size:9px;color:var(--muted);margin-top:6px;min-height:13px}
 .threshold-status.error{color:var(--red)}.threshold-status.success{color:var(--green)}
 .flow-thresholds{margin-top:7px;padding:7px;border:1px solid #34445a;border-radius:7px;background:#0b1420}
-.flow-thresholds-title{font-size:8px;color:var(--muted);font-weight:800;letter-spacing:.4px;text-transform:uppercase;margin-bottom:5px}
+.flow-threshold-observed{display:flex;gap:12px;flex-wrap:wrap;margin:7px 0;padding:7px 9px;border:1px solid var(--line,#334155);border-radius:8px;font-size:12px}.flow-threshold-observed span{opacity:.8}.flow-thresholds-title{font-size:8px;color:var(--muted);font-weight:800;letter-spacing:.4px;text-transform:uppercase;margin-bottom:5px}
 .flow-threshold-control{display:grid;grid-template-columns:minmax(0,1fr) 82px;gap:7px;align-items:center;padding:4px 0}
 .flow-threshold-control label{font-size:8px;color:#b8c6d8}
 .flow-threshold-control input{width:100%;min-width:0;background:#080f18;color:#fff;border:1px solid #40536d;border-radius:5px;padding:5px;font:10px ui-monospace,monospace}
@@ -523,9 +523,20 @@ function flowCheckMarkup(check, state, displayName, stageResult, decision, stage
     String(check.status || "").toUpperCase() === "NOT_EVALUATED" ? "NOT EVALUATED" : "UNAVAILABLE";
   const tooltip = check.description || check.help || check.tooltip || detail ||
     "Live decision check returned by Django.";
+  const isRewardRiskCheck = ["reward_risk", "reward_risk_too_low"].includes(String(check.name || "").toLowerCase());
+  const observedRewardRisk = Number(stageResult?.reward_risk);
+  const minimumRewardRisk = Number(
+    thresholdDraft?.risk_management?.min_reward_risk ??
+    thresholdConfig?.values?.risk_management?.min_reward_risk
+  );
+  const rewardRiskSummary = isRewardRiskCheck && Number.isFinite(observedRewardRisk)
+    ? '<div class="flow-threshold-observed"><strong>Actual RR: ' + esc(observedRewardRisk.toFixed(2)) +
+      'R</strong><span>Minimum required: ' + esc(Number.isFinite(minimumRewardRisk) ? minimumRewardRisk.toFixed(2) : "—") +
+      'R</span></div>'
+    : "";
   return '<div class="flow-check ' + css + '"><span class="flow-check-dot"></span><div>' +
     '<strong class="flow-tooltip" data-tooltip="' + esc(tooltip) + '" title="' + esc(tooltip) + '" tabindex="0">' + esc(label) + '</strong>' +
-    '<p>' + esc(detail) + '</p>' + flowMetricsMarkup(check.metrics) +
+    '<p>' + esc(detail) + '</p>' + flowMetricsMarkup(check.metrics) + rewardRiskSummary +
     thresholdControlsForCheck(stageName, check.name) +
     flowCheckCalculationMarkup(check, css, stageResult, decision, stageName) + '</div><em>' + tag + '</em></div>';
 }
@@ -629,6 +640,7 @@ const CHECK_THRESHOLD_KEYS = {
   risk_management: {
     stop:["stop_buffer_atr","min_stop_atr","max_stop_atr"],
     reward_risk:["min_reward_risk"],
+    reward_risk_too_low:["min_reward_risk"],
     rr:["min_reward_risk"]
   }
 };
