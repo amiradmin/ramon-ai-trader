@@ -14,7 +14,7 @@ input int DecisionIntervalSeconds = 30; // Django decision requests, independent
 input int BarsToSend = 128;
 input int RequestTimeoutMs = 5000;
 input int MaxSpreadPoints = 80;
-input double MaxRiskMoney = 5.0;           // Account-currency risk ceiling per OPEN command.
+input double MaxRiskMoney = 12.0;          // Demo execution ceiling; Django still enforces the 0.5% risk cap.
 
 CTrade Trade;
 string LastCommandId = "";
