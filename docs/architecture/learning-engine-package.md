@@ -22,6 +22,10 @@ SignalFlow behavior are preserved.
 | `recommendation_engine.py` | Formats findings as advisory review hypotheses. |
 | `engine.py` | Orchestrates the analyzers into one read-only report. |
 
+## Dashboard
+
+The read-only Learning Engine dashboard is served at `/api/ea/v1/learning/dashboard`. It displays overall performance, recent cumulative realized PnL, decision attribution coverage, regime segments, statistical findings, execution-metric availability, strategy-profile sample sufficiency, human-review recommendations, and recent closed trades. Recommendation generation and review use the existing staff-protected endpoints; accepting a recommendation authorizes a backtest only.
+
 ## Integration and compatibility
 
 - `ea_bridge.models.LearningTradeOutcome` and `LearningRecommendation`
