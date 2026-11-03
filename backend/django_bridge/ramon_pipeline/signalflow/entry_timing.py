@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from .common import ACCEPTED, DEFERRED, REJECTED, InvalidMarketData, clip, parse_timestamp
+from .trading_config import load_trading_config
 
 _TIMEFRAME_SECONDS = {
     "M1": 60, "M2": 120, "M3": 180, "M4": 240, "M5": 300, "M6": 360, "M10": 600, "M12": 720,
@@ -90,9 +91,12 @@ class EntryTimer:
             raise ValueError("minimum_quality must be between 0 and 1")
         if maximum_spread_points <= 0:
             raise ValueError("maximum_spread_points must be positive")
-        self.minimum_quality = minimum_quality
-        self.maximum_spread_points = maximum_spread_points
-        self.config = config or EntryTimingConfig()
+        settings = load_trading_config()["entry_timing"]
+        self.minimum_quality = float(settings.get("minimum_quality", minimum_quality)) if minimum_quality == 0.55 else minimum_quality
+        self.maximum_spread_points = float(settings.get("maximum_spread_points", maximum_spread_points)) if maximum_spread_points == 50.0 else maximum_spread_points
+        self.config = config or EntryTimingConfig(**{
+            key: settings[key] for key in EntryTimingConfig.__dataclass_fields__ if key in settings
+        })
         # When True, a structured opportunity without bid/ask/point is rejected instead of
         # being judged on the supplied spread alone (price-based checks are then skipped).
         self.require_quote = require_quote
