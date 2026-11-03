@@ -52,9 +52,9 @@ class DemoOpportunityProfileTests(TestCase):
         demo = _build_pipeline(demo_mode=True)
 
         self.assertEqual(demo.opportunities.minimum_score, 0.55)
-        self.assertEqual(demo.opportunities.config.min_ema_separation_atr, 0.12)
-        self.assertEqual(demo.opportunities.config.support_tolerance_atr, 0.75)
-        self.assertEqual(demo.opportunities.config.min_impulse_atr, 1.2)
+        self.assertEqual(demo.opportunities.config.min_ema_separation_atr, 0.20)
+        self.assertEqual(demo.opportunities.config.support_tolerance_atr, 0.65)
+        self.assertEqual(demo.opportunities.config.min_impulse_atr, 1.5)
         self.assertEqual(demo.entry_timer.minimum_quality, 0.55)
         self.assertEqual(demo.entry_timer.maximum_spread_points, 80.0)
 
