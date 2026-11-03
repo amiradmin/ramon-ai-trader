@@ -11,13 +11,6 @@
     "config_version": {
       "const": "1.0.0"
     },
-    "profile": {
-      "enum": [
-        "STRICT",
-        "BALANCED",
-        "LOOSE"
-      ]
-    },
     "symbol": {
       "type": "string"
     },
