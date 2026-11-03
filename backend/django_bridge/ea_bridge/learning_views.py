@@ -2,6 +2,7 @@
 import hashlib
 import json
 import math
+from datetime import datetime
 from functools import wraps
 
 from django.http import JsonResponse
@@ -11,7 +12,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from .auth import BearerTokenRequired
-from .models import LearningRecommendation, LearningTradeOutcome, OrderIntentRecord
+from .models import EACommand, LearningRecommendation, LearningTradeOutcome, OrderIntentRecord
 from .learning_store import DjangoOutcomeStore
 from ramon_pipeline.signalflow.learning import Learning
 
@@ -115,7 +116,19 @@ def record_outcome(request):
             raise ValueError("trade_id or deal_ticket is required")
         if payload.get("closed_at") is None:
             raise ValueError("closed_at is required for a completed trade outcome")
+        for field in ("opened_at", "closed_at"):
+            if payload.get(field) is not None:
+                stamp = payload[field]
+                if not isinstance(stamp, str):
+                    raise ValueError(f"{field} must be a timezone-aware ISO-8601 string")
+                parsed = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+                if parsed.tzinfo is None or parsed.utcoffset() is None:
+                    raise ValueError(f"{field} must include a timezone")
         decision_id = str(payload.get("decision_id") or "").strip()
+        if not decision_id and payload.get("command_id"):
+            command = EACommand.objects.filter(command_id=str(payload["command_id"])).first()
+            if command:
+                decision_id = command.decision_id
         if not decision_id and payload.get("broker_ticket"):
             intent = OrderIntentRecord.objects.filter(
                 broker_ticket=str(payload["broker_ticket"])
