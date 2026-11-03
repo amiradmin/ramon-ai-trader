@@ -163,12 +163,15 @@ def create_open_command(*, decision, verdict, instance_id, account_login, server
     if abs(baseline_equity - decision_equity) > Decimal("0.01"):
         return None, False, "ACCOUNT_EQUITY_CHANGED_AFTER_DECISION"
 
-    daily_loss_percent = max(
-        Decimal("0"),
-        (baseline_opening_balance - baseline_equity) / baseline_opening_balance * Decimal("100"),
-    )
-    if daily_loss_percent >= Decimal(str(RiskConfig().max_daily_loss_percent)):
-        return None, False, "DAILY_LOSS_LIMIT_REACHED"
+    # Enforce the daily-loss cap whenever a trustworthy baseline exists.
+    # With no baseline, this Demo-only path cannot calculate daily drawdown.
+    if baseline_opening_balance is not None:
+        daily_loss_percent = max(
+            Decimal("0"),
+            (baseline_opening_balance - baseline_equity) / baseline_opening_balance * Decimal("100"),
+        )
+        if daily_loss_percent >= Decimal(str(RiskConfig().max_daily_loss_percent)):
+            return None, False, "DAILY_LOSS_LIMIT_REACHED"
 
     if decision.action == "BUY":
         risk_distance, reward_distance = ask - stop_loss, take_profit - ask
