@@ -1,6 +1,5 @@
 {
   "config_version": "1.0.0",
-  "profile": "BALANCED",
   "symbol": "XAUUSD",
   "timeframe": "M15",
   "opportunity_finder": {
