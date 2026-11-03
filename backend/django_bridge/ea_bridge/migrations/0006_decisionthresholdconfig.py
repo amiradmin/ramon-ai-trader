@@ -7,6 +7,7 @@ class Migration(migrations.Migration):
     operations = [
         migrations.CreateModel(
             name="DecisionThresholdConfig",
+            options={"ordering": ["profile"]},
             fields=[
                 ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
                 ("profile", models.CharField(max_length=16, unique=True)),
