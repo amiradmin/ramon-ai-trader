@@ -15,4 +15,5 @@ urlpatterns = [
     path("status", views.status, name="ea-status"),
     path("dashboard", views.dashboard, name="ramon-dashboard"),
     path("dashboard-data", views.dashboard_data, name="ramon-dashboard-data"),
+    path("decision-thresholds", views.decision_thresholds, name="ramon-decision-thresholds"),
 ]
