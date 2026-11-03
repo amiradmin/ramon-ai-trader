@@ -159,7 +159,10 @@ class ValidSetupTests(TestCase):
         self.assertGreaterEqual(result["score"], 0.65)
         self.assertEqual(result["signal_bar_time"], bars[-1]["time"])
         self.assertEqual(result["setup"]["type"], "TREND_PULLBACK")
-        self.assertTrue(all(check["passed"] for check in result["checks"]))
+        self.assertTrue(
+            all(check["passed"] for check in result["checks"]),
+            msg=f"Unexpected failed opportunity checks: {result['checks']!r}",
+        )
         self.assertIn("BUY accepted", result["explanation"])
         self.assertEqual(set(result["components"]), {"strength", "volatility", "trend", "pullback", "momentum"})
 

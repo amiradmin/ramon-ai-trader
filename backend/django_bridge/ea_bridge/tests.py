@@ -840,6 +840,7 @@ class DashboardDataTests(TestCase):
             account_login="sensitive-account-id",
             server_name="private-broker-server",
             symbol="XAUUSD_o",
+            status="TELEMETRY_OK",
             terminal_connected=True,
             trade_allowed=False,
             payload={"account_trade_mode": 0},
