@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from django.conf import settings
 from django.http import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_GET, require_POST, require_http_methods
 from .auth import BearerTokenRequired
 from .models import EAEvent, EAHeartbeat, StrategyDecisionRecord, DecisionThresholdConfig
 
@@ -302,7 +302,7 @@ def _active_threshold_profile():
     return "demo" if is_demo else "standard"
 
 
-@csrf_exempt
+@require_http_methods(["GET", "POST"])
 def decision_thresholds(request):
     """Read or update the active profile's editable Django strategy thresholds."""
     from .thresholds import public_schema, validate_values
