@@ -3,23 +3,27 @@ from __future__ import annotations
 
 from typing import Any
 
-from ramon_pipeline.signalflow.learning import Learning
+from ramon_pipeline.signalflow.learning import Learning, OutcomeStore
 from .decision_analyzer import DecisionAnalyzer
 from .entry_exit_analyzer import EntryExitAnalyzer
 from .mistake_detector import MistakeDetector
 from .models import AnalysisReport
+from .outcome_collector import OutcomeCollector
 from .performance_analyzer import PerformanceAnalyzer
 from .regime_analyzer import RegimeAnalyzer
 from .strategy_evaluator import StrategyEvaluator
 
 
 class LearningEngine:
-    def __init__(self, store: Any) -> None:
-        self.learning = Learning(store=store)
+    """Read-only analysis facade over a caller-supplied durable or in-memory store."""
+
+    def __init__(self, store: OutcomeStore) -> None:
+        self.collector = OutcomeCollector.with_store(store)
+        self.learning: Learning = self.collector.learning
         self.store = store
 
     def collect(self, outcome: Any) -> dict[str, Any]:
-        return self.learning.observe(outcome)
+        return self.collector.collect(outcome)
 
     def analyze(self, *, as_of: Any = None, min_samples: int = 30) -> AnalysisReport:
         records, _ = self.learning._records(as_of)
