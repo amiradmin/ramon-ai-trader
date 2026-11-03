@@ -29,6 +29,13 @@
 @keyframes flow-status-blocked{0%,100%{opacity:1;filter:brightness(1);transform:scale(1)}50%{opacity:.42;filter:brightness(1.5);transform:scale(1.06)}}
 .flow-state.pass{background:#123328;color:var(--green)}.flow-state.wait{background:#382f1c;color:var(--amber)}
 .flow-state.blocked{background:#3a2028;color:var(--red)}.flow-state.idle{background:#202b39;color:var(--muted)}
+.detector-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:0 0 10px}
+.detector-card{min-width:0;padding:9px;border:1px solid #29384c;border-radius:9px;background:#101a27}
+.detector-card-head{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:10px;font-weight:850}
+.detector-card p{margin:5px 0 0;color:var(--muted);font-size:9px;overflow-wrap:anywhere}
+.detector-state{font-size:8px;font-weight:900;letter-spacing:.4px}
+.detector-state.pass{color:var(--green)}.detector-state.wait{color:var(--amber)}.detector-state.blocked{color:var(--red)}.detector-state.idle{color:var(--muted)}
+@media(max-width:620px){.detector-grid{grid-template-columns:1fr}}
 .flow-checks{display:grid;gap:7px}
 .flow-check{display:grid;grid-template-columns:7px minmax(0,1fr) auto;gap:7px;align-items:start;padding:7px 8px;border:1px solid #243247;border-radius:8px;background:#111a26}
 .flow-check.wait{animation:flow-check-wait 1s steps(2,end) infinite;border:1px solid #a8863c;background:#241f14;box-shadow:0 0 0 1px rgba(244,197,106,.42),0 0 16px rgba(244,197,106,.28)}
@@ -495,6 +502,52 @@ function flowCheckMarkup(check, state, displayName, stageResult, decision, stage
     '<p>' + esc(detail) + '</p>' + flowMetricsMarkup(check.metrics) +
     flowCheckCalculationMarkup(check, css, stageResult, decision, stageName) + '</div><em>' + tag + '</em></div>';
 }
+function opportunityDetectorMarkup(stageResult) {
+  const checks = Array.isArray(stageResult?.checks) ? stageResult.checks : [];
+  const byName = new Map(checks.map(item => [String(item?.name || "").toLowerCase(), item]));
+  const setupType = String(stageResult?.setup?.type || "").toUpperCase();
+  const breakout = byName.get("breakout_retest");
+  const pullbackNames = ["impulse", "pullback_depth", "trend_support", "value_zone", "freshness", "resumption"];
+  const pullbackChecks = pullbackNames.map(name => byName.get(name)).filter(Boolean);
+  const activePullbackCheck = pullbackChecks.find(item =>
+    item.passed === false || item.passed === true && String(item.status || "").toUpperCase() !== "NOT_EVALUATED"
+  );
+  let pullbackState = "idle", pullbackLabel = "NOT EVALUATED";
+  let pullbackDetail = "Shared prerequisites or an earlier gate prevented pullback evaluation.";
+  if (setupType === "TREND_PULLBACK" && stageResult?.approved === true) {
+    pullbackState = "pass"; pullbackLabel = "APPROVED";
+    pullbackDetail = stageResult.explanation || "Trend-pullback opportunity approved by Django.";
+  } else if (activePullbackCheck) {
+    pullbackState = activePullbackCheck.passed === true ? "wait" :
+      String(activePullbackCheck.status || "").toUpperCase() === "DEFERRED" ? "wait" : "blocked";
+    pullbackLabel = pullbackState === "wait" ? "WAITING" : "REJECTED";
+    pullbackDetail = activePullbackCheck.detail || "Pullback path did not pass this check.";
+  } else if (pullbackChecks.some(item => String(item.status || "").toUpperCase() !== "NOT_EVALUATED")) {
+    pullbackState = "wait"; pullbackLabel = "EVALUATED";
+    pullbackDetail = stageResult?.explanation || stageResult?.reason || "No approved trend-pullback setup in this snapshot.";
+  }
+
+  let breakoutState = "idle", breakoutLabel = "NOT EVALUATED";
+  let breakoutDetail = "Shared prerequisites or an earlier gate prevented breakout/retest evaluation.";
+  if (setupType === "BREAKOUT_RETEST" && stageResult?.approved === true) {
+    breakoutState = "pass"; breakoutLabel = "APPROVED";
+    breakoutDetail = stageResult.explanation || "Breakout/retest opportunity approved by Django.";
+  } else if (breakout && breakout.passed === true) {
+    breakoutState = "pass"; breakoutLabel = "CONFIRMED";
+    breakoutDetail = breakout.detail || "Breakout/retest sequence confirmed; inspect downstream checks for the final verdict.";
+  } else if (breakout && breakout.passed === false) {
+    breakoutState = "blocked"; breakoutLabel = "NOT CONFIRMED";
+    breakoutDetail = breakout.detail || "No confirmed breakout/retest sequence.";
+  }
+
+  const card = (title, state, label, detail) =>
+    '<article class="detector-card"><div class="detector-card-head"><span>' + esc(title) +
+    '</span><span class="detector-state ' + state + '">' + esc(label) +
+    '</span></div><p>' + esc(detail) + '</p></article>';
+  return '<div class="detector-grid" aria-label="Opportunity detector outcomes">' +
+    card("Trend Pullback", pullbackState, pullbackLabel, pullbackDetail) +
+    card("Breakout / Retest", breakoutState, breakoutLabel, breakoutDetail) + '</div>';
+}
 function flowStageMarkup(title, stageResult, checks, fallback, forcedState, decision, stageName, upcoming = false) {
   const state = upcoming ? "idle" : (forcedState || stageState(stageResult));
   const visibleChecks = upcoming ? checks.map(check => ({...check, notReached: true})) : checks;
@@ -509,7 +562,9 @@ function flowStageMarkup(title, stageResult, checks, fallback, forcedState, deci
       '</p></div><em>' + stateLabel + '</em></div>';
   return '<section class="flow-stage ' + (state === "wait" ? "waiting" : state === "blocked" ? "blocked" : state === "idle" ? "upcoming" : "") + '">' +
     '<div class="flow-stage-head"><div class="flow-stage-title">' + esc(title) + '</div><span class="flow-state ' +
-    state + '">' + stateLabel + '</span></div><div class="flow-checks">' + checkMarkup + '</div></section>';
+    state + '">' + stateLabel + '</span></div>' +
+    (stageName === "opportunities" ? opportunityDetectorMarkup(stageResult) : "") +
+    '<div class="flow-checks">' + checkMarkup + '</div></section>';
 }
 function collectFlowVariables(source, prefix = "", depth = 0, output = []) {
   if (!source || typeof source !== "object" || Array.isArray(source) || depth > 2) return output;
