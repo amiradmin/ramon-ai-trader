@@ -891,7 +891,7 @@ class OpportunityDetector:
         timeframe = str(market.get("timeframe", "M15")).upper()
 
         def done(status: str, reason: str, **kwargs: Any) -> dict[str, Any]:
-            return self._result(status, reason, checks=checks, **kwargs)
+            return self._result(status, reason, checks=checks, config_version=self.trading_settings["config_version"], **kwargs)
 
         if symbol and config.symbol_prefixes and not symbol.upper().startswith(
             tuple(prefix.upper() for prefix in config.symbol_prefixes)
