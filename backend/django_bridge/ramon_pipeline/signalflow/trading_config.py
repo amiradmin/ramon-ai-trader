@@ -95,4 +95,8 @@ def load_trading_config(path: str | Path | None = None) -> dict[str, Any]:
     validation = data.get("validation", {})
     if validation.get("allow_lookahead") is not False:
         raise ValueError("look-ahead must remain disabled")
+    if validation.get("use_completed_candles_only") is not True:
+        raise ValueError("use_completed_candles_only must remain true")
+    if validation.get("fail_closed_on_invalid_config") is not True:
+        raise ValueError("fail_closed_on_invalid_config must remain true")
     return data
