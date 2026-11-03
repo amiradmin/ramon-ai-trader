@@ -428,12 +428,12 @@ def decision(request):
         pipeline = _build_pipeline(demo_mode=is_demo_account)
         risk_policy = _apply_demo_risk_policy(market, pipeline, demo_mode=is_demo_account)
         result = pipeline.run(market)
-        if not risk_guards_complete:
-            action = "WAIT"
-            reason = "RISK_INPUTS_INCOMPLETE"
-        elif account_state_reason:
+        if account_state_reason:
             action = "WAIT"
             reason = account_state_reason
+        elif not risk_guards_complete:
+            action = "WAIT"
+            reason = "RISK_INPUTS_INCOMPLETE"
         elif result["approved"]:
             action = result["action"]
             reason = "SIGNALFLOW_APPROVED"
@@ -527,10 +527,12 @@ def decision(request):
             try:
                 approved_volume = Decimal(str(risk_stage["volume"]))
                 stop_loss_value = Decimal(str(stop_price))
-                tp_points = Decimal(str(market["take_profit_points"]))
-                point_value = Decimal(str(point))
                 entry_value = Decimal(str(ask if record.action == "BUY" else bid))
-                take_profit_price = entry_value + tp_points * point_value * (1 if record.action == "BUY" else -1)
+                minimum_reward_risk = Decimal(str(getattr(settings, "RAMON_MIN_REWARD_RISK", 1.2)))
+                if minimum_reward_risk < Decimal("1.2"):
+                    raise ValueError("minimum reward/risk cannot be below 1.2")
+                stop_distance = abs(entry_value - stop_loss_value)
+                take_profit_price = entry_value + stop_distance * minimum_reward_risk * (1 if record.action == "BUY" else -1)
                 if approved_volume <= 0 or stop_loss_value <= 0 or take_profit_price <= 0:
                     raise ValueError("non-positive executable risk values")
                 take_profit_value = take_profit_price
