@@ -668,7 +668,9 @@ bool BuildLearningOutcomeJson(const ulong position_id,
       return false;
 
    long login=(long)AccountInfoInteger(ACCOUNT_LOGIN);
-   trade_id=IntegerToString(login)+":"+IntegerToString((long)position_id);
+   string server_key=StringSubstr(AccountInfoString(ACCOUNT_SERVER),0,64);
+   trade_id=IntegerToString(login)+":"+server_key+":"+
+      IntegerToString((long)position_id);
 
    datetime opened_utc=(datetime)((long)opened_server-server_utc_offset);
    datetime closed_utc=(datetime)((long)closed_server-server_utc_offset);
@@ -684,8 +686,10 @@ bool BuildLearningOutcomeJson(const ulong position_id,
       +"\"commission\":"+DoubleToString(total_commission,8)+","
       +"\"swap\":"+DoubleToString(total_swap,8)+","
       +"\"opened_at\":\""+IsoUtc(opened_utc)+"\","
-      +"\"closed_at\":\""+IsoUtc(closed_utc)+"\","
-      +"\"broker_ticket\":\""+IntegerToString((long)opening_order)+"\"";
+      +"\"closed_at\":\""+IsoUtc(closed_utc)+"\"";
+
+   if(opening_order>0)
+      body+=",\"broker_ticket\":\""+IntegerToString((long)opening_order)+"\"";
 
    // Broker comments can truncate command IDs. The opening order ticket is
    // the authoritative fallback used by Django to resolve the command.
