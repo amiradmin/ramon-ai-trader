@@ -700,7 +700,11 @@ class DjangoDecisionApiTests(TestCase):
         self.assertFalse(b["execution_enabled"])
 
     @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
-    def test_client_daily_loss_zero_does_not_authorize_without_server_baseline(self):
+    def test_client_daily_loss_zero_does_not_authorize_real_account_without_server_baseline(self):
+        heartbeat = EAHeartbeat.objects.get(instance_id="ea-decision-test")
+        heartbeat.payload["account_trade_mode"] = 1
+        heartbeat.save(update_fields=["payload"])
+
         r=self.client.post(self.url,data=json.dumps(self.payload()),content_type="application/json",**self.headers)
         self.assertEqual(r.status_code,200,r.content)
         b=r.json()
@@ -712,6 +716,31 @@ class DjangoDecisionApiTests(TestCase):
         self.assertFalse(verdict.details["execution_authorized"])
         self.assertFalse(b["trading_authorization"])
         self.assertFalse(b["execution_enabled"])
+
+    @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
+    def test_verified_demo_without_baseline_uses_explicit_demo_bypass(self):
+        response = self.client.post(
+            self.url,
+            data=json.dumps(self.payload()),
+            content_type="application/json",
+            **self.headers,
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        body = response.json()
+        self.assertFalse(body["daily_baseline_available"])
+        self.assertIsNone(body["server_daily_loss_percent"])
+        self.assertEqual(body["daily_loss_source"], "DEMO_NO_BASELINE_BYPASS")
+        self.assertEqual(body["daily_baseline_day"], date.today().isoformat())
+
+        verdict = RiskVerdictRecord.objects.filter(
+            decision_id=body["sample_key"]
+        ).latest("created_at")
+        self.assertEqual(
+            verdict.details["daily_baseline_capture_method"],
+            "DEMO_NO_BASELINE_BYPASS",
+        )
+        self.assertIsNone(verdict.details["server_daily_loss_percent"])
+        self.assertEqual(verdict.details["account_state_reason"], "")
 
     @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
     def test_demo_uses_complete_broker_history_when_database_baseline_is_missing(self):
