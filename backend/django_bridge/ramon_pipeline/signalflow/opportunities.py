@@ -45,6 +45,8 @@ from statistics import median
 from typing import Any, Callable, Mapping, Sequence
 
 from .common import ACCEPTED, DEFERRED, REJECTED, InvalidMarketData, clip, finite_number, parse_timestamp
+from .trading_config import load_trading_config
+from .additional_setups import detect_additional_opportunity
 
 logger = logging.getLogger(__name__)
 
@@ -577,13 +579,21 @@ class OpportunityDetector:
             raise ValueError("minimum_score must be between 0 and 1")
         if forecast_limit < 40:
             raise ValueError("forecast_limit must be at least 40 candles")
-        self.minimum_score = minimum_score
+        self.trading_settings = load_trading_config()
+        if config is None:
+            config_values = dict(self.trading_settings["opportunity_finder"]["parameters"])
+            if config_values.get("symbol_prefixes") is not None:
+                config_values["symbol_prefixes"] = tuple(config_values["symbol_prefixes"])
+            if config_values.get("session_hours") is not None:
+                config_values["session_hours"] = tuple(tuple(x) for x in config_values["session_hours"])
+            config = OpportunityConfig(**config_values)
+        self.minimum_score = float(self.trading_settings["opportunity_finder"]["minimum_score"]) if minimum_score == 0.55 else minimum_score
         self.use_statistical_forecasts = use_statistical_forecasts
         self.forecast_limit = forecast_limit
         self.arima_order = arima_order
         self.sarima_order = sarima_order
         self.sarima_seasonal_order = sarima_seasonal_order
-        self.config = config or OpportunityConfig()
+        self.config = config
         # A detector built per request has an empty dedupe memory. To make duplicate
         # suppression work across requests, inject a long-lived store (and its lock).
         self._lock = accepted_lock if accepted_lock is not None else threading.Lock()
@@ -948,6 +958,60 @@ class OpportunityDetector:
                 signal_bar_time=_time_out(bar_time),
                 **kwargs,
             )
+
+        # 0. Supplemental setups: independently gated, opt-in and regime-aware.
+        supplemental = detect_additional_opportunity(
+            bars.times,
+            [float(bar.get("open", bar.get("close"))) for bar in market["bars"][-len(bars.close):]],
+            bars.high, bars.low, bars.close, ind.atr, ind.adx, ind.rsi,
+            ind.swing_highs, ind.swing_lows, regime.label,
+            self.trading_settings["opportunity_finder"]["setups"],
+        )
+        if supplemental is not None:
+            candidate_side = supplemental["side"]
+            score = min(1.0, max(0.0, 0.55 + min(0.25, abs(ind.adx[t] - 20.0) / 100.0)))
+            setup_type = supplemental["type"]
+            anchor_time = bar_time
+            signal_key = f"{symbol}|{timeframe}|{candidate_side}|{setup_type}|{anchor_time}"
+            with self._lock:
+                earlier = self._accepted.get(signal_key)
+            if earlier is not None and earlier != bar_time:
+                _check(checks, "duplicate", False, "this supplemental setup already produced a signal")
+                return finish(REJECTED, "DUPLICATE_SIGNAL", "this supplemental setup already produced a signal", candidate_side)
+            _check(checks, "supplemental_setup", True, f"{setup_type} confirmed on the latest completed candle",
+                   metrics={"setup_type": setup_type, "side": candidate_side})
+            if score < self.minimum_score:
+                return finish(REJECTED, "SETUP_SCORE_TOO_LOW",
+                              f"{setup_type} score {score:.2f} is below {self.minimum_score:.2f}", candidate_side)
+            setup = {
+                **supplemental, "side": candidate_side, "anchor_time": _time_out(anchor_time),
+                "reference_price": bars.close[t], "atr": round(atr, 5),
+                "rsi": round(ind.rsi[t], 2), "atr_ratio": round(atr_ratio, 3),
+            }
+            extra = {"setup": setup}
+            reason = f"{setup_type}_CONFIRMED"
+            if self.use_statistical_forecasts or bool(market.get("use_statistical_forecasts", False)):
+                forecast = self._evaluate_forecasts(market, candidate_side, bar_time=bar_time,
+                                                    tolerance=bars.interval / 2.0)
+                extra["forecasting"] = forecast
+                if not forecast.get("approved", False):
+                    reject_reason = forecast.get("reason", "FORECAST_REJECTED")
+                    _check(checks, "forecast", False, forecast.get("detail", reject_reason))
+                    return finish(_forecast_status(reject_reason), reject_reason,
+                                  f"{setup_type} passed technical gates but forecast evidence vetoed it",
+                                  candidate_side, **extra)
+                _check(checks, "forecast", True, "ARIMA/SARIMA agree with setup direction")
+            with self._lock:
+                self._accepted[signal_key] = bar_time
+                self._accepted.move_to_end(signal_key)
+                while len(self._accepted) > 512:
+                    self._accepted.popitem(last=False)
+            signal_id = hashlib.sha256(f"{signal_key}|{bar_time}".encode()).hexdigest()[:16]
+            return done(ACCEPTED, reason, side=candidate_side, candidate_side=candidate_side,
+                        score=score, regime=regime_info, components={k: round(v, 4) for k, v in components.items()},
+                        signal_bar_time=_time_out(bar_time), signal_id=signal_id,
+                        dedupe_key=signal_key, explanation=f"{candidate_side} accepted: {setup_type} confirmed",
+                        **extra)
 
         # 1. Regime ---------------------------------------------------------
         regime_text = (
