@@ -4,49 +4,97 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Ramon — Learning Engine</title>
 <style>
-:root{color-scheme:dark;--bg:#0b1220;--panel:#121d2e;--line:#26364d;--muted:#91a1b7;--text:#e7eef8;--green:#36c98f;--red:#f07878;--amber:#f2bd55}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,sans-serif}main{max-width:1400px;margin:auto;padding:26px}
-header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:20px}h1{margin:0;font-size:25px}h2{font-size:16px;margin:0 0 12px}.muted,.small{color:var(--muted)}.small{font-size:12px}
-button{background:#1e3554;color:var(--text);border:1px solid #38577e;padding:8px 12px;border-radius:8px;cursor:pointer;margin-right:5px}
-.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px;min-width:0}
-.metric span{display:block;color:var(--muted);font-size:12px}.metric strong{display:block;font-size:24px;margin-top:5px;font-variant-numeric:tabular-nums}
-.scroll{overflow:auto}table{width:100%;border-collapse:collapse;white-space:nowrap}th,td{text-align:left;padding:9px;border-bottom:1px solid var(--line);font-size:12px}th{color:var(--muted)}
-.good{color:var(--green)}.bad{color:var(--red)}.tag{border:1px solid var(--line);border-radius:18px;padding:3px 8px;font-size:11px}
-.item{border-top:1px solid var(--line);padding:12px 0}.item:first-child{border-top:0}
-@media(max-width:850px){.grid{grid-template-columns:repeat(2,1fr)}.two{grid-template-columns:1fr}}@media(max-width:500px){main{padding:12px}}
+:root{color-scheme:dark;--bg:#0a111d;--panel:#111d2d;--panel2:#162438;--line:#293b52;--muted:#94a7bd;--text:#e8eff8;--green:#39c995;--red:#f07878;--amber:#eab85b;--blue:#76a9ee}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 Inter,system-ui,sans-serif}main{max-width:1500px;margin:auto;padding:26px}
+header{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:20px}.eyebrow{color:var(--blue);font-size:11px;letter-spacing:.13em;font-weight:700}h1{font-size:26px;margin:3px 0}h2{font-size:15px;margin:0 0 14px}.muted,.small{color:var(--muted)}.small{font-size:12px}
+button{background:#1c3553;color:var(--text);border:1px solid #38577e;padding:8px 12px;border-radius:8px;cursor:pointer;font:inherit;font-size:12px}button:hover{background:#28486d}button:disabled{opacity:.5;cursor:wait}
+.tag{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:20px;padding:3px 9px;font-size:10px;letter-spacing:.04em}.tag.safe{color:var(--green);border-color:#28664f}.tag.warn{color:var(--amber);border-color:#705a30}
+.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.two{display:grid;grid-template-columns:1.15fr .85fr;gap:12px}.three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px;min-width:0}.metric span{display:block;color:var(--muted);font-size:11px}.metric strong{display:block;font-size:25px;margin-top:4px;font-variant-numeric:tabular-nums}.metric small{display:block;color:var(--muted);font-size:11px;margin-top:3px}
+.scroll{overflow:auto}table{width:100%;border-collapse:collapse;white-space:nowrap}th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);font-size:12px}th{color:var(--muted);font-weight:600}tbody tr:last-child td{border-bottom:0}.good{color:var(--green)}.bad{color:var(--red)}.amber{color:var(--amber)}
+.item{border-top:1px solid var(--line);padding:12px 0}.item:first-child{border-top:0}.item p{margin:5px 0;color:#c1cede}.barrow{display:grid;grid-template-columns:120px 1fr 70px;gap:10px;align-items:center;margin:10px 0;font-size:12px}.track{height:7px;background:#24344a;border-radius:8px;overflow:hidden}.fill{height:100%;background:var(--blue);border-radius:8px}.empty{padding:16px 0;color:var(--muted);font-size:12px}.actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.section-note{font-size:11px;color:var(--muted);margin-top:10px}.split{display:flex;justify-content:space-between;gap:10px;align-items:center}
+#status{font-size:12px;color:var(--muted);min-height:18px;margin:0 0 10px}.pillrow{display:flex;gap:8px;flex-wrap:wrap}.pill{background:var(--panel2);border:1px solid var(--line);padding:8px 10px;border-radius:8px;font-size:12px}
+svg{width:100%;height:145px;display:block}.chart-label{fill:var(--muted);font-size:10px}
+@media(max-width:900px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.two{grid-template-columns:1fr}.three{grid-template-columns:1fr 1fr}}
+@media(max-width:560px){main{padding:12px}.grid,.three{grid-template-columns:1fr 1fr}.metric strong{font-size:21px}.barrow{grid-template-columns:90px 1fr 55px}}
 </style>
 </head>
 <body><main>
-<header><div><div class="small">RAMON / SECTION 04</div><h1>Learning Engine</h1><div class="muted">Completed-trade evidence · Assisted learning · Human approval required</div></div>
-<div><span class="tag good">AUTO-APPLY OFF</span> <button id="refresh">Refresh</button> <button id="generate">Generate recommendations</button></div></header>
-<div class="grid" id="metrics"></div>
+<header>
+ <div><div class="eyebrow">RAMON / SECTION 04</div><h1>Learning Engine</h1><div class="muted">Trade outcomes → evidence → human-reviewed improvements</div></div>
+ <div class="pillrow"><span class="tag safe">ASSISTED MODE</span><span class="tag safe">AUTO-APPLY OFF</span><button id="refresh">Refresh data</button><button id="generate">Generate recommendations</button></div>
+</header>
+<div id="status" role="status">Loading learning data…</div>
+<section class="grid" id="kpis">
+ <div class="panel metric"><span>Closed trades</span><strong>—</strong></div><div class="panel metric"><span>Win rate</span><strong>—</strong></div><div class="panel metric"><span>Profit factor</span><strong>—</strong></div><div class="panel metric"><span>Expectancy</span><strong>—</strong></div>
+</section>
 <div class="two">
-<section class="panel"><h2>Performance by market regime</h2><div class="scroll"><table><thead><tr><th>Regime</th><th>Trades</th><th>Win rate</th><th>Net PnL</th><th>Expectancy</th></tr></thead><tbody id="regimes"></tbody></table></div></section>
-<section class="panel"><h2>Statistical review</h2><div id="findings" class="muted">Loading…</div><p id="sample" class="small"></p></section>
+ <section class="panel"><div class="split"><h2>Equity progression</h2><span class="small">Cumulative realized PnL · recent outcomes</span></div><div id="equity"><div class="empty">Waiting for outcome data…</div></div></section>
+ <section class="panel"><h2>Data quality & decision attribution</h2><div id="quality" class="pillrow"></div><p id="quality-note" class="section-note"></p><div id="actions" class="section-note"></div></section>
 </div>
-<section class="panel"><h2>Entry and exit diagnostics</h2><div class="scroll"><table><thead><tr><th>Metric</th><th>Observations</th><th>Average</th></tr></thead><tbody id="execution"></tbody></table></div><p class="small">Missing MAE/MFE or execution measurements remain unavailable, not zero.</p></section>
-<section class="panel"><h2>Human review queue</h2><div id="recommendations" class="muted">Loading…</div></section>
-<section class="panel"><h2>Decision vs outcome</h2><div class="scroll"><table><thead><tr><th>Closed UTC</th><th>Trade</th><th>Symbol</th><th>Decision</th><th>Net PnL</th><th>R</th><th>Regime</th></tr></thead><tbody id="outcomes"></tbody></table></div></section>
-<p id="quality" class="small"></p><form hidden>{% csrf_token %}</form>
+<div class="two">
+ <section class="panel"><h2>Performance by market regime</h2><div class="scroll"><table><thead><tr><th>Regime</th><th>Trades</th><th>Win rate</th><th>Net PnL</th><th>Expectancy</th></tr></thead><tbody id="regimes"></tbody></table></div></section>
+ <section class="panel"><h2>Statistical review / mistake detection</h2><div id="findings" class="muted">Loading…</div><p id="sample" class="section-note"></p></section>
+</div>
+<section class="panel"><h2>Decision attribution</h2><div id="decision-summary" class="pillrow"></div><p class="section-note">Unlinked outcomes are not assigned to decisions by inference. Improve command-ticket attribution at the source.</p></section>
+<div class="two">
+ <section class="panel"><h2>Entry & exit diagnostics</h2><div class="scroll"><table><thead><tr><th>Metric</th><th>Observed</th><th>Unavailable</th><th>Average</th></tr></thead><tbody id="execution"></tbody></table></div><p class="section-note">Missing MAE/MFE, spread, slippage, and efficiency measurements are unavailable, never zero.</p></section>
+ <section class="panel"><h2>Strategy profile evaluation</h2><div id="strategies"></div><p class="section-note">A profile is evaluated only after its configured minimum sample. No profile is ranked or activated automatically.</p></section>
+</div>
+<section class="panel"><div class="split"><h2>Human review queue</h2><span class="tag warn">ACCEPT = BACKTEST ONLY</span></div><div id="recommendations" class="muted">Loading…</div></section>
+<section class="panel"><h2>Recent completed trades</h2><div class="scroll"><table><thead><tr><th>Closed UTC</th><th>Trade</th><th>Symbol</th><th>Decision</th><th>Net PnL</th><th>R multiple</th><th>Setup / regime</th></tr></thead><tbody id="outcomes"></tbody></table></div></section>
+<footer class="small">Ramon Learning Engine · Django remains authoritative for every trading decision, risk verdict, and execution command.</footer>
+<form hidden>{% csrf_token %}</form>
 </main>
 <script>
-const $=id=>document.getElementById(id),fmt=(v,n=2)=>v===null||v===undefined?"—":Number(v).toFixed(n),pct=v=>v===null||v===undefined?"—":(v*100).toFixed(1)+"%";
+const API="/api/ea/v1/learning/";
+const $=id=>document.getElementById(id);
+const fmt=(v,n=2)=>v===null||v===undefined||!Number.isFinite(Number(v))?"—":Number(v).toFixed(n);
+const pct=v=>v===null||v===undefined?"—":(Number(v)*100).toFixed(1)+"%";
 const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const safe=(v)=>v===null||v===undefined?"—":esc(v);
+function metric(label,value,sub=""){return '<div class="panel metric"><span>'+label+'</span><strong>'+value+'</strong><small>'+sub+'</small></div>';}
+function renderEquity(rows){
+ const ordered=[...rows].filter(r=>Number.isFinite(Number(r.realized_pnl))).reverse();
+ if(!ordered.length){$("equity").innerHTML='<div class="empty">No completed trades recorded yet.</div>';return;}
+ let total=0;const points=[0,...ordered.map(r=>(total+=Number(r.realized_pnl)))];
+ const min=Math.min(0,...points),max=Math.max(0,...points),range=max-min||1,w=700,h=130,pad=8;
+ const coords=points.map((v,i)=>[pad+i*(w-2*pad)/Math.max(1,points.length-1),h-pad-((v-min)/range)*(h-2*pad)]);
+ const line=coords.map(p=>p.join(",")).join(" ");
+ const zeroY=h-pad-((0-min)/range)*(h-2*pad);
+ $("equity").innerHTML='<svg viewBox="0 0 '+w+' '+h+'" role="img" aria-label="Cumulative realized profit and loss"><line x1="0" y1="'+zeroY+'" x2="'+w+'" y2="'+zeroY+'" stroke="#52657d" stroke-dasharray="4 4"/><polyline points="'+line+'" fill="none" stroke="#76a9ee" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><text x="8" y="12" class="chart-label">'+fmt(min)+'</text><text x="8" y="'+(h-2)+'" class="chart-label">'+fmt(max)+'</text></svg><div class="split small"><span>'+ordered.length+' latest trades</span><b class="'+(total>=0?"good":"bad")+'">Cumulative: '+fmt(total)+'</b></div>';
+}
 function render(d){
-const s=d.summary.overall||{},cards=[["Closed trades",s.trades],["Win rate",pct(s.win_rate)],["Profit factor",fmt(s.profit_factor)],["Expectancy",fmt(s.expectancy)]];
-$("metrics").innerHTML=cards.map(x=>'<div class="panel metric"><span>'+x[0]+'</span><strong>'+x[1]+'</strong></div>').join("");
-const regimes=d.summary.by_regime||{};$("regimes").innerHTML=Object.entries(regimes).map(([k,v])=>'<tr><td>'+esc(k)+'</td><td>'+v.trades+'</td><td>'+pct(v.win_rate)+'</td><td>'+fmt(v.net_pnl)+'</td><td>'+fmt(v.expectancy)+'</td></tr>').join("")||'<tr><td colspan="5">No regime-tagged outcomes yet.</td></tr>';
-$("findings").innerHTML=(d.review.findings||[]).map(f=>'<div class="item"><b>'+esc(f.code)+'</b><p>'+esc(f.detail)+'</p></div>').join("");$("sample").textContent=d.review.sufficient_data?"Evidence sample: "+d.review.trades+" closed trades.":"Need at least 30 closed trades; current sample: "+d.review.trades+".";
-$("execution").innerHTML=Object.entries(d.execution_diagnostics.metrics||{}).map(([k,v])=>'<tr><td>'+esc(k.replaceAll("_"," "))+'</td><td>'+v.observations+'</td><td>'+fmt(v.average,4)+'</td></tr>').join("");
-$("recommendations").innerHTML=(d.recommendations||[]).map(r=>'<div class="item"><b>'+esc(r.title)+'</b> <span class="tag">'+esc(r.status)+'</span><p>'+esc(r.detail)+'</p><div class="small">Evidence: '+esc(JSON.stringify(r.evidence))+'</div>'+(r.status==="OPEN"?'<button data-review="ACCEPT" data-id="'+r.id+'">Accept for backtest</button><button data-review="REJECT" data-id="'+r.id+'">Reject</button>':'')+'</div>').join("")||"No recommendations yet.";
-$("outcomes").innerHTML=(d.recent_outcomes||[]).map(r=>'<tr><td>'+esc(r.closed_at)+'</td><td>'+esc(r.trade_id)+'</td><td>'+esc(r.symbol)+'</td><td>'+esc(r.decision.action||"Unlinked")+'</td><td class="'+(r.realized_pnl>=0?"good":"bad")+'">'+fmt(r.realized_pnl)+'</td><td>'+fmt(r.r_multiple,3)+'</td><td>'+esc(r.tags.regime||"—")+'</td></tr>').join("")||'<tr><td colspan="7">No completed outcomes recorded.</td></tr>';
-$("quality").textContent=d.data_quality.note+" · Outcomes without decision link: "+d.data_quality.outcomes_without_decision_link;
+ const s=d.summary?.overall||{};
+ $("kpis").innerHTML=[
+ metric("Closed trades",safe(s.trades),"Wins "+safe(s.wins)+" · Losses "+safe(s.losses)),
+ metric("Win rate",pct(s.win_rate),s.win_rate_ci95?"95% CI "+pct(s.win_rate_ci95[0])+"–"+pct(s.win_rate_ci95[1]):"Confidence interval unavailable"),
+ metric("Profit factor",fmt(s.profit_factor),"Gross profit "+fmt(s.gross_profit)+" / gross loss "+fmt(s.gross_loss)),
+ metric("Expectancy",fmt(s.expectancy),"Net PnL "+fmt(s.net_pnl)+" · Avg R "+fmt(s.avg_r,3))
+ ].join("");
+ const q=d.data_quality||{},a=d.analysis?.decisions||{};
+ $("quality").innerHTML='<span class="pill">Outcomes: <b>'+safe(q.closed_outcomes)+'</b></span><span class="pill">Decision linked: <b>'+safe(a.linked_outcomes)+'</b></span><span class="pill">Unlinked: <b class="'+(a.unlinked_outcomes?"amber":"good")+'">'+safe(a.unlinked_outcomes)+'</b></span><span class="pill">Link rate: <b>'+pct(a.link_rate)+'</b></span>';
+ $("quality-note").textContent=q.note||"";
+ $("actions").textContent="Linked sides: "+JSON.stringify(a.linked_by_side||{});
+ renderEquity(d.recent_outcomes||[]);
+ const regimes=d.analysis?.regimes||d.summary?.by_regime||{};
+ $("regimes").innerHTML=Object.entries(regimes).map(([k,v])=>'<tr><td>'+esc(k)+'</td><td>'+safe(v.trades)+'</td><td>'+pct(v.win_rate)+'</td><td class="'+(Number(v.net_pnl)>=0?"good":"bad")+'">'+fmt(v.net_pnl)+'</td><td>'+fmt(v.expectancy)+'</td></tr>').join("")||'<tr><td colspan="5">No regime-tagged outcomes yet.</td></tr>';
+ const review=d.analysis?.mistakes||d.review||{};
+ $("findings").innerHTML=(review.findings||[]).map(f=>'<div class="item"><b>'+esc(f.code||"Finding")+'</b><p>'+esc(f.detail||"")+'</p><div class="small">'+esc(JSON.stringify(f.evidence||{}))+'</div></div>').join("")||'<div class="empty">No statistically supported findings yet.</div>';
+ $("sample").textContent=review.sufficient_data?"Evidence sample: "+safe(review.trades)+" closed trades.":"Need at least 30 closed trades; current sample: "+safe(review.trades||s.trades||0)+". Findings are deliberately conservative.";
+ $("decision-summary").innerHTML='<span class="pill">Total outcomes: '+safe(a.outcomes)+'</span><span class="pill">Linked: '+safe(a.linked_outcomes)+'</span><span class="pill">Unlinked: '+safe(a.unlinked_outcomes)+'</span><span class="pill">Attribution coverage: '+pct(a.link_rate)+'</span>';
+ const metrics=d.analysis?.entry_exit?.metrics||d.execution_diagnostics?.metrics||{};
+ $("execution").innerHTML=Object.entries(metrics).map(([k,v])=>'<tr><td>'+esc(k.replaceAll("_"," "))+'</td><td>'+safe(v.observations)+'</td><td>'+safe(v.unavailable)+'</td><td>'+fmt(v.average,4)+'</td></tr>').join("")||'<tr><td colspan="4">No execution diagnostics available.</td></tr>';
+ const profiles=d.analysis?.strategies?.profiles||{};
+ $("strategies").innerHTML=Object.entries(profiles).map(([name,p])=>'<div class="item"><div class="split"><b>'+esc(name)+'</b><span class="tag '+(p.sufficient_data?"safe":"warn")+'">'+(p.sufficient_data?"SAMPLE READY":"INSUFFICIENT SAMPLE")+'</span></div><div class="small">'+safe(p.trades)+' trades'+(p.metrics?" · Win rate "+pct(p.metrics.win_rate)+" · Expectancy "+fmt(p.metrics.expectancy):" · Need "+safe(d.analysis.strategies.minimum_samples)+" minimum trades")+'</div></div>').join("")||'<div class="empty">No strategy-profile tags recorded yet.</div>';
+ $("recommendations").innerHTML=(d.recommendations||[]).map(r=>'<div class="item"><div class="split"><b>'+esc(r.title)+'</b><span class="tag">'+esc(r.status)+'</span></div><p>'+esc(r.detail)+'</p><div class="small">Finding: '+esc(r.finding_code)+' · Evidence: '+esc(JSON.stringify(r.evidence||{}))+'</div>'+(r.status==="OPEN"?'<div class="actions"><button data-review="ACCEPT" data-id="'+Number(r.id)+'">Accept for backtest</button><button data-review="REJECT" data-id="'+Number(r.id)+'">Reject</button></div>':'<div class="small">Reviewed by '+esc(r.reviewer||"—")+' · No automatic application</div>')+'</div>').join("")||'<div class="empty">No recommendations yet. Generation requires at least 30 closed outcomes.</div>';
+ $("outcomes").innerHTML=(d.recent_outcomes||[]).map(r=>'<tr><td>'+esc(r.closed_at)+'</td><td>'+esc(r.trade_id)+'</td><td>'+esc(r.symbol)+'</td><td>'+esc(r.decision?.action||"Unlinked")+'</td><td class="'+(Number(r.realized_pnl)>=0?"good":"bad")+'">'+fmt(r.realized_pnl)+'</td><td>'+fmt(r.r_multiple,3)+'</td><td>'+esc((r.tags?.setup_type||"—")+" / "+(r.tags?.regime||"—"))+'</td></tr>').join("")||'<tr><td colspan="7">No completed outcomes recorded yet.</td></tr>';
 }
 const csrf=()=>document.querySelector("[name=csrfmiddlewaretoken]")?.value||"";
-async function load(){const r=await fetch("../learning/overview",{credentials:"same-origin"});if(!r.ok)throw Error("Overview failed: "+r.status);render(await r.json());}
-$("refresh").onclick=()=>load().catch(e=>alert(e.message));
-$("generate").onclick=async()=>{try{const r=await fetch("../learning/recommendations/generate",{method:"POST",credentials:"same-origin",headers:{"X-CSRFToken":csrf()}});const d=await r.json();if(!r.ok)throw Error(d.error||"Request failed");alert(d.message);await load();}catch(e){alert(e.message);}};
-$("recommendations").onclick=async e=>{const b=e.target.closest("button[data-review]");if(!b)return;try{const r=await fetch("../learning/recommendations/"+b.dataset.id+"/review",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json","X-CSRFToken":csrf()},body:JSON.stringify({decision:b.dataset.review})});const d=await r.json();if(!r.ok)throw Error(d.error||"Review failed");await load();}catch(err){alert(err.message);}};
-load().catch(e=>$("findings").textContent=e.message);
+async function request(url,options={}){const r=await fetch(url,{credentials:"same-origin",...options});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||"Request failed ("+r.status+")");return d;}
+async function load(){ $("refresh").disabled=true;$("status").textContent="Refreshing from Django…";try{const d=await request(API+"overview");render(d);$("status").textContent="Updated "+new Date().toLocaleTimeString()+" · Read-only analysis";}catch(e){$("status").textContent=e.message;}finally{$("refresh").disabled=false;}}
+$("refresh").addEventListener("click",load);
+$("generate").addEventListener("click",async()=>{const b=$("generate");b.disabled=true;try{const d=await request(API+"recommendations/generate",{method:"POST",headers:{"X-CSRFToken":csrf()}});$("status").textContent=d.message||"Recommendation review complete";await load();}catch(e){$("status").textContent=e.message;}finally{b.disabled=false;}});
+$("recommendations").addEventListener("click",async e=>{const b=e.target.closest("button[data-review]");if(!b)return;b.disabled=true;try{await request(API+"recommendations/"+encodeURIComponent(b.dataset.id)+"/review",{method:"POST",headers:{"Content-Type":"application/json","X-CSRFToken":csrf()},body:JSON.stringify({decision:b.dataset.review})});await load();}catch(err){$("status").textContent=err.message;b.disabled=false;}});
+load();
 </script></body></html>
