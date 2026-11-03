@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Ramon Trading Configuration",
+  "type": "object",
+  "required": [
+    "config_version",
+    "opportunity_finder",
+    "validation"
+  ],
+  "properties": {
+    "config_version": {
+      "const": "1.0.0"
+    },
+    "profile": {
+      "enum": [
+        "STRICT",
+        "BALANCED",
+        "LOOSE"
+      ]
+    },
+    "symbol": {
+      "type": "string"
+    },
+    "timeframe": {
+      "type": "string"
+    },
+    "opportunity_finder": {
+      "type": "object",
+      "required": [
+        "minimum_score",
+        "parameters",
+        "setups"
+      ],
+      "properties": {
+        "minimum_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "parameters": {
+          "type": "object"
+        },
+        "setups": {
+          "type": "object",
+          "required": [
+            "trend_pullback",
+            "breakout_retest",
+            "failed_breakout_sweep",
+            "range_edge_fade",
+            "session_opening_range_breakout",
+            "volatility_compression_expansion",
+            "exhaustion_reversal"
+          ],
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "enabled"
+            ],
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    },
+    "entry_timing": {
+      "type": "object"
+    },
+    "risk_management": {
+      "type": "object"
+    },
+    "validation": {
+      "type": "object",
+      "properties": {
+        "allow_lookahead": {
+          "const": false
+        },
+        "use_completed_candles_only": {
+          "const": true
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}
