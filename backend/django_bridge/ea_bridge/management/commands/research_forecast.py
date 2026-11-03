@@ -43,6 +43,16 @@ class Command(BaseCommand):
         query = MarketBar.objects.filter(symbol=symbol, timeframe=timeframe)
         if source:
             query = query.filter(source=source)
+        else:
+            available_sources = list(
+                query.values_list("source", flat=True).distinct()[:2]
+            )
+            if len(available_sources) > 1:
+                raise CommandError(
+                    "Multiple MarketBar sources exist for this symbol/timeframe; "
+                    "pass --source explicitly to avoid mixing independent feeds. "
+                    f"Examples: {', '.join(available_sources)}"
+                )
         bars = list(query.order_by("-timestamp").only(
             "timestamp", "open", "high", "low", "close", "volume"
         )[:limit])
