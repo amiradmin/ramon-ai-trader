@@ -39,6 +39,12 @@ _CALCULATION_RULES = {
         "score": "Weighted opportunity score = sum(component_weight[name] × component_score[name]) for trend, strength, pullback, momentum and volatility. Pass when score >= minimum_score.",
         "duplicate": "Pass when no earlier accepted signal exists for the same symbol, timeframe, side and impulse-anchor timestamp.",
         "forecast": "Optional forecast veto: pass only when the enabled ARIMA/SARIMA evidence accepts the already-approved technical direction; forecasts cannot create an opportunity.",
+        "failed_breakout_sweep": "A completed candle trades beyond a prior lookback high/low by sweep_buffer_atr × ATR and closes back inside that prior range; the sweep extreme is the invalidation reference.",
+        "range_edge_fade": "Only in the RANGING regime: reject a prior range high/low with a directional wick whose fraction of the candle range meets minimum_rejection_wick_ratio; target construction remains downstream.",
+        "session_opening_range_breakout": "After the configured IANA-timezone opening range has fully completed, require a completed close beyond its high/low by breakout_buffer_atr × ATR. Session clock uses timezone-aware local time and DST.",
+        "volatility_compression_expansion": "Require the preceding compression_lookback_bars range to fit within compression_max_atr × current ATR × lookback, followed by a directional candle body >= expansion_body_atr × ATR.",
+        "exhaustion_reversal": "Last-priority setup: require an extension of minimum_extension_atr over extension_lookback_bars, RSI extreme, and a close through the last confirmed opposite swing (CHoCH).",
+        "configuration": "Stage thresholds are loaded from the versioned trading_config.json. Structural opportunity results expose config_version for audit; invalid configuration fails closed."
     },
     "entry_timing": {
         "freshness": "Signal age (bars) = (latest completed bar time − signal bar time) / timeframe seconds. Reject future signal times and pass only when age <= max_signal_age_bars.",
@@ -156,7 +162,7 @@ def _attach_calculation_metadata(
                     "market_inputs": {
                         key: market[key]
                         for key in (
-                            "symbol", "timeframe", "bid", "ask", "point", "spread_points",
+                            "symbol", "timeframe", "bid", "ask", "point", "spread_points", "config_version",
                             "entry_quality", "account_balance", "risk_percent", "stop_loss_points",
                             "point_value_per_lot", "volume_step", "min_volume", "max_volume",
                             "stop_level_points", "take_profit_points", "open_risk_percent",
