@@ -44,16 +44,24 @@ def _build_pipeline(*, demo_mode=False):
     dedupe = bool(opt("RAMON_DEDUPE_SIGNALS", False))
     # Demo profile broadens setup discovery without weakening the hard safety gates.
     opportunity_profile = ({
+        # Broaden demo-only discovery so Ramon records more valid candidates:
+        # accept smaller impulses and shallower/deeper pullbacks, allow a wider
+        # EMA value zone, and recognize more recent breakout/retest structures.
+        # Directional regime, completed-candle, quote, entry and risk guards stay intact.
         "adx_trending": 10.0,
         "adx_ranging": 8.0,
-        "min_ema_separation_atr": 0.12,
-        "support_tolerance_atr": 0.75,
-        "min_impulse_atr": 1.2,
-        "min_retracement": 0.15,
-        "max_retracement": 0.88,
-        "zone_tolerance_atr": 0.55,
-        "max_bars_since_pullback_low": 10,
-        "rsi_overbought": 80.0,
+        "min_ema_separation_atr": 0.10,
+        "support_tolerance_atr": 0.85,
+        "min_impulse_atr": 1.0,
+        "min_retracement": 0.10,
+        "max_retracement": 0.90,
+        "zone_tolerance_atr": 0.70,
+        "max_bars_since_pullback_low": 12,
+        "rsi_overbought": 82.0,
+        "breakout_lookback": 16,
+        "breakout_buffer_atr": 0.05,
+        "breakout_retest_tolerance_atr": 0.35,
+        "breakout_max_retest_bars": 4,
     } if demo_mode else {})
     entry_profile = ({
         "max_signal_age_bars": 1.5,
