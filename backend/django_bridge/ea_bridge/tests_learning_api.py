@@ -1,12 +1,13 @@
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
+from django.utils import timezone as django_timezone
 
 from ea_bridge.learning_store import DjangoOutcomeStore
-from ea_bridge.models import DecisionThresholdConfig, LearningRecommendation, LearningTradeOutcome
+from ea_bridge.models import EACommand, DecisionThresholdConfig, LearningRecommendation, LearningTradeOutcome, StrategyDecisionRecord
 from ramon_pipeline.signalflow.learning import Learning
 
 
@@ -37,6 +38,38 @@ class LearningOutcomeApiTests(TestCase):
         self.assertAlmostEqual(float(row.r_multiple), 1.55)
         self.assertEqual(row.execution_metrics["mae"], 2.0)
         self.assertEqual(row.tags["regime"], "BULLISH")
+
+    @override_settings(EA_BEARER_TOKEN="learning-test-token")
+    def test_opening_order_ticket_resolves_decision_when_broker_truncates_comment(self):
+        StrategyDecisionRecord.objects.create(
+            decision_id="decision-ticket-001", symbol="XAUUSD_o", action="BUY",
+            confidence=0.75, rationale_code="SIGNALFLOW_APPROVED",
+            model_version="test-v1", features={"regime": "BULLISH"},
+        )
+        EACommand.objects.create(
+            command_id="ramon-open-" + "a" * 32,
+            instance_id="ramon-command-ea-1", account_login="123456",
+            symbol="XAUUSD_o", action=EACommand.Action.OPEN,
+            payload={"side": "BUY", "volume": 0.01},
+            decision_id="decision-ticket-001", execution_authorized=True,
+            state=EACommand.State.EXECUTED,
+            expires_at=django_timezone.now() + timedelta(minutes=1),
+            result={"broker_ticket": "987654321"},
+        )
+        payload = {
+            "trade_id": "123456:5550001", "broker_ticket": "987654321",
+            "instance_id": "ramon-command-ea-1", "account_login": "123456",
+            "symbol": "XAUUSD_o", "side": "BUY", "exit_reason": "TP",
+            "realized_pnl": "12.75", "opened_at": "2026-11-03T10:00:00Z",
+            "closed_at": "2026-11-03T11:00:00Z",
+        }
+        response = self.client.post(
+            self.url, data=json.dumps(payload), content_type="application/json", **self.headers
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+        row = LearningTradeOutcome.objects.get(trade_id="123456:5550001")
+        self.assertEqual(row.decision_id, "decision-ticket-001")
+        self.assertEqual(row.decision_snapshot["action"], "BUY")
 
     @override_settings(EA_BEARER_TOKEN="learning-test-token")
     def test_duplicate_is_idempotent_and_conflict_does_not_overwrite(self):
