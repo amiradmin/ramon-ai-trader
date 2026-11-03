@@ -9,6 +9,7 @@ This runbook covers the guarded Django-to-MT5 command path. It does not guarante
 - The server creates an OPEN command only when both `RAMON_EA_COMMAND_CREATION_ENABLED=1` and `RAMON_EA_COMMAND_EXECUTION_ENABLED=1`.
 - The server additionally requires explicit broker telemetry `account_trade_mode=0` (MT5 demo). Missing, malformed, contest, or real-account mode is rejected.
 - The EA must have `EnableCommandExecution=true` for execution, and its own `SafeOpen` guard independently rejects non-demo accounts, disabled terminal/EA trading, invalid volume, wide spread, invalid SL/TP, and per-order loss above `MaxRiskMoney`.
+- For demo sizing, Django uses the server-owned `RAMON_DEMO_RISK_PERCENT` target (default `0.5%`), capped by the configured RiskManager maximum. The v1.04 EA local per-order ceiling defaults to `$12`; Django remains the tighter percentage-based authority for the current demo balance.
 - The committed EA input default remains `EnableCommandExecution=false`; never use this workflow to enable live-account trading.
 
 ## 1. Verify deployment and schema
@@ -53,7 +54,11 @@ docker compose exec -T django python manage.py capture_daily_baseline \
 
 Replace every placeholder with verified values. The command refuses to overwrite an existing baseline. If you cannot verify the broker opening balance, do not create one; leave Ramon in WAIT mode.
 
-## 4. Enable demo-only command delivery deliberately
+## 4. Configure demo risk sizing and enable command delivery deliberately
+
+The default demo risk target is `0.5%` of account balance, applied by Django only after broker telemetry explicitly identifies a demo account. It does not disable the daily-loss, portfolio-risk, stop-distance, reward:risk, minimum-volume, or broker checks. The v1.04 EA's `MaxRiskMoney` default is `$12` so its local execution guard does not reject a correctly sized order on the current approximately `$2,394` demo balance. Keep this local ceiling at or above the expected server-approved per-order loss; it is not a replacement for Django's percentage cap.
+
+## 5. Enable demo-only command delivery deliberately
 
 Only after the above checks pass, edit the local `.env` (never commit it) and set:
 
@@ -71,7 +76,7 @@ docker compose ps
 
 Do not use `down -v`, remove volumes, or delete database data. In the EA Inputs, set `EnableCommandExecution=true` only while connected to the intended demo account. The server-side `account_trade_mode=0` check and EA-side demo-only guard are both mandatory; if either disagrees, no order should be placed.
 
-## 5. Verify a complete order lifecycle
+## 6. Verify a complete order lifecycle
 
 Watch the Experts log and Django logs:
 
