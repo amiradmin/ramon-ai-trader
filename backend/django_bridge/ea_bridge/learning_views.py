@@ -14,7 +14,7 @@ from django.views.decorators.http import require_GET, require_POST
 from .auth import BearerTokenRequired
 from .models import EACommand, LearningRecommendation, LearningTradeOutcome, OrderIntentRecord
 from .learning_store import DjangoOutcomeStore
-from ramon_pipeline.signalflow.learning import Learning
+from ramon_pipeline.learning import LearningEngine
 
 
 def _body(request):
@@ -28,7 +28,7 @@ def _body(request):
 
 
 def _learning():
-    return Learning(store=DjangoOutcomeStore())
+    return LearningEngine(store=DjangoOutcomeStore())
 
 
 def _staff_api(view):
@@ -92,6 +92,7 @@ def learning_overview(request):
         "ok": True, "mode": "ASSISTED", "auto_apply": False,
         "strategy_mutation_enabled": False,
         "summary": summary, "review": review,
+        "analysis": engine.analyze(min_samples=30),
         "execution_diagnostics": _execution_diagnostics(),
         "recommendations": [_recommendation_dict(row) for row in LearningRecommendation.objects.all()[:50]],
         "recent_outcomes": recent,
