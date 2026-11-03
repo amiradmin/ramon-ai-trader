@@ -344,7 +344,12 @@ def decision(request):
             market[name]=_num(p[name],name) if p.get(name) is not None else None
         # The client value is required for protocol compatibility, but never used to
         # authorize trading. The daily-loss guard receives only the server-derived value.
-        market["daily_loss_percent"] = server_daily_loss_percent
+        # SignalFlow requires a numeric value. Zero is only a pipeline placeholder
+        # when the Demo baseline is unavailable; the audit record remains None and the
+        # command producer independently enforces the same explicit Demo-only bypass.
+        market["daily_loss_percent"] = (
+            server_daily_loss_percent if server_daily_loss_percent is not None else 0.0
+        )
         configured_demo_profile = str(
             getattr(settings, "RAMON_DEMO_PROFILE", "expanded")
         ).strip().lower()
