@@ -602,6 +602,7 @@ const CHECK_THRESHOLD_KEYS = {
   opportunities: {
     volatility:["atr_ratio_min","atr_ratio_max"],
     regime:["adx_trending","adx_ranging","min_ema_separation_atr"],
+    regime_stability:["regime_lookback"],
     impulse:["min_impulse_atr"],
     pullback_depth:["min_retracement","max_retracement"],
     trend_support:["support_tolerance_atr"],
@@ -615,9 +616,13 @@ const CHECK_THRESHOLD_KEYS = {
     freshness:["max_signal_age_bars"],
     signal_freshness:["max_signal_age_bars"],
     chase:["max_chase_atr"],
+    spread_absolute:["maximum_spread_points"],
+    spread_volatility:["max_spread_atr"],
+    spread_risk:["max_spread_to_risk"],
     spread:["maximum_spread_points","max_spread_atr","max_spread_to_risk"],
     spread_cost:["maximum_spread_points","max_spread_atr","max_spread_to_risk"],
     risk_room:["min_risk_room_atr"],
+    quality:["minimum_quality"],
     entry_quality:["minimum_quality"]
   },
   risk_management: {
