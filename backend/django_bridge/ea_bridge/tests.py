@@ -521,16 +521,13 @@ class DjangoDecisionApiTests(TestCase):
     )
     @patch("ea_bridge.decision.SignalFlowPipeline.run")
     def test_command_is_created_once_only_after_approved_risk_and_fresh_demo_permissions(self, run_pipeline):
-        AccountDailyBaseline.objects.create(
-            account_login="12345678",
-            server_name="LiteFinance-MT5-Demo",
-            broker_day=date.today(),
-            opening_balance="10000.00",
-            source_instance_id="ea-decision-test",
-        )
         heartbeat = EAHeartbeat.objects.get(instance_id="ea-decision-test")
         heartbeat.trade_allowed = True
-        heartbeat.save(update_fields=["trade_allowed"])
+        heartbeat.payload.update({
+            "broker_day_history_complete": True,
+            "broker_day_opening_balance": "10000.00",
+        })
+        heartbeat.save(update_fields=["trade_allowed", "payload"])
         run_pipeline.return_value = {
             "approved": True,
             "action": "BUY",
@@ -553,6 +550,7 @@ class DjangoDecisionApiTests(TestCase):
         self.assertTrue(body["command_created"], body)
         self.assertTrue(body["command_available"], body)
         self.assertEqual(body["command_reason"], "COMMAND_CREATED")
+        self.assertEqual(body["daily_loss_source"], "BROKER_HISTORY_TELEMETRY_DEMO")
         command = EACommand.objects.get(command_id=body["command_id"])
         self.assertEqual(command.action, EACommand.Action.OPEN)
         self.assertEqual(command.instance_id, "ea-decision-test")
@@ -684,6 +682,57 @@ class DjangoDecisionApiTests(TestCase):
         self.assertFalse(verdict.details["execution_authorized"])
         self.assertFalse(b["trading_authorization"])
         self.assertFalse(b["execution_enabled"])
+
+    @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
+    def test_demo_uses_complete_broker_history_when_database_baseline_is_missing(self):
+        heartbeat = EAHeartbeat.objects.get(instance_id="ea-decision-test")
+        heartbeat.payload.update({
+            "broker_day_history_complete": True,
+            "broker_day_opening_balance": "10000.00",
+        })
+        heartbeat.payload["account"]["equity"] = "9600"
+        heartbeat.save(update_fields=["payload"])
+
+        response = self.client.post(
+            self.url, data=json.dumps(self.payload()),
+            content_type="application/json", **self.headers,
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        body = response.json()
+        self.assertTrue(body["daily_baseline_available"])
+        self.assertEqual(body["daily_baseline_balance"], 10000.0)
+        self.assertAlmostEqual(body["server_daily_loss_percent"], 4.0, places=4)
+        self.assertEqual(body["daily_loss_source"], "BROKER_HISTORY_TELEMETRY_DEMO")
+        record = StrategyDecisionRecord.objects.get(decision_id=body["sample_key"])
+        self.assertEqual(
+            record.features["daily_risk"]["source"],
+            "BROKER_HISTORY_TELEMETRY_DEMO",
+        )
+        verdict = RiskVerdictRecord.objects.filter(
+            decision_id=body["sample_key"]
+        ).latest("created_at")
+        self.assertEqual(
+            verdict.details["daily_baseline_capture_method"],
+            "BROKER_HISTORY_TELEMETRY_DEMO",
+        )
+
+    @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
+    def test_non_demo_cannot_use_broker_history_fallback(self):
+        heartbeat = EAHeartbeat.objects.get(instance_id="ea-decision-test")
+        heartbeat.payload.update({
+            "account_trade_mode": 1,
+            "broker_day_history_complete": True,
+            "broker_day_opening_balance": "10000.00",
+        })
+        heartbeat.save(update_fields=["payload"])
+
+        response = self.client.post(
+            self.url, data=json.dumps(self.payload()),
+            content_type="application/json", **self.headers,
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["reason"], "DAILY_LOSS_BASELINE_UNAVAILABLE")
+        self.assertFalse(response.json()["daily_baseline_available"])
 
     @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
     def test_server_baseline_equity_drawdown_overrides_client_zero(self):
