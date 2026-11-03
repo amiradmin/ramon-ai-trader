@@ -1,9 +1,9 @@
-from django.test import SimpleTestCase, override_settings
+from django.test import TestCase, override_settings
 
 from .decision import _apply_demo_risk_policy, _build_pipeline
 
 
-class DemoRiskPolicyTests(SimpleTestCase):
+class DemoRiskPolicyTests(TestCase):
     @override_settings(RAMON_DEMO_RISK_PERCENT=0.5)
     def test_demo_uses_server_owned_half_percent_instead_of_ea_five_dollar_cap(self):
         pipeline = _build_pipeline(demo_mode=True)
