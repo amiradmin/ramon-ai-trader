@@ -51,17 +51,20 @@
       },
       "failed_breakout_sweep": {
         "enabled": false,
+        "demo_enabled": true,
         "lookback_bars": 20,
         "sweep_buffer_atr": 0.1
       },
       "range_edge_fade": {
         "enabled": false,
+        "demo_enabled": true,
         "lookback_bars": 32,
         "edge_buffer_atr": 0.2,
         "minimum_rejection_wick_ratio": 0.35
       },
       "session_opening_range_breakout": {
         "enabled": false,
+        "demo_enabled": true,
         "sessions": {
           "LONDON": {
             "timezone": "Europe/London",
@@ -77,12 +80,14 @@
       },
       "volatility_compression_expansion": {
         "enabled": false,
+        "demo_enabled": true,
         "compression_lookback_bars": 20,
         "compression_max_atr": 0.75,
         "expansion_body_atr": 1
       },
       "exhaustion_reversal": {
         "enabled": false,
+        "demo_enabled": true,
         "extension_lookback_bars": 20,
         "minimum_extension_atr": 2.5,
         "rsi_extreme": 75,

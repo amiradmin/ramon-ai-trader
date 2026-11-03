@@ -64,6 +64,7 @@ def _build_pipeline(*, demo_mode=False):
     } if demo_mode else {})
     detector = OpportunityDetector(
         minimum_score=0.48 if demo_mode else 0.55,
+        demo_mode=demo_mode,
         config=OpportunityConfig(
             **opportunity_profile,
             require_closed_flag=True,

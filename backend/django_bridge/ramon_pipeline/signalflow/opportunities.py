@@ -45,7 +45,7 @@ from statistics import median
 from typing import Any, Callable, Mapping, Sequence
 
 from .common import ACCEPTED, DEFERRED, REJECTED, InvalidMarketData, clip, finite_number, parse_timestamp
-from .trading_config import load_trading_config
+from .trading_config import load_trading_config, _SUPPLEMENTAL_SETUP_NAMES
 from .additional_setups import detect_additional_opportunity
 
 logger = logging.getLogger(__name__)
@@ -572,6 +572,7 @@ class OpportunityDetector:
         sarima_order: tuple[int, int, int] = (1, 1, 1),
         sarima_seasonal_order: tuple[int, int, int, int] = (1, 0, 1, 5),
         config: OpportunityConfig | None = None,
+        demo_mode: bool = False,
         accepted_store: "OrderedDict[str, float] | None" = None,
         accepted_lock: Any = None,
     ) -> None:
@@ -580,6 +581,12 @@ class OpportunityDetector:
         if forecast_limit < 40:
             raise ValueError("forecast_limit must be at least 40 candles")
         self.trading_settings = load_trading_config()
+        self.demo_mode = bool(demo_mode)
+        if self.demo_mode:
+            demo_setups = self.trading_settings["opportunity_finder"]["setups"]
+            for name in _SUPPLEMENTAL_SETUP_NAMES:
+                settings = demo_setups[name]
+                settings["enabled"] = settings["demo_enabled"]
         if config is None:
             config_values = dict(self.trading_settings["opportunity_finder"]["parameters"])
             if config_values.get("symbol_prefixes") is not None:
@@ -891,7 +898,15 @@ class OpportunityDetector:
         timeframe = str(market.get("timeframe", "M15")).upper()
 
         def done(status: str, reason: str, **kwargs: Any) -> dict[str, Any]:
-            return self._result(status, reason, checks=checks, config_version=self.trading_settings["config_version"], **kwargs)
+            setup_switches = {
+                name: bool(settings.get("enabled"))
+                for name, settings in self.trading_settings["opportunity_finder"]["setups"].items()
+            }
+            return self._result(
+                status, reason, checks=checks,
+                config_version=self.trading_settings["config_version"],
+                setup_switches=setup_switches, **kwargs,
+            )
 
         if symbol and config.symbol_prefixes and not symbol.upper().startswith(
             tuple(prefix.upper() for prefix in config.symbol_prefixes)

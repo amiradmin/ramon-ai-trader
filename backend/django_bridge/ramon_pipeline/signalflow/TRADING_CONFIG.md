@@ -19,11 +19,23 @@ The runtime reads `trading_config.json` beside the SignalFlow Python modules. Th
 - `volatility_compression_expansion`: a directional expansion candle after a compressed prior range.
 - `exhaustion_reversal`: extended move plus confirmed swing-level CHoCH; intentionally last and highest-noise.
 
-The five supplemental setups are **disabled by default**. Enable one at a time only after a setup-specific chronological backtest. The shared completed-bar, regime-stability (where applicable), volatility, Entry Timing, Risk Management, and Django authorization gates remain in force. A detected opportunity is not an order instruction.
+The five supplemental setups remain **disabled in the standard profile**. Each has a separate `demo_enabled` switch. The decision endpoint applies those switches only after fresh MT5 telemetry positively identifies `ACCOUNT_TRADE_MODE_DEMO`; non-demo accounts continue to use the standard `enabled` values. In the current demo profile, all five supplemental detectors can be observed on the live market feed, with exhaustion reversal evaluated last.
+
+Demo activation does not bypass the shared completed-bar, regime-stability (where applicable), volatility, Entry Timing, structural Risk Management, account-baseline, or Django command-authorization gates. A detected opportunity is not an order instruction. Actual order delivery still requires both server environment gates, a fresh matching demo heartbeat, a passing risk verdict, a valid daily baseline, and EA-side demo-account checks.
 
 ## Strictness
 
 Tune numeric thresholds in each setup's JSON object. Lower buffers / rejection requirements generally make detection more permissive; higher requirements make it stricter. Change one parameter at a time and keep a copy of the prior config. There is intentionally no global preset that silently rewrites individual thresholds.
+
+## Practical demo rollout
+
+1. Deploy the code and run the full Django test suite.
+2. Attach RamonCommandEA v1.04 to the intended XAUUSD M15 demo chart and verify the dashboard reports a fresh heartbeat, `DEMO` account mode, matching symbol, and terminal trade permission.
+3. First observe decisions with server command creation/execution gates OFF. Confirm the Opportunity Finder reports each setup type and that Entry Timing/Risk Management explain every rejection.
+4. Only when telemetry, daily baseline capture, stop/target values, and risk verdicts are verified should command creation and execution be enabled locally for the demo deployment. Never commit those environment switches as enabled.
+5. Test one position at a time. The current command producer intentionally refuses to create a new OPEN command while any position is open because open-position risk is not yet independently verified.
+
+The EA's local `EnableCommandExecution` input must also be enabled for the demo terminal. Its own account-mode check rejects non-demo accounts. Keep the EA source and its risk cap under version control; keep the bearer token and deployment switches local.
 
 ## Important boundaries
 

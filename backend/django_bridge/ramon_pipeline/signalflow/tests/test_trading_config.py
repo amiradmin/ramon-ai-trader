@@ -7,6 +7,7 @@ from ramon_pipeline.signalflow.trading_config import load_trading_config
 from ramon_pipeline.signalflow.additional_setups import detect_additional_opportunity
 from ramon_pipeline.signalflow.entry_timing import EntryTimer
 from ramon_pipeline.signalflow.risk_management import RiskManager
+from ramon_pipeline.signalflow.opportunities import OpportunityDetector
 
 
 class TradingConfigTests(TestCase):
@@ -18,6 +19,31 @@ class TradingConfigTests(TestCase):
         self.assertFalse(setups["session_opening_range_breakout"]["enabled"])
         self.assertFalse(setups["volatility_compression_expansion"]["enabled"])
         self.assertFalse(setups["exhaustion_reversal"]["enabled"])
+
+    def test_supplemental_setups_are_enabled_only_for_verified_demo_profile(self):
+        standard = OpportunityDetector()
+        demo = OpportunityDetector(demo_mode=True)
+        setup_names = (
+            "failed_breakout_sweep",
+            "range_edge_fade",
+            "session_opening_range_breakout",
+            "volatility_compression_expansion",
+            "exhaustion_reversal",
+        )
+        standard_setups = standard.trading_settings["opportunity_finder"]["setups"]
+        demo_setups = demo.trading_settings["opportunity_finder"]["setups"]
+        for name in setup_names:
+            self.assertFalse(standard_setups[name]["enabled"], name)
+            self.assertTrue(demo_setups[name]["enabled"], name)
+
+    def test_demo_switches_must_be_boolean(self):
+        config = json.loads(Path(__file__).parents[1].joinpath("trading_config.json").read_text())
+        config["opportunity_finder"]["setups"]["failed_breakout_sweep"]["demo_enabled"] = "yes"
+        with tempfile.NamedTemporaryFile("w", suffix=".json", encoding="utf-8") as file:
+            json.dump(config, file)
+            file.flush()
+            with self.assertRaises(ValueError):
+                load_trading_config(file.name)
 
     def test_entry_and_risk_stages_load_the_central_thresholds(self):
         self.assertEqual(EntryTimer().config.max_chase_atr, 0.5)

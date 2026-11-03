@@ -11,6 +11,10 @@ _SETUP_NAMES = {
     "range_edge_fade", "session_opening_range_breakout",
     "volatility_compression_expansion", "exhaustion_reversal",
 }
+_SUPPLEMENTAL_SETUP_NAMES = {
+    "failed_breakout_sweep", "range_edge_fade", "session_opening_range_breakout",
+    "volatility_compression_expansion", "exhaustion_reversal",
+}
 
 
 def load_trading_config(path: str | Path | None = None) -> dict[str, Any]:
@@ -34,6 +38,8 @@ def load_trading_config(path: str | Path | None = None) -> dict[str, Any]:
     for name, settings in setups.items():
         if not isinstance(settings, dict) or not isinstance(settings.get("enabled"), bool):
             raise ValueError(f"setup {name} must define a boolean enabled flag")
+        if name in _SUPPLEMENTAL_SETUP_NAMES and not isinstance(settings.get("demo_enabled"), bool):
+            raise ValueError(f"setup {name} must define a boolean demo_enabled flag")
     score = finder.get("minimum_score")
     if isinstance(score, bool) or not isinstance(score, (int, float)) or not 0 <= score <= 1:
         raise ValueError("opportunity_finder.minimum_score must be between 0 and 1")

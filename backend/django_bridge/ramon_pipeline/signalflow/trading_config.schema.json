@@ -52,6 +52,9 @@
             "properties": {
               "enabled": {
                 "type": "boolean"
+              },
+              "demo_enabled": {
+                "type": "boolean"
               }
             }
           }
