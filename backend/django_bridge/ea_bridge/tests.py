@@ -859,8 +859,19 @@ class CommandPollingTests(TestCase):
     @override_settings(
         EA_BEARER_TOKEN="test-token",
         RAMON_EA_COMMAND_EXECUTION_ENABLED=True,
+        RAMON_EA_HEARTBEAT_MAX_AGE_SECONDS=90,
     )
     def test_next_command_delivers_only_authorized_pending_command_to_matching_account(self):
+        EAHeartbeat.objects.create(
+            instance_id="command-poll-ea",
+            account_login="12345678",
+            server_name="LiteFinance-MT5-Demo",
+            symbol="XAUUSD_o",
+            status="TELEMETRY_OK",
+            terminal_connected=True,
+            trade_allowed=True,
+            payload={"server_name": "LiteFinance-MT5-Demo", "account_trade_mode": 0},
+        )
         command = EACommand.objects.create(
             command_id="ramon-open-test-001",
             instance_id="command-poll-ea",
