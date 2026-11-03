@@ -26,11 +26,11 @@ jobs:
         run: |
           set -euo pipefail
           bash -n scripts/update_build_ramon.sh
-          grep -Fq 'mt5/RamonCommandEA_v1.05.mq5' scripts/update_build_ramon.sh || {
+          grep -Fq 'mt5/RamonCommandEA_v1.06.mq5' scripts/update_build_ramon.sh || {
             echo "FAIL: deployment script must compile the pinned command EA source." >&2
             exit 1
           }
-          grep -Fq 'EA_SOURCES=(mt5/RamonCommandEA_v1.05.mq5)' scripts/update_build_ramon.sh || {
+          grep -Fq 'EA_SOURCES=(mt5/RamonCommandEA_v1.06.mq5)' scripts/update_build_ramon.sh || {
             echo "FAIL: one-command deployment must install only the command EA." >&2
             exit 1
           }
@@ -92,7 +92,7 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          sources=(mt5/RamonCommandEA_v1.05.mq5)
+          sources=(mt5/RamonCommandEA_v1.06.mq5)
           if (( ${#sources[@]} == 0 )); then
             echo "No RamonCommandEA source files found" >&2
             exit 1
@@ -128,7 +128,7 @@ jobs:
             done
           done
 
-          production_source="mt5/RamonCommandEA_v1.05.mq5"
+          production_source="mt5/RamonCommandEA_v1.06.mq5"
           grep -Fq 'GetServerUtcOffsetSeconds' "$production_source" || {
             echo "FAIL: production EA must use a stable broker-to-UTC offset." >&2
             exit 1
