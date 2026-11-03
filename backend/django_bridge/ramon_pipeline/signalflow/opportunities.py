@@ -985,7 +985,7 @@ class OpportunityDetector:
         )
         if supplemental is not None:
             candidate_side = supplemental["side"]
-            score = min(1.0, max(0.0, 0.55 + min(0.25, abs(ind.adx[t] - 20.0) / 100.0)))
+            score = min(1.0, max(0.0, float(supplemental.pop("score", 0.55))))
             setup_type = supplemental["type"]
             anchor_time = bar_time
             signal_key = f"{symbol}|{timeframe}|{candidate_side}|{setup_type}|{anchor_time}"
