@@ -117,7 +117,9 @@ def create_open_command(*, decision, verdict, instance_id, account_login, server
         baseline_opening_balance = _decimal(baseline.opening_balance, "daily baseline")
         expected_baseline_source = "SERVER_BASELINE_EQUITY_DRAWDOWN"
     else:
-        # Match the decision API's demo-only, complete-broker-history fallback.
+        # Prefer a complete broker-history baseline. If it is unavailable, permit
+        # this explicitly identified Demo account to proceed without daily-loss
+        # enforcement; never apply this exception to a Real account.
         try:
             telemetry_opening_balance = _decimal(
                 snapshot.get("broker_day_opening_balance"), "broker day opening balance"
@@ -125,13 +127,15 @@ def create_open_command(*, decision, verdict, instance_id, account_login, server
         except ValueError:
             telemetry_opening_balance = Decimal("0")
         if (
-            snapshot.get("broker_day_history_complete") is not True
-            or snapshot.get("server_name") != server_name
-            or telemetry_opening_balance <= 0
+            snapshot.get("broker_day_history_complete") is True
+            and snapshot.get("server_name") == server_name
+            and telemetry_opening_balance > 0
         ):
-            return None, False, "DAILY_LOSS_BASELINE_UNAVAILABLE"
-        baseline_opening_balance = telemetry_opening_balance
-        expected_baseline_source = "BROKER_HISTORY_TELEMETRY_DEMO"
+            baseline_opening_balance = telemetry_opening_balance
+            expected_baseline_source = "BROKER_HISTORY_TELEMETRY_DEMO"
+        else:
+            baseline_opening_balance = None
+            expected_baseline_source = "DEMO_NO_BASELINE_BYPASS"
 
     if verdict.details.get("daily_baseline_day") != broker_day.isoformat():
         return None, False, "RISK_VERDICT_BASELINE_DAY_MISMATCH"
@@ -140,14 +144,18 @@ def create_open_command(*, decision, verdict, instance_id, account_login, server
         expected_baseline_source,
     ):
         return None, False, "RISK_VERDICT_BASELINE_SOURCE_MISMATCH"
-    try:
-        verdict_baseline_balance = _decimal(
-            verdict.details.get("daily_baseline_balance"), "verdict daily baseline"
-        )
-    except ValueError:
-        return None, False, "RISK_VERDICT_BASELINE_MISMATCH"
-    if abs(verdict_baseline_balance - baseline_opening_balance) > Decimal("0.01"):
-        return None, False, "RISK_VERDICT_BASELINE_MISMATCH"
+    if baseline_opening_balance is None:
+        if verdict.details.get("daily_baseline_balance") is not None:
+            return None, False, "RISK_VERDICT_BASELINE_MISMATCH"
+    else:
+        try:
+            verdict_baseline_balance = _decimal(
+                verdict.details.get("daily_baseline_balance"), "verdict daily baseline"
+            )
+        except ValueError:
+            return None, False, "RISK_VERDICT_BASELINE_MISMATCH"
+        if abs(verdict_baseline_balance - baseline_opening_balance) > Decimal("0.01"):
+            return None, False, "RISK_VERDICT_BASELINE_MISMATCH"
     if bid <= 0 or ask < bid or current_balance <= 0 or baseline_equity <= 0 or volume <= 0:
         return None, False, "ACCOUNT_OR_QUOTE_VALUES_INVALID"
     if abs(current_balance - decision_balance) > Decimal("0.01"):
