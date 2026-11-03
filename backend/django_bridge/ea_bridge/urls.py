@@ -3,6 +3,7 @@ from . import views
 from . import decision as decision_views
 from . import commands as command_views
 from . import telemetry as telemetry_views
+from . import learning_views
 
 urlpatterns = [
     path("handshake", views.handshake, name="ea-handshake"),
@@ -16,4 +17,9 @@ urlpatterns = [
     path("dashboard", views.dashboard, name="ramon-dashboard"),
     path("dashboard-data", views.dashboard_data, name="ramon-dashboard-data"),
     path("decision-thresholds", views.decision_thresholds, name="ramon-decision-thresholds"),
+    path("learning/dashboard", learning_views.learning_dashboard, name="ramon-learning-dashboard"),
+    path("learning/overview", learning_views.learning_overview, name="ramon-learning-overview"),
+    path("learning/outcomes", learning_views.record_outcome, name="ramon-learning-outcomes"),
+    path("learning/recommendations/generate", learning_views.generate_recommendations, name="ramon-learning-generate"),
+    path("learning/recommendations/<int:recommendation_id>/review", learning_views.review_recommendation, name="ramon-learning-review"),
 ]
