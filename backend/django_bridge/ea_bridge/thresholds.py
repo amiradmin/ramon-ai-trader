@@ -8,6 +8,7 @@ THRESHOLDS = {
         "minimum_score": {"label":"Minimum opportunity score","unit":"0–1","min":0.10,"max":0.95,"step":0.01,"description":"Minimum composite opportunity score required to advance."},
         "adx_trending": {"label":"ADX trending threshold","unit":"ADX","min":5,"max":50,"step":0.5,"description":"ADX level used to classify a directional market."},
         "adx_ranging": {"label":"ADX ranging threshold","unit":"ADX","min":3,"max":45,"step":0.5,"description":"ADX level below which the market can be classified as ranging."},
+        "regime_lookback": {"label":"Regime stability lookback","unit":"bars","min":1,"max":50,"step":1,"description":"Number of completed bars used to compare the prior market regime."},
         "min_ema_separation_atr": {"label":"Minimum EMA separation","unit":"ATR","min":0.01,"max":2,"step":0.01,"description":"Minimum fast/slow EMA separation normalized by ATR."},
         "support_tolerance_atr": {"label":"Support tolerance","unit":"ATR","min":0.05,"max":3,"step":0.05,"description":"Allowed distance from the structural support/resistance zone."},
         "atr_ratio_min": {"label":"Minimum volatility ratio","unit":"ratio","min":0.1,"max":3,"step":0.05,"description":"Lower bound for current ATR relative to its recent baseline."},
@@ -40,12 +41,12 @@ THRESHOLDS = {
     },
 }
 DEMO_DEFAULTS = {
-    "opportunities": {"minimum_score":0.42,"adx_trending":10.0,"adx_ranging":8.0,"min_ema_separation_atr":0.06,"support_tolerance_atr":1.0,"atr_ratio_min":0.6,"atr_ratio_max":2.5,"min_impulse_atr":0.8,"min_retracement":0.05,"max_retracement":0.95,"zone_tolerance_atr":0.9,"max_bars_since_pullback_low":16,"rsi_overbought":85.0,"breakout_lookback":12,"breakout_buffer_atr":0.0,"breakout_retest_tolerance_atr":0.5,"breakout_max_retest_bars":6},
+    "opportunities": {"minimum_score":0.42,"adx_trending":10.0,"adx_ranging":8.0,"min_ema_separation_atr":0.06,"regime_lookback":8,"support_tolerance_atr":1.0,"atr_ratio_min":0.6,"atr_ratio_max":2.5,"min_impulse_atr":0.8,"min_retracement":0.05,"max_retracement":0.95,"zone_tolerance_atr":0.9,"max_bars_since_pullback_low":16,"rsi_overbought":85.0,"breakout_lookback":12,"breakout_buffer_atr":0.0,"breakout_retest_tolerance_atr":0.5,"breakout_max_retest_bars":6},
     "entry_timing": {"minimum_quality":0.42,"maximum_spread_points":100.0,"max_signal_age_bars":1.5,"max_chase_atr":0.85,"min_risk_room_atr":0.15,"max_spread_atr":0.30,"max_spread_to_risk":0.40},
     "risk_management": {"stop_buffer_atr":0.25,"min_stop_atr":0.5,"max_stop_atr":3.5,"min_reward_risk":1.2},
 }
 STANDARD_DEFAULTS = {
-    "opportunities": {"minimum_score":0.55,"adx_trending":12.0,"adx_ranging":10.0,"min_ema_separation_atr":0.20,"support_tolerance_atr":0.65,"atr_ratio_min":0.6,"atr_ratio_max":2.5,"min_impulse_atr":1.5,"min_retracement":0.20,"max_retracement":0.82,"zone_tolerance_atr":0.40,"max_bars_since_pullback_low":8,"rsi_overbought":75.0,"breakout_lookback":20,"breakout_buffer_atr":0.10,"breakout_retest_tolerance_atr":0.25,"breakout_max_retest_bars":3},
+    "opportunities": {"minimum_score":0.55,"adx_trending":12.0,"adx_ranging":10.0,"min_ema_separation_atr":0.20,"regime_lookback":8,"support_tolerance_atr":0.65,"atr_ratio_min":0.6,"atr_ratio_max":2.5,"min_impulse_atr":1.5,"min_retracement":0.20,"max_retracement":0.82,"zone_tolerance_atr":0.40,"max_bars_since_pullback_low":8,"rsi_overbought":75.0,"breakout_lookback":20,"breakout_buffer_atr":0.10,"breakout_retest_tolerance_atr":0.25,"breakout_max_retest_bars":3},
     "entry_timing": {"minimum_quality":0.55,"maximum_spread_points":80.0,"max_signal_age_bars":1.0,"max_chase_atr":0.5,"min_risk_room_atr":0.25,"max_spread_atr":0.20,"max_spread_to_risk":0.25},
     "risk_management": {"stop_buffer_atr":0.25,"min_stop_atr":0.5,"max_stop_atr":3.5,"min_reward_risk":1.2},
 }
