@@ -690,7 +690,7 @@ class DjangoDecisionApiTests(TestCase):
         self.assertEqual(r.status_code,200,r.content)
         b=r.json()
         self.assertEqual(b["decision"],"WAIT")
-        self.assertEqual(b["reason"],"RISK_INPUTS_INCOMPLETE")
+        self.assertEqual(b["reason"],"SERVER_RISK_INPUTS_UNAVAILABLE")
         self.assertFalse(b["risk_inputs_complete"])
         self.assertIn("server_symbol_metadata", b["missing_risk_inputs"])
         self.assertFalse(b["risk_approved_advisory_only"])
