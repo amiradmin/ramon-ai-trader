@@ -50,18 +50,18 @@ def _build_pipeline(*, demo_mode=False):
         # Directional regime, completed-candle, quote, entry and risk guards stay intact.
         "adx_trending": 10.0,
         "adx_ranging": 8.0,
-        "min_ema_separation_atr": 0.10,
-        "support_tolerance_atr": 0.85,
-        "min_impulse_atr": 1.0,
-        "min_retracement": 0.10,
-        "max_retracement": 0.90,
-        "zone_tolerance_atr": 0.70,
-        "max_bars_since_pullback_low": 12,
-        "rsi_overbought": 82.0,
-        "breakout_lookback": 16,
-        "breakout_buffer_atr": 0.05,
-        "breakout_retest_tolerance_atr": 0.35,
-        "breakout_max_retest_bars": 4,
+        "min_ema_separation_atr": 0.06,
+        "support_tolerance_atr": 1.00,
+        "min_impulse_atr": 0.80,
+        "min_retracement": 0.05,
+        "max_retracement": 0.95,
+        "zone_tolerance_atr": 0.90,
+        "max_bars_since_pullback_low": 16,
+        "rsi_overbought": 85.0,
+        "breakout_lookback": 12,
+        "breakout_buffer_atr": 0.00,
+        "breakout_retest_tolerance_atr": 0.50,
+        "breakout_max_retest_bars": 6,
     } if demo_mode else {})
     entry_profile = ({
         "max_signal_age_bars": 1.5,
@@ -71,7 +71,7 @@ def _build_pipeline(*, demo_mode=False):
         "max_spread_to_risk": 0.40,
     } if demo_mode else {})
     detector = OpportunityDetector(
-        minimum_score=0.48 if demo_mode else 0.55,
+        minimum_score=0.42 if demo_mode else 0.55,
         demo_mode=demo_mode,
         config=OpportunityConfig(
             **opportunity_profile,
@@ -97,7 +97,7 @@ def _build_pipeline(*, demo_mode=False):
         accepted_lock=_SIGNAL_MEMORY_LOCK if dedupe else None,
     )
     timer = EntryTimer(
-        minimum_quality=0.48 if demo_mode else 0.55,
+        minimum_quality=0.42 if demo_mode else 0.55,
         maximum_spread_points=100.0 if demo_mode else 80.0,
         require_quote=True,
         config=EntryTimingConfig(
