@@ -210,6 +210,7 @@ def decision(request):
         daily_baseline_day = ""
         daily_baseline_balance = None
         daily_baseline_capture_method = ""
+        daily_loss_source = "UNAVAILABLE_FAIL_CLOSED"
         daily_current_equity = None
         account_snapshot_balance = None
 
@@ -272,14 +273,37 @@ def decision(request):
                             server_name=server_name,
                             broker_day=broker_day,
                         ).first()
-                        if baseline is None or baseline.opening_balance <= 0:
-                            account_state_reason = "DAILY_LOSS_BASELINE_UNAVAILABLE"
-                        else:
-                            daily_baseline_day = broker_day.isoformat()
+                        if baseline is not None and baseline.opening_balance > 0:
                             daily_baseline_balance = float(baseline.opening_balance)
                             daily_baseline_capture_method = baseline.capture_method
-                            # Equity drawdown from the server-recorded opening balance
-                            # includes both realized and current floating losses.
+                            daily_loss_source = "SERVER_BASELINE_EQUITY_DRAWDOWN"
+                        else:
+                            # Demo-only fallback: use the EA's broker-history-derived opening
+                            # balance only when MT5 explicitly confirms complete history.
+                            # This preserves the daily-loss guard without trusting client inputs.
+                            opening_balance_raw = snapshot.get("broker_day_opening_balance")
+                            history_complete = snapshot.get("broker_day_history_complete") is True
+                            try:
+                                telemetry_opening_balance = _num(
+                                    opening_balance_raw, "broker day opening balance"
+                                )
+                            except (TypeError, ValueError, OverflowError):
+                                telemetry_opening_balance = 0.0
+                            if (
+                                is_demo_account
+                                and history_complete
+                                and snapshot.get("server_name") == server_name
+                                and telemetry_opening_balance > 0
+                            ):
+                                daily_baseline_balance = telemetry_opening_balance
+                                daily_baseline_capture_method = "BROKER_HISTORY_TELEMETRY_DEMO"
+                                daily_loss_source = "BROKER_HISTORY_TELEMETRY_DEMO"
+                            else:
+                                account_state_reason = "DAILY_LOSS_BASELINE_UNAVAILABLE"
+
+                        if daily_baseline_balance is not None:
+                            daily_baseline_day = broker_day.isoformat()
+                            # Equity drawdown includes realized and current floating losses.
                             server_daily_loss_percent = max(
                                 0.0,
                                 (daily_baseline_balance - snapshot_equity) / daily_baseline_balance * 100.0,
@@ -352,7 +376,7 @@ def decision(request):
             "capture_method": daily_baseline_capture_method,
             "current_equity": daily_current_equity,
             "loss_percent": server_daily_loss_percent,
-            "source": "SERVER_BASELINE_EQUITY_DRAWDOWN" if server_daily_loss_percent is not None else "UNAVAILABLE_FAIL_CLOSED",
+            "source": daily_loss_source,
           },
           # Read-only inputs for explaining the existing Django risk verdict in the dashboard.
           # These fields do not participate in, or alter, the decision.
@@ -469,7 +493,7 @@ def decision(request):
         response["daily_baseline_day"] = daily_baseline_day
         response["daily_baseline_balance"] = daily_baseline_balance
         response["server_daily_loss_percent"] = server_daily_loss_percent
-        response["daily_loss_source"] = "SERVER_BASELINE_EQUITY_DRAWDOWN" if server_daily_loss_percent is not None else "UNAVAILABLE_FAIL_CLOSED"
+        response["daily_loss_source"] = daily_loss_source
         response["stages"] = result["stages"]
         return JsonResponse(response, json_dumps_params={"separators": (",", ":")})
     except (KeyError,TypeError,ValueError,OverflowError,json.JSONDecodeError) as exc:
