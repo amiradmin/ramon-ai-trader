@@ -71,6 +71,7 @@ Useful runbooks:
 - [Demo-only activation checklist](docs/operations/demo-trading-activation.md)
 - [Command EA v1.06 validation](docs/ramon-commandea-v1.06-validation.md)
 - [Learning Engine package architecture](docs/architecture/learning-engine-package.md)
+- Learning Engine dashboard: `/api/ea/v1/learning/dashboard` (linked from the main Ramon dashboard)
 - [Django command protocol](docs/architecture/django-command-ea-protocol-v1.md)
 
 ## Research code vs. running service
