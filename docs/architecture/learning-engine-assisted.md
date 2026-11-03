@@ -53,6 +53,10 @@ All timestamps should be UTC. MAE/MFE and execution metrics are only analyzed wh
 The new endpoint is ready to receive normalized completed-trade events. The MT5 EA event schema must be inspected and mapped explicitly before changing EA emission; no assumptions are made about broker ticket semantics or the EA's current close-event payload.
 
 
+## Modular Python package
+
+The analysis layer is organized in `backend/django_bridge/ramon_pipeline/learning/`. It separates outcome collection, performance, decision-link coverage, entry/exit diagnostics, regime segmentation, mistake detection, strategy-profile evaluation, optimization evidence checks, and recommendation formatting. The existing `signalflow.learning.Learning` remains the compatibility/statistics core; the Django ORM models and `DjangoOutcomeStore` remain in `ea_bridge` and are not duplicated. The read-only overview API exposes the combined `analysis` report. See [the package architecture](learning-engine-package.md) for module contracts.
+
 ## MT5 completed-position integration (EA v1.06)
 
 The pinned production source is `mt5/RamonCommandEA_v1.06.mq5`. The EA scans broker deal history on its timer and submits only positions that have fully closed. It does not send each partial-close deal as a separate trade outcome.
