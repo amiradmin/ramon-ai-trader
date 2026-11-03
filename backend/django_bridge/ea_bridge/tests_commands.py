@@ -6,7 +6,7 @@ from .command_producer import _is_demo_account
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from .models import EACommand
+from .models import EACommand, EAHeartbeat
 
 
 class DemoAccountGateTests(TestCase):
@@ -25,6 +25,12 @@ class EACommandEndpointTests(TestCase):
     ack_url = "/api/ea/v1/commands/ack"
 
     def setUp(self):
+        EAHeartbeat.objects.create(
+            instance_id="ea-test-1", account_login="12345",
+            server_name="LiteFinance-MT5-Demo", symbol="XAUUSD_o",
+            status="TELEMETRY_OK", terminal_connected=True, trade_allowed=True,
+            payload={"server_name": "LiteFinance-MT5-Demo", "account_trade_mode": 0},
+        )
         self.payload = {
             "command_id": "cmd-test-1",
             "instance_id": "ea-test-1",
