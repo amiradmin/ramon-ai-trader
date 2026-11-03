@@ -219,6 +219,7 @@
     <div class="flow-legend"><span style="color:var(--green)"><i></i>PASS</span><span style="color:var(--amber)"><i></i>WAIT</span><span style="color:var(--red)"><i></i>BLOCKED</span><span><i></i>UPCOMING</span></div>
   </div>
   <div class="card">
+    <form id="ramonCsrfForm" hidden>{% csrf_token %}</form>
     <div id="decisionFlow" class="flow-grid" aria-live="polite"><div class="small">Waiting for the latest Django decision…</div></div>
     <div id="thresholdEditorStatus" class="threshold-status" role="status" aria-live="polite">Loading Django strategy thresholds…</div>
     <div id="flowSummary" class="flow-summary">Waiting for decision diagnostics…</div>
@@ -666,8 +667,11 @@ async function saveDecisionThresholds(reset = false) {
   const status = $("thresholdEditorStatus");
   if (status) { status.className = "threshold-status"; status.textContent = reset ? "Restoring defaults…" : "Saving thresholds…"; }
   try {
+    const csrfToken = document.querySelector("#ramonCsrfForm [name=csrfmiddlewaretoken]")?.value;
+    if (!csrfToken) throw new Error("Security token unavailable; reload the dashboard and try again.");
     const response = await fetch("/api/ea/v1/decision-thresholds", {
-      method:"POST", headers:{"Content-Type":"application/json"},
+      method:"POST",
+      headers:{"Content-Type":"application/json","X-CSRFToken":csrfToken},
       body:JSON.stringify(reset ? {action:"reset"} : {values:thresholdDraft})
     });
     const data = await response.json();
