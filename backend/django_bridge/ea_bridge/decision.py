@@ -122,7 +122,7 @@ def _num(v, name):
 
 def _apply_demo_risk_policy(market, pipeline, *, demo_mode):
     """Apply the server-owned demo risk target; never raise the live account's request."""
-    requested = _num(market.get("risk_percent", 0), "risk_percent")
+    requested = 0.0
     maximum = _num(pipeline.risk_manager.maximum_risk_percent, "maximum_risk_percent")
     if maximum <= 0:
         raise ValueError("maximum_risk_percent must be positive")
@@ -298,10 +298,6 @@ def decision(request):
                         account_state_reason = "ACCOUNT_BALANCE_INVALID"
                     elif abs(snapshot_balance - request_balance) > 0.01:
                         account_state_reason = "ACCOUNT_BALANCE_MISMATCH"
-                    elif positions_snapshot:
-                        # Current telemetry lacks enough broker metadata to independently
-                        # calculate the risk of every open position.
-                        account_state_reason = "OPEN_POSITION_RISK_UNVERIFIED"
                     else:
                         baseline = AccountDailyBaseline.objects.filter(
                             account_login=account_login,
@@ -356,18 +352,60 @@ def decision(request):
                             )
                             account_state_reason = ""
 
-        risk_guard_fields=("stop_level_points","take_profit_points","daily_loss_percent","open_risk_percent")
-        missing_risk_inputs=[name for name in risk_guard_fields if p.get(name) is None]
-        risk_guards_complete=not missing_risk_inputs
+
+        # Derive all policy inputs on the server from raw account and symbol telemetry.
+        snapshot = heartbeat.payload if heartbeat is not None and isinstance(heartbeat.payload, dict) else {}
+        symbol_info = snapshot.get("symbol_info", {}) if isinstance(snapshot.get("symbol_info", {}), dict) else {}
+        try:
+            tick_size = _num(symbol_info.get("tick_size"), "symbol tick_size")
+            tick_value = _num(symbol_info.get("tick_value"), "symbol tick_value")
+            min_volume = _num(symbol_info.get("volume_min"), "symbol volume_min")
+            max_volume = _num(symbol_info.get("volume_max"), "symbol volume_max")
+            volume_step = _num(symbol_info.get("volume_step"), "symbol volume_step")
+            stop_level_points = _num(symbol_info.get("stops_level_points"), "symbol stops level")
+            if min(tick_size, tick_value, min_volume, max_volume, volume_step) <= 0:
+                raise ValueError("invalid symbol metadata")
+            point_value_per_lot = tick_value * point / tick_size
+            open_risk_money = 0.0
+            for pos in positions_snapshot:
+                if not isinstance(pos, dict):
+                    raise ValueError("invalid position telemetry")
+                vol = _num(pos.get("volume"), "position volume")
+                entry = _num(pos.get("price_open"), "position open")
+                sl = _num(pos.get("sl"), "position stop")
+                pos_tick_size = _num(pos.get("tick_size"), "position tick size")
+                pos_tick_value = _num(pos.get("tick_value"), "position tick value")
+                pos_type = int(pos.get("type"))
+                if min(vol, entry, sl, pos_tick_size, pos_tick_value) <= 0:
+                    raise ValueError("position risk facts unavailable")
+                adverse = entry - sl if pos_type == 0 else sl - entry
+                if adverse < 0:
+                    raise ValueError("position stop is not loss-side")
+                open_risk_money += adverse / pos_tick_size * pos_tick_value * vol
+            risk_balance = _num(account_snapshot.get("balance"), "risk balance")
+            open_risk_percent_server = open_risk_money / risk_balance * 100.0
+            take_profit_points_server = max(stop_level_points + 1.0, 2.0 * atr / point)
+        except (TypeError, ValueError, OverflowError):
+            account_state_reason = account_state_reason or "SERVER_RISK_INPUTS_UNAVAILABLE"
+            point_value_per_lot = 0.0
+            min_volume = max_volume = volume_step = stop_level_points = 0.0
+            open_risk_percent_server = 100.0
+            take_profit_points_server = 0.0
+
+        risk_guards_complete = bool(
+            not account_state_reason and point_value_per_lot > 0 and
+            min_volume > 0 and max_volume >= min_volume and volume_step > 0 and
+            take_profit_points_server > 0
+        )
         market={"symbol":symbol,"timeframe":"M15","bars":bars,"last_bar_closed":True,
           "latest_bar_time":bar_time,"bid":bid,"ask":ask,"point":point,
           "trend":direction,"setup_score":setup,"entry_quality":quality,"spread_points":spread,
-          "account_balance":_num(p.get("account_balance",0),"account_balance"),"risk_percent":_num(p.get("risk_percent",0),"risk_percent"),
-          "stop_loss_points":atr*1.5/point,"point_value_per_lot":_num(p.get("point_value_per_lot",0),"point_value_per_lot"),
-          "volume_step":_num(p.get("volume_step",0),"volume_step"),"min_volume":_num(p.get("min_volume",0),"min_volume"),
-          "max_volume":_num(p.get("max_volume",0),"max_volume")}
-        for name in risk_guard_fields:
-            market[name]=_num(p[name],name) if p.get(name) is not None else None
+          "account_balance":_num(account_snapshot.get("balance",0),"account_balance"),"risk_percent":0.0,
+          "stop_loss_points":atr*1.5/point,"point_value_per_lot":point_value_per_lot,
+          "volume_step":volume_step,"min_volume":min_volume,"max_volume":max_volume,
+          "stop_level_points":stop_level_points,"take_profit_points":take_profit_points_server,
+          "daily_loss_percent":server_daily_loss_percent if server_daily_loss_percent is not None else 0.0,
+          "open_risk_percent":open_risk_percent_server}
         # The client value is required for protocol compatibility, but never used to
         # authorize trading. The daily-loss guard receives only the server-derived value.
         # SignalFlow requires a numeric value. Zero is only a pipeline placeholder
