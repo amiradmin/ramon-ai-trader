@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from io import StringIO
 from unittest.mock import patch
 
-from django.core.management import call_command
+from django.core.management import call_command, CommandError
 from django.test import TestCase
 
 from ea_bridge.models import MarketBar
@@ -48,6 +48,6 @@ class ReadOnlyResearchForecastCommandTests(TestCase):
 
     def test_rejects_unknown_model_without_touching_marketbars(self):
         before = MarketBar.objects.count()
-        with self.assertRaises(Exception):
+        with self.assertRaises(CommandError):
             call_command("research_forecast", models="tensorflow_magic")
         self.assertEqual(MarketBar.objects.count(), before)
