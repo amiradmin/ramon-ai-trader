@@ -509,9 +509,8 @@ function opportunityDetectorMarkup(stageResult) {
   const breakout = byName.get("breakout_retest");
   const pullbackNames = ["impulse", "pullback_depth", "trend_support", "value_zone", "freshness", "resumption"];
   const pullbackChecks = pullbackNames.map(name => byName.get(name)).filter(Boolean);
-  const activePullbackCheck = pullbackChecks.find(item =>
-    item.passed === false || item.passed === true && String(item.status || "").toUpperCase() !== "NOT_EVALUATED"
-  );
+  const activePullbackCheck = pullbackChecks.find(item => item.passed === false) ||
+    pullbackChecks.find(item => item.passed === true && String(item.status || "").toUpperCase() !== "NOT_EVALUATED");
   let pullbackState = "idle", pullbackLabel = "NOT EVALUATED";
   let pullbackDetail = "Shared prerequisites or an earlier gate prevented pullback evaluation.";
   if (setupType === "TREND_PULLBACK" && stageResult?.approved === true) {
