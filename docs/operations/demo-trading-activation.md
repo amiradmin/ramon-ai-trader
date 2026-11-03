@@ -5,7 +5,7 @@ This runbook covers the guarded Django-to-MT5 command path. It does not guarante
 ## Safety contract
 
 - Django remains the sole strategy and risk decision-maker.
-- Missing/stale telemetry, missing daily baseline, an open position whose risk cannot be verified, or an incomplete risk verdict must result in `WAIT` / no command.
+- Missing/stale telemetry, an open position whose risk cannot be verified, or an incomplete risk verdict must result in `WAIT` / no command. Real accounts require a verified daily baseline; demo accounts may use only the explicit, audited `DEMO_NO_BASELINE_BYPASS` path when no verified baseline is available.
 - The server creates an OPEN command only when both `RAMON_EA_COMMAND_CREATION_ENABLED=1` and `RAMON_EA_COMMAND_EXECUTION_ENABLED=1`.
 - The server additionally requires explicit broker telemetry `account_trade_mode=0` (MT5 demo). Missing, malformed, contest, or real-account mode is rejected.
 - The EA must have `EnableCommandExecution=true` for execution, and its own `SafeOpen` guard independently rejects non-demo accounts, disabled terminal/EA trading, invalid volume, wide spread, invalid SL/TP, and per-order loss above `MaxRiskMoney`.
@@ -38,7 +38,7 @@ The EA must send the exact broker server name, broker-local date, account trade 
 
 ## 3. Establish today's daily-risk baseline
 
-A missing baseline intentionally blocks entries. Never substitute the current balance or current equity for the opening balance.
+A verified broker-day opening balance is preferred. Real accounts fail closed without it. For an explicitly identified demo account only, the code may proceed with `DEMO_NO_BASELINE_BYPASS` when neither a server baseline nor complete broker-history baseline is available; daily-loss enforcement is then unavailable and must be visible in the audit record. Never fabricate an opening balance or substitute current balance/equity.
 
 Check whether today's `AccountDailyBaseline` exists for the exact account login, exact server name, and broker-local date. If it does not, use the broker's account history/statement to verify the opening balance for that broker day, adjusting for deposits, withdrawals, and credit operations where applicable. Then run:
 
@@ -96,8 +96,8 @@ If any step fails, use the returned reason code and fix that prerequisite. Do no
 
 - [ ] Django health check and migrations pass.
 - [ ] Exact EA source compiled with zero errors/warnings and installed in the active terminal.
-- [ ] Live telemetry reports `ea_version=1.02` and integer `account_trade_mode=0`.
-- [ ] Daily baseline exists for the exact account/server/broker day and is broker-verified.
+- [ ] Live telemetry reports `ea_version=1.04` and integer `account_trade_mode=0`.
+- [ ] Daily baseline exists for the exact account/server/broker day and is broker-verified, or the demo-only `DEMO_NO_BASELINE_BYPASS` is explicitly recorded.
 - [ ] Missing baseline and non-demo account tests fail closed.
 - [ ] Both server command flags and EA execution input are enabled only for the intended demo test.
 - [ ] A real strategy/risk-approved demo signal creates one command and the EA acknowledges the broker result.
