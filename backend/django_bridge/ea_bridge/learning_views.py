@@ -14,7 +14,7 @@ from django.views.decorators.http import require_GET, require_POST
 from .auth import BearerTokenRequired
 from .models import EACommand, LearningRecommendation, LearningTradeOutcome, OrderIntentRecord
 from .learning_store import DjangoOutcomeStore
-from ramon_pipeline.learning import LearningEngine
+from ramon_pipeline.learning import LearningEngine, RecommendationEngine
 
 
 def _body(request):
@@ -187,9 +187,9 @@ def generate_recommendations(request):
             "message": "At least 30 closed outcomes are required before recommendations are generated.",
         })
     created = 0
-    for finding in review.get("findings", []):
-        code = str(finding.get("code") or "UNKNOWN")[:96]
-        evidence = finding.get("evidence") or {}
+    for recommendation in RecommendationEngine().generate(review):
+        code = str(recommendation["finding_code"])[:96]
+        evidence = recommendation["evidence"]
         fingerprint_source = json.dumps(
             {"code": code, "evidence": evidence}, sort_keys=True, separators=(",", ":"), default=str
         )
@@ -198,9 +198,9 @@ def generate_recommendations(request):
             fingerprint=fingerprint,
             defaults={
                 "finding_code": code,
-                "severity": str(finding.get("severity") or "INFO")[:16],
-                "title": code.replace("_", " ").title(),
-                "detail": str(finding.get("detail") or ""),
+                "severity": str(recommendation["severity"] or "INFO")[:16],
+                "title": str(recommendation["title"]),
+                "detail": str(recommendation["detail"]),
                 "evidence": evidence,
             },
         )
