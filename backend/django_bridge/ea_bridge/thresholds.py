@@ -37,7 +37,7 @@ THRESHOLDS = {
         "stop_buffer_atr": {"label":"Structural stop buffer","unit":"ATR","min":0,"max":2,"step":0.01,"description":"Additional stop distance beyond the structural invalidation level."},
         "min_stop_atr": {"label":"Minimum stop distance","unit":"ATR","min":0.1,"max":5,"step":0.05,"description":"Reject stops that are too close to market noise."},
         "max_stop_atr": {"label":"Maximum stop distance","unit":"ATR","min":0.5,"max":10,"step":0.05,"description":"Reject setups whose structural stop is too far away."},
-        "min_reward_risk": {"label":"Minimum reward / risk","unit":"R:R","min":0.5,"max":10,"step":0.1,"description":"Minimum planned reward relative to planned risk."},
+        "min_reward_risk": {"label":"Minimum reward / risk","unit":"R:R","min":1.0,"max":3.0,"step":0.1,"description":"Minimum planned reward relative to planned risk. Allowed range: 1.0R to 3.0R."},
     },
 }
 DEMO_DEFAULTS = {
