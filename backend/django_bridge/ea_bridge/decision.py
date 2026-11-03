@@ -127,6 +127,7 @@ def _apply_demo_risk_policy(market, pipeline, *, demo_mode):
     if maximum <= 0:
         raise ValueError("maximum_risk_percent must be positive")
     if not demo_mode:
+        market["risk_percent"] = 0.0
         return {
             "source": "SERVER_POLICY",
             "requested_risk_percent": requested,
@@ -528,7 +529,7 @@ def decision(request):
                 approved_volume = Decimal(str(risk_stage["volume"]))
                 stop_loss_value = Decimal(str(stop_price))
                 entry_value = Decimal(str(ask if record.action == "BUY" else bid))
-                minimum_reward_risk = Decimal(str(getattr(settings, "RAMON_MIN_REWARD_RISK", 1.2)))
+                minimum_reward_risk = Decimal(str(getattr(settings, "RAMON_MIN_REWARD_RISK", 1.25)))
                 if minimum_reward_risk < Decimal("1.2"):
                     raise ValueError("minimum reward/risk cannot be below 1.2")
                 stop_distance = abs(entry_value - stop_loss_value)
