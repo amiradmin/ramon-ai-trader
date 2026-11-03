@@ -40,6 +40,51 @@ class EATelemetryTests(TestCase):
         self.assertEqual(heartbeat.payload["account_trade_mode"], 0)
 
     @override_settings(EA_BEARER_TOKEN="test-token")
+    def test_persists_validated_symbol_info_without_authorizing_trading(self):
+        payload = self.payload()
+        payload["symbol_info"] = {
+            "tick_size": 0.01,
+            "tick_value": 1.0,
+            "volume_min": 0.01,
+            "volume_max": 100.0,
+            "volume_step": 0.01,
+            "stops_level_points": 0,
+        }
+        response = self.client.post(
+            self.url, data=json.dumps(payload),
+            content_type="application/json", **self.headers,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["trading_authorization"])
+        heartbeat = EAHeartbeat.objects.get(instance_id="ea-telemetry-test")
+        self.assertEqual(heartbeat.payload["symbol_info"], {
+            "tick_size": "0.01",
+            "tick_value": "1.0",
+            "volume_min": "0.01",
+            "volume_max": "100.0",
+            "volume_step": "0.01",
+            "stops_level_points": "0",
+        })
+
+    @override_settings(EA_BEARER_TOKEN="test-token")
+    def test_rejects_invalid_symbol_info(self):
+        payload = self.payload()
+        payload["symbol_info"] = {
+            "tick_size": 0.01,
+            "tick_value": 0,
+            "volume_min": 0.01,
+            "volume_max": 100.0,
+            "volume_step": 0.01,
+            "stops_level_points": 0,
+        }
+        response = self.client.post(
+            self.url, data=json.dumps(payload),
+            content_type="application/json", **self.headers,
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(EAHeartbeat.objects.filter(instance_id="ea-telemetry-test").exists())
+
+    @override_settings(EA_BEARER_TOKEN="test-token")
     def test_rejects_unclosed_bar(self):
         payload = self.payload()
         payload["bars"][0]["closed"] = False
