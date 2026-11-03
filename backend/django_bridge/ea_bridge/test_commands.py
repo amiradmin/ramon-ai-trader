@@ -4,7 +4,7 @@ from datetime import timedelta
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from .models import EACommand
+from .models import EACommand, EAHeartbeat
 
 
 class EACommandApiTests(TestCase):
@@ -14,6 +14,12 @@ class EACommandApiTests(TestCase):
 
     def setUp(self):
         self.scope = {"instance_id": "ramon-test-instance", "account_login": "123456"}
+        EAHeartbeat.objects.create(
+            instance_id=self.scope["instance_id"], account_login=self.scope["account_login"],
+            server_name="LiteFinance-MT5-Demo", symbol="XAUUSD_o", status="TELEMETRY_OK",
+            terminal_connected=True, trade_allowed=True,
+            payload={"server_name": "LiteFinance-MT5-Demo", "account_trade_mode": 0},
+        )
 
     def post_json(self, url, payload, headers=None):
         return self.client.post(
