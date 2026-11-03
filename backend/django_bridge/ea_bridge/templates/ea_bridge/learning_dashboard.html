@@ -43,7 +43,7 @@ $("recommendations").innerHTML=(d.recommendations||[]).map(r=>'<div class="item"
 $("outcomes").innerHTML=(d.recent_outcomes||[]).map(r=>'<tr><td>'+esc(r.closed_at)+'</td><td>'+esc(r.trade_id)+'</td><td>'+esc(r.symbol)+'</td><td>'+esc(r.decision.action||"Unlinked")+'</td><td class="'+(r.realized_pnl>=0?"good":"bad")+'">'+fmt(r.realized_pnl)+'</td><td>'+fmt(r.r_multiple,3)+'</td><td>'+esc(r.tags.regime||"—")+'</td></tr>').join("")||'<tr><td colspan="7">No completed outcomes recorded.</td></tr>';
 $("quality").textContent=d.data_quality.note+" · Outcomes without decision link: "+d.data_quality.outcomes_without_decision_link;
 }
-const csrf=()=>$("[name=csrfmiddlewaretoken]")?.value||"";
+const csrf=()=>document.querySelector("[name=csrfmiddlewaretoken]")?.value||"";
 async function load(){const r=await fetch("../learning/overview",{credentials:"same-origin"});if(!r.ok)throw Error("Overview failed: "+r.status);render(await r.json());}
 $("refresh").onclick=()=>load().catch(e=>alert(e.message));
 $("generate").onclick=async()=>{try{const r=await fetch("../learning/recommendations/generate",{method:"POST",credentials:"same-origin",headers:{"X-CSRFToken":csrf()}});const d=await r.json();if(!r.ok)throw Error(d.error||"Request failed");alert(d.message);await load();}catch(e){alert(e.message);}};
