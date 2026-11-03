@@ -109,7 +109,11 @@ class LearningOutcomeApiTests(TestCase):
         self.assertAlmostEqual(summary["overall"]["expectancy"], 5)
         self.assertEqual(summary["by_regime"]["BULLISH"]["trades"], 3)
 
-    def test_learning_dashboard_renders_analysis_sections(self):
+    def test_main_dashboard_links_to_learning_engine(self):
+        response = self.client.get("/api/ea/v1/dashboard")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "/api/ea/v1/learning/dashboard")
+\n    def test_learning_dashboard_renders_analysis_sections(self):
         response = self.client.get("/api/ea/v1/learning/dashboard")
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Learning Engine")
