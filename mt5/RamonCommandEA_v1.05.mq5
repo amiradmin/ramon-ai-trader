@@ -1,7 +1,7 @@
 #property strict
-#property version   "1.05"
-#property description "RamonCommandEA v1.05: Django telemetry + guarded demo execution"
-#define RAMON_COMMAND_EA_VERSION "1.05"
+#property version   "1.06"
+#property description "RamonCommandEA v1.06: Django telemetry, learning outcomes + guarded execution"
+#define RAMON_COMMAND_EA_VERSION "1.06"
 
 #include <Trade/Trade.mqh>
 
@@ -521,6 +521,277 @@ string BuildTelemetry()
       +"\"last_command_id\":\""+JsonEscape(LastCommandId)+"\",\"bars\":"+BuildBarsJson()+"}";
 }
 
+
+
+// -----------------------------------------------------------------------------
+// Assisted-learning outcome delivery
+// -----------------------------------------------------------------------------
+
+string LearningCursorName()
+{
+   return "RamonLearn."+
+      IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN))+"."+
+      StringSubstr(InstanceId,0,12);
+}
+
+string LearningTicketCursorName()
+{
+   return LearningCursorName()+".T";
+}
+
+bool IsPositionIdentifierOpen(const ulong position_id)
+{
+   for(int i=0;i<PositionsTotal();i++)
+   {
+      ulong ticket=PositionGetTicket(i);
+      if(ticket==0) continue;
+      if((ulong)PositionGetInteger(POSITION_IDENTIFIER)==position_id)
+         return true;
+   }
+   return false;
+}
+
+bool ContainsPositionId(const ulong &position_ids[],const ulong position_id)
+{
+   for(int i=0;i<ArraySize(position_ids);i++)
+      if(position_ids[i]==position_id) return true;
+   return false;
+}
+
+void SaveLearningCursor(const string cursor_name,
+                        const string ticket_name,
+                        const long deal_time,
+                        const ulong deal_ticket)
+{
+   GlobalVariableSet(cursor_name,(double)deal_time);
+   GlobalVariableSet(ticket_name,(double)deal_ticket);
+   GlobalVariablesFlush();
+}
+
+string DealReasonName(const long reason)
+{
+   if(reason==DEAL_REASON_TP) return "TP";
+   if(reason==DEAL_REASON_SL) return "SL";
+   if(reason==DEAL_REASON_SO) return "STOP_OUT";
+   if(reason==DEAL_REASON_EXPERT) return "EXPERT";
+   if(reason==DEAL_REASON_CLIENT) return "CLIENT";
+   if(reason==DEAL_REASON_MOBILE) return "MOBILE";
+   if(reason==DEAL_REASON_WEB) return "WEB";
+   if(reason==DEAL_REASON_ROLLOVER) return "ROLLOVER";
+   if(reason==DEAL_REASON_VMARGIN) return "MARGIN";
+   if(reason==DEAL_REASON_SPLIT) return "SPLIT";
+   if(reason==DEAL_REASON_CORPORATE_ACTION) return "CORPORATE_ACTION";
+   return "UNKNOWN";
+}
+
+string CommandIdFromComment(const string comment)
+{
+   int prefix=StringFind(comment,"RamonCmd:");
+   if(prefix<0) return "";
+   return StringSubstr(comment,prefix+9);
+}
+
+bool BuildLearningOutcomeJson(const ulong position_id,
+                              const long server_utc_offset,
+                              string &body,
+                              string &trade_id)
+{
+   if(!HistorySelectByPosition(position_id))
+      return false;
+
+   int total=HistoryDealsTotal();
+   if(total<=0) return false;
+
+   double net_pnl=0.0;
+   double total_commission=0.0;
+   double total_swap=0.0;
+   datetime opened_server=0;
+   datetime closed_server=0;
+   ulong opening_order=0;
+   string symbol="";
+   string side="";
+   string exit_reason="UNKNOWN";
+   string command_id="";
+
+   for(int i=0;i<total;i++)
+   {
+      ulong deal=HistoryDealGetTicket(i);
+      if(deal==0) continue;
+
+      long entry=HistoryDealGetInteger(deal,DEAL_ENTRY);
+      long deal_time=HistoryDealGetInteger(deal,DEAL_TIME);
+      long deal_type=HistoryDealGetInteger(deal,DEAL_TYPE);
+      string deal_symbol=HistoryDealGetString(deal,DEAL_SYMBOL);
+      double profit=HistoryDealGetDouble(deal,DEAL_PROFIT);
+      double swap=HistoryDealGetDouble(deal,DEAL_SWAP);
+      double commission=HistoryDealGetDouble(deal,DEAL_COMMISSION);
+      double fee=HistoryDealGetDouble(deal,DEAL_FEE);
+
+      // Net PnL includes all position-linked broker costs, including entry fees.
+      net_pnl+=profit+swap+commission+fee;
+      total_commission+=commission+fee;
+      total_swap+=swap;
+
+      if(entry==DEAL_ENTRY_IN)
+      {
+         if(opened_server==0 || deal_time<opened_server)
+         {
+            opened_server=(datetime)deal_time;
+            opening_order=(ulong)HistoryDealGetInteger(deal,DEAL_ORDER);
+            symbol=deal_symbol;
+            if(deal_type==DEAL_TYPE_BUY) side="BUY";
+            else if(deal_type==DEAL_TYPE_SELL) side="SELL";
+
+            string comment=HistoryDealGetString(deal,DEAL_COMMENT);
+            command_id=CommandIdFromComment(comment);
+            if(command_id=="" && opening_order>0 && HistoryOrderSelect(opening_order))
+               command_id=CommandIdFromComment(
+                  HistoryOrderGetString(opening_order,ORDER_COMMENT));
+         }
+      }
+
+      if(entry==DEAL_ENTRY_OUT || entry==DEAL_ENTRY_OUT_BY)
+      {
+         if(deal_time>=closed_server)
+         {
+            closed_server=(datetime)deal_time;
+            exit_reason=DealReasonName(
+               HistoryDealGetInteger(deal,DEAL_REASON));
+         }
+      }
+   }
+
+   // The current Ramon account is hedging. Netting reversal (DEAL_ENTRY_INOUT)
+   // is intentionally not merged into a completed position outcome.
+   if(opened_server<=0 || closed_server<=0 || closed_server<opened_server ||
+      symbol=="" || (side!="BUY" && side!="SELL"))
+      return false;
+
+   long login=(long)AccountInfoInteger(ACCOUNT_LOGIN);
+   trade_id=IntegerToString(login)+":"+IntegerToString((long)position_id);
+
+   datetime opened_utc=(datetime)((long)opened_server-server_utc_offset);
+   datetime closed_utc=(datetime)((long)closed_server-server_utc_offset);
+
+   body="{\"trade_id\":\""+JsonEscape(trade_id)+"\","
+      +"\"position_id\":\""+IntegerToString((long)position_id)+"\","
+      +"\"instance_id\":\""+JsonEscape(InstanceId)+"\","
+      +"\"account_login\":\""+IntegerToString(login)+"\","
+      +"\"symbol\":\""+JsonEscape(symbol)+"\","
+      +"\"side\":\""+side+"\","
+      +"\"exit_reason\":\""+exit_reason+"\","
+      +"\"realized_pnl\":"+DoubleToString(net_pnl,8)+","
+      +"\"commission\":"+DoubleToString(total_commission,8)+","
+      +"\"swap\":"+DoubleToString(total_swap,8)+","
+      +"\"opened_at\":\""+IsoUtc(opened_utc)+"\","
+      +"\"closed_at\":\""+IsoUtc(closed_utc)+"\","
+      +"\"broker_ticket\":\""+IntegerToString((long)opening_order)+"\"";
+
+   // Broker comments can truncate command IDs. The opening order ticket is
+   // the authoritative fallback used by Django to resolve the command.
+   if(command_id!="")
+      body+=",\"command_id\":\""+JsonEscape(command_id)+"\"";
+   body+="}";
+   return true;
+}
+
+void PollLearningOutcomes()
+{
+   datetime server_now=TimeTradeServer();
+   long server_utc_offset=0;
+   if(server_now<=0 || !GetServerUtcOffsetSeconds(server_utc_offset))
+      return;
+
+   string cursor_name=LearningCursorName();
+   string ticket_name=LearningTicketCursorName();
+
+   if(!GlobalVariableCheck(cursor_name))
+      GlobalVariableSet(cursor_name,(double)((long)server_now-90*86400));
+   if(!GlobalVariableCheck(ticket_name))
+      GlobalVariableSet(ticket_name,0.0);
+
+   long cursor_time=(long)GlobalVariableGet(cursor_name);
+   ulong cursor_ticket=(ulong)GlobalVariableGet(ticket_name);
+   datetime scan_from=(datetime)MathMax(0,cursor_time-60);
+
+   if(!HistorySelect(scan_from,server_now))
+   {
+      Print("Ramon Learning: broker history selection failed; cursor retained.");
+      return;
+   }
+
+   int total=HistoryDealsTotal();
+   if(total<=0) return;
+
+   // Snapshot the selected deal list before HistorySelectByPosition changes it.
+   ulong deal_tickets[];
+   ulong position_ids[];
+   long deal_times[];
+   long deal_entries[];
+   ArrayResize(deal_tickets,total);
+   ArrayResize(position_ids,total);
+   ArrayResize(deal_times,total);
+   ArrayResize(deal_entries,total);
+
+   for(int i=0;i<total;i++)
+   {
+      ulong deal=HistoryDealGetTicket(i);
+      deal_tickets[i]=deal;
+      position_ids[i]=(ulong)HistoryDealGetInteger(deal,DEAL_POSITION_ID);
+      deal_times[i]=HistoryDealGetInteger(deal,DEAL_TIME);
+      deal_entries[i]=HistoryDealGetInteger(deal,DEAL_ENTRY);
+   }
+
+   ulong delivered_positions[];
+   ArrayResize(delivered_positions,0);
+
+   for(int i=0;i<total;i++)
+   {
+      ulong deal=deal_tickets[i];
+      long deal_time=deal_times[i];
+
+      if(deal==0 || deal_time<cursor_time ||
+         (deal_time==cursor_time && deal<=cursor_ticket))
+         continue;
+
+      long entry=deal_entries[i];
+      ulong position_id=position_ids[i];
+
+      if((entry==DEAL_ENTRY_OUT || entry==DEAL_ENTRY_OUT_BY) &&
+         position_id>0 && !IsPositionIdentifierOpen(position_id) &&
+         !ContainsPositionId(delivered_positions,position_id))
+      {
+         string body="";
+         string trade_id="";
+         if(!BuildLearningOutcomeJson(position_id,server_utc_offset,body,trade_id))
+         {
+            Print("Ramon Learning: could not build completed-position outcome; cursor retained. position_id=",
+                  position_id);
+            return;
+         }
+
+         string response="";
+         if(!PostJson("/learning/outcomes",body,response))
+         {
+            Print("Ramon Learning: outcome delivery failed; will retry. trade_id=",
+                  trade_id);
+            return;
+         }
+
+         int count=ArraySize(delivered_positions);
+         ArrayResize(delivered_positions,count+1);
+         delivered_positions[count]=position_id;
+         Print("Ramon Learning: completed position accepted by Django. trade_id=",
+               trade_id," response=",response);
+      }
+
+      // Persist only after a successful POST or a deal that needs no outcome.
+      // A failed POST leaves the cursor before that closing deal for retry.
+      SaveLearningCursor(cursor_name,ticket_name,deal_time,deal);
+   }
+}
+
+
 bool AckCommand(const string command_id,const string state,const string detail,const ulong ticket=0)
 {
    string result="{\"detail\":\""+JsonEscape(detail)+"\",\"broker_ticket\":\""+IntegerToString((long)ticket)+"\"}";
@@ -720,6 +991,7 @@ void OnTimer()
       RequestDjangoDecision();
    }
    PollCommands();
+   PollLearningOutcomes();
    Busy=false;
 }
 
