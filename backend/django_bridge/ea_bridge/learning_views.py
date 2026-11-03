@@ -125,16 +125,40 @@ def record_outcome(request):
                 if parsed.tzinfo is None or parsed.utcoffset() is None:
                     raise ValueError(f"{field} must include a timezone")
         decision_id = str(payload.get("decision_id") or "").strip()
+        instance_id = str(payload.get("instance_id") or "").strip()
+        account_login = str(payload.get("account_login") or "").strip()
         if not decision_id and payload.get("command_id"):
-            command = EACommand.objects.filter(command_id=str(payload["command_id"])).first()
+            commands = EACommand.objects.filter(command_id=str(payload["command_id"]))
+            if instance_id:
+                commands = commands.filter(instance_id=instance_id)
+            if account_login:
+                commands = commands.filter(account_login=account_login)
+            command = commands.first()
             if command:
                 decision_id = command.decision_id
         if not decision_id and payload.get("broker_ticket"):
-            intent = OrderIntentRecord.objects.filter(
-                broker_ticket=str(payload["broker_ticket"])
-            ).order_by("-created_at").first()
-            if intent:
-                decision_id = intent.decision_id
+            # MT5/brokers may truncate the RamonCmd comment. The opening order
+            # ticket is also returned in the command acknowledgement, so use it
+            # as the durable, account-scoped attribution key.
+            commands = EACommand.objects.filter(
+                result__broker_ticket=str(payload["broker_ticket"])
+            ).order_by("-created_at")
+            if instance_id:
+                commands = commands.filter(instance_id=instance_id)
+            if account_login:
+                commands = commands.filter(account_login=account_login)
+            command = commands.first()
+            if command:
+                decision_id = command.decision_id
+            else:
+                intents = OrderIntentRecord.objects.filter(
+                    broker_ticket=str(payload["broker_ticket"])
+                ).order_by("-created_at")
+                if instance_id:
+                    intents = intents.filter(instance_id=instance_id)
+                intent = intents.first()
+                if intent:
+                    decision_id = intent.decision_id
         outcome = dict(payload)
         outcome["trade_id"] = trade_id[:128]
         if decision_id:
