@@ -28,15 +28,15 @@ class DemoRiskPolicyTests(SimpleTestCase):
         self.assertEqual(policy["effective_risk_percent"], 0.5)
 
     @override_settings(RAMON_DEMO_RISK_PERCENT=0.5)
-    def test_live_account_keeps_ea_requested_risk_percent(self):
+    def test_live_account_does_not_accept_client_risk_percent(self):
         pipeline = _build_pipeline(demo_mode=False)
         market = {"risk_percent": 0.20882145}
 
         policy = _apply_demo_risk_policy(market, pipeline, demo_mode=False)
 
-        self.assertEqual(market["risk_percent"], 0.20882145)
+        self.assertEqual(market["risk_percent"], 0.0)
         self.assertEqual(policy["source"], "SERVER_POLICY")
-        self.assertEqual(policy["effective_risk_percent"], 0.20882145)
+        self.assertEqual(policy["effective_risk_percent"], 0.0)
 
     @override_settings(RAMON_DEMO_RISK_PERCENT=0.5)
     def test_demo_budget_can_size_minimum_lot_without_rounding_up(self):
