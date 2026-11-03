@@ -33,6 +33,17 @@
         "parameters": {
           "type": "object"
         },
+        "higher_timeframe_bias": {
+          "type": "object",
+          "required": ["enabled", "demo_enabled"],
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "demo_enabled": {"type": "boolean"},
+            "ema_period": {"type": "integer", "minimum": 5},
+            "bucket_minutes": {"type": "integer", "minimum": 30},
+            "applies_to": {"type": "array", "items": {"type": "string"}}
+          }
+        },
         "setups": {
           "type": "object",
           "required": [

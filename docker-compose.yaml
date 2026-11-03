@@ -25,6 +25,7 @@ services:
       # Fail closed by default. Opt in locally only after verifying a demo account.
       RAMON_EA_COMMAND_CREATION_ENABLED: "${RAMON_EA_COMMAND_CREATION_ENABLED:-0}"
       RAMON_EA_COMMAND_EXECUTION_ENABLED: "${RAMON_EA_COMMAND_EXECUTION_ENABLED:-0}"
+      RAMON_DEMO_PROFILE: "${RAMON_DEMO_PROFILE:-expanded}"
       RAMON_PIPELINE_INGEST_ENABLED: "0"
     ports:
       - "127.0.0.1:8017:8016"

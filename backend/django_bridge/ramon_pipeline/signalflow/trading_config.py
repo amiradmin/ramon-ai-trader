@@ -85,7 +85,7 @@ def load_trading_config(path: str | Path | None = None) -> dict[str, Any]:
     compression = setups["volatility_compression_expansion"]
     if int(compression.get("compression_lookback_bars", 0)) < 2:
         raise ValueError("volatility_compression_expansion.compression_lookback_bars must be at least 2")
-    positive_number(compression, "compression_max_atr")
+    positive_number(compression, "compression_max_width_atr")
     positive_number(compression, "expansion_body_atr")
 
     exhaustion = setups["exhaustion_reversal"]
@@ -97,6 +97,15 @@ def load_trading_config(path: str | Path | None = None) -> dict[str, Any]:
         raise ValueError("exhaustion_reversal.rsi_extreme must be in (50, 100]")
     if exhaustion.get("require_choch") is not True:
         raise ValueError("exhaustion_reversal.require_choch must remain true")
+
+    htf = finder.get("higher_timeframe_bias")
+    if htf is not None:
+        if not isinstance(htf, dict) or not isinstance(htf.get("enabled"), bool) or not isinstance(htf.get("demo_enabled"), bool):
+            raise ValueError("higher_timeframe_bias must define boolean enabled and demo_enabled flags")
+        if int(htf.get("ema_period", 0)) < 5:
+            raise ValueError("higher_timeframe_bias.ema_period must be at least 5")
+        if int(htf.get("bucket_minutes", 0)) < 30:
+            raise ValueError("higher_timeframe_bias.bucket_minutes must be at least 30")
 
     validation = data.get("validation", {})
     if validation.get("allow_lookahead") is not False:

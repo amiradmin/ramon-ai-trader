@@ -82,8 +82,8 @@
         "enabled": false,
         "demo_enabled": true,
         "compression_lookback_bars": 20,
-        "compression_max_atr": 0.75,
-        "expansion_body_atr": 1
+        "expansion_body_atr": 1,
+        "compression_max_width_atr": 3.0
       },
       "exhaustion_reversal": {
         "enabled": false,
@@ -93,6 +93,18 @@
         "rsi_extreme": 75,
         "require_choch": true
       }
+    },
+    "higher_timeframe_bias": {
+      "enabled": false,
+      "demo_enabled": false,
+      "ema_period": 20,
+      "bucket_minutes": 60,
+      "applies_to": [
+        "TREND_PULLBACK",
+        "BREAKOUT_RETEST",
+        "SESSION_OPENING_RANGE_BREAKOUT",
+        "VOLATILITY_COMPRESSION_EXPANSION"
+      ]
     }
   },
   "entry_timing": {

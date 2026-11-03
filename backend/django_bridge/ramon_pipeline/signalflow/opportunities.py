@@ -47,6 +47,7 @@ from typing import Any, Callable, Mapping, Sequence
 from .common import ACCEPTED, DEFERRED, REJECTED, InvalidMarketData, clip, finite_number, parse_timestamp
 from .trading_config import load_trading_config, _SUPPLEMENTAL_SETUP_NAMES
 from .additional_setups import detect_additional_opportunity
+from .higher_timeframe import BEARISH, BULLISH, higher_timeframe_bias
 
 logger = logging.getLogger(__name__)
 
@@ -587,6 +588,9 @@ class OpportunityDetector:
             for name in _SUPPLEMENTAL_SETUP_NAMES:
                 settings = demo_setups[name]
                 settings["enabled"] = settings["demo_enabled"]
+            demo_htf = self.trading_settings["opportunity_finder"].get("higher_timeframe_bias")
+            if isinstance(demo_htf, dict):
+                demo_htf["enabled"] = demo_htf["demo_enabled"]
         if config is None:
             config_values = dict(self.trading_settings["opportunity_finder"]["parameters"])
             if config_values.get("symbol_prefixes") is not None:
@@ -793,7 +797,24 @@ class OpportunityDetector:
             return self._result(REJECTED, "INVALID_MARKET_SNAPSHOT", detail="market snapshot must be a mapping")
         if market.get("bars") is not None:
             try:
-                return self._evaluate_structure(market)
+                # Core setups (trend pullback, breakout/retest) keep priority and their
+                # existing rules. Supplemental setups are only considered when the core
+                # path produced no approved signal, so they can never hide a core setup.
+                core = self._evaluate_structure(market, include_supplemental=False)
+                if core.get("approved"):
+                    return core
+                supplemental = self._evaluate_structure(market, supplemental_only=True)
+                if supplemental is not None and supplemental.get("approved"):
+                    supplemental["core_rejection"] = {
+                        "reason": core.get("reason"), "status": core.get("status"),
+                    }
+                    return supplemental
+                if supplemental is not None and supplemental.get("setup_switches") is not None:
+                    core["supplemental"] = {
+                        "approved": False, "reason": supplemental.get("reason"),
+                        "status": supplemental.get("status"),
+                    }
+                return core
             except Exception as exc:  # fail closed: never let a bug approve or crash the pipeline
                 logger.exception("Opportunity evaluation failed")
                 return self._result(
@@ -891,7 +912,27 @@ class OpportunityDetector:
         result.update(extra)
         return result
 
-    def _evaluate_structure(self, market: Mapping[str, Any]) -> dict[str, Any]:
+    def _htf_conflict(self, bars: Any, side: str) -> str | None:
+        """Return a human-readable veto when the optional higher-timeframe filter objects."""
+        settings = self.trading_settings["opportunity_finder"].get("higher_timeframe_bias")
+        if not isinstance(settings, dict) or not settings.get("enabled"):
+            return None
+        bias = higher_timeframe_bias(
+            bars.times, bars.close, bars.interval,
+            bucket_minutes=int(settings.get("bucket_minutes", 60)),
+            ema_period=int(settings.get("ema_period", 20)),
+        )
+        wanted = BULLISH if side == "BUY" else BEARISH
+        if bias == wanted:
+            return None
+        return f"higher-timeframe bias is {bias}; {side} needs {wanted}"
+
+    def _htf_applies(self, setup_type: str) -> bool:
+        settings = self.trading_settings["opportunity_finder"].get("higher_timeframe_bias")
+        return isinstance(settings, dict) and setup_type in settings.get("applies_to", ())
+
+    def _evaluate_structure(self, market: Mapping[str, Any], *, include_supplemental: bool = True,
+                            supplemental_only: bool = False) -> dict[str, Any] | None:
         config = self.config
         checks: list[dict[str, Any]] = []
         symbol = str(market.get("symbol", "")).strip()
@@ -992,7 +1033,7 @@ class OpportunityDetector:
             else:
                 settings["enabled"] = settings["enabled"] and regime.label in {"BULLISH", "BEARISH"} and regime_stable
             settings["enabled"] = settings["enabled"] and volatility_ready
-        supplemental = detect_additional_opportunity(
+        supplemental = None if not include_supplemental else detect_additional_opportunity(
             bars.times,
             [float(bar.get("open", bar.get("close"))) for bar in market["bars"][-len(bars.close):]],
             bars.high, bars.low, bars.close, ind.atr, ind.adx, ind.rsi,
@@ -1010,7 +1051,14 @@ class OpportunityDetector:
                 _check(checks, "duplicate", False, "this supplemental setup already produced a signal")
                 return finish(REJECTED, "DUPLICATE_SIGNAL", "this supplemental setup already produced a signal", candidate_side)
             _check(checks, "supplemental_setup", True, f"{setup_type} confirmed on the latest completed candle",
-                   metrics={"setup_type": setup_type, "side": candidate_side})
+                   metrics={"setup_type": setup_type, "side": candidate_side,
+                            "also_detected": supplemental.get("also_detected", [])})
+            if self._htf_applies(setup_type):
+                conflict = self._htf_conflict(bars, candidate_side)
+                if conflict is not None:
+                    _check(checks, "higher_timeframe_bias", False, conflict)
+                    return finish(DEFERRED, "HTF_BIAS_CONFLICT", f"{setup_type}: {conflict}", candidate_side)
+                _check(checks, "higher_timeframe_bias", True, "higher-timeframe bias agrees with the setup")
             if score < self.minimum_score:
                 return finish(REJECTED, "SETUP_SCORE_TOO_LOW",
                               f"{setup_type} score {score:.2f} is below {self.minimum_score:.2f}", candidate_side)
@@ -1044,6 +1092,9 @@ class OpportunityDetector:
                         dedupe_key=signal_key, explanation=f"{candidate_side} accepted: {setup_type} confirmed",
                         **extra)
 
+        if supplemental_only:
+            return None
+
         # 1. Regime ---------------------------------------------------------
         regime_text = (
             f"{regime.label} (ADX {regime.adx:.1f}, EMA bias {regime.ema_bias}, structure {regime.structure})"
@@ -1076,6 +1127,15 @@ class OpportunityDetector:
             _check(checks, "volatility", False, vol_text + " (spike)", metrics={"value": round(atr_ratio, 3), "threshold": f"{config.atr_ratio_min:.2f}–{config.atr_ratio_max:.2f}", "minimum": config.atr_ratio_min, "maximum": config.atr_ratio_max, "factor": "ATR / recent ATR median"})
             return finish(DEFERRED, "VOLATILITY_SPIKE", vol_text + ", wait for volatility to settle", side)
         _check(checks, "volatility", True, vol_text, metrics={"value": round(atr_ratio, 3), "threshold": f"{config.atr_ratio_min:.2f}–{config.atr_ratio_max:.2f}", "minimum": config.atr_ratio_min, "maximum": config.atr_ratio_max, "factor": "ATR / recent ATR median"})
+
+        # 2b. Optional higher-timeframe bias (off unless enabled in trading_config.json).
+        if self._htf_applies("TREND_PULLBACK") or self._htf_applies("BREAKOUT_RETEST"):
+            conflict = self._htf_conflict(bars, side)
+            if conflict is not None:
+                _check(checks, "higher_timeframe_bias", False, conflict)
+                return finish(DEFERRED, "HTF_BIAS_CONFLICT", conflict, side)
+            if self.trading_settings["opportunity_finder"]["higher_timeframe_bias"].get("enabled"):
+                _check(checks, "higher_timeframe_bias", True, "higher-timeframe bias agrees with the setup")
 
         # 3. Alternative setup: confirmed breakout -> retest -> continuation.
         # This is evaluated only inside an already-confirmed directional regime and

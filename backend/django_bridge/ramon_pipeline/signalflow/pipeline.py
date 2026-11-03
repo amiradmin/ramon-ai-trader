@@ -42,8 +42,9 @@ _CALCULATION_RULES = {
         "failed_breakout_sweep": "A completed candle trades beyond a prior lookback high/low by sweep_buffer_atr × ATR and closes back inside that prior range; the sweep extreme is the invalidation reference.",
         "range_edge_fade": "Only in the RANGING regime: reject a prior range high/low with a directional wick whose fraction of the candle range meets minimum_rejection_wick_ratio; target construction remains downstream.",
         "session_opening_range_breakout": "After the configured IANA-timezone opening range has fully completed, require a completed close beyond its high/low by breakout_buffer_atr × ATR. Session clock uses timezone-aware local time and DST.",
-        "volatility_compression_expansion": "Require the preceding compression_lookback_bars range to fit within compression_max_atr × current ATR × lookback, followed by a directional candle body >= expansion_body_atr × ATR.",
+        "volatility_compression_expansion": "Require the compression_lookback_bars completed candles immediately before the signal candle to have a total high-low width <= compression_max_width_atr × current ATR, followed by a directional candle whose body >= expansion_body_atr × ATR and whose close is beyond that range.",
         "exhaustion_reversal": "Last-priority setup: require an extension of minimum_extension_atr over extension_lookback_bars, RSI extreme, and a close through the last confirmed opposite swing (CHoCH).",
+        "higher_timeframe_bias": "Optional veto for trend-following setups: completed M15 candles are grouped into complete hourly candles; BULLISH when the last hourly close is above its EMA and the EMA is rising, BEARISH for the mirror case, otherwise NEUTRAL. A setup is vetoed when the bias is opposite, NEUTRAL or unavailable. Reversal and range setups are exempt.",
         "configuration": "Stage thresholds are loaded from the versioned trading_config.json. Structural opportunity results expose config_version for audit; invalid configuration fails closed."
     },
     "entry_timing": {

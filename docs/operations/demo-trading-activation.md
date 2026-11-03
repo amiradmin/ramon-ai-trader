@@ -100,3 +100,11 @@ If any step fails, use the returned reason code and fix that prerequisite. Do no
 - [ ] A real strategy/risk-approved demo signal creates one command and the EA acknowledges the broker result.
 - [ ] Position appears in MT5 and is subsequently reflected in Django telemetry.
 - [ ] If conditions never become true, no order is expected; that is not a reason to bypass the strategy or risk gates.
+
+## Opening demo trades more easily (without touching the safety gates)
+
+Already relaxed for a verified demo account (`RAMON_DEMO_PROFILE=expanded`, the default): ADX/EMA/impulse/retracement thresholds, the minimum opportunity score and entry quality, the chase/room/spread limits, and all five supplemental setups. Set `RAMON_DEMO_PROFILE=standard` to keep the supplemental setups but use the live thresholds.
+
+Deliberately **not** relaxed, because they protect against a mistaken real-money account or a bad fill: the `account_trade_mode=0` demo check, fresh telemetry and quote checks, the daily-loss baseline and limit, the minimum reward-to-risk, structural stop sizing, and the one-open-position rule. If a demo trade does not open, read the decision's `reason` (for example `DAILY_LOSS_BASELINE_UNAVAILABLE`, `ACCOUNT_TELEMETRY_STALE`, `OPEN_POSITION_RISK_UNVERIFIED`) and fix that precondition instead of loosening the gate.
+
+To flip the local gates and restart Django in one step, run `scripts/enable_demo_trading.sh on` (and `off` to turn them back off). It edits only your local, git-ignored `.env`.

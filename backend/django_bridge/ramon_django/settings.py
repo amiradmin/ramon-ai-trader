@@ -53,6 +53,7 @@ RAMON_DEDUPE_SIGNALS = os.environ.get("RAMON_DEDUPE_SIGNALS", "0") == "1"
 RAMON_USE_COMPUTED_ENTRY_QUALITY = os.environ.get("RAMON_USE_COMPUTED_ENTRY_QUALITY", "0") == "1"
 RAMON_SHORT_STOP_SPREAD_ADJUST = os.environ.get("RAMON_SHORT_STOP_SPREAD_ADJUST", "0") == "1"
 RAMON_IMPULSE_START_MODE = os.environ.get("RAMON_IMPULSE_START_MODE", "LAST_SWING_LOW")
+RAMON_DEMO_PROFILE = os.environ.get("RAMON_DEMO_PROFILE", "expanded").strip().lower()  # expanded | standard
 RAMON_ENFORCE_BAR_CLOSE = os.environ.get("RAMON_ENFORCE_BAR_CLOSE", "0") == "1"
 # Command creation and delivery are separate explicit opt-ins; both default off.
 RAMON_EA_COMMAND_CREATION_ENABLED = os.environ.get("RAMON_EA_COMMAND_CREATION_ENABLED", "0") == "1"
