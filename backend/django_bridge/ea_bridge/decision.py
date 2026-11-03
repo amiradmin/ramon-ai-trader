@@ -128,7 +128,7 @@ def _apply_demo_risk_policy(market, pipeline, *, demo_mode):
         raise ValueError("maximum_risk_percent must be positive")
     if not demo_mode:
         return {
-            "source": "EA_REQUEST",
+            "source": "SERVER_POLICY",
             "requested_risk_percent": requested,
             "effective_risk_percent": requested,
             "maximum_risk_percent": maximum,
@@ -250,6 +250,8 @@ def decision(request):
         account_snapshot_balance = None
 
         heartbeat = None
+        account_snapshot = {}
+        positions_snapshot = []
         is_demo_account = False
         if instance_id and account_login:
             heartbeat = EAHeartbeat.objects.filter(instance_id=instance_id).first()
@@ -290,14 +292,12 @@ def decision(request):
                     snapshot_equity = _num(account_snapshot["equity"], "telemetry equity")
                     account_snapshot_balance = snapshot_balance
                     daily_current_equity = snapshot_equity
-                    request_balance = _num(p["account_balance"], "request balance")
+
                 except (KeyError, TypeError, ValueError, OverflowError):
                     account_state_reason = "ACCOUNT_BALANCE_UNAVAILABLE"
                 else:
-                    if snapshot_balance <= 0 or snapshot_equity <= 0 or request_balance <= 0:
+                    if snapshot_balance <= 0 or snapshot_equity <= 0:
                         account_state_reason = "ACCOUNT_BALANCE_INVALID"
-                    elif abs(snapshot_balance - request_balance) > 0.01:
-                        account_state_reason = "ACCOUNT_BALANCE_MISMATCH"
                     else:
                         baseline = AccountDailyBaseline.objects.filter(
                             account_login=account_login,
@@ -392,11 +392,14 @@ def decision(request):
             open_risk_percent_server = 100.0
             take_profit_points_server = 0.0
 
+        risk_guard_fields = ("stop_level_points", "take_profit_points", "daily_loss_percent", "open_risk_percent")
         risk_guards_complete = bool(
-            not account_state_reason and point_value_per_lot > 0 and
-            min_volume > 0 and max_volume >= min_volume and volume_step > 0 and
-            take_profit_points_server > 0
+            heartbeat is not None and not account_state_reason and
+            point_value_per_lot > 0 and min_volume > 0 and max_volume >= min_volume and
+            volume_step > 0 and take_profit_points_server > 0 and
+            _num(account_snapshot.get("balance", 0), "account balance") > 0
         )
+        missing_risk_inputs = [] if risk_guards_complete else ["server_symbol_metadata", "server_position_risk", "server_account_state"]
         market={"symbol":symbol,"timeframe":"M15","bars":bars,"last_bar_closed":True,
           "latest_bar_time":bar_time,"bid":bid,"ask":ask,"point":point,
           "trend":direction,"setup_score":setup,"entry_quality":quality,"spread_points":spread,
@@ -524,7 +527,7 @@ def decision(request):
             try:
                 approved_volume = Decimal(str(risk_stage["volume"]))
                 stop_loss_value = Decimal(str(stop_price))
-                tp_points = Decimal(str(p["take_profit_points"]))
+                tp_points = Decimal(str(market["take_profit_points"]))
                 point_value = Decimal(str(point))
                 entry_value = Decimal(str(ask if record.action == "BUY" else bid))
                 take_profit_price = entry_value + tp_points * point_value * (1 if record.action == "BUY" else -1)
