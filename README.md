@@ -35,9 +35,9 @@ The script validates the Compose configuration, builds/starts services, applies 
 
 The versioned command EA source is `mt5/RamonCommandEA_v1.06.mq5`. It defaults to:
 
-- `EnableCommandExecution=false`
 - empty `DjangoBearerToken` (set only in MT5 Inputs on the local machine)
-- command creation and execution disabled server-side unless explicitly configured otherwise
+- no local strategy or risk-policy settings; the EA accepts an order only when Django supplies both `trading_authorization=true` and `execution_authorized=true`, and terminal/EA trading permissions allow it
+- Django command creation and execution disabled server-side unless explicitly configured otherwise
 
 Authenticated API routes are under `/api/ea/v1/`:
 
