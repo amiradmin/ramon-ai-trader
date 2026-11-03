@@ -358,6 +358,8 @@ def decision(request):
         snapshot = heartbeat.payload if heartbeat is not None and isinstance(heartbeat.payload, dict) else {}
         symbol_info = snapshot.get("symbol_info", {}) if isinstance(snapshot.get("symbol_info", {}), dict) else {}
         try:
+            if not isinstance(account_snapshot, dict) or not isinstance(positions_snapshot, list):
+                raise ValueError("account or positions telemetry unavailable")
             tick_size = _num(symbol_info.get("tick_size"), "symbol tick_size")
             tick_value = _num(symbol_info.get("tick_value"), "symbol tick_value")
             min_volume = _num(symbol_info.get("volume_min"), "symbol volume_min")
@@ -377,6 +379,8 @@ def decision(request):
                 pos_tick_size = _num(pos.get("tick_size"), "position tick size")
                 pos_tick_value = _num(pos.get("tick_value"), "position tick value")
                 pos_type = int(pos.get("type"))
+                if pos_type not in (0, 1):
+                    raise ValueError("unsupported position type")
                 if min(vol, entry, sl, pos_tick_size, pos_tick_value) <= 0:
                     raise ValueError("position risk facts unavailable")
                 adverse = entry - sl if pos_type == 0 else sl - entry
