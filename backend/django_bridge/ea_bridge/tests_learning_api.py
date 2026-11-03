@@ -113,7 +113,8 @@ class LearningOutcomeApiTests(TestCase):
         response = self.client.get("/api/ea/v1/dashboard")
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "/api/ea/v1/learning/dashboard")
-\n    def test_learning_dashboard_renders_analysis_sections(self):
+
+    def test_learning_dashboard_renders_analysis_sections(self):
         response = self.client.get("/api/ea/v1/learning/dashboard")
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Learning Engine")
