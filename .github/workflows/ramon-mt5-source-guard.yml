@@ -126,7 +126,10 @@ jobs:
                 exit 1
               fi
             done
-            grep -Fq 'GetServerUtcOffsetSeconds' "$production_source" || {
+          done
+
+          production_source="mt5/RamonCommandEA_v1.05.mq5"
+          grep -Fq 'GetServerUtcOffsetSeconds' "$production_source" || {
             echo "FAIL: production EA must use a stable broker-to-UTC offset." >&2
             exit 1
           }
