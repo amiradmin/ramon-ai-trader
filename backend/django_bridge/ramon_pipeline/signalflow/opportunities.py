@@ -1124,6 +1124,11 @@ class OpportunityDetector:
                 **extra,
             )
 
+        _check(
+            checks, "breakout_retest", False,
+            "no confirmed breakout, retest and continuation sequence was found in the recent completed candles",
+        )
+
         # 3. Pullback geometry, oriented so "up" is the trade direction ---------
         if sign > 0:
             o_high, o_low, o_close = bars.high, bars.low, bars.close
