@@ -101,7 +101,6 @@
     "require_quote": false
   },
   "risk_management": {
-    "minimum_risk_reward": 1.2,
     "maximum_risk_percent": 0.5,
     "stop_buffer_atr": 0.25,
     "min_stop_atr": 0.5,
