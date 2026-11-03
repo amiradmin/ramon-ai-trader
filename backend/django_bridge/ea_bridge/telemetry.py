@@ -41,7 +41,7 @@ def _decimal(value, name):
 def _normalize_symbol_info(value):
     """Validate broker symbol specifications before persisting them for risk."""
     if value is None:
-        return None
+        return {}
     if not isinstance(value, dict):
         raise ValueError("symbol_info must be an object")
 
