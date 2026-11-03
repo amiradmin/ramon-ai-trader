@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ramon — Learning Engine</title>
+<style>
+:root{color-scheme:dark;--bg:#0b1220;--panel:#121d2e;--line:#26364d;--muted:#91a1b7;--text:#e7eef8;--green:#36c98f;--red:#f07878;--amber:#f2bd55}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,sans-serif}main{max-width:1400px;margin:auto;padding:26px}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:20px}h1{margin:0;font-size:25px}h2{font-size:16px;margin:0 0 12px}.muted,.small{color:var(--muted)}.small{font-size:12px}
+button{background:#1e3554;color:var(--text);border:1px solid #38577e;padding:8px 12px;border-radius:8px;cursor:pointer;margin-right:5px}
+.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px;min-width:0}
+.metric span{display:block;color:var(--muted);font-size:12px}.metric strong{display:block;font-size:24px;margin-top:5px;font-variant-numeric:tabular-nums}
+.scroll{overflow:auto}table{width:100%;border-collapse:collapse;white-space:nowrap}th,td{text-align:left;padding:9px;border-bottom:1px solid var(--line);font-size:12px}th{color:var(--muted)}
+.good{color:var(--green)}.bad{color:var(--red)}.tag{border:1px solid var(--line);border-radius:18px;padding:3px 8px;font-size:11px}
+.item{border-top:1px solid var(--line);padding:12px 0}.item:first-child{border-top:0}
+@media(max-width:850px){.grid{grid-template-columns:repeat(2,1fr)}.two{grid-template-columns:1fr}}@media(max-width:500px){main{padding:12px}}
+</style>
+</head>
+<body><main>
+<header><div><div class="small">RAMON / SECTION 04</div><h1>Learning Engine</h1><div class="muted">Completed-trade evidence · Assisted learning · Human approval required</div></div>
+<div><span class="tag good">AUTO-APPLY OFF</span> <button id="refresh">Refresh</button> <button id="generate">Generate recommendations</button></div></header>
+<div class="grid" id="metrics"></div>
+<div class="two">
+<section class="panel"><h2>Performance by market regime</h2><div class="scroll"><table><thead><tr><th>Regime</th><th>Trades</th><th>Win rate</th><th>Net PnL</th><th>Expectancy</th></tr></thead><tbody id="regimes"></tbody></table></div></section>
+<section class="panel"><h2>Statistical review</h2><div id="findings" class="muted">Loading…</div><p id="sample" class="small"></p></section>
+</div>
+<section class="panel"><h2>Entry and exit diagnostics</h2><div class="scroll"><table><thead><tr><th>Metric</th><th>Observations</th><th>Average</th></tr></thead><tbody id="execution"></tbody></table></div><p class="small">Missing MAE/MFE or execution measurements remain unavailable, not zero.</p></section>
+<section class="panel"><h2>Human review queue</h2><div id="recommendations" class="muted">Loading…</div></section>
+<section class="panel"><h2>Decision vs outcome</h2><div class="scroll"><table><thead><tr><th>Closed UTC</th><th>Trade</th><th>Symbol</th><th>Decision</th><th>Net PnL</th><th>R</th><th>Regime</th></tr></thead><tbody id="outcomes"></tbody></table></div></section>
+<p id="quality" class="small"></p><form hidden>{% csrf_token %}</form>
+</main>
+<script>
+const $=id=>document.getElementById(id),fmt=(v,n=2)=>v===null||v===undefined?"—":Number(v).toFixed(n),pct=v=>v===null||v===undefined?"—":(v*100).toFixed(1)+"%";
+const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function render(d){
+const s=d.summary.overall||{},cards=[["Closed trades",s.trades],["Win rate",pct(s.win_rate)],["Profit factor",fmt(s.profit_factor)],["Expectancy",fmt(s.expectancy)]];
+$("metrics").innerHTML=cards.map(x=>'<div class="panel metric"><span>'+x[0]+'</span><strong>'+x[1]+'</strong></div>').join("");
+const regimes=d.summary.by_regime||{};$("regimes").innerHTML=Object.entries(regimes).map(([k,v])=>'<tr><td>'+esc(k)+'</td><td>'+v.trades+'</td><td>'+pct(v.win_rate)+'</td><td>'+fmt(v.net_pnl)+'</td><td>'+fmt(v.expectancy)+'</td></tr>').join("")||'<tr><td colspan="5">No regime-tagged outcomes yet.</td></tr>';
+$("findings").innerHTML=(d.review.findings||[]).map(f=>'<div class="item"><b>'+esc(f.code)+'</b><p>'+esc(f.detail)+'</p></div>').join("");$("sample").textContent=d.review.sufficient_data?"Evidence sample: "+d.review.trades+" closed trades.":"Need at least 30 closed trades; current sample: "+d.review.trades+".";
+$("execution").innerHTML=Object.entries(d.execution_diagnostics.metrics||{}).map(([k,v])=>'<tr><td>'+esc(k.replaceAll("_"," "))+'</td><td>'+v.observations+'</td><td>'+fmt(v.average,4)+'</td></tr>').join("");
+$("recommendations").innerHTML=(d.recommendations||[]).map(r=>'<div class="item"><b>'+esc(r.title)+'</b> <span class="tag">'+esc(r.status)+'</span><p>'+esc(r.detail)+'</p><div class="small">Evidence: '+esc(JSON.stringify(r.evidence))+'</div>'+(r.status==="OPEN"?'<button data-review="ACCEPT" data-id="'+r.id+'">Accept for backtest</button><button data-review="REJECT" data-id="'+r.id+'">Reject</button>':'')+'</div>').join("")||"No recommendations yet.";
+$("outcomes").innerHTML=(d.recent_outcomes||[]).map(r=>'<tr><td>'+esc(r.closed_at)+'</td><td>'+esc(r.trade_id)+'</td><td>'+esc(r.symbol)+'</td><td>'+esc(r.decision.action||"Unlinked")+'</td><td class="'+(r.realized_pnl>=0?"good":"bad")+'">'+fmt(r.realized_pnl)+'</td><td>'+fmt(r.r_multiple,3)+'</td><td>'+esc(r.tags.regime||"—")+'</td></tr>').join("")||'<tr><td colspan="7">No completed outcomes recorded.</td></tr>';
+$("quality").textContent=d.data_quality.note+" · Outcomes without decision link: "+d.data_quality.outcomes_without_decision_link;
+}
+const csrf=()=>$("[name=csrfmiddlewaretoken]")?.value||"";
+async function load(){const r=await fetch("../learning/overview",{credentials:"same-origin"});if(!r.ok)throw Error("Overview failed: "+r.status);render(await r.json());}
+$("refresh").onclick=()=>load().catch(e=>alert(e.message));
+$("generate").onclick=async()=>{try{const r=await fetch("../learning/recommendations/generate",{method:"POST",credentials:"same-origin",headers:{"X-CSRFToken":csrf()}});const d=await r.json();if(!r.ok)throw Error(d.error||"Request failed");alert(d.message);await load();}catch(e){alert(e.message);}};
+$("recommendations").onclick=async e=>{const b=e.target.closest("button[data-review]");if(!b)return;try{const r=await fetch("../learning/recommendations/"+b.dataset.id+"/review",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json","X-CSRFToken":csrf()},body:JSON.stringify({decision:b.dataset.review})});const d=await r.json();if(!r.ok)throw Error(d.error||"Review failed");await load();}catch(err){alert(err.message);}};
+load().catch(e=>$("findings").textContent=e.message);
+</script></body></html>
