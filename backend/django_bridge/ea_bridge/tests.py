@@ -829,13 +829,13 @@ class DjangoDecisionApiTests(TestCase):
         self.assertEqual(r.json()["reason"],"ACCOUNT_LOGIN_MISMATCH")
 
     @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
-    def test_rejects_balance_mismatch(self):
+    def test_client_balance_value_is_ignored_in_favor_of_heartbeat(self):
         p=self.payload()
-        p["account_balance"]=9999
+        p["account_balance"]=1
         r=self.client.post(self.url,data=json.dumps(p),content_type="application/json",**self.headers)
         self.assertEqual(r.status_code,200,r.content)
-        self.assertEqual(r.json()["decision"],"WAIT")
-        self.assertEqual(r.json()["reason"],"ACCOUNT_BALANCE_MISMATCH")
+        self.assertNotEqual(r.json()["reason"],"ACCOUNT_BALANCE_MISMATCH")
+        self.assertTrue(r.json()["risk_inputs_complete"])
 
     @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
     def test_rejects_missing_instance_identity(self):
