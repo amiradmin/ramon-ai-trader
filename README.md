@@ -2,7 +2,7 @@
 
 Ramon is a local MT5 gold-trading project whose **Django service owns strategy decisions, risk checks, and command authorization**. The MT5 Expert Advisor (EA) is a telemetry/command bridge and broker-side executor; it must not become a second strategy engine.
 
-> **Deployment entry point:** `scripts/update_build_ramon.sh` is the single-command local deployment. It starts and validates the Compose services and compiles/installs only `RamonCommandEA_v1.04.ex5`. GitHub Actions verifies the command EA source contract and MetaEditor compilation. Local deployment still needs to be run on the target machine.
+> **Deployment entry point:** `scripts/update_build_ramon.sh` is the single-command local deployment. It starts and validates the Compose services and compiles/installs only `RamonCommandEA_v1.06.ex5`. GitHub Actions verifies the command EA source contract and MetaEditor compilation. Local deployment still needs to be run on the target machine.
 
 ## Current supported stack
 
@@ -29,11 +29,11 @@ cd ~/Documents/Presentation/ramon-ai-trader-bridge && bash scripts/update_build_
 
 If the clone lives elsewhere, set `RAMON_REPO_DIR` to its absolute path before running the script. Optional build settings include `RAMON_MT5_PREFIX`, `RAMON_MT5_TERMINAL_ID`, `RAMON_METAEDITOR`, and `RAMON_HEALTH_URL`; see [the update/build runbook](docs/operations/one-command-update-build.md).
 
-The script validates the Compose configuration, builds/starts services, applies forward migrations, runs Django's system check, verifies Django/Redis/TimescaleDB health and worker status, backs up the current command EA, then compiles and installs only `RamonCommandEA_v1.04.mq5`. The legacy `Ramon_v0.62.x` strategy EA is deliberately excluded to avoid installing a second EA alongside the command architecture. The script does not launch MT5, attach an EA, change trading flags, or place orders. It stops rather than accepting a missing compiler log or a stale EX5 as a successful build.
+The script validates the Compose configuration, builds/starts services, applies forward migrations, runs Django's system check, verifies Django/Redis/TimescaleDB health and worker status, backs up the current command EA, then compiles and installs only `RamonCommandEA_v1.06.mq5`. The legacy `Ramon_v0.62.x` strategy EA is deliberately excluded to avoid installing a second EA alongside the command architecture. The script does not launch MT5, attach an EA, change trading flags, or place orders. It stops rather than accepting a missing compiler log or a stale EX5 as a successful build.
 
 ## EA and API
 
-The versioned command EA source is `mt5/RamonCommandEA_v1.04.mq5`. It defaults to:
+The versioned command EA source is `mt5/RamonCommandEA_v1.06.mq5`. It defaults to:
 
 - `EnableCommandExecution=false`
 - empty `DjangoBearerToken` (set only in MT5 Inputs on the local machine)
@@ -69,7 +69,7 @@ Useful runbooks:
 - [EA heartbeat troubleshooting](docs/EA-HEARTBEAT-TROUBLESHOOTING.md)
 - [Daily risk baseline recovery](docs/operations/daily-risk-baseline-recovery.md)
 - [Demo-only activation checklist](docs/operations/demo-trading-activation.md)
-- [Command EA v1.04 validation](docs/ramon-commandea-v1.04-validation.md)
+- [Command EA v1.04 validation](docs/ramon-commandea-v1.06-validation.md)
 - [Django command protocol](docs/architecture/django-command-ea-protocol-v1.md)
 
 ## Research code vs. running service
