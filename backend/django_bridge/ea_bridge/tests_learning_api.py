@@ -21,7 +21,7 @@ class LearningOutcomeApiTests(TestCase):
         StrategyDecisionRecord.objects.create(
             decision_id="decision-001", symbol="XAUUSD_o", action="BUY",
             confidence=0.8, rationale_code="SIGNALFLOW_APPROVED",
-            model_version="test-v1", features={"regime": "BULLISH"},
+            model_version="test-v1", features={"strategy_profile": "BALANCED", "stages": {"opportunities": {"regime": {"label": "BULLISH"}, "setup": {"type": "PULLBACK"}, "signal_id": "signal-001", "score": 0.82, "reason": "OPPORTUNITY_FOUND_WITH_FORECAST_CONFIRMATION"}}},
         )
         payload = {
             "trade_id": "deal-001", "decision_id": "decision-001",
@@ -70,6 +70,10 @@ class LearningOutcomeApiTests(TestCase):
         row = LearningTradeOutcome.objects.get(trade_id="123456:5550001")
         self.assertEqual(row.decision_id, "decision-ticket-001")
         self.assertEqual(row.decision_snapshot["action"], "BUY")
+        self.assertEqual(row.tags["regime"], "BULLISH")
+        self.assertEqual(row.tags["setup_type"], "PULLBACK")
+        self.assertEqual(row.tags["strategy_profile"], "BALANCED")
+        self.assertTrue(row.tags["forecast_confirmed"])
 
     @override_settings(EA_BEARER_TOKEN="learning-test-token")
     def test_duplicate_is_idempotent_and_conflict_does_not_overwrite(self):
