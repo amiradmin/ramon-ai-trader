@@ -11,10 +11,6 @@ from math import sqrt
 from typing import Mapping, Sequence
 
 import numpy as np
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.linear_model import Ridge
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import StandardScaler
 
 
 @dataclass(frozen=True)
@@ -135,6 +131,19 @@ def evaluate_regression_forecasts(
         raise ValueError("insufficient chronological train/test observations")
     X_train, X_test = X[:train_end], X[test_start:]
     y_train, y_test = y[:train_end], y[test_start:]
+
+    # Keep scikit-learn optional: importing this research package must not
+    # make the production Django test/runtime depend on the ML extra.
+    try:
+        from sklearn.ensemble import RandomForestRegressor
+        from sklearn.linear_model import Ridge
+        from sklearn.pipeline import make_pipeline
+        from sklearn.preprocessing import StandardScaler
+    except ImportError as exc:
+        raise RuntimeError(
+            "Regression experiments require the optional research extra "
+            "(install scikit-learn in the research environment)"
+        ) from exc
 
     models = {
         "ridge": make_pipeline(StandardScaler(), Ridge(alpha=10.0)),
