@@ -45,6 +45,26 @@ class DemoOpportunityProfileTests(TestCase):
         self.assertEqual(demo.risk_manager.config.min_reward_risk, 1.2)
 
 
+    @override_settings(RAMON_DEMO_PROFILE="standard")
+    def test_standard_demo_profile_restores_live_discovery_thresholds(self):
+        from .decision import _build_pipeline
+
+        demo = _build_pipeline(demo_mode=True)
+
+        self.assertEqual(demo.opportunities.minimum_score, 0.55)
+        self.assertEqual(demo.opportunities.config.min_ema_separation_atr, 0.20)
+        self.assertEqual(demo.opportunities.config.support_tolerance_atr, 0.65)
+        self.assertEqual(demo.opportunities.config.min_impulse_atr, 1.5)
+        self.assertEqual(demo.entry_timer.minimum_quality, 0.55)
+        self.assertEqual(demo.entry_timer.maximum_spread_points, 80.0)
+
+        # The profile switch must not change the risk manager's hard limits.
+        self.assertEqual(demo.risk_manager.maximum_risk_percent, 0.5)
+        self.assertEqual(demo.risk_manager.config.max_total_risk_percent, 2.0)
+        self.assertEqual(demo.risk_manager.config.max_daily_loss_percent, 3.0)
+        self.assertEqual(demo.risk_manager.config.min_reward_risk, 1.2)
+
+
 class EAIngestionTests(TestCase):
     def setUp(self):
         self.url = "/api/ea/v1/events"

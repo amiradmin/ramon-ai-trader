@@ -42,12 +42,13 @@ def _build_pipeline(*, demo_mode=False):
         return getattr(settings, name, default)
 
     dedupe = bool(opt("RAMON_DEDUPE_SIGNALS", False))
-    # Demo profile broadens setup discovery without weakening the hard safety gates.
+    # Expanded discovery is opt-out for demo accounts; "standard" restores live thresholds.
+    # This profile changes candidate discovery/entry quality only, never account or risk guards.
+    relaxed = (
+        bool(demo_mode)
+        and str(opt("RAMON_DEMO_PROFILE", "expanded")).strip().lower() != "standard"
+    )
     opportunity_profile = ({
-        # Broaden demo-only discovery so Ramon records more valid candidates:
-        # accept smaller impulses and shallower/deeper pullbacks, allow a wider
-        # EMA value zone, and recognize more recent breakout/retest structures.
-        # Directional regime, completed-candle, quote, entry and risk guards stay intact.
         "adx_trending": 10.0,
         "adx_ranging": 8.0,
         "min_ema_separation_atr": 0.06,
@@ -62,16 +63,16 @@ def _build_pipeline(*, demo_mode=False):
         "breakout_buffer_atr": 0.00,
         "breakout_retest_tolerance_atr": 0.50,
         "breakout_max_retest_bars": 6,
-    } if demo_mode else {})
+    } if relaxed else {})
     entry_profile = ({
         "max_signal_age_bars": 1.5,
         "max_chase_atr": 0.85,
         "min_risk_room_atr": 0.15,
         "max_spread_atr": 0.30,
         "max_spread_to_risk": 0.40,
-    } if demo_mode else {})
+    } if relaxed else {})
     detector = OpportunityDetector(
-        minimum_score=0.42 if demo_mode else 0.55,
+        minimum_score=0.42 if relaxed else 0.55,
         demo_mode=demo_mode,
         config=OpportunityConfig(
             **opportunity_profile,
@@ -97,8 +98,8 @@ def _build_pipeline(*, demo_mode=False):
         accepted_lock=_SIGNAL_MEMORY_LOCK if dedupe else None,
     )
     timer = EntryTimer(
-        minimum_quality=0.42 if demo_mode else 0.55,
-        maximum_spread_points=100.0 if demo_mode else 80.0,
+        minimum_quality=0.42 if relaxed else 0.55,
+        maximum_spread_points=100.0 if relaxed else 80.0,
         require_quote=True,
         config=EntryTimingConfig(
             **entry_profile,
@@ -333,7 +334,14 @@ def decision(request):
         # The client value is required for protocol compatibility, but never used to
         # authorize trading. The daily-loss guard receives only the server-derived value.
         market["daily_loss_percent"] = server_daily_loss_percent
-        strategy_profile = "DEMO_EXPANDED" if is_demo_account else "STANDARD"
+        configured_demo_profile = str(
+            getattr(settings, "RAMON_DEMO_PROFILE", "expanded")
+        ).strip().lower()
+        strategy_profile = (
+            "DEMO_EXPANDED"
+            if is_demo_account and configured_demo_profile != "standard"
+            else "STANDARD"
+        )
         result = _build_pipeline(demo_mode=is_demo_account).run(market)
         if not risk_guards_complete:
             action = "WAIT"
