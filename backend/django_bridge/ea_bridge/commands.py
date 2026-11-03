@@ -65,8 +65,13 @@ def next_command(request):
 
     now = timezone.now()
 
-    # Django is the execution authority: never deliver a command based only on
-    # a queued row. Revalidate the live bridge/account state at delivery time.
+    # Expire old rows even when the bridge is currently offline.
+    EACommand.objects.filter(instance_id=instance_id, account_login=account_login,
+        state=EACommand.State.PENDING, expires_at__lte=now).update(
+            state=EACommand.State.EXPIRED, completed_at=now
+        )
+
+    # Django is the execution authority: revalidate the live bridge/account state.
     heartbeat = EAHeartbeat.objects.filter(instance_id=instance_id).first()
     if heartbeat is None:
         return JsonResponse({
@@ -99,13 +104,6 @@ def next_command(request):
         })
 
     with transaction.atomic():
-        EACommand.objects.filter(
-            instance_id=instance_id,
-            account_login=account_login,
-            state=EACommand.State.PENDING,
-            expires_at__lte=now,
-        ).update(state=EACommand.State.EXPIRED, completed_at=now)
-
         command = (
             EACommand.objects.select_for_update()
             .filter(
