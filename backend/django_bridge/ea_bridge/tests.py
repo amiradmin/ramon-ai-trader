@@ -1018,3 +1018,12 @@ class DashboardTemplateTests(TestCase):
         self.assertContains(response, "Trend Pullback")
         self.assertContains(response, "Breakout / Retest")
         self.assertContains(response, "NOT EVALUATED")
+
+    def test_dashboard_lists_the_supplemental_setups_and_the_active_profile(self):
+        response = self.client.get("/api/ea/v1/dashboard")
+        self.assertEqual(response.status_code, 200)
+        for title in ("Failed Breakout / Sweep", "Range Edge Fade", "Session Opening Range",
+                      "Compression / Expansion", "Exhaustion Reversal"):
+            self.assertContains(response, title)
+        self.assertContains(response, "setup_switches")
+        self.assertContains(response, "strategy_profile")

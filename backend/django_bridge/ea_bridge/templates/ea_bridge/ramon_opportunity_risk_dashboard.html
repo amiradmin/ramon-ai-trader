@@ -502,7 +502,7 @@ function flowCheckMarkup(check, state, displayName, stageResult, decision, stage
     '<p>' + esc(detail) + '</p>' + flowMetricsMarkup(check.metrics) +
     flowCheckCalculationMarkup(check, css, stageResult, decision, stageName) + '</div><em>' + tag + '</em></div>';
 }
-function opportunityDetectorMarkup(stageResult) {
+function opportunityDetectorMarkup(stageResult, decision) {
   const checks = Array.isArray(stageResult?.checks) ? stageResult.checks : [];
   const byName = new Map(checks.map(item => [String(item?.name || "").toLowerCase(), item]));
   const setupType = String(stageResult?.setup?.type || "").toUpperCase();
@@ -543,9 +543,35 @@ function opportunityDetectorMarkup(stageResult) {
     '<article class="detector-card"><div class="detector-card-head"><span>' + esc(title) +
     '</span><span class="detector-state ' + state + '">' + esc(label) +
     '</span></div><p>' + esc(detail) + '</p></article>';
-  return '<div class="detector-grid" aria-label="Opportunity detector outcomes">' +
+  // Supplemental setups: shown from the server-reported switches and the setup that fired.
+  // Nothing is recalculated here; a card only reports what Django saved with the decision.
+  const switches = stageResult?.setup_switches && typeof stageResult.setup_switches === "object" ? stageResult.setup_switches : {};
+  const alsoDetected = (Array.isArray(stageResult?.setup?.also_detected) ? stageResult.setup.also_detected : [])
+    .map(item => String(item).toUpperCase());
+  const supplemental = [
+    ["FAILED_BREAKOUT_SWEEP", "failed_breakout_sweep", "Failed Breakout / Sweep"],
+    ["RANGE_EDGE_FADE", "range_edge_fade", "Range Edge Fade"],
+    ["SESSION_OPENING_RANGE_BREAKOUT", "session_opening_range_breakout", "Session Opening Range"],
+    ["VOLATILITY_COMPRESSION_EXPANSION", "volatility_compression_expansion", "Compression / Expansion"],
+    ["EXHAUSTION_REVERSAL", "exhaustion_reversal", "Exhaustion Reversal"],
+  ].map(([type, key, title]) => {
+    if (!(key in switches)) return card(title, "idle", "NOT EVALUATED", "No setup-switch information in this decision snapshot.");
+    if (!switches[key]) return card(title, "idle", "DISABLED", "Switched off for this account profile in trading_config.json (supplemental setups are demo-only by default).");
+    if (setupType === type) {
+      return card(title, "pass", stageResult?.approved === true ? "APPROVED" : "CONFIRMED",
+        stageResult.explanation || "Setup confirmed by Django; inspect downstream checks for the final verdict.");
+    }
+    if (alsoDetected.includes(type)) return card(title, "wait", "ALSO FIRED", "Fired on the same candle, but a higher-scoring setup was used.");
+    return card(title, "wait", "WATCHING", "Enabled; no qualifying candle in this decision (regime, volatility or pattern conditions not met).");
+  }).join("");
+  const profile = decision?.features?.strategy_profile;
+  const coreNote = stageResult?.core_rejection?.reason ? " · core setups declined: " + stageResult.core_rejection.reason : "";
+  const meta = '<p style="margin:0 0 6px;font-size:9px;color:var(--muted)">Profile: <b>' +
+    esc(profile || "not recorded (older decision)") + '</b> · config ' + esc(stageResult?.config_version || "n/a") +
+    esc(coreNote) + '</p>';
+  return meta + '<div class="detector-grid" aria-label="Opportunity detector outcomes">' +
     card("Trend Pullback", pullbackState, pullbackLabel, pullbackDetail) +
-    card("Breakout / Retest", breakoutState, breakoutLabel, breakoutDetail) + '</div>';
+    card("Breakout / Retest", breakoutState, breakoutLabel, breakoutDetail) + supplemental + '</div>';
 }
 function flowStageMarkup(title, stageResult, checks, fallback, forcedState, decision, stageName, upcoming = false) {
   const state = upcoming ? "idle" : (forcedState || stageState(stageResult));
@@ -562,7 +588,7 @@ function flowStageMarkup(title, stageResult, checks, fallback, forcedState, deci
   return '<section class="flow-stage ' + (state === "wait" ? "waiting" : state === "blocked" ? "blocked" : state === "idle" ? "upcoming" : "") + '">' +
     '<div class="flow-stage-head"><div class="flow-stage-title">' + esc(title) + '</div><span class="flow-state ' +
     state + '">' + stateLabel + '</span></div>' +
-    (stageName === "opportunities" ? opportunityDetectorMarkup(stageResult) : "") +
+    (stageName === "opportunities" ? opportunityDetectorMarkup(stageResult, decision) : "") +
     '<div class="flow-checks">' + checkMarkup + '</div></section>';
 }
 function collectFlowVariables(source, prefix = "", depth = 0, output = []) {
