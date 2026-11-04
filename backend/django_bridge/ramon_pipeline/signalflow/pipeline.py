@@ -64,7 +64,7 @@ _CALCULATION_RULES = {
     "risk_management": {
         "stop": "Structural stop = invalidation price − direction_sign × stop_buffer_atr × setup ATR (SELL stop may additionally be moved by ask − bid when short_stop_spread_adjust is enabled). Stop distance = (entry price − stop price) × direction_sign; normalize by ATR and require min_stop_atr <= stop_ATR <= max_stop_atr. Legacy mode uses supplied stop_loss_points.",
         "stop_below_broker_minimum": "Pass when planned stop distance in points >= broker stop_level_points.",
-        "reward_risk": "Reward-to-risk = take_profit_points / stop_loss_points. When take_profit_points is supplied, require ratio >= min_reward_risk; otherwise this guard is explicitly skipped.",
+        "reward_risk": "When target_reward_risk is supplied, planned take-profit distance = structural stop distance × target_reward_risk; require target_reward_risk >= min_reward_risk. Legacy callers may still supply take_profit_points directly.",
         "daily_loss": "When server-derived daily_loss_percent is supplied, pass only when daily_loss_percent < max_daily_loss_percent; otherwise this guard is explicitly skipped.",
         "portfolio_risk": "Available headroom = max_total_risk_percent − open_risk_percent. When open_risk_percent is supplied, require headroom > 0 and cap this trade's risk percent to headroom; otherwise this guard is explicitly skipped.",
         "sizing": "Effective risk percent = min(requested risk percent, maximum_risk_percent, available portfolio headroom when supplied). Risk budget = account balance × effective risk percent / 100. Raw lots = risk budget / (stop points × point value per lot); cap at max_volume, round down to volume_step, and reject if below min_volume. Estimated risk = rounded lots × stop points × point value per lot and must not exceed budget.",
@@ -75,7 +75,7 @@ _CALCULATION_RULES = {
         "stop_too_tight": "Structural stop distance normalized by ATR must be >= min_stop_atr.",
         "stop_too_wide": "Structural stop distance normalized by ATR must be <= max_stop_atr.",
         "stop_below_broker_minimum": "Planned stop distance in points must be >= broker stop_level_points.",
-        "reward_risk_too_low": "take_profit_points / stop_loss_points must be >= min_reward_risk.",
+        "reward_risk_too_low": "The configured target_reward_risk must be >= min_reward_risk; the executable take-profit is derived from the same structural stop distance and target multiple.",
         "daily_loss_limit_reached": "Server-derived daily_loss_percent must be < max_daily_loss_percent.",
         "portfolio_risk_limit_reached": "max_total_risk_percent − open_risk_percent must be > 0.",
         "risk_budget_below_minimum_volume": "After capping at max_volume and rounding down to volume_step, calculated volume must be >= min_volume; never round up to the broker minimum.",
@@ -134,7 +134,7 @@ def _attach_calculation_metadata(
             continue
         stage_inputs = {}
         for key in ("regime", "components", "setup", "score", "side", "signal_bar_time",
-                    "signal_age_bars", "room_to_invalidation_atr", "chase_atr", "spread_points",
+                    "signal_age_bars", "target_reward_risk", "take_profit_points", "max_total_risk_percent", "max_daily_loss_percent", "room_to_invalidation_atr", "chase_atr", "spread_points",
                     "spread_atr_fraction", "spread_to_risk", "quality", "quality_source",
                     "quote_price", "entry_price", "stop_price", "stop_points", "stop_atr",
                     "stop_source", "take_profit_points", "reward_risk", "risk_percent",
@@ -165,7 +165,7 @@ def _attach_calculation_metadata(
                             "symbol", "timeframe", "bid", "ask", "point", "spread_points", "config_version",
                             "entry_quality", "account_balance", "risk_percent", "stop_loss_points",
                             "point_value_per_lot", "volume_step", "min_volume", "max_volume",
-                            "stop_level_points", "take_profit_points", "open_risk_percent",
+                            "stop_level_points", "take_profit_points", "target_reward_risk", "open_risk_percent",
                             "daily_loss_percent",
                         )
                         if key in market
