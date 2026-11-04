@@ -11,6 +11,7 @@ from django.utils import timezone
 
 from ea_bridge.models import LearningModelRun, LearningTrainingJob, MarketBar
 from ramon_pipeline.research_forecasting import evaluate_regression_forecasts
+from ramon_pipeline.learning.regression_pipelines import PIPELINES, train_trade_outcome_pipeline
 from ramon_pipeline.signalflow.forecasting import (
     forecast_market_bars,
     forecast_market_bars_sarima,
@@ -50,6 +51,17 @@ def _run_model(job, run):
     run.status = LearningModelRun.Status.RUNNING
     run.save(update_fields=["training_started_at", "status"])
     try:
+        if run.model_key in PIPELINES:
+            trained = train_trade_outcome_pipeline(run.model_key)
+            run.metrics = {**trained["metrics"], "_artifact_joblib_b64": trained["artifact"]}
+            run.validation = trained["validation"]
+            run.version = trained["version"]
+            run.status = (
+                LearningModelRun.Status.PASSED
+                if trained["validation"]["passed"]
+                else LearningModelRun.Status.REJECTED
+            )
+            return
         query = MarketBar.objects.filter(
             symbol=job.symbol, timeframe=job.timeframe
         )
