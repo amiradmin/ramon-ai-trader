@@ -1115,6 +1115,7 @@ async function copyMarketSnapshot() {
   button.disabled = true;
   button.textContent = "Preparing snapshot…";
   status.textContent = "";
+  status.className = "small";
   try {
     const response = await fetch("/api/ea/v1/dashboard-snapshot", {cache: "no-store"});
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
