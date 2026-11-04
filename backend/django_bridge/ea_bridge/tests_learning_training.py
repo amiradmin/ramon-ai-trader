@@ -33,7 +33,7 @@ class LearningTrainingApiTests(TestCase):
         self.assertEqual(response.status_code, 202, response.content)
         job = LearningTrainingJob.objects.get()
         self.assertEqual(job.status, LearningTrainingJob.Status.QUEUED)
-        self.assertEqual(set(job.requested_models), {"arima", "sarima"})
+        self.assertEqual(set(job.requested_models), {"arima", "sarima", "ridge", "random_forest"})
         self.assertEqual(set(job.model_runs.values_list("model_key", flat=True)), {"arima", "sarima"})
 
     def test_rejects_ambiguous_market_data_sources(self):
