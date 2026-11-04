@@ -45,10 +45,8 @@ def _claim_job():
         job.status = LearningTrainingJob.Status.RUNNING
         job.started_at = timezone.now()
         job.save(update_fields=["status", "started_at"])
-        job.model_runs.filter(status=LearningModelRun.Status.QUEUED).update(
-            status=LearningModelRun.Status.RUNNING,
-            training_started_at=timezone.now(),
-        )
+        # Keep individual runs QUEUED until each model actually starts. The
+        # dashboard can then report the sequential worker progress accurately.
         return job.pk
 
 
