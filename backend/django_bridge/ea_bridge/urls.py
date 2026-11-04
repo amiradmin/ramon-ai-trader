@@ -16,6 +16,7 @@ urlpatterns = [
     path("status", views.status, name="ea-status"),
     path("dashboard", views.dashboard, name="ramon-dashboard"),
     path("dashboard-data", views.dashboard_data, name="ramon-dashboard-data"),
+    path("dashboard-snapshot", views.dashboard_snapshot, name="ramon-dashboard-snapshot"),
     path("decision-thresholds", views.decision_thresholds, name="ramon-decision-thresholds"),
     path("learning/dashboard", learning_views.learning_dashboard, name="ramon-learning-dashboard"),
     path("learning/overview", learning_views.learning_overview, name="ramon-learning-overview"),

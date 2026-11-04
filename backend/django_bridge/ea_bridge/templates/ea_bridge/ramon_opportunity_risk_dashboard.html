@@ -202,7 +202,7 @@
 <div class="wrap">
 <header class="top">
   <div class="brand"><div class="logo">R</div><div><div class="eyebrow">RAMON · SMART TRADER</div><div class="title">Opportunity & Risk Desk</div><div class="sub">XAUUSD · M15 · Decision overview</div></div></div>
-  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><a class="btn" href="/api/ea/v1/learning/dashboard">Learning Engine ↗</a><div class="status"><span class="dot"></span><span id="connection">DJANGO · DECISION FEED</span></div></div>
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><a class="btn" href="/api/ea/v1/learning/dashboard">Learning Engine ↗</a><button class="btn" id="copyMarketSnapshot" type="button">Copy Market Snapshot</button><span id="copySnapshotStatus" class="small" role="status" aria-live="polite"></span><div class="status"><span class="dot"></span><span id="connection">DJANGO · DECISION FEED</span></div></div>
 </header>
 <div class="notice"><strong>Read-only decision monitor:</strong> values come from saved Django decisions. Unprovided prices and risk settings are shown as unavailable. Pipeline approval does not prove that a broker order was executed.</div>
 <div id="status" class="card" role="status" aria-live="polite" style="margin-bottom:18px">Loading the latest Django decision…</div>
@@ -1107,6 +1107,51 @@ $("opportunities").addEventListener("click", event => {
   detail.classList.toggle("open");
   button.textContent = detail.classList.contains("open") ? "Hide" : "View";
 });
+
+
+async function copyMarketSnapshot() {
+  const button = $("copyMarketSnapshot");
+  const status = $("copySnapshotStatus");
+  button.disabled = true;
+  button.textContent = "Preparing snapshot…";
+  status.textContent = "";
+  status.className = "small";
+  try {
+    const response = await fetch("/api/ea/v1/dashboard-snapshot", {cache: "no-store"});
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const snapshot = await response.json();
+    if (!snapshot.ok || snapshot.schema_version !== "ramon-market-snapshot-v1") {
+      throw new Error("Unexpected market snapshot format");
+    }
+    const text = JSON.stringify(snapshot, null, 2);
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand("copy");
+      textarea.remove();
+      if (!copied) throw new Error("Clipboard access was denied by the browser");
+    }
+    button.textContent = "Copied ✓";
+    status.textContent = `Snapshot copied · ${snapshot.market.bars_count} M15 candles`;
+  } catch (error) {
+    button.textContent = "Copy Market Snapshot";
+    status.textContent = "Copy failed: " + error.message;
+    status.className = "small negative";
+  } finally {
+    button.disabled = false;
+    if (button.textContent === "Copied ✓") {
+      window.setTimeout(() => { button.textContent = "Copy Market Snapshot"; }, 2200);
+    }
+  }
+}
+$("copyMarketSnapshot").addEventListener("click", copyMarketSnapshot);
 
 async function refresh() {
   const connection = $("connection");
