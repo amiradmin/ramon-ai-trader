@@ -26,22 +26,7 @@ svg{width:100%;height:145px;display:block}.chart-label{fill:var(--muted);font-si
  <div class="pillrow"><span class="tag safe">ASSISTED MODE</span><span class="tag safe">AUTO-APPLY OFF</span><button id="refresh">Refresh data</button><button id="generate">Generate recommendations</button></div>
 </header>
 <div id="status" role="status">Loading learning data…</div>
-<section class="panel">
- <div class="split"><h2>Learning pipeline</h2><span class="tag safe">Research & validation only</span></div>
- <div class="flow" aria-label="Learning workflow">
-  <div class="flow-node"><div class="circle">1</div><strong>Market data</strong><small>Completed OHLCV candles</small></div><div class="flow-arrow">→</div>
-  <div class="flow-node"><div class="circle">2</div><strong>Preparation</strong><small>Chronology & data checks</small></div><div class="flow-arrow">→</div>
-  <div class="flow-node"><div class="circle">3</div><strong>Model fitting</strong><small>ARIMA · SARIMA · Ridge · RF</small></div><div class="flow-arrow">→</div>
-  <div class="flow-node"><div class="circle">4</div><strong>Validation</strong><small>Holdout vs baseline</small></div><div class="flow-arrow">→</div>
-  <div class="flow-node"><div class="circle">5</div><strong>Model registry</strong><small>Run history & metrics</small></div><div class="flow-arrow">→</div>
-  <div class="flow-node"><div class="circle">6</div><strong>Learning insights</strong><small>Advisory only</small></div>
- </div>
- <div class="split"><h2>Model registry & validation</h2><span class="small" id="training-updated">Waiting for training status…</span></div>
- <div class="model-grid" id="model-registry"><div class="empty">Loading registered models…</div></div>
- <div class="divider"></div>
- <div class="train-actions"><button class="train-button" id="train-now">▶ Train Now — Market Forecast Models</button><span class="status-line" id="training-status">Trains ARIMA, SARIMA, Ridge and Random Forest on completed market candles.</span></div>
- <div class="section-note">Validation uses a chronological rolling holdout and compares MAE/RMSE against a persistence baseline. A failed validation is recorded, never silently promoted. These research model runs do not alter trading signals, risk controls, or EA execution.</div>
-</section>
+
 
 <section class="panel" id="trade-regression-pipelines">
  <div class="split"><h2>Six independent trade-outcome regression pipelines</h2><span class="tag safe">Chronological validation</span></div>
@@ -236,22 +221,19 @@ function renderTraining(data){
   const checksText=Object.keys(checks).length?Object.entries(checks).map(([k,val])=>(val?"✓ ":"✕ ")+k.replaceAll("_"," ")).join(" · "):"No validation report yet";
   return '<article class="model-card"><div class="split"><h3>'+esc(item.name)+'</h3><span class="tag '+(badge==="PASSED"?"safe":badge==="REJECTED"||badge==="FAILED"?"warn":"")+'">'+esc(badge)+'</span></div><div class="small">Version: '+esc(r.version||"—")+'</div><div class="model-meta"><div><span>Last training (UTC)</span><b>'+esc(date)+'</b></div><div><span>Observations</span><b>'+safe(m.observations)+'</b></div><div><span>MAE / baseline</span><b>'+fmt(m.mae,5)+' / '+fmt(m.baseline_mae,5)+'</b></div><div><span>RMSE / baseline</span><b>'+fmt(m.rmse,5)+' / '+fmt(m.baseline_rmse,5)+'</b></div><div><span>Directional accuracy</span><b>'+pct(m.directional_accuracy)+'</b></div><div><span>Validation</span><b>'+esc(v.passed===true?"Passed":v.passed===false?"Not passed":"Not available")+'</b></div></div><p class="section-note">'+esc(checksText)+'</p>'+(r.error?'<p class="bad small">'+esc(r.error)+'</p>':"")+'</article>';
  }).join("");
- $("model-registry").innerHTML=cards||'<div class="empty">No trainable models are registered.</div>';
+
  const tradeKeys=["trade_performance","trade_decision","trade_entry_exit","trade_regime","trade_mistake","trade_strategy"];
  tradeKeys.forEach(key=>{const item=(data.registry||[]).find(x=>x.key===key),r=item?.latest||{},m=r.metrics||{},v=r.validation||{},card=document.querySelector('[data-pipeline="'+key+'"]');if(!card)return;const date=r.training_finished_at?new Date(r.training_finished_at).toLocaleString("en-GB",{timeZone:"UTC"})+" UTC":"Never trained";card.querySelector(".component-output").textContent="Status: "+(r.status||"NOT TRAINED")+" · "+date+" · n="+(m.observations??"—")+" · MAE "+(m.mae??"—")+" / baseline "+(m.baseline_mae??"—")+" · validation "+(v.passed===true?"passed":v.passed===false?"rejected":"pending")+(r.error?" · "+r.error:"");});
  const active=data.active_job_id;
  const latest=(data.jobs||[])[0];
- $("training-status").textContent=active?"Training job #"+active+" is queued or running. This panel refreshes automatically.":latest?"Last job #"+latest.id+": "+latest.status+" · "+(latest.finished_at?new Date(latest.finished_at).toLocaleString():""):"No training run yet.";
- $("training-updated").textContent="Updated "+new Date().toLocaleTimeString();
- $("train-now").disabled=!!active;const tradeButton=$("train-trade-models");if(tradeButton)tradeButton.disabled=!!active;
+
+
+ const tradeButton=$("train-trade-models");if(tradeButton)tradeButton.disabled=!!active;
 }
 async function loadTraining(){try{const d=await request(API+"training/status");renderTraining(d);}catch(e){$("training-status").textContent=e.message;}}
 async function load(){ $("refresh").disabled=true;$("status").textContent="Refreshing from Django…";try{const d=await request(API+"overview");render(d);$("status").textContent="Updated "+new Date().toLocaleTimeString()+" · Read-only analysis";}catch(e){$("status").textContent=e.message;}finally{$("refresh").disabled=false;}await loadTraining();}
 $("refresh").addEventListener("click",load);
 $("train-trade-models").addEventListener("click",async()=>{const b=$("train-trade-models");if(!confirm("Train six independent regressors from closed outcomes? This will not change live trading."))return;b.disabled=true;$("trade-training-status").textContent="Submitting six pipelines…";try{const models=["trade_performance","trade_decision","trade_entry_exit","trade_regime","trade_mistake","trade_strategy"];const d=await request(API+"training/start",{method:"POST",headers:{"Content-Type":"application/json","X-CSRFToken":csrf()},body:JSON.stringify({symbol:"XAUUSD_o",models})});$("trade-training-status").textContent=d.message||"Training queued";await loadTraining();}catch(e){$("trade-training-status").textContent=e.message;await loadTraining();}});
-$("train-now").addEventListener("click",async()=>{const b=$("train-now");if(!confirm("Retrain the four market forecasting models from completed candles?"))return;b.disabled=true;$("training-status").textContent="Submitting full training job…";try{const d=await request(API+"training/start",{method:"POST",headers:{"Content-Type":"application/json","X-CSRFToken":csrf()},body:JSON.stringify({symbol:"XAUUSD_o",timeframe:"M15",models:["arima","sarima","ridge","random_forest"]})});$("training-status").textContent=d.message||"Training queued";await loadTraining();}catch(e){$("training-status").textContent=e.message;await loadTraining();}});
-setInterval(loadTraining,5000);
-
 $("generate").addEventListener("click",async()=>{const b=$("generate");b.disabled=true;try{const d=await request(API+"recommendations/generate",{method:"POST",headers:{"X-CSRFToken":csrf()}});$("status").textContent=d.message||"Recommendation review complete";await load();}catch(e){$("status").textContent=e.message;}finally{b.disabled=false;}});
 $("recommendations").addEventListener("click",async e=>{const b=e.target.closest("button[data-review]");if(!b)return;b.disabled=true;try{await request(API+"recommendations/"+encodeURIComponent(b.dataset.id)+"/review",{method:"POST",headers:{"Content-Type":"application/json","X-CSRFToken":csrf()},body:JSON.stringify({decision:b.dataset.review})});await load();}catch(err){$("status").textContent=err.message;b.disabled=false;}});
 load();
