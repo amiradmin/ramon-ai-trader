@@ -1,4 +1,4 @@
-from django.test import TestCase, override_settings
+from django.test import TestCase
 
 from .decision import _apply_demo_risk_policy, _build_pipeline
 from .models import DecisionThresholdConfig
