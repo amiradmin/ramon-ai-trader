@@ -33,8 +33,45 @@ class LearningTrainingApiTests(TestCase):
         self.assertEqual(response.status_code, 202, response.content)
         job = LearningTrainingJob.objects.get()
         self.assertEqual(job.status, LearningTrainingJob.Status.QUEUED)
-        self.assertEqual(set(job.requested_models), {"arima", "sarima", "ridge", "random_forest"})
-        self.assertEqual(set(job.model_runs.values_list("model_key", flat=True)), {"arima", "sarima", "ridge", "random_forest"})
+        self.assertEqual(set(job.requested_models), {"arima", "sarima", "ridge", "random_forest", "trade_performance", "trade_decision", "trade_entry_exit", "trade_regime", "trade_mistake", "trade_strategy"})
+        self.assertEqual(set(job.model_runs.values_list("model_key", flat=True)), set(job.requested_models))
+
+
+    def test_trade_only_training_does_not_require_market_candles(self):
+        response = self.client.post(
+            "/api/ea/v1/learning/training/start",
+            data=json.dumps({"models": ["trade_performance", "trade_decision"]}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 202, response.content)
+        job = LearningTrainingJob.objects.get()
+        self.assertEqual(set(job.requested_models), {"trade_performance", "trade_decision"})
+        self.assertEqual(job.source, "")
+
+    def test_worker_runs_trade_outcome_pipeline_and_persists_artifact(self):
+        from ea_bridge.management.commands.run_learning_training_worker import process_one_job
+
+        job = LearningTrainingJob.objects.create(
+            requested_models=["trade_performance"],
+        )
+        run = LearningModelRun.objects.create(
+            job=job, model_key="trade_performance", model_name="Performance · Random Forest"
+        )
+        trained = {
+            "metrics": {"observations": 60, "mae": 0.4, "rmse": 0.6, "baseline_mae": 0.8, "baseline_rmse": 1.0},
+            "validation": {"passed": True, "checks": {"no_post_trade_features": True}},
+            "artifact": "ZmFrZS1tb2RlbC1hcnRpZmFjdA==",
+            "version": "trade-test123",
+        }
+        with patch(
+            "ea_bridge.management.commands.run_learning_training_worker.train_trade_outcome_pipeline",
+            return_value=trained,
+        ):
+            self.assertTrue(process_one_job())
+        run.refresh_from_db()
+        self.assertEqual(run.status, LearningModelRun.Status.PASSED)
+        self.assertEqual(run.metrics["_artifact_joblib_b64"], trained["artifact"])
+        self.assertTrue(run.validation["checks"]["no_post_trade_features"])
 
     def test_rejects_ambiguous_market_data_sources(self):
         MarketBar.objects.create(
