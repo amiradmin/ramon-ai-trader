@@ -12,7 +12,8 @@ button{background:#1c3553;color:var(--text);border:1px solid #38577e;padding:8px
 .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.two{display:grid;grid-template-columns:1.15fr .85fr;gap:12px}.three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px;min-width:0}.metric span{display:block;color:var(--muted);font-size:11px}.metric strong{display:block;font-size:25px;margin-top:4px;font-variant-numeric:tabular-nums}.metric small{display:block;color:var(--muted);font-size:11px;margin-top:3px}
 .scroll{overflow:auto}table{width:100%;border-collapse:collapse;white-space:nowrap}th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);font-size:12px}th{color:var(--muted);font-weight:600}tbody tr:last-child td{border-bottom:0}.good{color:var(--green)}.bad{color:var(--red)}.amber{color:var(--amber)}
-.item{border-top:1px solid var(--line);padding:12px 0}.item:first-child{border-top:0}.item p{margin:5px 0;color:#c1cede}.barrow{display:grid;grid-template-columns:120px 1fr 70px;gap:10px;align-items:center;margin:10px 0;font-size:12px}.track{height:7px;background:#24344a;border-radius:8px;overflow:hidden}.fill{height:100%;background:var(--blue);border-radius:8px}.empty{padding:16px 0;color:var(--muted);font-size:12px}.actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.section-note{font-size:11px;color:var(--muted);margin-top:10px}.split{display:flex;justify-content:space-between;gap:10px;align-items:center}
+.item{border-top:1px solid var(--line);padding:12px 0}.item:first-child{border-top:0}.item p{margin:5px 0;color:#c1cede}.barrow{display:grid;grid-template-columns:120px 1fr 70px;gap:10px;align-items:center;margin:10px 0;font-size:12px}.track{height:7px;background:#24344a;border-radius:8px;overflow:hidden}.fill{height:100%;background:var(--blue);border-radius:8px}.empty{padding:16px 0;color:var(--muted);font-size:12px}.actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.section-note{font-size:11px;color:var(--muted);margin-top:10px}
+.flow{display:flex;align-items:stretch;gap:8px;overflow-x:auto;padding:8px 2px 14px}.flow-node{position:relative;min-width:132px;flex:1;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:12px 10px;text-align:center}.flow-node .circle{width:34px;height:34px;border:2px solid var(--blue);border-radius:50%;display:grid;place-items:center;margin:0 auto 8px;font-weight:700}.flow-node strong{display:block;font-size:12px}.flow-node small{display:block;color:var(--muted);font-size:10px;margin-top:4px}.flow-arrow{align-self:center;color:var(--blue);font-size:22px;flex:0 0 auto}.model-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.model-card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:0}.model-card h3{font-size:14px;margin:0 0 8px}.model-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}.model-meta div{background:#0e1928;border-radius:7px;padding:8px}.model-meta span{display:block;color:var(--muted);font-size:10px}.model-meta b{display:block;font-size:12px;margin-top:3px;overflow-wrap:anywhere}.train-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.train-button{background:#146b50;border-color:#278d6b;padding:11px 20px;font-weight:700;font-size:13px}.train-button:hover{background:#18835f}.train-button:disabled{opacity:.55}.status-line{font-size:12px;color:var(--muted)}.split{display:flex;justify-content:space-between;gap:10px;align-items:center}
 #status{font-size:12px;color:var(--muted);min-height:18px;margin:0 0 10px}.pillrow{display:flex;gap:8px;flex-wrap:wrap}.pill{background:var(--panel2);border:1px solid var(--line);padding:8px 10px;border-radius:8px;font-size:12px}
 svg{width:100%;height:145px;display:block}.chart-label{fill:var(--muted);font-size:10px}
 @media(max-width:900px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.two{grid-template-columns:1fr}.three{grid-template-columns:1fr 1fr}}
@@ -25,6 +26,22 @@ svg{width:100%;height:145px;display:block}.chart-label{fill:var(--muted);font-si
  <div class="pillrow"><span class="tag safe">ASSISTED MODE</span><span class="tag safe">AUTO-APPLY OFF</span><button id="refresh">Refresh data</button><button id="generate">Generate recommendations</button></div>
 </header>
 <div id="status" role="status">Loading learning data…</div>
+<section class="panel">
+ <div class="split"><h2>Learning pipeline</h2><span class="tag safe">Research & validation only</span></div>
+ <div class="flow" aria-label="Learning workflow">
+  <div class="flow-node"><div class="circle">1</div><strong>Market data</strong><small>Completed OHLCV candles</small></div><div class="flow-arrow">→</div>
+  <div class="flow-node"><div class="circle">2</div><strong>Preparation</strong><small>Chronology & data checks</small></div><div class="flow-arrow">→</div>
+  <div class="flow-node"><div class="circle">3</div><strong>Model fitting</strong><small>ARIMA · SARIMA</small></div><div class="flow-arrow">→</div>
+  <div class="flow-node"><div class="circle">4</div><strong>Validation</strong><small>Holdout vs baseline</small></div><div class="flow-arrow">→</div>
+  <div class="flow-node"><div class="circle">5</div><strong>Model registry</strong><small>Run history & metrics</small></div><div class="flow-arrow">→</div>
+  <div class="flow-node"><div class="circle">6</div><strong>Learning insights</strong><small>Advisory only</small></div>
+ </div>
+ <div class="split"><h2>Model registry & validation</h2><span class="small" id="training-updated">Waiting for training status…</span></div>
+ <div class="model-grid" id="model-registry"><div class="empty">Loading registered models…</div></div>
+ <div class="divider"></div>
+ <div class="train-actions"><button class="train-button" id="train-now">▶ Train Now — All Models</button><span class="status-line" id="training-status">Starts a background training and validation job for every registered model.</span></div>
+ <div class="section-note">Validation uses a chronological rolling holdout and compares MAE/RMSE against a persistence baseline. A failed validation is recorded, never silently promoted. These research model runs do not alter trading signals, risk controls, or EA execution.</div>
+</section>
 <section class="grid" id="kpis">
  <div class="panel metric"><span>Closed trades</span><strong>—</strong></div><div class="panel metric"><span>Win rate</span><strong>—</strong></div><div class="panel metric"><span>Profit factor</span><strong>—</strong></div><div class="panel metric"><span>Expectancy</span><strong>—</strong></div>
 </section>
@@ -92,8 +109,26 @@ function render(d){
 }
 const csrf=()=>document.querySelector("[name=csrfmiddlewaretoken]")?.value||"";
 async function request(url,options={}){const r=await fetch(url,{credentials:"same-origin",...options});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||"Request failed ("+r.status+")");return d;}
-async function load(){ $("refresh").disabled=true;$("status").textContent="Refreshing from Django…";try{const d=await request(API+"overview");render(d);$("status").textContent="Updated "+new Date().toLocaleTimeString()+" · Read-only analysis";}catch(e){$("status").textContent=e.message;}finally{$("refresh").disabled=false;}}
-$("refresh").addEventListener("click",load);
+function renderTraining(data){
+ const cards=(data.registry||[]).map(item=>{
+  const r=item.latest||{},m=r.metrics||{},v=r.validation||{},checks=v.checks||{};
+  const badge=r.status||"NOT TRAINED";
+  const date=r.training_finished_at?new Date(r.training_finished_at).toLocaleString():"Never";
+  const checksText=Object.keys(checks).length?Object.entries(checks).map(([k,val])=>(val?"✓ ":"✕ ")+k.replaceAll("_"," ")).join(" · "):"No validation report yet";
+  return '<article class="model-card"><div class="split"><h3>'+esc(item.name)+'</h3><span class="tag '+(badge==="PASSED"?"safe":badge==="REJECTED"||badge==="FAILED"?"warn":"")+'">'+esc(badge)+'</span></div><div class="small">Version: '+esc(r.version||"—")+'</div><div class="model-meta"><div><span>Last training (UTC)</span><b>'+esc(date)+'</b></div><div><span>Observations</span><b>'+safe(m.observations)+'</b></div><div><span>MAE / baseline</span><b>'+fmt(m.mae,5)+' / '+fmt(m.baseline_mae,5)+'</b></div><div><span>RMSE / baseline</span><b>'+fmt(m.rmse,5)+' / '+fmt(m.baseline_rmse,5)+'</b></div><div><span>Directional accuracy</span><b>'+pct(m.directional_accuracy)+'</b></div><div><span>Validation</span><b>'+esc(v.passed===true?"Passed":v.passed===false?"Not passed":"Not available")+'</b></div></div><p class="section-note">'+esc(checksText)+'</p>'+(r.error?'<p class="bad small">'+esc(r.error)+'</p>':"")+'</article>';
+ }).join("");
+ $("model-registry").innerHTML=cards||'<div class="empty">No trainable models are registered.</div>';
+ const active=data.active_job_id;
+ const latest=(data.jobs||[])[0];
+ $("training-status").textContent=active?"Training job #"+active+" is queued or running. This panel refreshes automatically.":latest?"Last job #"+latest.id+": "+latest.status+" · "+(latest.finished_at?new Date(latest.finished_at).toLocaleString():""):"No training run yet.";
+ $("training-updated").textContent="Updated "+new Date().toLocaleTimeString();
+ $("train-now").disabled=!!active;
+}
+async function loadTraining(){try{const d=await request(API+"training/status");renderTraining(d);}catch(e){$("training-status").textContent=e.message;}}
+async function load(){ $("refresh").disabled=true;$("status").textContent="Refreshing from Django…";try{const d=await request(API+"overview");render(d);$("status").textContent="Updated "+new Date().toLocaleTimeString()+" · Read-only analysis";}catch(e){$("status").textContent=e.message;}finally{$("refresh").disabled=false;}await loadTraining();}
+$("refresh").addEventListener("click",load);\n$("train-now").addEventListener("click",async()=>{const b=$("train-now");if(!confirm("Start retraining and validating every registered learning model?"))return;b.disabled=true;$("training-status").textContent="Submitting full training job…";try{const d=await request(API+"training/start",{method:"POST",headers:{"Content-Type":"application/json","X-CSRFToken":csrf()},body:JSON.stringify({symbol:"XAUUSD_o",timeframe:"M15",models:["arima","sarima"]})});$("training-status").textContent=d.message||"Training queued";await loadTraining();}catch(e){$("training-status").textContent=e.message;await loadTraining();}});
+setInterval(loadTraining,5000);
+
 $("generate").addEventListener("click",async()=>{const b=$("generate");b.disabled=true;try{const d=await request(API+"recommendations/generate",{method:"POST",headers:{"X-CSRFToken":csrf()}});$("status").textContent=d.message||"Recommendation review complete";await load();}catch(e){$("status").textContent=e.message;}finally{b.disabled=false;}});
 $("recommendations").addEventListener("click",async e=>{const b=e.target.closest("button[data-review]");if(!b)return;b.disabled=true;try{await request(API+"recommendations/"+encodeURIComponent(b.dataset.id)+"/review",{method:"POST",headers:{"Content-Type":"application/json","X-CSRFToken":csrf()},body:JSON.stringify({decision:b.dataset.review})});await load();}catch(err){$("status").textContent=err.message;b.disabled=false;}});
 load();
