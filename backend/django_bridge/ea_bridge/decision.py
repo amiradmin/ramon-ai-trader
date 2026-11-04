@@ -395,6 +395,7 @@ def decision(request):
             _num(account_snapshot.get("balance", 0), "account balance") > 0
         )
         missing_risk_inputs = [] if risk_guards_complete else ["server_symbol_metadata", "server_position_risk", "server_account_state"]
+        # Build the profile-specific Django pipeline before constructing its risk inputs.
         market={"symbol":symbol,"timeframe":"M15","bars":bars,"last_bar_closed":True,
           "latest_bar_time":bar_time,"bid":bid,"ask":ask,"point":point,
           "trend":direction,"setup_score":setup,"entry_quality":quality,"spread_points":spread,
@@ -421,7 +422,6 @@ def decision(request):
             if is_demo_account and configured_demo_profile != "standard"
             else "STANDARD"
         )
-        pipeline = _build_pipeline(demo_mode=is_demo_account)
         risk_policy = _apply_demo_risk_policy(market, pipeline, demo_mode=is_demo_account)
         result = pipeline.run(market)
         if account_state_reason:
