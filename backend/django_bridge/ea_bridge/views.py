@@ -6,7 +6,7 @@ from django.http import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST, require_http_methods
 from .auth import BearerTokenRequired
-from .models import EAEvent, EAHeartbeat, StrategyDecisionRecord, DecisionThresholdConfig
+from .models import (EAEvent, EAHeartbeat, MarketBar, StrategyDecisionRecord, RiskVerdictRecord, DecisionThresholdConfig)
 
 log = logging.getLogger(__name__)
 
@@ -288,6 +288,157 @@ def dashboard_data(request):
         "ok": True,
         "decisions": decisions,
         "execution": _dashboard_execution_state(latest_symbol),
+    })
+
+
+@require_GET
+def dashboard_snapshot(request):
+    """Return a read-only, shareable market/decision snapshot for dashboard diagnostics."""
+    now = datetime.now(timezone.utc)
+    decision = StrategyDecisionRecord.objects.order_by("-created_at").first()
+    heartbeat = EAHeartbeat.objects.order_by("-last_seen").first()
+    symbol = decision.symbol if decision else (heartbeat.symbol if heartbeat else "")
+    features = decision.features if decision and isinstance(decision.features, dict) else {}
+    payload = heartbeat.payload if heartbeat and isinstance(heartbeat.payload, dict) else {}
+
+    # Keep candles scoped to the active EA source when possible, so another
+    # terminal/account cannot silently contaminate this market snapshot.
+    bars_query = MarketBar.objects.filter(symbol=symbol, timeframe="M15")
+    if heartbeat is not None:
+        bars_query = bars_query.filter(source=heartbeat.instance_id)
+    bars = list(bars_query.order_by("-timestamp")[:64])
+    bars.reverse()
+
+    trade_mode = payload.get("account_trade_mode")
+    is_demo = (
+        isinstance(trade_mode, str) and trade_mode.strip().upper() == "DEMO"
+    ) or (isinstance(trade_mode, int) and not isinstance(trade_mode, bool) and trade_mode == 0)
+    profile = "demo" if is_demo else "standard"
+    from .thresholds import defaults_for
+    threshold_values = defaults_for(profile)
+    saved_thresholds = DecisionThresholdConfig.objects.filter(profile=profile).first()
+    if saved_thresholds and isinstance(saved_thresholds.values, dict):
+        for group, updates in saved_thresholds.values.items():
+            if group in threshold_values and isinstance(updates, dict):
+                threshold_values[group].update({
+                    key: value for key, value in updates.items()
+                    if key in threshold_values[group]
+                })
+
+    risk_verdict = None
+    if decision is not None:
+        verdict = RiskVerdictRecord.objects.filter(
+            decision_id=decision.decision_id
+        ).order_by("-created_at").first()
+        if verdict is not None:
+            risk_verdict = {
+                "approved": verdict.approved,
+                "reason_code": verdict.reason_code,
+                "approved_volume": str(verdict.approved_volume),
+                "stop_loss": str(verdict.stop_loss) if verdict.stop_loss is not None else None,
+                "take_profit": str(verdict.take_profit) if verdict.take_profit is not None else None,
+                "details": verdict.details if isinstance(verdict.details, dict) else {},
+                "created_at_utc": verdict.created_at.isoformat() if verdict.created_at else None,
+            }
+
+    heartbeat_age = None
+    if heartbeat is not None:
+        last_seen = heartbeat.last_seen
+        if last_seen.tzinfo is None or last_seen.utcoffset() is None:
+            last_seen = last_seen.replace(tzinfo=timezone.utc)
+        heartbeat_age = max(0, int((now - last_seen).total_seconds()))
+
+    # Account identifiers and authentication material are intentionally omitted.
+    account_payload = payload.get("account", {})
+    if not isinstance(account_payload, dict):
+        account_payload = {}
+    safe_account_fields = (
+        "balance", "equity", "margin", "free_margin", "margin_level",
+        "profit", "currency", "leverage",
+    )
+    safe_account = {
+        key: account_payload[key]
+        for key in safe_account_fields
+        if key in account_payload
+    }
+
+    latest_decisions = StrategyDecisionRecord.objects.filter(
+        symbol=symbol
+    ).order_by("-created_at")[:5] if symbol else []
+    return JsonResponse({
+        "ok": True,
+        "schema_version": "ramon-market-snapshot-v1",
+        "generated_at_utc": now.isoformat(),
+        "market": {
+            "symbol": symbol or None,
+            "timeframe": "M15",
+            "decision_market_snapshot": features.get("market_snapshot", {}),
+            "latest_quote": payload.get("quote", {}),
+            "quote_time": payload.get("quote_time"),
+            "bars": [
+                {
+                    "timestamp_utc": bar.timestamp.isoformat(),
+                    "open": str(bar.open),
+                    "high": str(bar.high),
+                    "low": str(bar.low),
+                    "close": str(bar.close),
+                    "volume": str(bar.volume),
+                    "source": bar.source,
+                }
+                for bar in bars
+            ],
+            "bars_count": len(bars),
+            "latest_bar_time_utc": bars[-1].timestamp.isoformat() if bars else None,
+        },
+        "decision": None if decision is None else {
+            "decision_id": decision.decision_id,
+            "symbol": decision.symbol,
+            "action": decision.action,
+            "confidence": decision.confidence,
+            "rationale_code": decision.rationale_code,
+            "model_version": decision.model_version,
+            "created_at_utc": decision.created_at.isoformat() if decision.created_at else None,
+            "features": features,
+        },
+        "recent_decisions": [
+            {
+                "decision_id": row.decision_id,
+                "action": row.action,
+                "confidence": row.confidence,
+                "rationale_code": row.rationale_code,
+                "created_at_utc": row.created_at.isoformat() if row.created_at else None,
+            }
+            for row in latest_decisions
+        ],
+        "risk_verdict": risk_verdict,
+        "thresholds": {"profile": profile, "values": threshold_values},
+        "broker": {
+            "instance_id": heartbeat.instance_id if heartbeat else None,
+            "symbol": heartbeat.symbol if heartbeat else None,
+            "ea_version": heartbeat.ea_version if heartbeat else None,
+            "status": heartbeat.status if heartbeat else None,
+            "heartbeat_age_seconds": heartbeat_age,
+            "heartbeat_fresh": heartbeat_age is not None and heartbeat_age <= int(
+                getattr(settings, "RAMON_EA_HEARTBEAT_MAX_AGE_SECONDS", 90)
+            ),
+            "server_name": heartbeat.server_name if heartbeat else None,
+            "account_trade_mode": trade_mode,
+            "account": safe_account,
+            "symbol_info": payload.get("symbol_info", {}),
+            "positions": payload.get("positions", []),
+        },
+        "execution": _dashboard_execution_state(symbol),
+        "data_quality": {
+            "decision_available": decision is not None,
+            "heartbeat_available": heartbeat is not None,
+            "market_bars_available": bool(bars),
+            "market_bars_count": len(bars),
+            "market_bars_note": (
+                "Completed M15 candles stored by Django for the latest EA instance."
+                if bars else
+                "No matching stored M15 candles were found; the snapshot does not fabricate candle data."
+            ),
+        },
     })
 
 
