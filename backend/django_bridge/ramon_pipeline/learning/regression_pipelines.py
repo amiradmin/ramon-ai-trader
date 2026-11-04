@@ -189,7 +189,8 @@ def train_trade_outcome_pipeline(model_key: str) -> dict[str, Any]:
     baseline_mae = float(mean_absolute_error(y_test, baseline))
     baseline_rmse = float(math.sqrt(mean_squared_error(y_test, baseline)))
     finite = all(math.isfinite(value) for value in (mae, rmse, baseline_mae, baseline_rmse))
-    passed = finite and mae < baseline_mae and rmse < baseline_rmse
+    chronological = train_rows[-1][0] < test_rows[0][0]
+    passed = finite and chronological and mae < baseline_mae and rmse < baseline_rmse
 
     artifact_buffer = io.BytesIO()
     joblib.dump({"vectorizer": vectorizer, "estimator": model, "model_key": model_key}, artifact_buffer)
@@ -220,7 +221,7 @@ def train_trade_outcome_pipeline(model_key: str) -> dict[str, Any]:
                 ),
                 "minimum_holdout_observations": len(test_rows) >= _MIN_HOLDOUT_ROWS,
                 "no_post_trade_features": True,
-                "chronological_split": train_rows[-1][0] < test_rows[0][0],
+                "chronological_split": chronological,
             },
             "note": "Research validation only. Model is stored for offline evaluation; it is not deployed to trading.",
         },
