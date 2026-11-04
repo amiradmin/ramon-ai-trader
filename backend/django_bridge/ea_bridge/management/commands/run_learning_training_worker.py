@@ -23,6 +23,12 @@ MODEL_REGISTRY = {
     "sarima": ("SARIMA", forecast_market_bars_sarima),
     "ridge": ("Ridge Regression", None),
     "random_forest": ("Random Forest", None),
+    "trade_performance": ("Performance · Random Forest", None),
+    "trade_decision": ("Decision · HistGradientBoosting", None),
+    "trade_entry_exit": ("Entry/Exit · Extra Trees", None),
+    "trade_regime": ("Regime · HistGradientBoosting", None),
+    "trade_mistake": ("Mistake · Huber Regression", None),
+    "trade_strategy": ("Strategy · Random Forest", None),
 }
 
 
@@ -143,6 +149,17 @@ def _run_model(job, run):
             LearningModelRun.Status.PASSED if passed
             else LearningModelRun.Status.REJECTED
         )
+    except ValueError as exc:
+        run.error = str(exc)[:4000]
+        if "Insufficient labeled observations" in run.error or "Chronological holdout requires" in run.error:
+            run.status = LearningModelRun.Status.REJECTED
+            run.validation = {
+                "passed": False,
+                "checks": {"sufficient_labeled_data": False},
+                "note": run.error,
+            }
+        else:
+            run.status = LearningModelRun.Status.FAILED
     except Exception as exc:
         run.status = LearningModelRun.Status.FAILED
         run.error = str(exc)[:4000]
