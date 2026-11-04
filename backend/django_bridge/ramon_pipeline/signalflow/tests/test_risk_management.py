@@ -46,6 +46,7 @@ class LegacyRiskTests(TestCase):
             min_stop_atr=0.6,
             max_stop_atr=2.8,
             min_reward_risk=1.8,
+            target_reward_risk=1.8,
             max_total_risk_percent=1.5,
             max_daily_loss_percent=2.5,
         )
