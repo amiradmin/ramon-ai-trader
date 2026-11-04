@@ -58,7 +58,7 @@ def _run_model(job, run):
     run.save(update_fields=["training_started_at", "status"])
     try:
         if run.model_key in PIPELINES:
-            trained = train_trade_outcome_pipeline(run.model_key)
+            trained = train_trade_outcome_pipeline(run.model_key, symbol=job.symbol)
             run.metrics = {**trained["metrics"], "_artifact_joblib_b64": trained["artifact"]}
             run.validation = trained["validation"]
             run.version = trained["version"]
