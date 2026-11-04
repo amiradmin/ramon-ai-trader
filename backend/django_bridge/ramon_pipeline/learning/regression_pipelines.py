@@ -9,10 +9,8 @@ import base64
 import hashlib
 import io
 import math
-from collections.abc import Callable
 from typing import Any
 
-from django.utils import timezone
 
 from ea_bridge.models import LearningTradeOutcome
 
@@ -161,7 +159,7 @@ def train_trade_outcome_pipeline(model_key: str) -> dict[str, Any]:
             continue
         if model_key == "trade_strategy" and not (row.tags or {}).get("strategy_profile"):
             continue
-        if model_key == "trade_entry_exit" and not (row.execution_metrics or {}).get("slippage_points") is not None:
+        if model_key == "trade_entry_exit" and (row.execution_metrics or {}).get("slippage_points") is None:
             continue
         samples.append((row.closed_at, features, float(target)))
 
