@@ -1120,10 +1120,11 @@ async function copyMarketSnapshot() {
     const response = await fetch("/api/ea/v1/dashboard-snapshot", {cache: "no-store"});
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const snapshot = await response.json();
-    if (!snapshot.ok || snapshot.schema_version !== "ramon-market-snapshot-v1") {
-      throw new Error("Unexpected market snapshot format");
+    if (snapshot.v !== 2) {
+      throw new Error("Unexpected compact snapshot format");
     }
-    const text = JSON.stringify(snapshot, null, 2);
+    // Minified JSON avoids wasting clipboard space on indentation and whitespace.
+    const text = JSON.stringify(snapshot);
     if (navigator.clipboard && window.isSecureContext) {
       await navigator.clipboard.writeText(text);
     } else {
@@ -1139,7 +1140,7 @@ async function copyMarketSnapshot() {
       if (!copied) throw new Error("Clipboard access was denied by the browser");
     }
     button.textContent = "Copied ✓";
-    status.textContent = `Snapshot copied · ${snapshot.market.bars_count} M15 candles`;
+    status.textContent = "Compact snapshot copied · " + snapshot.market.candles_included + " candles · " + Math.ceil(text.length / 1024) + " KB";
   } catch (error) {
     button.textContent = "Copy Market Snapshot";
     status.textContent = "Copy failed: " + error.message;
