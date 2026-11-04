@@ -314,7 +314,7 @@ def dashboard_snapshot(request):
                 result[str(key)] = compact(item, depth + 1)
             return result
         if isinstance(value, (list, tuple)):
-            items = [compact(item, depth + 1) for item in value[:12]
+            items = [compact(item, depth + 1) for item in value[:12]]
             if len(value) > 12:
                 items.append("… +" + str(len(value) - 12))
             return items
