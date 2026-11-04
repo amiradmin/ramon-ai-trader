@@ -595,6 +595,9 @@ function thresholdEditorMarkup(stageName) {
   const group = thresholdConfig.groups.find(item => item.key === stageName);
   if (!group) return "";
   const values = thresholdDraft || thresholdConfig.values;
+  const riskNote = stageName === "risk_management"
+    ? '<div class="small threshold-risk-note">These controls are enforced by Django. Maximum risk per trade is the demo sizing budget and hard per-trade cap. Portfolio exposure and daily loss are checked against server-side account telemetry. Position size is always rounded down; Ramon will never force the broker minimum lot when it exceeds the risk budget. Live-account risk remains fail-closed.</div>'
+    : "";
   const rows = group.items.map(item => {
     const value = values?.[stageName]?.[item.key] ?? item.value;
     return '<div class="threshold-row"><label for="threshold-' + esc(stageName + "-" + item.key) +
@@ -641,9 +644,13 @@ const CHECK_THRESHOLD_KEYS = {
   },
   risk_management: {
     stop:["stop_buffer_atr","min_stop_atr","max_stop_atr"],
-    reward_risk:["min_reward_risk"],
+    reward_risk:["target_reward_risk","min_reward_risk"],
     reward_risk_too_low:["min_reward_risk"],
-    rr:["min_reward_risk"]
+    rr:["target_reward_risk","min_reward_risk"],
+    sizing:["maximum_risk_percent"],
+    risk_budget_below_minimum_volume:["maximum_risk_percent"],
+    portfolio_risk:["maximum_risk_percent","max_total_risk_percent"],
+    daily_loss:["max_daily_loss_percent"]
   }
 };
 function thresholdControlsForCheck(stageName, checkName) {
@@ -652,7 +659,10 @@ function thresholdControlsForCheck(stageName, checkName) {
   let keys = CHECK_THRESHOLD_KEYS[stageName]?.[normalized] || [];
   if (stageName === "risk_management" && !keys.length) {
     if (/(stop|invalidation)/.test(normalized)) keys = ["stop_buffer_atr","min_stop_atr","max_stop_atr"];
-    else if (/(reward|risk.?reward|rr)/.test(normalized)) keys = ["min_reward_risk"];
+    else if (/(reward|risk.?reward|rr)/.test(normalized)) keys = ["target_reward_risk","min_reward_risk"];
+    else if (/(portfolio|exposure)/.test(normalized)) keys = ["maximum_risk_percent","max_total_risk_percent"];
+    else if (/(daily.?loss|daily_loss)/.test(normalized)) keys = ["max_daily_loss_percent"];
+    else if (/(sizing|minimum.?volume|risk.?budget)/.test(normalized)) keys = ["maximum_risk_percent"];
   }
   const group = thresholdConfig.groups.find(item => item.key === stageName);
   const specs = keys.map(key => group?.items.find(item => item.key === key)).filter(Boolean);
