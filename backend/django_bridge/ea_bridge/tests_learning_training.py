@@ -38,6 +38,7 @@ class LearningTrainingApiTests(TestCase):
 
 
     def test_trade_only_training_does_not_require_market_candles(self):
+        MarketBar.objects.all().delete()
         response = self.client.post(
             "/api/ea/v1/learning/training/start",
             data=json.dumps({"models": ["trade_performance", "trade_decision"]}),
