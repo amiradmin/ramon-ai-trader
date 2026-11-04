@@ -31,37 +31,7 @@ services:
     depends_on:
       timescaledb:
         condition: service_healthy
-    
-  learning-worker:
-    build:
-      context: .
-      dockerfile: backend/django_bridge/Dockerfile
-    container_name: ramon-learning-worker
-    restart: unless-stopped
-    init: true
-    env_file:
-      - .env
-    environment:
-      DJANGO_SETTINGS_MODULE: ramon_django.settings
-      DJANGO_DEBUG: "0"
-      DJANGO_ALLOWED_HOSTS: "127.0.0.1,localhost,django"
-      DJANGO_DB_ENGINE: postgresql
-      DJANGO_DB_HOST: timescaledb
-      DJANGO_DB_PORT: "5432"
-      DJANGO_DB_NAME: ${POSTGRES_DB:-ramon}
-      DJANGO_DB_USER: ${POSTGRES_USER:-ramon}
-      DJANGO_DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
-      RAMON_REDIS_URL: redis://redis:6379/0
-    command: ["python", "manage.py", "run_learning_training_worker", "--poll-seconds", "2"]
-    depends_on:
-      django:
-        condition: service_healthy
-      timescaledb:
-        condition: service_healthy
-    networks:
-      - ramon_backend
-
-  redis:
+      redis:
         condition: service_healthy
     networks:
       - ramon_backend
@@ -110,6 +80,35 @@ services:
       django:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    networks:
+      - ramon_backend
+
+  learning-worker:
+    build:
+      context: .
+      dockerfile: backend/django_bridge/Dockerfile
+    container_name: ramon-learning-worker
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    environment:
+      DJANGO_SETTINGS_MODULE: ramon_django.settings
+      DJANGO_DEBUG: "0"
+      DJANGO_ALLOWED_HOSTS: "127.0.0.1,localhost,django"
+      DJANGO_DB_ENGINE: postgresql
+      DJANGO_DB_HOST: timescaledb
+      DJANGO_DB_PORT: "5432"
+      DJANGO_DB_NAME: ${POSTGRES_DB:-ramon}
+      DJANGO_DB_USER: ${POSTGRES_USER:-ramon}
+      DJANGO_DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      RAMON_REDIS_URL: redis://redis:6379/0
+    command: ["python", "manage.py", "run_learning_training_worker", "--poll-seconds", "2"]
+    depends_on:
+      django:
         condition: service_healthy
       timescaledb:
         condition: service_healthy
