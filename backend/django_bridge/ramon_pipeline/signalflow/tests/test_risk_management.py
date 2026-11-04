@@ -98,6 +98,42 @@ class LegacyRiskTests(TestCase):
             self.assertFalse(result["approved"], market)
             self.assertEqual((result["reason"], result["volume"], result["status"]), (reason, 0.0, "REJECTED"), market)
 
+    def test_invalid_risk_inputs_identify_each_field_without_changing_reason_code(self):
+        manager = RiskManager()
+        cases = (
+            (legacy_market(account_balance=0), "account_balance"),
+            (legacy_market(risk_percent=0), "risk_percent"),
+            (legacy_market(stop_loss_points=0), "stop_loss_points"),
+            (legacy_market(point_value_per_lot=0), "point_value_per_lot"),
+            (legacy_market(volume_step=0), "volume_step"),
+            (legacy_market(min_volume=0), "min_volume"),
+            (legacy_market(min_volume=0.1, max_volume=0.05), "max_volume"),
+        )
+        for market, field in cases:
+            with self.subTest(field=field):
+                result = manager.evaluate(market, True)
+                self.assertFalse(result["approved"])
+                self.assertEqual(result["reason"], "NON_POSITIVE_OR_INCONSISTENT_RISK_INPUT")
+                self.assertEqual(result["volume"], 0.0)
+                self.assertEqual(result["invalid_fields"][0]["field"], field)
+                self.assertIn(field, result["explanation"])
+
+    def test_valid_demo_sizing_keeps_existing_position_volume_and_risk(self):
+        market = legacy_market(
+            account_balance=2394.39,
+            risk_percent=0.5,
+            stop_loss_points=908.36,
+            point_value_per_lot=1.0,
+            volume_step=0.01,
+            min_volume=0.01,
+            max_volume=100.0,
+        )
+        result = RiskManager().evaluate(market, True)
+        self.assertTrue(result["approved"], result["explanation"])
+        self.assertEqual(result["volume"], 0.01)
+        self.assertAlmostEqual(result["risk_budget"], 11.97195, places=5)
+        self.assertAlmostEqual(result["estimated_risk"], 9.0836, places=4)
+
     def test_upstream_rejection_and_bad_snapshot_never_size(self):
         for upstream, market in ((False, legacy_market()), (True, None)):
             result = RiskManager().evaluate(market, upstream)
