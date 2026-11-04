@@ -55,7 +55,8 @@ def _recommendation_dict(row):
 def _execution_diagnostics():
     rows = list(LearningTradeOutcome.objects.order_by("-closed_at")[:500])
     fields = ("mae", "mfe", "entry_efficiency", "exit_efficiency", "spread_points", "slippage_points")
-    result = {"sample_trades": len(rows), "metrics": {}}
+    sample_trades = len(rows)
+    result = {"sample_trades": sample_trades, "metrics": {}}
     for field in fields:
         values = []
         for row in rows:
@@ -64,6 +65,7 @@ def _execution_diagnostics():
                 values.append(float(value))
         result["metrics"][field] = {
             "observations": len(values),
+            "unavailable": sample_trades - len(values),
             "average": round(sum(values) / len(values), 6) if values else None,
         }
     return result
