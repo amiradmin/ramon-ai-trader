@@ -127,7 +127,7 @@ def _estimator(name: str) -> Any:
     raise ValueError(f"Unknown regression estimator: {name}")
 
 
-def train_trade_outcome_pipeline(model_key: str) -> dict[str, Any]:
+def train_trade_outcome_pipeline(model_key: str, *, symbol: str = "XAUUSD_o") -> dict[str, Any]:
     """Fit one component-specific regressor and evaluate on the latest chronological holdout."""
     from sklearn.feature_extraction import DictVectorizer
     from sklearn.metrics import mean_absolute_error, mean_squared_error
@@ -137,7 +137,9 @@ def train_trade_outcome_pipeline(model_key: str) -> dict[str, Any]:
     if spec is None:
         raise ValueError(f"Unknown trade-outcome pipeline: {model_key}")
 
-    query = LearningTradeOutcome.objects.filter(closed_at__isnull=False).order_by("closed_at", "id")
+    query = LearningTradeOutcome.objects.filter(
+        closed_at__isnull=False, symbol=symbol
+    ).order_by("closed_at", "id")
     if model_key == "trade_decision":
         query = query.exclude(decision_id="")
     elif model_key == "trade_regime":
