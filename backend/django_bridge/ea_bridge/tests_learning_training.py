@@ -34,7 +34,7 @@ class LearningTrainingApiTests(TestCase):
         job = LearningTrainingJob.objects.get()
         self.assertEqual(job.status, LearningTrainingJob.Status.QUEUED)
         self.assertEqual(set(job.requested_models), {"arima", "sarima", "ridge", "random_forest"})
-        self.assertEqual(set(job.model_runs.values_list("model_key", flat=True)), {"arima", "sarima"})
+        self.assertEqual(set(job.model_runs.values_list("model_key", flat=True)), {"arima", "sarima", "ridge", "random_forest"})
 
     def test_rejects_ambiguous_market_data_sources(self):
         MarketBar.objects.create(
