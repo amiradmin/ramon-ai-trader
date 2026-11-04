@@ -8,11 +8,12 @@ from functools import wraps
 from django.http import JsonResponse
 from django.shortcuts import render
 from django.utils import timezone
+from django.db import transaction
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from .auth import BearerTokenRequired
-from .models import EACommand, LearningRecommendation, LearningTradeOutcome, OrderIntentRecord
+from .models import (EACommand, LearningRecommendation, LearningTradeOutcome, OrderIntentRecord, LearningTrainingJob, LearningModelRun, MarketBar)
 from .learning_store import DjangoOutcomeStore
 from ramon_pipeline.learning import LearningEngine, RecommendationEngine
 
@@ -234,5 +235,119 @@ def review_recommendation(request, recommendation_id):
         return JsonResponse({"ok": True, "recommendation": _recommendation_dict(row), "strategy_changed": False})
     except LearningRecommendation.DoesNotExist:
         return JsonResponse({"ok": False, "error": "recommendation not found"}, status=404)
+    except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return JsonResponse({"ok": False, "error": str(exc)}, status=400)
+
+
+
+TRAINABLE_MODELS = {
+    "arima": "ARIMA",
+    "sarima": "SARIMA",
+}
+
+
+def _model_run_dict(row):
+    return {
+        "id": row.id, "job_id": row.job_id, "model_key": row.model_key,
+        "model_name": row.model_name, "status": row.status,
+        "version": row.version,
+        "training_started_at": row.training_started_at.isoformat() if row.training_started_at else None,
+        "training_finished_at": row.training_finished_at.isoformat() if row.training_finished_at else None,
+        "metrics": row.metrics, "validation": row.validation, "error": row.error,
+    }
+
+
+@_staff_api
+@require_GET
+def training_status(request):
+    latest = {}
+    for row in LearningModelRun.objects.select_related("job").order_by(
+        "model_key", "-training_finished_at", "-id"
+    ):
+        if row.model_key not in latest:
+            latest[row.model_key] = _model_run_dict(row)
+    recent_jobs = []
+    for job in LearningTrainingJob.objects.prefetch_related("model_runs")[:20]:
+        recent_jobs.append({
+            "id": job.id, "status": job.status, "symbol": job.symbol,
+            "timeframe": job.timeframe, "source": job.source,
+            "created_at": job.created_at.isoformat(),
+            "started_at": job.started_at.isoformat() if job.started_at else None,
+            "finished_at": job.finished_at.isoformat() if job.finished_at else None,
+            "error": job.error,
+            "models": [_model_run_dict(row) for row in job.model_runs.all()],
+        })
+    active = LearningTrainingJob.objects.filter(
+        status__in=[LearningTrainingJob.Status.QUEUED, LearningTrainingJob.Status.RUNNING]
+    ).values_list("id", flat=True).first()
+    return JsonResponse({
+        "ok": True,
+        "registry": [
+            {"key": key, "name": name, "latest": latest.get(key)}
+            for key, name in TRAINABLE_MODELS.items()
+        ],
+        "active_job_id": active,
+        "jobs": recent_jobs,
+        "training_worker_required": True,
+        "trading_authorization": False,
+        "strategy_mutation": False,
+    })
+
+
+@_staff_api
+@require_POST
+def start_training(request):
+    try:
+        payload = _body(request)
+        symbol = str(payload.get("symbol") or "XAUUSD_o").strip()[:32]
+        timeframe = str(payload.get("timeframe") or "M15").strip().upper()[:16]
+        source = str(payload.get("source") or "").strip()[:128]
+        if not symbol or not timeframe:
+            raise ValueError("symbol and timeframe are required")
+        requested = payload.get("models", list(TRAINABLE_MODELS))
+        if not isinstance(requested, list) or not requested:
+            raise ValueError("models must be a non-empty list")
+        requested = list(dict.fromkeys(str(item).lower() for item in requested))
+        unknown = set(requested) - set(TRAINABLE_MODELS)
+        if unknown:
+            raise ValueError("Unknown models: " + ", ".join(sorted(unknown)))
+        bars = MarketBar.objects.filter(symbol=symbol, timeframe=timeframe)
+        if source:
+            bars = bars.filter(source=source)
+        count = bars.count()
+        if count < 50:
+            return JsonResponse({
+                "ok": False,
+                "error": f"Only {count} matching completed candles found; at least 50 are required.",
+            }, status=400)
+        sources = list(bars.values_list("source", flat=True).distinct()[:2])
+        if not source and len(sources) > 1:
+            return JsonResponse({
+                "ok": False,
+                "error": "Multiple MarketBar sources exist. Supply an explicit source to avoid mixing feeds.",
+                "sources": sources,
+            }, status=400)
+        with transaction.atomic():
+            active = LearningTrainingJob.objects.select_for_update().filter(
+                status__in=[LearningTrainingJob.Status.QUEUED, LearningTrainingJob.Status.RUNNING]
+            ).first()
+            if active:
+                return JsonResponse({
+                    "ok": False, "error": "A training job is already queued or running.",
+                    "active_job_id": active.id,
+                }, status=409)
+            job = LearningTrainingJob.objects.create(
+                symbol=symbol, timeframe=timeframe, source=source or sources[0],
+                requested_models=requested, created_by=request.user.get_username(),
+            )
+            LearningModelRun.objects.bulk_create([
+                LearningModelRun(job=job, model_key=key, model_name=TRAINABLE_MODELS[key])
+                for key in requested
+            ])
+        return JsonResponse({
+            "ok": True, "job_id": job.id, "status": job.status,
+            "message": "Training queued. The background learning worker will process every selected model.",
+            "trading_authorization": False,
+        }, status=202)
     except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         return JsonResponse({"ok": False, "error": str(exc)}, status=400)
