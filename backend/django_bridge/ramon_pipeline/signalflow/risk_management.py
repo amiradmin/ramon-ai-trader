@@ -254,33 +254,9 @@ class RiskManager:
         balance, requested_pct, stop_points, point_value, step, min_volume, max_volume = (
             values[k] for k in _LEGACY_REQUIRED
         )
-        invalid_fields = []
-        for field, value, label in (
-            ("account_balance", balance, "account balance"),
-            ("risk_percent", requested_pct, "risk percentage"),
-            ("stop_loss_points", stop_points, "stop distance"),
-            ("point_value_per_lot", point_value, "point value per lot"),
-            ("volume_step", step, "volume step"),
-            ("min_volume", min_volume, "minimum volume"),
-        ):
-            if value <= 0:
-                invalid_fields.append({"field": field, "value": value, "requirement": f"{label} must be greater than zero"})
-        if max_volume < min_volume:
-            invalid_fields.append({
-                "field": "max_volume",
-                "value": max_volume,
-                "requirement": "maximum volume must be greater than or equal to minimum volume",
-            })
-        if invalid_fields:
-            detail = "; ".join(
-                f"{item['field']}={item['value']:g}: {item['requirement']}"
-                for item in invalid_fields
-            )
-            raise _Reject(
-                "NON_POSITIVE_OR_INCONSISTENT_RISK_INPUT",
-                detail,
-                invalid_fields=invalid_fields,
-            )
+        if (balance <= 0 or requested_pct <= 0 or stop_points <= 0 or point_value <= 0 or step <= 0
+                or min_volume <= 0 or max_volume < min_volume):
+            raise _Reject("NON_POSITIVE_OR_INCONSISTENT_RISK_INPUT", "balance, risk %, stop, point value and volumes must be positive and consistent")
         if not structural:
             checks.append({"name": "stop", "passed": True, "detail": fallback_note or f"supplied stop of {stop_points:g} points"})
 
