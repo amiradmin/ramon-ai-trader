@@ -610,7 +610,7 @@ function thresholdEditorMarkup(stageName) {
   }).join("");
   return '<details class="threshold-editor"><summary class="threshold-editor-head"><strong>Edit ' +
     esc(group.title) + ' thresholds</strong><span class="small">Django · ' + esc(thresholdConfig.profile.toUpperCase()) +
-    '</span></summary><div class="threshold-editor-grid">' + rows + '</div><div class="threshold-actions">' +
+    '</span></summary>' + riskNote + '<div class="threshold-editor-grid">' + rows + '</div><div class="threshold-actions">' +
     '<button type="button" class="primary" data-threshold-save="' + esc(stageName) + '">Save thresholds</button>' +
     '<button type="button" data-threshold-reset="true">Reset profile defaults</button></div>' +
     '<div class="threshold-status" data-threshold-status="' + esc(stageName) + '">Changes apply to the next Django decision.</div></details>';
@@ -645,7 +645,7 @@ const CHECK_THRESHOLD_KEYS = {
   risk_management: {
     stop:["stop_buffer_atr","min_stop_atr","max_stop_atr"],
     reward_risk:["target_reward_risk","min_reward_risk"],
-    reward_risk_too_low:["min_reward_risk"],
+    reward_risk_too_low:["target_reward_risk","min_reward_risk"],
     rr:["target_reward_risk","min_reward_risk"],
     sizing:["maximum_risk_percent"],
     risk_budget_below_minimum_volume:["maximum_risk_percent"],
