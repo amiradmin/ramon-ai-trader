@@ -243,6 +243,8 @@ def review_recommendation(request, recommendation_id):
 TRAINABLE_MODELS = {
     "arima": "ARIMA",
     "sarima": "SARIMA",
+    "ridge": "Ridge Regression",
+    "random_forest": "Random Forest",
 }
 
 
