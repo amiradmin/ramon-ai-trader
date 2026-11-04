@@ -51,7 +51,7 @@ def heartbeat(request):
         row, _ = EAHeartbeat.objects.update_or_create(instance_id=instance_id, defaults={
             "account_login": str(p.get("account_login", ""))[:32], "server_name": str(p.get("server_name", ""))[:128],
             "symbol": str(p.get("symbol", ""))[:32], "ea_version": str(p.get("ea_version", ""))[:32],
-            "status": str(p.get("status", "UNKNOWN"))[:64], "terminal_connected": bool(p.get("terminal_connected", False)),
+            "status": str(p.get("status", "UNKNOWN"))[:256], "terminal_connected": bool(p.get("terminal_connected", False)),
             "trade_allowed": bool(p.get("trade_allowed", False)), "payload": p})
     except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         return JsonResponse({"ok": False, "error": str(exc)}, status=400)
