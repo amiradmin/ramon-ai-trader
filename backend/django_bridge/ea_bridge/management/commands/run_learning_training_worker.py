@@ -22,6 +22,7 @@ MODEL_REGISTRY = {
     "sarima": ("SARIMA", forecast_market_bars_sarima),
     "ridge": ("Ridge Regression", None),
     "random_forest": ("Random Forest", None),
+}
 
 
 def _claim_job():
