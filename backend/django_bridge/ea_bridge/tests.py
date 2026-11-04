@@ -84,6 +84,18 @@ class DecisionThresholdConfigurationTests(TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
+    def test_risk_relationships_are_validated_together(self):
+        for updates in (
+            {"maximum_risk_percent": 1.5, "max_total_risk_percent": 1.0},
+            {"target_reward_risk": 1.2, "min_reward_risk": 1.5},
+        ):
+            response = self.client.post(
+                self.url,
+                data=json.dumps({"values": {"risk_management": updates}}),
+                content_type="application/json",
+            )
+            self.assertEqual(response.status_code, 400)
+
     def test_minimum_reward_risk_is_limited_to_1_2_to_three_r(self):
         for value in (1.1, 3.1):
             response = self.client.post(
