@@ -10,6 +10,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from ea_bridge.models import LearningModelRun, LearningTrainingJob, MarketBar
+from ramon_pipeline.research_forecasting import evaluate_regression_forecasts
 from ramon_pipeline.signalflow.forecasting import (
     forecast_market_bars,
     forecast_market_bars_sarima,
@@ -19,7 +20,8 @@ from ramon_pipeline.signalflow.forecasting import (
 MODEL_REGISTRY = {
     "arima": ("ARIMA", forecast_market_bars),
     "sarima": ("SARIMA", forecast_market_bars_sarima),
-}
+    "ridge": ("Ridge Regression", None),
+    "random_forest": ("Random Forest", None),
 
 
 def _claim_job():
@@ -69,6 +71,19 @@ def _run_model(job, run):
                 symbol=job.symbol, timeframe=job.timeframe,
                 source=job.source or sources[0], limit=500, test_size=20,
             ).as_dict()
+        elif run.model_key in {"ridge", "random_forest"}:
+            bars = list(query.order_by("-timestamp").only(
+                "timestamp", "open", "high", "low", "close", "volume"
+            )[:500])
+            bars.reverse()
+            candles = [{
+                "timestamp": bar.timestamp.isoformat(),
+                "open": float(bar.open), "high": float(bar.high),
+                "low": float(bar.low), "close": float(bar.close),
+                "tick_volume": float(bar.volume),
+            } for bar in bars]
+            reports = evaluate_regression_forecasts(candles, horizon_bars=4)
+            result = reports[run.model_key].as_dict()
         else:
             raise ValueError("Model is not registered for training.")
 
@@ -84,14 +99,23 @@ def _run_model(job, run):
         )
         no_convergence_warnings = result.get("convergence_warnings", 0) == 0
         enough_holdout = result.get("test_observations", 0) >= 5
-        passed = bool(beats_baseline and enough_holdout and no_convergence_warnings)
+        regression_baseline = run.model_key in {"ridge", "random_forest"}
+        beats_baseline = (
+            bool(result.get("beats_zero_return_baseline"))
+            if regression_baseline else beats_baseline
+        )
+        passed = bool(
+            finite and beats_baseline and enough_holdout
+            and (regression_baseline or no_convergence_warnings)
+        )
         validation = {
             "passed": passed,
             "checks": {
                 "finite_metrics": finite,
-                "beats_persistence_baseline_on_mae_and_rmse": beats_baseline,
+                ("beats_zero_return_baseline_on_mae_and_rmse" if regression_baseline
+                 else "beats_persistence_baseline_on_mae_and_rmse"): beats_baseline,
                 "minimum_five_holdout_observations": enough_holdout,
-                "no_convergence_warnings": no_convergence_warnings,
+                "no_convergence_warnings": no_convergence_warnings if not regression_baseline else None,
             },
             "evaluation_method": result.get("evaluation_method"),
             "note": "Research validation only; this report does not deploy a model or authorize trading.",
