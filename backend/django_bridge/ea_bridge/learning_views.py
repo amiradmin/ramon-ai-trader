@@ -245,6 +245,12 @@ TRAINABLE_MODELS = {
     "sarima": "SARIMA",
     "ridge": "Ridge Regression",
     "random_forest": "Random Forest",
+    "trade_performance": "Performance · Random Forest",
+    "trade_decision": "Decision · HistGradientBoosting",
+    "trade_entry_exit": "Entry/Exit · Extra Trees",
+    "trade_regime": "Regime · HistGradientBoosting",
+    "trade_mistake": "Mistake · Huber Regression",
+    "trade_strategy": "Strategy · Random Forest",
 }
 
 
@@ -255,7 +261,7 @@ def _model_run_dict(row):
         "version": row.version,
         "training_started_at": row.training_started_at.isoformat() if row.training_started_at else None,
         "training_finished_at": row.training_finished_at.isoformat() if row.training_finished_at else None,
-        "metrics": row.metrics, "validation": row.validation, "error": row.error,
+        "metrics": {key: value for key, value in (row.metrics or {}).items() if key != "_artifact_joblib_b64"}, "validation": row.validation, "error": row.error,
     }
 
 
@@ -313,22 +319,25 @@ def start_training(request):
         unknown = set(requested) - set(TRAINABLE_MODELS)
         if unknown:
             raise ValueError("Unknown models: " + ", ".join(sorted(unknown)))
-        bars = MarketBar.objects.filter(symbol=symbol, timeframe=timeframe)
-        if source:
-            bars = bars.filter(source=source)
-        count = bars.count()
-        if count < 50:
-            return JsonResponse({
-                "ok": False,
-                "error": f"Only {count} matching completed candles found; at least 50 are required.",
-            }, status=400)
-        sources = list(bars.values_list("source", flat=True).distinct()[:2])
-        if not source and len(sources) > 1:
-            return JsonResponse({
-                "ok": False,
-                "error": "Multiple MarketBar sources exist. Supply an explicit source to avoid mixing feeds.",
-                "sources": sources,
-            }, status=400)
+        market_models = set(requested) & {"arima", "sarima", "ridge", "random_forest"}
+        sources = []
+        if market_models:
+            bars = MarketBar.objects.filter(symbol=symbol, timeframe=timeframe)
+            if source:
+                bars = bars.filter(source=source)
+            count = bars.count()
+            if count < 50:
+                return JsonResponse({
+                    "ok": False,
+                    "error": f"Only {count} matching completed candles found; at least 50 are required.",
+                }, status=400)
+            sources = list(bars.values_list("source", flat=True).distinct()[:2])
+            if not source and len(sources) > 1:
+                return JsonResponse({
+                    "ok": False,
+                    "error": "Multiple MarketBar sources exist. Supply an explicit source to avoid mixing feeds.",
+                    "sources": sources,
+                }, status=400)
         with transaction.atomic():
             active = LearningTrainingJob.objects.select_for_update().filter(
                 status__in=[LearningTrainingJob.Status.QUEUED, LearningTrainingJob.Status.RUNNING]
@@ -339,7 +348,7 @@ def start_training(request):
                     "active_job_id": active.id,
                 }, status=409)
             job = LearningTrainingJob.objects.create(
-                symbol=symbol, timeframe=timeframe, source=source or sources[0],
+                symbol=symbol, timeframe=timeframe, source=source or (sources[0] if sources else ""),
                 requested_models=requested, created_by=request.user.get_username(),
             )
             LearningModelRun.objects.bulk_create([
