@@ -14,7 +14,7 @@ button{background:#1c3553;color:var(--text);border:1px solid #38577e;padding:8px
 .scroll{overflow:auto}table{width:100%;border-collapse:collapse;white-space:nowrap}th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);font-size:12px}th{color:var(--muted);font-weight:600}tbody tr:last-child td{border-bottom:0}.good{color:var(--green)}.bad{color:var(--red)}.amber{color:var(--amber)}
 .item{border-top:1px solid var(--line);padding:12px 0}.item:first-child{border-top:0}.item p{margin:5px 0;color:#c1cede}.barrow{display:grid;grid-template-columns:120px 1fr 70px;gap:10px;align-items:center;margin:10px 0;font-size:12px}.track{height:7px;background:#24344a;border-radius:8px;overflow:hidden}.fill{height:100%;background:var(--blue);border-radius:8px}.empty{padding:16px 0;color:var(--muted);font-size:12px}.actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.section-note{font-size:11px;color:var(--muted);margin-top:10px}
 .flow{display:flex;align-items:stretch;gap:8px;overflow-x:auto;padding:8px 2px 14px}.flow-node{position:relative;min-width:132px;flex:1;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:12px 10px;text-align:center}.flow-node .circle{width:34px;height:34px;border:2px solid var(--blue);border-radius:50%;display:grid;place-items:center;margin:0 auto 8px;font-weight:700}.flow-node strong{display:block;font-size:12px}.flow-node small{display:block;color:var(--muted);font-size:10px;margin-top:4px}.flow-arrow{align-self:center;color:var(--blue);font-size:22px;flex:0 0 auto}.model-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.model-card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:0}.model-card h3{font-size:14px;margin:0 0 8px}.model-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}.model-meta div{background:#0e1928;border-radius:7px;padding:8px}.model-meta span{display:block;color:var(--muted);font-size:10px}.model-meta b{display:block;font-size:12px;margin-top:3px;overflow-wrap:anywhere}.train-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.train-button{background:#146b50;border-color:#278d6b;padding:11px 20px;font-weight:700;font-size:13px}.train-button:hover{background:#18835f}.train-button:disabled{opacity:.55}.status-line{font-size:12px;color:var(--muted)}.split{display:flex;justify-content:space-between;gap:10px;align-items:center}
-#status{font-size:12px;color:var(--muted);min-height:18px;margin:0 0 10px}.pillrow{display:flex;gap:8px;flex-wrap:wrap}.pill{background:var(--panel2);border:1px solid var(--line);padding:8px 10px;border-radius:8px;font-size:12px}
+#status{font-size:12px;color:var(--muted);min-height:18px;margin:0 0 10px}.component-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.component-card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;min-width:0}.component-card h3{font-size:13px;margin:0 0 4px}.component-card code{font-size:10px;color:var(--blue);overflow-wrap:anywhere}.component-card p{font-size:11px;color:#c1cede;margin:8px 0}.component-card .component-state{font-size:10px;color:var(--muted)}.component-card .component-output{font-size:11px;margin-top:7px;padding-top:7px;border-top:1px solid var(--line)}.component-flow{display:flex;align-items:center;gap:7px;overflow-x:auto;padding:8px 0 14px}.component-step{min-width:125px;flex:1;text-align:center;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:10px}.component-step b{display:block;font-size:11px}.component-step small{display:block;color:var(--muted);font-size:10px}.component-arrow{color:var(--blue);font-size:20px}@media(max-width:760px){.component-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:480px){.component-grid{grid-template-columns:1fr}}.pillrow{display:flex;gap:8px;flex-wrap:wrap}.pill{background:var(--panel2);border:1px solid var(--line);padding:8px 10px;border-radius:8px;font-size:12px}
 svg{width:100%;height:145px;display:block}.chart-label{fill:var(--muted);font-size:10px}
 @media(max-width:900px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.two{grid-template-columns:1fr}.three{grid-template-columns:1fr 1fr}}
 @media(max-width:560px){main{padding:12px}.grid,.three{grid-template-columns:1fr 1fr}.metric strong{font-size:21px}.barrow{grid-template-columns:90px 1fr 55px}}
@@ -41,6 +41,34 @@ svg{width:100%;height:145px;display:block}.chart-label{fill:var(--muted);font-si
  <div class="divider"></div>
  <div class="train-actions"><button class="train-button" id="train-now">▶ Train Now — All Models</button><span class="status-line" id="training-status">Starts a background training and validation job for every registered model.</span></div>
  <div class="section-note">Validation uses a chronological rolling holdout and compares MAE/RMSE against a persistence baseline. A failed validation is recorded, never silently promoted. These research model runs do not alter trading signals, risk controls, or EA execution.</div>
+</section>
+<section class="panel">
+ <div class="split"><h2>Trade-outcome learning components</h2><span class="tag safe">Code-backed analyzers</span></div>
+ <p class="section-note">These are the analysis components in <code>ramon_pipeline/learning/</code>. Unlike ARIMA/SARIMA/Ridge/Random Forest, they are not independently trained ML models: they run on trade outcomes and current evidence. Their last execution is the dashboard analysis refresh, not a model-training timestamp.</p>
+ <div class="component-flow" aria-label="Trade outcome learning workflow">
+  <div class="component-step"><b>Broker outcomes</b><small>Closed trade results</small></div><span class="component-arrow">→</span>
+  <div class="component-step"><b>OutcomeCollector</b><small>Validate & collect</small></div><span class="component-arrow">→</span>
+  <div class="component-step"><b>LearningEngine</b><small>Orchestrate analysis</small></div><span class="component-arrow">→</span>
+  <div class="component-step"><b>Analyzers</b><small>Performance · decisions · entries · regimes · mistakes · strategies</small></div><span class="component-arrow">→</span>
+  <div class="component-step"><b>OptimizationEngine</b><small>Compare candidates offline</small></div><span class="component-arrow">→</span>
+  <div class="component-step"><b>RecommendationEngine</b><small>Human review queue</small></div>
+ </div>
+ <div class="split"><h2>Component registry</h2><span class="small" id="components-updated">Waiting for analysis…</span></div>
+ <div class="component-grid" id="learning-components">
+  <article class="component-card"><h3>OutcomeCollector</h3><code>outcome_collector.py</code><p>Validates and records completed trade outcomes through the SignalFlow outcome store.</p><div class="component-state">Trigger: each received outcome</div></article>
+  <article class="component-card"><h3>LearningEngine</h3><code>engine.py</code><p>Orchestrates the analysis components and exposes summary, review, and observe operations.</p><div class="component-state">Trigger: dashboard analysis request</div></article>
+  <article class="component-card"><h3>PerformanceAnalyzer</h3><code>performance_analyzer.py</code><p>Calculates aggregate trade performance using the established learning statistics.</p><div class="component-state">Output: analysis.performance</div></article>
+  <article class="component-card"><h3>DecisionAnalyzer</h3><code>decision_analyzer.py</code><p>Measures outcome-to-decision attribution and linked/unlinked coverage without guessing missing links.</p><div class="component-state">Output: analysis.decisions</div></article>
+  <article class="component-card"><h3>EntryExitAnalyzer</h3><code>entry_exit_analyzer.py</code><p>Summarizes MAE, MFE, entry/exit efficiency, spread, and slippage when broker data exists.</p><div class="component-state">Output: analysis.entry_exit</div></article>
+  <article class="component-card"><h3>RegimeAnalyzer</h3><code>regime_analyzer.py</code><p>Segments observed trade performance by market regime.</p><div class="component-state">Output: analysis.regimes</div></article>
+  <article class="component-card"><h3>MistakeDetector</h3><code>mistake_detector.py</code><p>Finds statistically supported patterns and keeps findings as hypotheses, not automatic rules.</p><div class="component-state">Output: analysis.mistakes</div></article>
+  <article class="component-card"><h3>StrategyEvaluator</h3><code>strategy_evaluator.py</code><p>Compares tagged strategy profiles and enforces minimum sample safeguards.</p><div class="component-state">Output: analysis.strategies</div></article>
+  <article class="component-card"><h3>OptimizationEngine</h3><code>optimization_engine.py</code><p>Compares baseline and candidate evidence offline; requires sufficient trades, improved expectancy, and no worse drawdown.</p><div class="component-state">Trigger: explicit candidate evaluation · not auto-run</div></article>
+  <article class="component-card"><h3>RecommendationEngine</h3><code>recommendation_engine.py</code><p>Converts review findings into deduplicatable recommendations for human review.</p><div class="component-state">Trigger: Generate recommendations</div></article>
+  <article class="component-card"><h3>Learning contracts</h3><code>models.py</code><p>Defines typed OutcomeRecord and AnalysisReport data contracts; it is not a predictive model.</p><div class="component-state">Role: typed data structures</div></article>
+  <article class="component-card"><h3>Package exports</h3><code>__init__.py</code><p>Exports the learning engine, analyzers, recommendation and optimization components as the package API.</p><div class="component-state">Role: module interface</div></article>
+ </div>
+ <p class="section-note" id="component-run-state">Analysis execution status will appear after the first successful dashboard refresh. OptimizationEngine is currently a callable offline evaluator, not part of the automatic analyze() pass. None of these components can alter live strategy parameters or authorize orders.</p>
 </section>
 <section class="grid" id="kpis">
  <div class="panel metric"><span>Closed trades</span><strong>—</strong></div><div class="panel metric"><span>Win rate</span><strong>—</strong></div><div class="panel metric"><span>Profit factor</span><strong>—</strong></div><div class="panel metric"><span>Expectancy</span><strong>—</strong></div>
@@ -81,7 +109,26 @@ function renderEquity(rows){
  const zeroY=h-pad-((0-min)/range)*(h-2*pad);
  $("equity").innerHTML='<svg viewBox="0 0 '+w+' '+h+'" role="img" aria-label="Cumulative realized profit and loss"><line x1="0" y1="'+zeroY+'" x2="'+w+'" y2="'+zeroY+'" stroke="#52657d" stroke-dasharray="4 4"/><polyline points="'+line+'" fill="none" stroke="#76a9ee" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><text x="8" y="12" class="chart-label">'+fmt(min)+'</text><text x="8" y="'+(h-2)+'" class="chart-label">'+fmt(max)+'</text></svg><div class="split small"><span>'+ordered.length+' latest trades</span><b class="'+(total>=0?"good":"bad")+'">Cumulative: '+fmt(total)+'</b></div>';
 }
+function renderLearningComponents(d){
+ const a=d.analysis||{}, recs=d.recommendations||[];
+ const outputs={
+  "PerformanceAnalyzer":a.performance?"Performance metrics loaded":"No analysis result",
+  "DecisionAnalyzer":a.decisions?safe(a.decisions.linked_outcomes)+" linked / "+safe(a.decisions.outcomes)+" outcomes":"No analysis result",
+  "EntryExitAnalyzer":a.entry_exit?safe(a.entry_exit.sample_trades)+" trades analyzed":"No analysis result",
+  "RegimeAnalyzer":a.regimes?Object.keys(a.regimes).length+" regimes observed":"No analysis result",
+  "MistakeDetector":a.mistakes?(a.mistakes.sufficient_data?"Evidence ready":"Collecting sample"):"No analysis result",
+  "StrategyEvaluator":a.strategies?Object.keys(a.strategies.profiles||{}).length+" profiles evaluated":"No analysis result",
+  "RecommendationEngine":recs.length+" recommendations in review queue"
+ };
+ $("learning-components").querySelectorAll(".component-card").forEach(card=>{
+  const out=outputs[card.querySelector("h3")?.textContent];
+  if(out){let el=card.querySelector(".component-output");if(!el){el=document.createElement("div");el.className="component-output";card.appendChild(el);}el.textContent=out;}
+ });
+ $("components-updated").textContent="Last analysis: "+new Date().toLocaleString();
+ $("component-run-state").textContent="Last execution shown above is the most recent dashboard analysis refresh. OptimizationEngine remains callable for explicit offline candidate comparisons; models.py contains typed contracts, not a trainable model. These components do not alter live strategy parameters or authorize orders.";
+}
 function render(d){
+ renderLearningComponents(d);
  const s=d.summary?.overall||{};
  $("kpis").innerHTML=[
  metric("Closed trades",safe(s.trades),"Wins "+safe(s.wins)+" · Losses "+safe(s.losses)),
