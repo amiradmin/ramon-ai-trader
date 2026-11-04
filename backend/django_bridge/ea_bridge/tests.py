@@ -33,8 +33,12 @@ class DecisionThresholdConfigurationTests(TestCase):
         self.assertEqual(volatility["atr_ratio_max"]["value"], 2.5)
         risk_items = {item["key"]: item for item in groups["risk_management"]["items"]}
         self.assertEqual(risk_items["min_reward_risk"]["value"], 1.2)
-        self.assertEqual(risk_items["min_reward_risk"]["min"], 1.0)
+        self.assertEqual(risk_items["min_reward_risk"]["min"], 1.2)
         self.assertEqual(risk_items["min_reward_risk"]["max"], 3.0)
+        self.assertEqual(risk_items["maximum_risk_percent"]["value"], 0.5)
+        self.assertEqual(risk_items["max_total_risk_percent"]["value"], 2.0)
+        self.assertEqual(risk_items["max_daily_loss_percent"]["value"], 3.0)
+        self.assertEqual(risk_items["target_reward_risk"]["value"], 1.25)
         self.assertIn("entry_timing", groups)
         self.assertIn("risk_management", groups)
 
@@ -44,7 +48,7 @@ class DecisionThresholdConfigurationTests(TestCase):
             data=json.dumps({"values": {
                 "opportunities": {"atr_ratio_min": 0.75, "atr_ratio_max": 2.2},
                 "entry_timing": {"max_chase_atr": 0.7, "minimum_quality": 0.6, "maximum_spread_points": 90},
-                "risk_management": {"min_reward_risk": 1.5},
+                "risk_management": {"maximum_risk_percent": 0.75, "max_total_risk_percent": 2.5, "max_daily_loss_percent": 3.5, "target_reward_risk": 1.5, "min_reward_risk": 1.2},
             }}),
             content_type="application/json",
         )
@@ -56,11 +60,11 @@ class DecisionThresholdConfigurationTests(TestCase):
         self.assertEqual(pipeline.entry_timer.config.max_chase_atr, 0.7)
         self.assertEqual(pipeline.entry_timer.minimum_quality, 0.6)
         self.assertEqual(pipeline.entry_timer.maximum_spread_points, 90)
-        self.assertEqual(pipeline.risk_manager.config.min_reward_risk, 1.5)
-        # Editable tuning must not loosen account-level hard risk ceilings.
-        self.assertEqual(pipeline.risk_manager.maximum_risk_percent, 0.5)
-        self.assertEqual(pipeline.risk_manager.config.max_total_risk_percent, 2.0)
-        self.assertEqual(pipeline.risk_manager.config.max_daily_loss_percent, 3.0)
+        self.assertEqual(pipeline.risk_manager.config.min_reward_risk, 1.2)
+        self.assertEqual(pipeline.risk_manager.config.target_reward_risk, 1.5)
+        self.assertEqual(pipeline.risk_manager.maximum_risk_percent, 0.75)
+        self.assertEqual(pipeline.risk_manager.config.max_total_risk_percent, 2.5)
+        self.assertEqual(pipeline.risk_manager.config.max_daily_loss_percent, 3.5)
 
     def test_rejects_invalid_or_non_strategy_thresholds(self):
         response = self.client.post(
@@ -80,8 +84,8 @@ class DecisionThresholdConfigurationTests(TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
-    def test_minimum_reward_risk_is_limited_to_one_to_three_r(self):
-        for value in (0.9, 3.1):
+    def test_minimum_reward_risk_is_limited_to_1_2_to_three_r(self):
+        for value in (1.1, 3.1):
             response = self.client.post(
                 self.url,
                 data=json.dumps({"values": {"risk_management": {"min_reward_risk": value}}}),
@@ -91,7 +95,7 @@ class DecisionThresholdConfigurationTests(TestCase):
 
         response = self.client.post(
             self.url,
-            data=json.dumps({"values": {"risk_management": {"min_reward_risk": 1.8}}}),
+            data=json.dumps({"values": {"risk_management": {"min_reward_risk": 1.8, "target_reward_risk": 1.8}}}),
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 200, response.content)
