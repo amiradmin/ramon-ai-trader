@@ -13,7 +13,17 @@ button{background:#1c3553;color:var(--text);border:1px solid #38577e;padding:8px
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px;min-width:0}.metric span{display:block;color:var(--muted);font-size:11px}.metric strong{display:block;font-size:25px;margin-top:4px;font-variant-numeric:tabular-nums}.metric small{display:block;color:var(--muted);font-size:11px;margin-top:3px}
 .scroll{overflow:auto}table{width:100%;border-collapse:collapse;white-space:nowrap}th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);font-size:12px}th{color:var(--muted);font-weight:600}tbody tr:last-child td{border-bottom:0}.good{color:var(--green)}.bad{color:var(--red)}.amber{color:var(--amber)}
 .item{border-top:1px solid var(--line);padding:12px 0}.item:first-child{border-top:0}.item p{margin:5px 0;color:#c1cede}.barrow{display:grid;grid-template-columns:120px 1fr 70px;gap:10px;align-items:center;margin:10px 0;font-size:12px}.track{height:7px;background:#24344a;border-radius:8px;overflow:hidden}.fill{height:100%;background:var(--blue);border-radius:8px}.empty{padding:16px 0;color:var(--muted);font-size:12px}.actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.section-note{font-size:11px;color:var(--muted);margin-top:10px}
-.flow{display:flex;align-items:stretch;gap:8px;overflow-x:auto;padding:8px 2px 14px}.flow-node{position:relative;min-width:132px;flex:1;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:12px 10px;text-align:center}.flow-node .circle{width:34px;height:34px;border:2px solid var(--blue);border-radius:50%;display:grid;place-items:center;margin:0 auto 8px;font-weight:700}.flow-node strong{display:block;font-size:12px}.flow-node small{display:block;color:var(--muted);font-size:10px;margin-top:4px}.flow-arrow{align-self:center;color:var(--blue);font-size:22px;flex:0 0 auto}.model-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.model-card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:0}.model-card h3{font-size:14px;margin:0 0 8px}.model-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}.model-meta div{background:#0e1928;border-radius:7px;padding:8px}.model-meta span{display:block;color:var(--muted);font-size:10px}.model-meta b{display:block;font-size:12px;margin-top:3px;overflow-wrap:anywhere}.train-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.train-button{background:#146b50;border-color:#278d6b;padding:11px 20px;font-weight:700;font-size:13px}.train-button:hover{background:#18835f}.train-button:disabled{opacity:.55}.status-line{font-size:12px;color:var(--muted)}.split{display:flex;justify-content:space-between;gap:10px;align-items:center}
+.flow{display:flex;align-items:stretch;gap:8px;overflow-x:auto;padding:8px 2px 14px}.flow-node{position:relative;min-width:132px;flex:1;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:12px 10px;text-align:center}.flow-node .circle{width:34px;height:34px;border:2px solid var(--blue);border-radius:50%;display:grid;place-items:center;margin:0 auto 8px;font-weight:700}.flow-node strong{display:block;font-size:12px}.flow-node small{display:block;color:var(--muted);font-size:10px;margin-top:4px}.flow-arrow{align-self:center;color:var(--blue);font-size:22px;flex:0 0 auto}.model-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.model-card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:0}.model-card h3{font-size:14px;margin:0 0 8px}.model-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}.model-meta div{background:#0e1928;border-radius:7px;padding:8px}.model-meta span{display:block;color:var(--muted);font-size:10px}.model-meta b{display:block;font-size:12px;margin-top:3px;overflow-wrap:anywhere}.train-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.train-button{background:#146b50;border-color:#278d6b;padding:11px 20px;font-weight:700;font-size:13px}.train-button:hover{background:#18835f}.train-button:disabled{opacity:.55}.status-line{font-size:12px;color:var(--muted)}
+/* Live pipeline execution feedback */
+.flow-node.pipeline-running{border-color:var(--blue);background:#173b60;box-shadow:0 0 0 1px #76a9ee66,0 0 18px #3989e866;animation:pipelinePulse 1.25s ease-in-out infinite}
+.flow-node.pipeline-running .circle{border-color:var(--blue);background:#245582;color:#fff}
+.flow-node.pipeline-complete{border-color:#28664f;background:#12372f}
+.flow-node.pipeline-complete .circle{border-color:var(--green);color:var(--green)}
+.individual-flow-card.pipeline-is-running{border-color:#385f8a}
+.individual-flow-card.pipeline-is-running h3{color:#a9ceff}
+@keyframes pipelinePulse{0%,100%{opacity:1;box-shadow:0 0 0 1px #76a9ee55,0 0 9px #3989e844}50%{opacity:.68;box-shadow:0 0 0 2px #76a9eeaa,0 0 23px #3989e899}}
+@media(prefers-reduced-motion:reduce){.flow-node.pipeline-running{animation:none}}
+.split{display:flex;justify-content:space-between;gap:10px;align-items:center}
 #status{font-size:12px;color:var(--muted);min-height:18px;margin:0 0 10px}.component-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.component-card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;min-width:0}.component-card h3{font-size:13px;margin:0 0 4px}.component-card code{font-size:10px;color:var(--blue);overflow-wrap:anywhere}.component-card p{font-size:11px;color:#c1cede;margin:8px 0}.component-card .component-state{font-size:10px;color:var(--muted)}.component-card .component-output{font-size:11px;margin-top:7px;padding-top:7px;border-top:1px solid var(--line)}.component-flow{display:flex;align-items:center;gap:7px;overflow-x:auto;padding:8px 0 14px}.individual-flow-grid{display:grid;grid-template-columns:1fr;gap:12px}.individual-flow-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:0}.individual-flow-card h3{font-size:13px;margin:0 0 3px}.individual-flow-card>p{font-size:11px;color:var(--muted);margin:0 0 6px}.individual-flow-card .flow{padding:8px 0 2px}.individual-flow-card .flow-node{min-width:112px;padding:10px 8px}.individual-flow-card .flow-node .circle{width:29px;height:29px;font-size:11px}.individual-flow-card .flow-node strong{font-size:11px}.individual-flow-card .flow-node small{font-size:9px}.individual-flow-card .flow-arrow{font-size:18px}.pipeline-info-button{display:inline-flex;align-items:center;gap:7px;margin-top:10px;padding:7px 10px;border-radius:8px;background:#172b43;border:1px solid #38577e;color:#cfe2fb;font-size:11px}.pipeline-info-button:hover{background:#254466}.pipeline-dialog{width:min(760px,calc(100% - 28px));max-height:85vh;overflow:auto;background:var(--panel);color:var(--text);border:1px solid #49617e;border-radius:14px;padding:0;box-shadow:0 24px 80px #0009}.pipeline-dialog::backdrop{background:#030811c9;backdrop-filter:blur(3px)}.pipeline-dialog-head{position:sticky;top:0;display:flex;justify-content:space-between;align-items:center;gap:12px;padding:16px 18px;background:var(--panel);border-bottom:1px solid var(--line);z-index:1}.pipeline-dialog-head h2{margin:0}.pipeline-dialog-body{padding:18px}.pipeline-article-lead{color:#c1cede;margin:0 0 16px}.pipeline-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.pipeline-detail{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:10px}.pipeline-detail span{display:block;color:var(--muted);font-size:10px}.pipeline-detail b{display:block;font-size:13px;margin-top:3px;overflow-wrap:anywhere}.pipeline-dialog-body h3{font-size:13px;margin:18px 0 7px}.pipeline-dialog-body p,.pipeline-dialog-body li{font-size:12px;color:#c1cede}.pipeline-dialog-body ul{padding-left:18px;margin:7px 0}.pipeline-validation{padding:11px;border:1px solid var(--line);border-radius:9px;background:#0e1928;margin-top:12px}.pipeline-validation strong{font-size:12px}.pipeline-dialog-close{font-size:18px;padding:4px 10px}@media(max-width:760px){.individual-flow-card .flow-node{min-width:118px}}.component-step{min-width:125px;flex:1;text-align:center;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:10px}.component-step b{display:block;font-size:11px}.component-step small{display:block;color:var(--muted);font-size:10px}.component-arrow{color:var(--blue);font-size:20px}@media(max-width:760px){.component-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:480px){.component-grid{grid-template-columns:1fr}}.pillrow{display:flex;gap:8px;flex-wrap:wrap}.pill{background:var(--panel2);border:1px solid var(--line);padding:8px 10px;border-radius:8px;font-size:12px}
 svg{width:100%;height:145px;display:block}.chart-label{fill:var(--muted);font-size:10px}
 @media(max-width:900px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.two{grid-template-columns:1fr}.three{grid-template-columns:1fr 1fr}}
@@ -209,16 +219,46 @@ function render(d){
 const csrf=()=>document.querySelector("[name=csrfmiddlewaretoken]")?.value||"";
 async function request(url,options={}){const r=await fetch(url,{credentials:"same-origin",...options});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||"Request failed ("+r.status+")");return d;}
 function renderTraining(data){
- latestTrainingData=data||{registry:[]};
+ latestTrainingData=data||{registry:[],jobs:[]};
  const tradeKeys=["trade_performance","trade_decision","trade_entry_exit","trade_regime","trade_mistake","trade_strategy"];
- tradeKeys.forEach(key=>{const item=(data.registry||[]).find(x=>x.key===key),r=item?.latest||{},m=r.metrics||{},v=r.validation||{},card=document.querySelector('[data-pipeline="'+key+'"]');if(!card)return;const date=r.training_finished_at?new Date(r.training_finished_at).toLocaleString("en-GB",{timeZone:"UTC"})+" UTC":"Never trained";card.querySelector(".component-output").textContent="Status: "+(r.status||"NOT TRAINED")+" · "+date+" · n="+(m.observations??"—")+" · MAE "+(m.mae??"—")+" / baseline "+(m.baseline_mae??"—")+" · validation "+(v.passed===true?"passed":v.passed===false?"rejected":"pending")+(r.error?" · "+r.error:"");});
- const active=data.active_job_id;
- const latest=(data.jobs||[])[0];
-
-
- const tradeButton=$("train-trade-models");if(tradeButton)tradeButton.disabled=!!active;
+ const activeJob=(data.jobs||[]).find(job=>job.id===data.active_job_id);
+ const runs=activeJob?.models||[];
+ tradeKeys.forEach(key=>{
+  const item=(data.registry||[]).find(x=>x.key===key),r=item?.latest||{},m=r.metrics||{},v=r.validation||{},card=document.querySelector('[data-pipeline="'+key+'"]');
+  if(!card)return;
+  const date=r.training_finished_at?new Date(r.training_finished_at).toLocaleString("en-GB",{timeZone:"UTC"})+" UTC":"Never trained";
+  card.querySelector(".component-output").textContent="Latest: "+(r.status||"NOT TRAINED")+" · "+date+" · n="+(m.observations??"—")+" · MAE "+(m.mae??"—")+" / baseline "+(m.baseline_mae??"—")+" · validation "+(v.passed===true?"passed":v.passed===false?"rejected":"pending")+(r.error?" · "+r.error:"");
+  const run=runs.find(x=>x.model_key===key);
+  const nodes=[...card.querySelectorAll(".flow-node")];
+  nodes.forEach(node=>node.classList.remove("pipeline-running","pipeline-complete"));
+  card.classList.remove("pipeline-is-running");
+  if(run?.status==="RUNNING"){
+   card.classList.add("pipeline-is-running");
+   // The worker reports model-level execution, not internal estimator substeps.
+   // Highlight the estimator stage to show which pipeline is actively fitting.
+   if(nodes[2])nodes[2].classList.add("pipeline-running");
+   card.querySelector(".component-output").textContent="NOW TRAINING · "+(run.model_name||key)+" · started "+(run.training_started_at?new Date(run.training_started_at).toLocaleTimeString():"just now");
+  }else if(run&&["PASSED","REJECTED","FAILED"].includes(run.status)){
+   nodes.forEach(node=>node.classList.add("pipeline-complete"));
+   card.querySelector(".component-output").textContent=run.status+" · "+(run.error||"Training run finished; see model & validation details.");
+  }else if(run?.status==="QUEUED"){
+   card.querySelector(".component-output").textContent="QUEUED · Waiting for the training worker";
+  }
+ });
+ const tradeButton=$("train-trade-models");
+ if(tradeButton)tradeButton.disabled=!!data.active_job_id;
+ if($("trade-training-status")){
+  if(activeJob){
+   const running=activeJob.models?.find(x=>x.status==="RUNNING");
+   const done=(activeJob.models||[]).filter(x=>["PASSED","REJECTED","FAILED"].includes(x.status)).length;
+   $("trade-training-status").textContent=running?"Training "+running.model_name+" · "+done+"/"+activeJob.models.length+" finished":"Training job queued · "+done+"/"+(activeJob.models||[]).length+" finished";
+  }else{
+   const latestJob=(data.jobs||[])[0];
+   $("trade-training-status").textContent=latestJob?"Last job: "+latestJob.status+" · "+(latestJob.models||[]).length+" model runs":"No active training job.";
+  }
+ }
 }
-async function loadTraining(){try{const d=await request(API+"training/status");renderTraining(d);}catch(e){$("training-status").textContent=e.message;}}
+async function loadTraining(){try{const d=await request(API+"training/status");renderTraining(d);}catch(e){$("trade-training-status").textContent=e.message;}}
 async function load(){ $("refresh").disabled=true;$("status").textContent="Refreshing from Django…";try{const d=await request(API+"overview");render(d);$("status").textContent="Updated "+new Date().toLocaleTimeString()+" · Read-only analysis";}catch(e){$("status").textContent=e.message;}finally{$("refresh").disabled=false;}await loadTraining();}
 $("refresh").addEventListener("click",load);
 $("train-trade-models").addEventListener("click",async()=>{const b=$("train-trade-models");if(!confirm("Train six independent regressors from closed outcomes? This will not change live trading."))return;b.disabled=true;$("trade-training-status").textContent="Submitting six pipelines…";try{const models=["trade_performance","trade_decision","trade_entry_exit","trade_regime","trade_mistake","trade_strategy"];const d=await request(API+"training/start",{method:"POST",headers:{"Content-Type":"application/json","X-CSRFToken":csrf()},body:JSON.stringify({symbol:"XAUUSD_o",models})});$("trade-training-status").textContent=d.message||"Training queued";await loadTraining();}catch(e){$("trade-training-status").textContent=e.message;await loadTraining();}});
@@ -255,4 +295,10 @@ $("pipeline-dialog-close").addEventListener("click",()=>$("pipeline-details-dial
 $("pipeline-details-dialog").addEventListener("click",e=>{if(e.target===$("pipeline-details-dialog"))$("pipeline-details-dialog").close();});
 
 load();
+let trainingPollInFlight=false;
+setInterval(async()=>{
+ if(trainingPollInFlight)return;
+ trainingPollInFlight=true;
+ try{await loadTraining();}finally{trainingPollInFlight=false;}
+},2000);
 </script></body></html>
