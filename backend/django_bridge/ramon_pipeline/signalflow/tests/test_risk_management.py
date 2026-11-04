@@ -46,6 +46,7 @@ class LegacyRiskTests(TestCase):
             min_stop_atr=0.6,
             max_stop_atr=2.8,
             min_reward_risk=1.8,
+            target_reward_risk=1.8,
             max_total_risk_percent=1.5,
             max_daily_loss_percent=2.5,
         )
@@ -57,6 +58,7 @@ class LegacyRiskTests(TestCase):
             "min_stop_atr": 0.6,
             "max_stop_atr": 2.8,
             "min_reward_risk": 1.8,
+            "target_reward_risk": 1.8,
             "max_total_risk_percent": 1.5,
             "max_daily_loss_percent": 2.5,
         })
@@ -200,6 +202,13 @@ class AccountGuardTests(TestCase):
     def evaluate(self, **market):
         return RiskManager().evaluate(structural_market(**market), True, opportunity=opportunity())
 
+    def test_configured_target_reward_risk_is_derived_from_the_structural_stop(self):
+        result = self.evaluate(target_reward_risk=1.5)
+        self.assertTrue(result["approved"], result["explanation"])
+        self.assertEqual(result["target_reward_risk"], 1.5)
+        self.assertAlmostEqual(result["take_profit_points"], result["stop_points"] * 1.5)
+        self.assertEqual(result["reward_risk"], 1.5)
+
     def test_reward_risk_is_enforced_only_when_a_target_is_supplied(self):
         self.assertTrue(self.evaluate()["approved"])
         self.assertIsNone(self.evaluate()["reward_risk"])
@@ -238,7 +247,7 @@ class AccountGuardTests(TestCase):
         self.assertEqual(result["reason"], "DAILY_LOSS_LIMIT_REACHED")
 
     def test_config_validation(self):
-        for kwargs in ({"stop_buffer_atr": -1}, {"min_stop_atr": 4.0}, {"min_reward_risk": 0}, {"max_daily_loss_percent": -1}):
+        for kwargs in ({"stop_buffer_atr": -1}, {"min_stop_atr": 4.0}, {"min_reward_risk": 0}, {"target_reward_risk": 1.0, "min_reward_risk": 1.2}, {"max_daily_loss_percent": -1}):
             with self.assertRaises(ValueError):
                 RiskConfig(**kwargs)
 

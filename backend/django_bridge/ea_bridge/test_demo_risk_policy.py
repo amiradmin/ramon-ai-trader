@@ -1,11 +1,11 @@
-from django.test import TestCase, override_settings
+from django.test import TestCase
 
 from .decision import _apply_demo_risk_policy, _build_pipeline
+from .models import DecisionThresholdConfig
 
 
 class DemoRiskPolicyTests(TestCase):
-    @override_settings(RAMON_DEMO_RISK_PERCENT=0.5)
-    def test_demo_uses_server_owned_half_percent_instead_of_ea_five_dollar_cap(self):
+    def test_demo_uses_dashboard_owned_per_trade_risk_budget(self):
         pipeline = _build_pipeline(demo_mode=True)
         market = {"risk_percent": 0.20882145}
 
@@ -17,17 +17,18 @@ class DemoRiskPolicyTests(TestCase):
         self.assertEqual(policy["effective_risk_percent"], 0.5)
         self.assertEqual(policy["maximum_risk_percent"], 0.5)
 
-    @override_settings(RAMON_DEMO_RISK_PERCENT=5.0)
-    def test_demo_policy_cannot_exceed_server_risk_manager_ceiling(self):
+    def test_demo_policy_uses_persisted_risk_ceiling_and_cannot_be_raised_by_ea(self):
+        DecisionThresholdConfig.objects.create(
+            profile="demo", values={"risk_management": {"maximum_risk_percent": 0.75}}
+        )
         pipeline = _build_pipeline(demo_mode=True)
         market = {"risk_percent": 0.1}
 
         policy = _apply_demo_risk_policy(market, pipeline, demo_mode=True)
 
-        self.assertEqual(market["risk_percent"], 0.5)
-        self.assertEqual(policy["effective_risk_percent"], 0.5)
+        self.assertEqual(market["risk_percent"], 0.75)
+        self.assertEqual(policy["effective_risk_percent"], 0.75)
 
-    @override_settings(RAMON_DEMO_RISK_PERCENT=0.5)
     def test_live_account_does_not_accept_client_risk_percent(self):
         pipeline = _build_pipeline(demo_mode=False)
         market = {"risk_percent": 0.20882145}
@@ -38,7 +39,6 @@ class DemoRiskPolicyTests(TestCase):
         self.assertEqual(policy["source"], "SERVER_POLICY")
         self.assertEqual(policy["effective_risk_percent"], 0.0)
 
-    @override_settings(RAMON_DEMO_RISK_PERCENT=0.5)
     def test_demo_budget_can_size_minimum_lot_without_rounding_up(self):
         pipeline = _build_pipeline(demo_mode=True)
         market = {

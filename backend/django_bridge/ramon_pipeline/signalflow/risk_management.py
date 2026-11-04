@@ -45,7 +45,8 @@ class RiskConfig:
     stop_buffer_atr: float = 0.25  # distance beyond the invalidation level
     min_stop_atr: float = 0.5  # tighter stops are noise-level
     max_stop_atr: float = 3.5  # wider stops mean the structure is a poor place to risk
-    min_reward_risk: float = 1.2  # applied only when take_profit_points is supplied
+    min_reward_risk: float = 1.2  # minimum acceptable planned reward/risk
+    target_reward_risk: float = 1.25  # planned take-profit distance as a multiple of the structural stop
     max_total_risk_percent: float = 2.0  # open risk + this trade, applied when open_risk_percent is supplied
     max_daily_loss_percent: float = 3.0  # halt after this realised loss, applied when daily_loss_percent is supplied
     # Validation / safety options. Defaults keep the original behaviour.
@@ -61,9 +62,11 @@ class RiskConfig:
             raise ValueError("stop_buffer_atr must not be negative")
         if not 0 < self.min_stop_atr < self.max_stop_atr:
             raise ValueError("stop ATR bounds must satisfy 0 < min < max")
-        for name in ("min_reward_risk", "max_total_risk_percent", "max_daily_loss_percent"):
+        for name in ("min_reward_risk", "target_reward_risk", "max_total_risk_percent", "max_daily_loss_percent"):
             if not getattr(self, name) > 0:
                 raise ValueError(f"{name} must be positive")
+        if self.target_reward_risk < self.min_reward_risk:
+            raise ValueError("target_reward_risk must be greater than or equal to min_reward_risk")
 
 
 class _Reject(Exception):
@@ -129,6 +132,7 @@ class RiskManager:
             "min_stop_atr": self.config.min_stop_atr,
             "max_stop_atr": self.config.max_stop_atr,
             "min_reward_risk": self.config.min_reward_risk,
+            "target_reward_risk": self.config.target_reward_risk,
             "max_total_risk_percent": self.config.max_total_risk_percent,
             "max_daily_loss_percent": self.config.max_daily_loss_percent,
         }
@@ -261,14 +265,22 @@ class RiskManager:
             raise _Reject("STOP_BELOW_BROKER_MINIMUM", f"stop of {stop_points:.0f} points is inside the broker minimum of {broker_min:g}")
 
         reward_risk = None
-        take_profit = _optional(market, "take_profit_points")
-        if take_profit is None:
-            checks.append({"name": "reward_risk", "passed": True, "detail": "skipped: no take_profit_points supplied"})
+        requested_target_rr = _optional(market, "target_reward_risk")
+        if requested_target_rr is not None:
+            if requested_target_rr < cfg.min_reward_risk:
+                raise _Reject("REWARD_RISK_TOO_LOW", f"target reward:risk is {requested_target_rr:.2f} (minimum {cfg.min_reward_risk})", reward_risk=round(requested_target_rr, 3))
+            reward_risk = requested_target_rr
+            take_profit = stop_points * requested_target_rr
+            checks.append({"name": "reward_risk", "passed": True, "detail": f"planned target reward:risk {reward_risk:.2f}"})
         else:
-            reward_risk = take_profit / stop_points
-            if reward_risk < cfg.min_reward_risk:
-                raise _Reject("REWARD_RISK_TOO_LOW", f"reward:risk is {reward_risk:.2f} (minimum {cfg.min_reward_risk})", reward_risk=round(reward_risk, 3))
-            checks.append({"name": "reward_risk", "passed": True, "detail": f"reward:risk {reward_risk:.2f}"})
+            take_profit = _optional(market, "take_profit_points")
+            if take_profit is None:
+                checks.append({"name": "reward_risk", "passed": True, "detail": "skipped: no take-profit distance supplied"})
+            else:
+                reward_risk = take_profit / stop_points
+                if reward_risk < cfg.min_reward_risk:
+                    raise _Reject("REWARD_RISK_TOO_LOW", f"reward:risk is {reward_risk:.2f} (minimum {cfg.min_reward_risk})", reward_risk=round(reward_risk, 3))
+                checks.append({"name": "reward_risk", "passed": True, "detail": f"reward:risk {reward_risk:.2f}"})
 
         daily_loss = _optional(market, "daily_loss_percent")
         if daily_loss is None:
@@ -313,6 +325,8 @@ class RiskManager:
             "risk_capped": risk_pct < requested_pct,
             "stop_points": round(stop_points, 4),
             "reward_risk": None if reward_risk is None else round(reward_risk, 3),
+            "target_reward_risk": None if requested_target_rr is None else round(requested_target_rr, 3),
+            "take_profit_points": None if take_profit is None else round(take_profit, 4),
             "checks": checks,
         }
         result.update({k: v for k, v in details.items() if k != "stop_points"})

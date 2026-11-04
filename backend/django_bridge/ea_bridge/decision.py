@@ -95,7 +95,9 @@ def _build_pipeline(*, demo_mode=False):
     # constructor defaults; explicitly pin the Django-persisted values afterwards.
     timer.minimum_quality = minimum_quality
     timer.maximum_spread_points = maximum_spread_points
+    maximum_risk_percent = float(risk_values.pop("maximum_risk_percent"))
     risk = RiskManager(
+        maximum_risk_percent=maximum_risk_percent,
         config=RiskConfig(
             **risk_values,
             strict_structural=True,
@@ -124,10 +126,9 @@ def _apply_demo_risk_policy(market, pipeline, *, demo_mode):
             "maximum_risk_percent": maximum,
         }
 
-    configured = _num(getattr(settings, "RAMON_DEMO_RISK_PERCENT", maximum), "RAMON_DEMO_RISK_PERCENT")
-    if configured <= 0:
-        raise ValueError("RAMON_DEMO_RISK_PERCENT must be positive")
-    effective = min(configured, maximum)
+    # The persisted Risk Management dashboard value is the demo per-trade budget
+    # and the RiskManager hard ceiling. No EA-supplied value can raise it.
+    effective = maximum
     market["risk_percent"] = effective
     return {
         "source": "SERVER_DEMO_POLICY",
@@ -394,6 +395,8 @@ def decision(request):
             _num(account_snapshot.get("balance", 0), "account balance") > 0
         )
         missing_risk_inputs = [] if risk_guards_complete else ["server_symbol_metadata", "server_position_risk", "server_account_state"]
+        # Build the profile-specific Django pipeline before constructing its risk inputs.
+        pipeline = _build_pipeline(demo_mode=is_demo_account)
         market={"symbol":symbol,"timeframe":"M15","bars":bars,"last_bar_closed":True,
           "latest_bar_time":bar_time,"bid":bid,"ask":ask,"point":point,
           "trend":direction,"setup_score":setup,"entry_quality":quality,"spread_points":spread,
@@ -401,6 +404,7 @@ def decision(request):
           "stop_loss_points":atr*1.5/point,"point_value_per_lot":point_value_per_lot,
           "volume_step":volume_step,"min_volume":min_volume,"max_volume":max_volume,
           "stop_level_points":stop_level_points,"take_profit_points":take_profit_points_server,
+          "target_reward_risk":pipeline.risk_manager.config.target_reward_risk,
           "daily_loss_percent":server_daily_loss_percent if server_daily_loss_percent is not None else 0.0,
           "open_risk_percent":open_risk_percent_server}
         # The client value is required for protocol compatibility, but never used to
@@ -419,7 +423,6 @@ def decision(request):
             if is_demo_account and configured_demo_profile != "standard"
             else "STANDARD"
         )
-        pipeline = _build_pipeline(demo_mode=is_demo_account)
         risk_policy = _apply_demo_risk_policy(market, pipeline, demo_mode=is_demo_account)
         result = pipeline.run(market)
         if account_state_reason:
@@ -485,7 +488,8 @@ def decision(request):
             "min_volume": market["min_volume"],
             "max_volume": market["max_volume"],
             "stop_level_points": market["stop_level_points"],
-            "take_profit_points": market["take_profit_points"],
+            "take_profit_points": result["stages"]["risk_management"].get("take_profit_points", market["take_profit_points"]),
+            "target_reward_risk": market["target_reward_risk"],
             "daily_loss_percent": server_daily_loss_percent,
             "open_risk_percent": market["open_risk_percent"],
           },
@@ -522,11 +526,12 @@ def decision(request):
                 approved_volume = Decimal(str(risk_stage["volume"]))
                 stop_loss_value = Decimal(str(stop_price))
                 entry_value = Decimal(str(ask if record.action == "BUY" else bid))
-                minimum_reward_risk = Decimal(str(getattr(settings, "RAMON_MIN_REWARD_RISK", 1.25)))
-                if minimum_reward_risk < Decimal("1.2"):
-                    raise ValueError("minimum reward/risk cannot be below 1.2")
+                target_reward_risk = Decimal(str(risk_stage.get("target_reward_risk", pipeline.risk_manager.config.target_reward_risk)))
+                minimum_reward_risk = Decimal(str(pipeline.risk_manager.config.min_reward_risk))
+                if target_reward_risk < minimum_reward_risk or minimum_reward_risk < Decimal("1.2"):
+                    raise ValueError("target reward/risk must meet the configured minimum of at least 1.2")
                 stop_distance = abs(entry_value - stop_loss_value)
-                take_profit_price = entry_value + stop_distance * minimum_reward_risk * (1 if record.action == "BUY" else -1)
+                take_profit_price = entry_value + stop_distance * target_reward_risk * (1 if record.action == "BUY" else -1)
                 if approved_volume <= 0 or stop_loss_value <= 0 or take_profit_price <= 0:
                     raise ValueError("non-positive executable risk values")
                 take_profit_value = take_profit_price
