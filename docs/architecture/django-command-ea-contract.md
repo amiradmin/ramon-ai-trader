@@ -25,7 +25,7 @@ The decision endpoint is not an order-placement endpoint. A directional BUY/SELL
 
 ## Command envelope and lifecycle
 
-Each durable command has a unique `command_id`, `instance_id`, account login, broker server, symbol, action, payload, decision reference, risk-verdict reference, expiry, and explicit `execution_authorized` flag. The polling response supplies the server name from the fresh Django heartbeat for a final terminal-side scope check.
+Each durable command has a unique `command_id`, `instance_id`, account login, broker server, symbol, action, payload, decision reference, risk-verdict reference, expiry, and explicit `execution_authorized` flag. The command payload persists the broker server that approved the decision; polling rejects it if the fresh heartbeat has moved to another server, and the EA repeats the exact server check at the terminal.
 
 Supported actions: `NOOP`, `OPEN`, `CLOSE`, and `MODIFY_SLTP`.
 
