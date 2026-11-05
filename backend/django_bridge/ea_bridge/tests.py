@@ -76,7 +76,7 @@ class DecisionThresholdConfigurationTests(TestCase):
         response = self.client.post(
             self.url,
             data=json.dumps({"values": {
-                "risk_management": {"max_daily_loss_percent": 99},
+                "risk_management": {"daily_loss_percent": 99},
             }}),
             content_type="application/json",
         )
@@ -175,7 +175,6 @@ class DemoOpportunityProfileTests(TestCase):
         # The profile switch must not change the risk manager's hard limits.
         self.assertEqual(demo.risk_manager.maximum_risk_percent, 0.5)
         self.assertEqual(demo.risk_manager.config.max_total_risk_percent, 2.0)
-        self.assertEqual(demo.risk_manager.config.max_daily_loss_percent, 3.0)
         self.assertEqual(demo.risk_manager.config.min_reward_risk, 1.2)
 
 
@@ -824,7 +823,7 @@ class DjangoDecisionApiTests(TestCase):
             content_type="application/json", **self.headers,
         )
         self.assertEqual(response.status_code, 200, response.content)
-        self.assertNotEqual(response.json()["reason"], "DAILY_LOSS_BASELINE_UNAVAILABLE")
+        self.assertNotIn("DAILY_LOSS", response.json()["reason"])
         self.assertFalse(response.json()["daily_baseline_available"])
 
     @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
@@ -844,7 +843,7 @@ class DjangoDecisionApiTests(TestCase):
             content_type="application/json", **self.headers,
         )
         self.assertEqual(response.status_code, 200, response.content)
-        self.assertNotEqual(response.json()["reason"], "DAILY_LOSS_LIMIT_REACHED")
+        self.assertNotIn("DAILY_LOSS", response.json()["reason"])
 
     @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
     def test_rejects_account_login_mismatch(self):
