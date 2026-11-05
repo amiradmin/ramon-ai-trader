@@ -7,7 +7,7 @@ This runbook covers the guarded Django-to-MT5 command path. A trade is expected 
 - Django is the sole strategy and risk decision-maker.
 - The server creates an OPEN command only when both `RAMON_EA_COMMAND_CREATION_ENABLED=1` and `RAMON_EA_COMMAND_EXECUTION_ENABLED=1`.
 - Django requires explicit broker telemetry `account_trade_mode=0`, fresh heartbeat/quote, matching instance/account/server/symbol, verified risk inputs, and no existing position whose risk is unverified.
-- The EA v1.07 independently checks the connected account is demo, validates exact instance/account/server/symbol scope, command expiry, server authorization, and terminal trading permissions.
+- Django validates the connected account is demo, exact instance/account/server/symbol scope, command expiry, server authorization, and terminal trading permissions before delivering a command. The EA does not repeat these checks.
 - The EA does not calculate signals, position size, daily loss, portfolio risk, or risk thresholds. Those remain Django-owned.
 - The EA acknowledges `EXECUTED` for OPEN only after the broker returns `TRADE_RETCODE_DONE` and provides an order/deal identifier. Partial fills, merely placed orders, and ambiguous results are `RECONCILIATION_REQUIRED`; they are never blindly retried.
 - Never enable command gates for a real account.
@@ -53,7 +53,7 @@ docker compose up -d --build --force-recreate django
 docker compose ps
 ```
 
-The EA independently rejects non-demo accounts and mismatched broker servers. The two Django command gates are the operator-controlled execution switch. Do not lower strategy or risk thresholds to force a trade.
+Django rejects non-demo accounts and mismatched broker servers before command delivery. The two Django command gates are the operator-controlled execution switch. Do not lower strategy or risk thresholds to force a trade.
 
 ## 5. Verify a complete order lifecycle
 
