@@ -275,6 +275,7 @@ class StreamPersistenceTests(TestCase):
                 "low": "99",
                 "close": "101",
                 "volume": "3",
+                "closed": True,
             }),
         }
         with self.assertRaisesRegex(ValueError, "market bar timestamp must include a timezone"):
@@ -286,7 +287,7 @@ class StreamPersistenceTests(TestCase):
                   "occurred_at": "2026-10-22T10:00:00+00:00",
                   "payload": json.dumps({"symbol": "XAUUSD_o", "timeframe": "m1",
                       "timestamp": "2026-10-22T10:00:00+00:00", "open": "100", "high": "102",
-                      "low": "99", "close": "101", "volume": "3"})}
+                      "low": "99", "close": "101", "volume": "3", "closed": True})}
         self.worker._persist(record)
         self.worker._persist(record)
         self.assertEqual(MarketBar.objects.count(), 1)
@@ -1334,3 +1335,21 @@ class MarketBarRetentionCommandTests(TestCase):
         call_command("prune_market_bars", source="retention-test", apply=True, stdout=Mock())
         self.assertFalse(MarketBar.objects.filter(source="retention-test", timeframe="M1").exists())
         self.assertTrue(MarketBar.objects.filter(source="retention-test", timeframe="M5").exists())
+
+
+    def test_market_bar_rejects_incomplete_candle(self):
+        record = {
+            "kind": "market_bar",
+            "source": "ea-test-1",
+            "event_id": "bar-open-001",
+            "occurred_at": "2026-10-22T10:00:00+00:00",
+            "payload": json.dumps({
+                "symbol": "XAUUSD_o", "timeframe": "m1",
+                "timestamp": "2026-10-22T10:00:00+00:00",
+                "open": "100", "high": "102", "low": "99",
+                "close": "101", "volume": "3", "closed": False,
+            }),
+        }
+        with self.assertRaisesRegex(ValueError, "completed candle"):
+            Command._persist(record)
+        self.assertEqual(MarketBar.objects.count(), 0)
