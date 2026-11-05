@@ -693,7 +693,7 @@ class DjangoDecisionApiTests(TestCase):
         self.assertTrue(body["command_created"], body)
         self.assertTrue(body["command_available"], body)
         self.assertEqual(body["command_reason"], "COMMAND_CREATED")
-        self.assertEqual(body["daily_loss_source"], "BROKER_HISTORY_TELEMETRY_DEMO")
+        self.assertEqual(body["daily_loss_source"], "UNAVAILABLE_FAIL_CLOSED")
         command = EACommand.objects.get(command_id=body["command_id"])
         self.assertEqual(command.action, EACommand.Action.OPEN)
         self.assertEqual(command.instance_id, "ea-decision-test")
