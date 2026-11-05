@@ -10,7 +10,7 @@ input string DjangoBearerToken = "";       // Set locally in MT5; never commit a
 input string InstanceId = "ramon-command-ea-1";
 input int TimerSeconds = 15;
 input int DecisionIntervalSeconds = 30; // Django decision requests, independent of telemetry polling.
-input int BarsToSend = 128;
+input int BarsToSend = 512; // Initial history per timeframe; later requests send only newly closed bars.
 input int RequestTimeoutMs = 5000;
 
 CTrade Trade;
@@ -18,6 +18,9 @@ string LastCommandId = "";
 datetime LastTelemetryAttempt = 0;
 datetime LastDecisionAttempt = 0;
 bool Busy = false;
+// Independent UTC candle cursors avoid retransmitting the same history window.
+datetime LastSentBarCursor[4];
+datetime PendingBarCursor[4];
 
 string JsonEscape(string value)
 {
@@ -267,29 +270,62 @@ bool PostJson(const string path,const string body,string &response)
    return true;
 }
 
-string BuildBarsJson()
+string BuildBarsJsonForTimeframe(const ENUM_TIMEFRAMES tf,const int cursor_index)
 {
    MqlRates rates[];
    ArraySetAsSeries(rates,true);
    int count=MathMax(1,MathMin(BarsToSend,512));
-   int copied=CopyRates(_Symbol,_Period,1,count,rates); // start at 1: omit the still-forming candle
+   int copied=CopyRates(_Symbol,tf,1,count,rates); // start at 1: omit the still-forming candle
+   PendingBarCursor[cursor_index]=LastSentBarCursor[cursor_index];
    if(copied<=0) return "[]";
+
    long server_utc_offset=0;
    if(!GetServerUtcOffsetSeconds(server_utc_offset)) return "[]";
    string out="[";
+   bool first=true;
    for(int i=copied-1;i>=0;i--)
    {
-      if(i<copied-1) out+=",";
       datetime utc=(datetime)((long)rates[i].time-server_utc_offset);
-      if(_Period==PERIOD_M15) utc=NormalizeM15Utc(utc);
+      if(tf==PERIOD_M15) utc=NormalizeM15Utc(utc);
+      if(utc<=LastSentBarCursor[cursor_index]) continue;
+
+      if(!first) out+=",";
+      first=false;
       out+="{\"timestamp\":\""+IsoUtc(utc)+"\","
          +"\"open\":"+DoubleToString(rates[i].open,_Digits)+","
          +"\"high\":"+DoubleToString(rates[i].high,_Digits)+","
          +"\"low\":"+DoubleToString(rates[i].low,_Digits)+","
          +"\"close\":"+DoubleToString(rates[i].close,_Digits)+","
          +"\"volume\":"+DoubleToString((double)rates[i].tick_volume,0)+",\"closed\":true}";
+      if(utc>PendingBarCursor[cursor_index])
+         PendingBarCursor[cursor_index]=utc;
    }
    return out+"]";
+}
+
+string BuildBarSetsJson()
+{
+   ENUM_TIMEFRAMES timeframes[4];
+   timeframes[0]=PERIOD_M1;
+   timeframes[1]=PERIOD_M5;
+   timeframes[2]=PERIOD_M15;
+   timeframes[3]=PERIOD_H1;
+
+   string out="[";
+   for(int i=0;i<4;i++)
+   {
+      if(i>0) out+=",";
+      out+="{\"timeframe\":\""+TfName(timeframes[i])+"\","
+         +"\"bars\":"+BuildBarsJsonForTimeframe(timeframes[i],i)+"}";
+   }
+   return out+"]";
+}
+
+void CommitBarCursors()
+{
+   for(int i=0;i<4;i++)
+      if(PendingBarCursor[i]>LastSentBarCursor[i])
+         LastSentBarCursor[i]=PendingBarCursor[i];
 }
 
 
@@ -518,7 +554,7 @@ string BuildTelemetry()
       +"\"quote_time\":\""+IsoUtc((datetime)((long)tick.time-server_utc_offset))+"\","
       +"\"terminal_trade_allowed\":"+((bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) && (bool)MQLInfoInteger(MQL_TRADE_ALLOWED) ? "true":"false")+","
       +"\"account\":"+account+",\"symbol_info\":"+symbol_info+",\"positions\":"+BuildPositionsJson()+","
-      +"\"last_command_id\":\""+JsonEscape(LastCommandId)+"\",\"bars\":"+BuildBarsJson()+"}";
+      +"\"last_command_id\":\""+JsonEscape(LastCommandId)+"\",\"bars\":[],\"bar_sets\":"+BuildBarSetsJson()+"}";
 }
 
 
@@ -945,8 +981,10 @@ void OnTimer()
    if(body!="")
    {
       string response;
-      if(!PostJson("/telemetry",body,response))
-         Print("RamonCommandEA: telemetry delivery failed.");
+      if(PostJson("/telemetry",body,response))
+         CommitBarCursors();
+      else
+         Print("RamonCommandEA: telemetry delivery failed; candle cursors were not advanced.");
    }
    datetime local_now=TimeLocal();
    int decision_interval=MathMax(30,DecisionIntervalSeconds);
@@ -968,6 +1006,11 @@ int OnInit()
    {
       Print("RamonCommandEA: set DjangoBearerToken in Inputs; token must be at least 32 characters.");
       return INIT_PARAMETERS_INCORRECT;
+   }
+   for(int i=0;i<4;i++)
+   {
+      LastSentBarCursor[i]=0;
+      PendingBarCursor[i]=0;
    }
    if(!EventSetTimer(MathMax(5,TimerSeconds)))
       return INIT_FAILED;
