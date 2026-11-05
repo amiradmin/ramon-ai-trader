@@ -1,20 +1,18 @@
 # Demo-only trading activation
 
-This runbook covers the guarded Django-to-MT5 command path. It does not guarantee that a trade will occur: Ramon must receive fresh market/account telemetry and produce a valid directional signal that passes all entry, risk, daily-loss, spread, stop/target, and broker checks.
+This runbook covers the guarded Django-to-MT5 command path. A trade is expected only when fresh market/account telemetry produces a directional setup that passes Opportunity Finder, Entry Timing, Risk Management, daily-loss, account, and broker checks.
 
 ## Safety contract
 
-- Django remains the sole strategy and risk decision-maker.
-- Missing/stale telemetry, an open position whose risk cannot be verified, or an incomplete risk verdict must result in `WAIT` / no command. Real accounts require a verified daily baseline; demo accounts may use only the explicit, audited `DEMO_NO_BASELINE_BYPASS` path when no verified baseline is available.
+- Django is the sole strategy and risk decision-maker.
 - The server creates an OPEN command only when both `RAMON_EA_COMMAND_CREATION_ENABLED=1` and `RAMON_EA_COMMAND_EXECUTION_ENABLED=1`.
-- The server additionally requires explicit broker telemetry `account_trade_mode=0` (MT5 demo). Missing, malformed, contest, or real-account mode is rejected.
-- The EA must have `EnableCommandExecution=true` for execution, and its own `SafeOpen` guard independently rejects non-demo accounts, disabled terminal/EA trading, invalid volume, wide spread, invalid SL/TP, and per-order loss above `MaxRiskMoney`.
-- For demo sizing, Django uses the server-owned `RAMON_DEMO_RISK_PERCENT` target (default `0.5%`), capped by the configured RiskManager maximum. The v1.07 EA local per-order ceiling defaults to `$12`; Django remains the tighter percentage-based authority for the current demo balance.
-- The committed EA input default remains `the EA has no independent strategy override; keep the Django command-creation and execution gates disabled until the demo checks are complete`; never use this workflow to enable live-account trading.
+- Django requires explicit broker telemetry `account_trade_mode=0`, fresh heartbeat/quote, matching instance/account/server/symbol, verified risk inputs, and no existing position whose risk is unverified.
+- The EA v1.07 independently checks the connected account is demo, validates exact instance/account/server/symbol scope, command expiry, server authorization, and terminal trading permissions.
+- The EA does not calculate signals, position size, daily loss, portfolio risk, or risk thresholds. Those remain Django-owned.
+- The EA acknowledges `EXECUTED` for OPEN only after the broker returns `TRADE_RETCODE_DONE` and provides an order/deal identifier. Partial fills, merely placed orders, and ambiguous results are `RECONCILIATION_REQUIRED`; they are never blindly retried.
+- Never enable command gates for a real account.
 
 ## 1. Verify deployment and schema
-
-From the project directory:
 
 ```bash
 docker compose ps
@@ -23,56 +21,39 @@ docker compose exec -T django python manage.py showmigrations ea_bridge
 docker compose exec -T django python manage.py migrate --check
 ```
 
-Confirm all four services are healthy and migration `0004_accountdailybaseline` is applied. Do not delete or recreate PostgreSQL/Redis volumes to resolve migration problems.
+Do not delete or recreate PostgreSQL/Redis volumes to resolve migration problems.
 
 ## 2. Install the matching EA source
 
-1. Copy `mt5/RamonCommandEA_v1.07.mq5` into the active MT5 terminal's `MQL5/Experts` directory.
-2. Compile it in MetaEditor and confirm zero errors and zero warnings. Verify that the resulting `RamonCommandEA_v1.07.ex5` is the binary compiled from this exact source.
-3. Attach it only to the intended demo broker account and the broker's gold symbol (for example `XAUUSD_o`) on an M15 chart.
-4. Add `http://127.0.0.1:8017` to MT5's allowed WebRequest URLs.
-5. Set `DjangoBearerToken` in the EA Inputs locally. Do not commit the token.
-6. Initially leave `the EA has no independent strategy override; keep the Django command-creation and execution gates disabled until the demo checks are complete`. Confirm the Experts log shows v1.07, telemetry requests succeed, and decision polling reaches Django.
+1. Confirm the intended LiteFinance demo login, exact broker server, and `XAUUSD_o` M15 chart.
+2. Run `bash scripts/update_build_ramon.sh` from the repository directory. It fast-forwards main, rebuilds the stack, compiles and installs only `RamonCommandEA_v1.07.mq5`, and backs up the previous EA source/binary.
+3. Confirm MetaEditor reports exactly zero errors and zero warnings.
+4. Set `DjangoBearerToken` only in the local EA Inputs. Never commit the token.
+5. Confirm the Experts log reports v1.07 and telemetry/decision requests succeed.
 
-The EA must send the exact broker server name, broker-local date, account trade mode, balance/equity, quote timestamp, and positions. Confirm the dashboard/heartbeat shows the intended account and `account_trade_mode=0`.
+## 3. Verify the daily-risk baseline
 
-## 3. Establish today's daily-risk baseline
+A verified broker-day opening balance is preferred. Real accounts fail closed without a verified baseline. Demo accounts may use only the explicitly audited `DEMO_NO_BASELINE_BYPASS` path when no verified server or broker-history baseline is available; daily-loss enforcement is unavailable in that case and must remain visible in the audit record.
 
-A verified broker-day opening balance is preferred. Real accounts fail closed without it. For an explicitly identified demo account only, the code may proceed with `DEMO_NO_BASELINE_BYPASS` when neither a server baseline nor complete broker-history baseline is available; daily-loss enforcement is then unavailable and must be visible in the audit record. Never fabricate an opening balance or substitute current balance/equity.
+Never fabricate an opening balance or substitute current balance/equity. If manually capturing a baseline, verify it against the broker statement and use the `capture_daily_baseline` management command with the exact login, server, broker-local date, and verified opening balance.
 
-Check whether today's `AccountDailyBaseline` exists for the exact account login, exact server name, and broker-local date. If it does not, use the broker's account history/statement to verify the opening balance for that broker day, adjusting for deposits, withdrawals, and credit operations where applicable. Then run:
+## 4. Enable command delivery deliberately
 
-```bash
-docker compose exec -T django python manage.py capture_daily_baseline \
-  --account-login '<BROKER_ACCOUNT_LOGIN>' \
-  --server-name '<EXACT_BROKER_SERVER_NAME>' \
-  --broker-day '<BROKER_LOCAL_DATE_YYYY-MM-DD>' \
-  --opening-balance '<VERIFIED_OPENING_BALANCE>' \
-  --source-instance-id 'ramon-command-ea-1' \
-  --confirm-broker-opening-balance
-```
-
-Replace every placeholder with verified values. The command refuses to overwrite an existing baseline. If you cannot verify the broker opening balance, do not create one; leave Ramon in WAIT mode.
-
-## 4. Configure demo risk sizing and enable command delivery deliberately
-
-The default demo risk target is `0.5%` of account balance, applied by Django only after broker telemetry explicitly identifies a demo account. It does not disable the daily-loss, portfolio-risk, stop-distance, reward:risk, minimum-volume, or broker checks. The v1.07 EA's `MaxRiskMoney` default is `$12` so its local execution guard does not reject a correctly sized order on the current approximately `$2,394` demo balance. Keep this local ceiling at or above the expected server-approved per-order loss; it is not a replacement for Django's percentage cap.
-
-Only after the above checks pass, edit the local `.env` (never commit it) and set:
+Only after the preceding checks pass, edit the local `.env` (never commit it):
 
 ```dotenv
 RAMON_EA_COMMAND_CREATION_ENABLED=1
 RAMON_EA_COMMAND_EXECUTION_ENABLED=1
 ```
 
-Recreate only Django so it reads the new environment:
+Recreate only Django so it reads the environment:
 
 ```bash
 docker compose up -d --build --force-recreate django
 docker compose ps
 ```
 
-Do not use `down -v`, remove volumes, or delete database data. The EA independently checks `ACCOUNT_TRADE_MODE_DEMO` and exact broker-server/account/symbol scope immediately before execution. The two Django command gates remain the operator-controlled execution switch. If any account or terminal permission check disagrees, no order should be placed.
+The EA independently rejects non-demo accounts and mismatched broker servers. The two Django command gates are the operator-controlled execution switch. Do not lower strategy or risk thresholds to force a trade.
 
 ## 5. Verify a complete order lifecycle
 
@@ -82,24 +63,26 @@ Watch the Experts log and Django logs:
 docker compose logs --since=10m django
 ```
 
-A successful path should be traceable through:
-1. Fresh telemetry heartbeat for the expected instance/account/server/symbol.
-2. A Django decision with a directional `BUY` or `SELL` action and all risk gates approved.
-3. An approved risk verdict with positive volume, valid protective stop and target, and acceptable reward/risk.
-4. A single unexpired OPEN command scoped to the exact instance/account/symbol.
-5. EA command receipt and local demo/symbol/spread/volume/risk checks.
-6. Broker order result and command acknowledgement, followed by a refreshed telemetry snapshot showing the position.
+A successful path must show:
+1. Fresh telemetry for the expected EA instance/account/server/symbol.
+2. A directional BUY/SELL decision with all three SignalFlow stages approved.
+3. An approved risk verdict with positive volume and valid SL/TP.
+4. One unexpired OPEN command scoped to the exact account and broker server.
+5. EA validation of the command and connected demo account.
+6. Broker `TRADE_RETCODE_DONE` plus an order/deal identifier.
+7. Django acknowledgement as `EXECUTED`, followed by a refreshed telemetry snapshot showing the open position.
 
-If any step fails, use the returned reason code and fix that prerequisite. Do not lower risk limits, fabricate a signal, or disable a guard to force a trade. Repeated requests for the same decision must not create duplicate commands.
+Partial fills, merely placed orders, missing fill identifiers, and uncertain outcomes must be reconciled before any further action. A healthy API or passing CI is not proof of broker execution.
 
 ## Acceptance checklist
 
 - [ ] Django health check and migrations pass.
-- [ ] Exact EA source compiled with zero errors/warnings and installed in the active terminal.
-- [ ] Live telemetry reports `ea_version=1.07` and integer `account_trade_mode=0`.
-- [ ] Daily baseline exists for the exact account/server/broker day and is broker-verified, or the demo-only `DEMO_NO_BASELINE_BYPASS` is explicitly recorded.
-- [ ] Missing baseline and non-demo account tests fail closed.
-- [ ] Both server command flags and EA execution input are enabled only for the intended demo test.
-- [ ] A real strategy/risk-approved demo signal creates one command and the EA acknowledges the broker result.
-- [ ] Position appears in MT5 and is subsequently reflected in Django telemetry.
-- [ ] If conditions never become true, no order is expected; that is not a reason to bypass the strategy or risk gates.
+- [ ] EA v1.07 compiles with zero errors and warnings and is installed in the active terminal.
+- [ ] Telemetry reports the intended account, exact broker server, and integer `account_trade_mode=0`.
+- [ ] Both server command gates are enabled only for the intended demo test.
+- [ ] A genuine strategy/risk-approved signal creates one account-scoped OPEN command.
+- [ ] EA checks demo mode and exact broker-server/account/symbol scope.
+- [ ] EA records the broker retcode and acknowledges `EXECUTED` only for a confirmed DONE fill.
+- [ ] The resulting position appears in MT5 and in subsequent Django telemetry.
+- [ ] Ambiguous broker outcomes are marked `RECONCILIATION_REQUIRED` and are not retried blindly.
+- [ ] No order is created when any required strategy, risk, account, quote, or execution condition fails.
