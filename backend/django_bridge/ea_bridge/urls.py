@@ -11,6 +11,7 @@ urlpatterns = [
     path("events", views.events, name="ea-events"),
     path("decision", decision_views.decision, name="ea-decision"),
     path("telemetry", telemetry_views.telemetry, name="ea-telemetry"),
+    path("market-data/status", telemetry_views.market_data_status, name="ea-market-data-status"),
     path("commands/next", command_views.next_command, name="ea-command-next"),
     path("commands/ack", command_views.acknowledge_command, name="ea-command-ack"),
     path("status", views.status, name="ea-status"),
