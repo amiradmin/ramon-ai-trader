@@ -38,6 +38,13 @@ class DjangoOutcomeStore:
     """OutcomeStore backed by immutable, unique trade IDs in Django's database."""
 
     def add(self, record):
+        # Fast-path existing trade IDs so ordinary retries/conflicts do not
+        # generate expected PostgreSQL unique-constraint errors in the logs.
+        # The unique constraint and IntegrityError handler below still protect
+        # against concurrent inserts racing after this read.
+        if LearningTradeOutcome.objects.filter(trade_id=record["trade_id"]).exists():
+            return False
+
         tags = dict(record.get("tags") or {})
         decision_id = str(tags.get("decision_id") or "")[:128]
         snapshot = {}
