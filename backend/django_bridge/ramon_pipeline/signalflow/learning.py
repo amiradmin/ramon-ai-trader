@@ -36,7 +36,7 @@ from .common import InvalidMarketData, parse_timestamp
 _Z_OVERALL = 1.96  # ~95% two-sided
 _Z_SEGMENT = 2.58  # ~99%: stricter because many segments are compared
 _ALLOWED_SIDES = {"BUY", "SELL"}
-_TAG_KEYS = ("side", "regime", "exit_reason", "setup_type", "forecast_confirmed", "signal_id", "score", "decision_id", "symbol", "strategy_profile", "model_version", "entry_timing", "instance_id", "account_login")
+_TAG_KEYS = ("side", "regime", "exit_reason", "setup_type", "forecast_confirmed", "signal_id", "score", "decision_id", "symbol", "strategy_profile", "model_version", "entry_timing", "instance_id", "account_login", "command_id", "broker_ticket")
 _METRIC_KEYS = ("mae", "mfe", "entry_efficiency", "exit_efficiency", "spread_points", "slippage_points", "commission", "swap")
 _SEGMENT_KEYS = ("side", "regime", "exit_reason", "setup_type")
 
