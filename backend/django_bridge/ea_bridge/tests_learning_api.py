@@ -107,7 +107,7 @@ class LearningOutcomeApiTests(TestCase):
         )
         payload = {
             "trade_id": "123456:position-risk-001",
-            "broker_ticket": "risk-ticket-001",
+            "broker_ticket": "risk-ticket-001", "command_id": "ramon-open-risk-001",
             "instance_id": "ramon-command-ea-1", "account_login": "123456",
             "symbol": "XAUUSD_o", "side": "BUY",
             "entry_price": 2300.25, "realized_pnl": "6.25",
@@ -122,6 +122,8 @@ class LearningOutcomeApiTests(TestCase):
         self.assertEqual(row.decision_id, decision.decision_id)
         self.assertEqual(row.risk_amount, 12.5)
         self.assertAlmostEqual(float(row.r_multiple), 0.5)
+        self.assertEqual(row.tags["command_id"], "ramon-open-risk-001")
+        self.assertEqual(row.tags["broker_ticket"], "risk-ticket-001")
         self.assertEqual(row.execution_metrics["slippage_points"], 5.0)
 
     @override_settings(EA_BEARER_TOKEN="learning-test-token")
