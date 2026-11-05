@@ -35,7 +35,7 @@ class EACommandApiTests(TestCase):
             command_id="cmd-disabled", instance_id=self.scope["instance_id"],
             account_login=self.scope["account_login"], symbol="XAUUSD_o",
             action=EACommand.Action.OPEN,
-            payload={"direction": "BUY", "volume": "0.01", "stop_loss": 2300, "take_profit": 2310},
+            payload={"server_name": "LiteFinance-MT5-Demo", "direction": "BUY", "volume": "0.01", "stop_loss": 2300, "take_profit": 2310},
             decision_id="decision-test", risk_verdict_id="risk-test",
             execution_authorized=True, expires_at=timezone.now() + timedelta(minutes=1),
         )
