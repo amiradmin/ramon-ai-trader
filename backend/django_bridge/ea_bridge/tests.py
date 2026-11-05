@@ -593,7 +593,7 @@ class DjangoDecisionApiTests(TestCase):
         self.assertEqual(b["missing_risk_inputs"], "")
         self.assertEqual(
             set(b["risk_inputs_received"].split(",")),
-            {"stop_level_points", "take_profit_points", "daily_loss_percent", "open_risk_percent"},
+            {"stop_level_points", "take_profit_points", "open_risk_percent"},
         )
         for k in ("base_decision","base_reason","ensemble_ready","regime_probability","news_source","news_source_ready",
           "news_source_age_seconds","signal_bid","signal_ask","forecast_low","forecast_median","forecast_high","atr",
