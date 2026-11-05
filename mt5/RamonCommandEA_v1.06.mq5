@@ -697,6 +697,11 @@ bool BuildLearningOutcomeJson(const ulong position_id,
       +"\"opened_at\":\""+IsoUtc(opened_utc)+"\","
       +"\"closed_at\":\""+IsoUtc(closed_utc)+"\"";
 
+   // Send the volume-weighted broker fill price; Django compares it with the
+   // persisted decision quote and calculates adverse slippage in points.
+   if(opening_volume>0.0)
+      body+=",\"entry_price\":"+DoubleToString(weighted_entry_price/opening_volume,10);
+
    if(opening_order>0)
       body+=",\"broker_ticket\":\""+IntegerToString((long)opening_order)+"\"";
 
