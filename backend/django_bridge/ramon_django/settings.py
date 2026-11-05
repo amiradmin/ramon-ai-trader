@@ -48,7 +48,7 @@ MEDIA_URL = "/media/"
 MEDIA_ROOT = Path(os.environ.get("RAMON_MEDIA_ROOT", str(BASE_DIR / "media")))
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 EA_BEARER_TOKEN = os.environ.get("RAMON_EA_BEARER_TOKEN", "")
-EA_MAX_BODY_BYTES = int(os.environ.get("RAMON_EA_MAX_BODY_BYTES", "65536"))
+EA_MAX_BODY_BYTES = int(os.environ.get("RAMON_EA_MAX_BODY_BYTES", "524288"))
 RAMON_PIPELINE_INGEST_ENABLED = os.environ.get("RAMON_PIPELINE_INGEST_ENABLED", "0") == "1"
 RAMON_DJANGO_DECISION_ENABLED = os.environ.get("RAMON_DJANGO_DECISION_ENABLED", "1") == "1"
 # Validation options for the SignalFlow decision path. All default OFF so live behaviour is unchanged.
