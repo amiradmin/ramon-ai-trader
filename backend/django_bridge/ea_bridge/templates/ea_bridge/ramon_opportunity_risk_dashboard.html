@@ -630,8 +630,12 @@ function thresholdEditorMarkup(stageName) {
   if (!group) return "";
   const values = thresholdDraft || thresholdConfig.values;
   const riskNote = stageName === "risk_management"
-    ? '<div class="small threshold-risk-note">These controls are enforced by Django. Maximum risk per trade is the demo sizing budget and hard per-trade cap. Portfolio exposure and daily loss are checked against server-side account telemetry. Position size is always rounded down; Ramon will never force the broker minimum lot when it exceeds the risk budget. Live-account risk remains fail-closed.</div>'
+    ? '<div class="small threshold-risk-note">These eight strategy/risk thresholds are editable, validated and stored by Django. They affect later decisions only. Independent hard guards remain active: account identity, broker telemetry, news controls, duplicate-position prevention, absolute risk ceilings, and execution authorization. Position size is rounded down; Ramon never forces the broker minimum lot when it exceeds the risk budget. Live-account execution remains fail-closed.</div>'
     : "";
+  const audit = thresholdConfig.audit;
+  const auditLine = audit
+    ? '<div class="small threshold-audit">Last change: ' + esc(audit.actor) + ' · ' + esc(audit.action) + ' · ' + esc(audit.changed_at) + '</div>'
+    : '<div class="small threshold-audit">No threshold changes recorded yet.</div>';
   const rows = group.items.map(item => {
     const value = values?.[stageName]?.[item.key] ?? item.value;
     return '<div class="threshold-row"><label for="threshold-' + esc(stageName + "-" + item.key) +
@@ -644,7 +648,7 @@ function thresholdEditorMarkup(stageName) {
   }).join("");
   return '<details class="threshold-editor"><summary class="threshold-editor-head"><strong>Edit ' +
     esc(group.title) + ' thresholds</strong><span class="small">Django · ' + esc(thresholdConfig.profile.toUpperCase()) +
-    '</span></summary>' + riskNote + '<div class="threshold-editor-grid">' + rows + '</div><div class="threshold-actions">' +
+    '</span></summary>' + riskNote + auditLine + '<div class="threshold-editor-grid">' + rows + '</div><div class="threshold-actions">' +
     '<button type="button" class="primary" data-threshold-save="' + esc(stageName) + '">Save thresholds</button>' +
     '<button type="button" data-threshold-reset="true">Reset profile defaults</button></div>' +
     '<div class="threshold-status" data-threshold-status="' + esc(stageName) + '">Changes apply to the next Django decision.</div></details>';
@@ -702,8 +706,8 @@ function thresholdControlsForCheck(stageName, checkName) {
   const specs = keys.map(key => group?.items.find(item => item.key === key)).filter(Boolean);
   if (!specs.length) {
     if (stageName !== "risk_management") return "";
-    return '<div class="flow-thresholds flow-thresholds-protected"><div class="flow-thresholds-title">Protected Django risk guard</div>' +
-      '<div class="small">This check is intentionally not user-adjustable. Account exposure, daily-loss protection, news controls, duplicate-position prevention, and execution safety remain enforced by Django.</div></div>';
+    return '<div class="flow-thresholds flow-thresholds-protected"><div class="flow-thresholds-title">Independent Django safety guard</div>' +
+      '<div class="small">This check is not a strategy threshold. Account identity, broker telemetry, news controls, duplicate-position prevention, absolute risk ceilings, and execution authorization remain enforced independently of the editable values above.</div></div>';
   }
   const controls = specs.map(item => {
     const value = thresholdDraft[stageName][item.key];
