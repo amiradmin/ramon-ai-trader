@@ -110,42 +110,47 @@ def learning_overview(request):
 
 
 def _linked_open_command(payload, instance_id, account_login):
-    """Resolve the exact Django OPEN command that produced this broker position."""
+    """Resolve one exact account-scoped Django OPEN command for a closed position."""
     command_id = str(payload.get("command_id") or "").strip()
     broker_ticket = str(payload.get("broker_ticket") or "").strip()
-    commands = EACommand.objects.filter(action=EACommand.Action.OPEN)
-    if command_id:
-        commands = commands.filter(command_id=command_id)
-    elif broker_ticket:
-        commands = commands.filter(result__broker_ticket=broker_ticket)
-    else:
+    # A ticket or command ID without both account identifiers is not enough
+    # to safely attribute a broker trade to a Django command.
+    if not instance_id or not account_login or not (command_id or broker_ticket):
         return None
 
-    if instance_id:
-        commands = commands.filter(instance_id=instance_id)
-    if account_login:
-        commands = commands.filter(account_login=account_login)
-    command = commands.order_by("-created_at").first()
-    if command is None and command_id and broker_ticket:
-        # Broker comments can be truncated; retry with the account-scoped
-        # opening order ticket returned in the EA command acknowledgement.
-        commands = EACommand.objects.filter(
-            action=EACommand.Action.OPEN,
-            result__broker_ticket=broker_ticket,
-        )
-        if instance_id:
-            commands = commands.filter(instance_id=instance_id)
-        if account_login:
-            commands = commands.filter(account_login=account_login)
-        command = commands.order_by("-created_at").first()
+    scope = EACommand.objects.filter(
+        action=EACommand.Action.OPEN,
+        instance_id=instance_id,
+        account_login=account_login,
+    )
+    command = None
+    if command_id:
+        command = scope.filter(command_id=command_id).first()
+    # EA comments may be truncated or unavailable. The broker ticket returned
+    # in the command acknowledgement is the account-scoped fallback identity.
+    if command is None and broker_ticket:
+        matches = scope.filter(result__broker_ticket=broker_ticket)
+        if matches.count() > 1:
+            raise ValueError("broker_ticket matches multiple Django OPEN commands")
+        command = matches.first()
     if command is None:
         return None
+
     command_result = command.result if isinstance(command.result, dict) else {}
-    if broker_ticket and command_result.get("broker_ticket") not in (None, "", broker_ticket):
+    stored_ticket = str(command_result.get("broker_ticket") or "").strip()
+    if broker_ticket and stored_ticket != broker_ticket:
         raise ValueError("broker_ticket does not match the linked Django command")
     supplied_decision_id = str(payload.get("decision_id") or "").strip()
     if supplied_decision_id and supplied_decision_id != command.decision_id:
         raise ValueError("decision_id does not match the linked Django command")
+    supplied_symbol = str(payload.get("symbol") or "").strip()
+    if supplied_symbol and command.symbol and supplied_symbol != command.symbol:
+        raise ValueError("symbol does not match the linked Django command")
+    command_payload = command.payload if isinstance(command.payload, dict) else {}
+    supplied_side = str(payload.get("side") or "").strip().upper()
+    command_side = str(command_payload.get("side") or "").strip().upper()
+    if supplied_side and command_side and supplied_side != command_side:
+        raise ValueError("side does not match the linked Django command")
     return command
 
 
@@ -175,12 +180,20 @@ def _trusted_command_risk_amount(command, decision_id):
         stage_volume = Decimal(str(risk_stage.get("volume")))
     except (InvalidOperation, TypeError, ValueError):
         return None
+    command_payload = command.payload if isinstance(command.payload, dict) else {}
+    try:
+        command_volume = Decimal(str(command_payload.get("volume")))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
     if (
         not risk_amount.is_finite()
         or risk_amount <= 0
         or not stage_volume.is_finite()
         or stage_volume <= 0
+        or not command_volume.is_finite()
+        or command_volume <= 0
         or abs(stage_volume - verdict.approved_volume) > Decimal("0.00000001")
+        or abs(command_volume - verdict.approved_volume) > Decimal("0.00000001")
     ):
         return None
     return risk_amount
@@ -262,20 +275,33 @@ def record_outcome(request):
 
         outcome = dict(payload)
         outcome["trade_id"] = trade_id[:128]
+        if command is not None:
+            command_result = command.result if isinstance(command.result, dict) else {}
+            # Persist all attribution identifiers from the authoritative
+            # command, not from an EA comment that may be truncated.
+            decision_id = command.decision_id
+            outcome["command_id"] = command.command_id
+            outcome["broker_ticket"] = str(
+                command_result.get("broker_ticket") or payload.get("broker_ticket") or ""
+            )[:64]
+            outcome["instance_id"] = command.instance_id
+            outcome["account_login"] = command.account_login
+            outcome["symbol"] = command.symbol or str(payload.get("symbol") or "")
         if decision_id:
             outcome["decision_id"] = decision_id[:128]
         for key in ("symbol", "instance_id", "account_login"):
-            if payload.get(key) is not None:
-                outcome[key] = str(payload[key])[:128]
+            if outcome.get(key) is not None:
+                outcome[key] = str(outcome[key])[:128]
 
         decision = StrategyDecisionRecord.objects.filter(
-            decision_id=decision_id
+            decision_id=decision_id,
+            symbol=command.symbol if command is not None and command.symbol else outcome.get("symbol", ""),
         ).first() if decision_id else None
         trusted_risk = _trusted_command_risk_amount(command, decision_id)
-        if trusted_risk is not None:
-            # Django's persisted approved verdict is authoritative; never trust
-            # an EA-calculated or caller-supplied risk amount for command trades.
-            outcome["risk_amount"] = str(trusted_risk)
+        if command is not None:
+            # For command-linked positions, missing/unapproved risk stays NULL.
+            # Never fall back to EA/caller-supplied risk_amount.
+            outcome["risk_amount"] = str(trusted_risk) if trusted_risk is not None else None
         observed_slippage = _observed_entry_slippage(outcome, decision)
         if observed_slippage is not None:
             outcome["slippage_points"] = observed_slippage
