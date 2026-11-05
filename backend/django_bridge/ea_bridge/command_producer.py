@@ -189,6 +189,7 @@ def create_open_command(*, decision, verdict, instance_id, account_login, server
         f"{decision.decision_id}|{instance_id}|{account_login}".encode()
     ).hexdigest()[:32]
     payload = {
+        "server_name": server_name,
         "side": decision.action,
         "volume": float(volume),
         "stop_loss": float(stop_loss),
