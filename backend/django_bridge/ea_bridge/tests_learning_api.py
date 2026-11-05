@@ -70,6 +70,11 @@ class LearningOutcomeApiTests(TestCase):
         self.assertEqual(response.status_code, 201, response.content)
         row = LearningTradeOutcome.objects.get(trade_id="123456:5550001")
         self.assertEqual(row.decision_id, "decision-ticket-001")
+        self.assertEqual(row.tags["command_id"], "ramon-open-" + "a" * 32)
+        self.assertEqual(row.tags["broker_ticket"], "987654321")
+        self.assertEqual(row.instance_id, "ramon-command-ea-1")
+        self.assertEqual(row.account_login, "123456")
+        self.assertEqual(row.symbol, "XAUUSD_o")
         self.assertEqual(row.decision_snapshot["action"], "BUY")
         self.assertEqual(row.tags["regime"], "BULLISH")
         self.assertEqual(row.tags["setup_type"], "PULLBACK")
@@ -152,7 +157,7 @@ class LearningOutcomeApiTests(TestCase):
             "trade_id": "123456:position-no-risk-001",
             "broker_ticket": "no-risk-ticket-001",
             "instance_id": "ramon-command-ea-1", "account_login": "123456",
-            "symbol": "XAUUSD_o", "realized_pnl": "6.25",
+            "symbol": "XAUUSD_o", "realized_pnl": "6.25", "risk_amount": "9999",
             "opened_at": "2026-11-05T10:00:00Z",
             "closed_at": "2026-11-05T11:00:00Z",
         }
