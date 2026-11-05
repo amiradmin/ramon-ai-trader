@@ -875,8 +875,8 @@ void SafeOpen(const string command_json,const string command_id,
 
 bool ProcessCommand(const string response)
 {
-   if(StringFind(response,"\\"command\\":null")>=0 ||
-      StringFind(response,"\\"command\\": null")>=0)
+   if(StringFind(response,"\"command\":null")>=0 ||
+      StringFind(response,"\"command\": null")>=0)
       return true;
 
    string command=JsonObject(response,"command");
