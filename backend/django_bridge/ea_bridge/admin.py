@@ -5,6 +5,7 @@ from django.contrib import admin
 from .models import (
     EAEvent,
     EAHeartbeat,
+    LearningModelRun,
     LearningRecommendation,
     LearningTradeOutcome,
     MarketBar,
@@ -221,6 +222,29 @@ class LearningRecommendationAdmin(admin.ModelAdmin):
     search_fields = ("finding_code", "title", "detail", "reviewer")
     readonly_fields = tuple(field.name for field in LearningRecommendation._meta.fields)
     ordering = ("-created_at",)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return True
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+
+@admin.register(LearningModelRun)
+class LearningModelRunAdmin(admin.ModelAdmin):
+    list_display = (
+        "training_finished_at", "model_name", "model_key", "status",
+        "version", "artifact_size_bytes", "artifact_sha256",
+    )
+    list_filter = ("status", "model_key", "job__symbol")
+    search_fields = ("model_name", "model_key", "version", "artifact_path", "artifact_sha256")
+    readonly_fields = tuple(field.name for field in LearningModelRun._meta.fields)
+    ordering = ("-training_finished_at", "-id")
+    list_per_page = 50
 
     def has_add_permission(self, request):
         return False
