@@ -12,7 +12,7 @@ from django.utils import timezone
 from django.http import JsonResponse
 from django.utils.dateparse import parse_datetime
 from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 
 from .auth import BearerTokenRequired
 from .models import AccountDailyBaseline, EAHeartbeat, MarketBar
@@ -111,39 +111,74 @@ def telemetry(request):
         point = _decimal(quote.get("point"), "quote.point")
         if bid <= 0 or ask < bid or point <= 0:
             raise ValueError("invalid quote values")
+        # New command EAs send one independent set per timeframe. Older EAs
+        # remain compatible through the original top-level timeframe/bars fields.
+        bar_sets = p.get("bar_sets")
+        if bar_sets is None:
+            bar_sets = [{"timeframe": timeframe, "bars": bars}]
+        if not isinstance(bar_sets, list) or len(bar_sets) > 4:
+            raise ValueError("bar_sets must contain at most four timeframe objects")
+
+        timeframe_seconds = {
+            "M1": 60, "M5": 300, "M15": 900, "H1": 3600,
+        }
         normalized_bars = []
-        m15_bars_by_timestamp = {}
-        is_m15 = timeframe.upper() == "M15"
-        for index, bar in enumerate(bars):
-            if not isinstance(bar, dict) or bar.get("closed") is not True:
-                raise ValueError(f"bars[{index}] must be a completed candle")
-            stamp = parse_datetime(str(bar.get("timestamp", "")))
-            if stamp is None or stamp.tzinfo is None:
-                raise ValueError(f"bars[{index}].timestamp must include timezone")
-            o = _decimal(bar.get("open"), f"bars[{index}].open")
-            h = _decimal(bar.get("high"), f"bars[{index}].high")
-            lo = _decimal(bar.get("low"), f"bars[{index}].low")
-            c = _decimal(bar.get("close"), f"bars[{index}].close")
-            vol = _decimal(bar.get("volume", 0), f"bars[{index}].volume")
-            if min(o, h, lo, c) <= 0 or vol < 0 or h < max(o, c, lo) or lo > min(o, c, h):
-                raise ValueError(f"bars[{index}] has invalid OHLCV values")
-            values = (o, h, lo, c, vol)
-            if is_m15:
-                stamp = _normalize_m15_timestamp(stamp, f"bars[{index}].timestamp")
-                previous_values = m15_bars_by_timestamp.get(stamp)
+        seen_bars = {}
+        total_bars = 0
+        seen_timeframes = set()
+        for set_index, bar_set in enumerate(bar_sets):
+            if not isinstance(bar_set, dict):
+                raise ValueError(f"bar_sets[{set_index}] must be an object")
+            bar_timeframe = str(bar_set.get("timeframe", "")).strip().upper()
+            if bar_timeframe not in timeframe_seconds:
+                raise ValueError(f"bar_sets[{set_index}].timeframe must be M1, M5, M15 or H1")
+            if bar_timeframe in seen_timeframes:
+                raise ValueError(f"duplicate bar timeframe: {bar_timeframe}")
+            seen_timeframes.add(bar_timeframe)
+            set_bars = bar_set.get("bars", [])
+            if not isinstance(set_bars, list) or len(set_bars) > 512:
+                raise ValueError(f"bar_sets[{set_index}].bars must contain at most 512 candles")
+            total_bars += len(set_bars)
+            if total_bars > 2048:
+                raise ValueError("at most 2048 candles may be ingested per telemetry request")
+
+            for index, bar in enumerate(set_bars):
+                field = f"bar_sets[{set_index}].bars[{index}]"
+                if not isinstance(bar, dict) or bar.get("closed") is not True:
+                    raise ValueError(f"{field} must be a completed candle")
+                stamp = parse_datetime(str(bar.get("timestamp", "")))
+                if stamp is None or stamp.tzinfo is None:
+                    raise ValueError(f"{field}.timestamp must include timezone")
+                stamp = stamp.astimezone(dt_timezone.utc)
+                if bar_timeframe == "M15":
+                    stamp = _normalize_m15_timestamp(stamp, f"{field}.timestamp")
+                elif int(stamp.timestamp()) % timeframe_seconds[bar_timeframe] != 0:
+                    raise ValueError(f"{field}.timestamp must align to a {bar_timeframe} candle boundary")
+
+                o = _decimal(bar.get("open"), f"{field}.open")
+                h = _decimal(bar.get("high"), f"{field}.high")
+                lo = _decimal(bar.get("low"), f"{field}.low")
+                c = _decimal(bar.get("close"), f"{field}.close")
+                vol = _decimal(bar.get("volume", 0), f"{field}.volume")
+                if min(o, h, lo, c) <= 0 or vol < 0 or h < max(o, c, lo) or lo > min(o, c, h):
+                    raise ValueError(f"{field} has invalid OHLCV values")
+
+                key = (bar_timeframe, stamp)
+                values = (o, h, lo, c, vol)
+                previous_values = seen_bars.get(key)
                 if previous_values is not None and previous_values != values:
                     raise ValueError(
-                        f"bars[{index}] conflicts with another candle at "
-                        f"normalized M15 timestamp {stamp.isoformat()}"
+                        f"{field} conflicts with another candle at "
+                        f"{bar_timeframe} timestamp {stamp.isoformat()}"
                     )
-                m15_bars_by_timestamp[stamp] = values
-            else:
-                normalized_bars.append((stamp, *values))
-        if is_m15:
-            normalized_bars.extend(
-                (stamp, *values)
-                for stamp, values in sorted(m15_bars_by_timestamp.items())
+                seen_bars[key] = values
+
+        normalized_bars = [
+            (bar_timeframe, stamp, *values)
+            for (bar_timeframe, stamp), values in sorted(
+                seen_bars.items(), key=lambda item: (item[0][0], item[0][1])
             )
+        ]
         symbol_info = _normalize_symbol_info(p.get("symbol_info"))
         account = p.get("account", {})
         positions = p.get("positions", [])
@@ -241,11 +276,49 @@ def telemetry(request):
                     },
                 )
 
-        for stamp, o, h, lo, c, vol in normalized_bars:
-            MarketBar.objects.update_or_create(
-                source=instance_id, symbol=symbol, timeframe=timeframe, timestamp=stamp,
-                defaults={"open": o, "high": h, "low": lo, "close": c, "volume": vol},
+        bar_groups = {}
+        for bar_timeframe, stamp, o, h, lo, c, vol in normalized_bars:
+            bar_groups.setdefault(bar_timeframe, []).append((stamp, o, h, lo, c, vol))
+
+        timeframe_ingestion = []
+        for bar_timeframe, rows in bar_groups.items():
+            query = MarketBar.objects.filter(
+                source=instance_id, symbol=symbol, timeframe=bar_timeframe,
             )
+            previous_latest = query.order_by("-timestamp").values_list("timestamp", flat=True).first()
+            candidate_times = [row[0] for row in rows]
+            existing_times = set(query.filter(timestamp__in=candidate_times).values_list("timestamp", flat=True))
+            new_rows = [row for row in rows if row[0] not in existing_times]
+            late_arrivals = sum(
+                1 for row in new_rows
+                if previous_latest is not None and row[0] < previous_latest
+            )
+            MarketBar.objects.bulk_create(
+                [
+                    MarketBar(
+                        source=instance_id, symbol=symbol, timeframe=bar_timeframe,
+                        timestamp=stamp, open=o, high=h, low=lo, close=c, volume=vol,
+                    )
+                    for stamp, o, h, lo, c, vol in new_rows
+                ],
+                ignore_conflicts=True,
+                batch_size=500,
+            )
+            latest = MarketBar.objects.filter(
+                source=instance_id, symbol=symbol, timeframe=bar_timeframe,
+            ).order_by("-timestamp").values_list("timestamp", flat=True).first()
+            latest_received = MarketBar.objects.filter(
+                source=instance_id, symbol=symbol, timeframe=bar_timeframe,
+            ).order_by("-received_at").values_list("received_at", flat=True).first()
+            timeframe_ingestion.append({
+                "timeframe": bar_timeframe,
+                "received_bars": len(rows),
+                "inserted_bars": len(new_rows),
+                "late_arrivals": late_arrivals,
+                "last_successful_candle_utc": latest.isoformat() if latest else None,
+                "last_received_at_utc": latest_received.isoformat() if latest_received else None,
+            })
+
         EAHeartbeat.objects.update_or_create(
             instance_id=instance_id,
             defaults={
@@ -278,6 +351,90 @@ def telemetry(request):
             },
         )
     return JsonResponse({
-        "ok": True, "stored_bars": len(normalized_bars),
-        "telemetry_only": True, "trading_authorization": False,
+        "ok": True,
+        "stored_bars": len(normalized_bars),
+        "inserted_bars": sum(item["inserted_bars"] for item in timeframe_ingestion),
+        "timeframes": timeframe_ingestion,
+        "telemetry_only": True,
+        "trading_authorization": False,
+    })
+
+
+
+@require_GET
+def market_data_status(request):
+    """Read-only coverage and freshness report for persisted market candles."""
+    denied = BearerTokenRequired.reject_if_invalid(request)
+    if denied:
+        return denied
+
+    symbol = str(request.GET.get("symbol", "XAUUSD_o")).strip()[:32]
+    source = str(request.GET.get("source", "")).strip()[:128]
+    if not symbol:
+        return JsonResponse({"ok": False, "error": "symbol is required"}, status=400)
+
+    sources = list(
+        MarketBar.objects.filter(symbol=symbol)
+        .exclude(source="")
+        .values_list("source", flat=True).distinct().order_by("source")
+    )
+    if source:
+        sources = [item for item in sources if item == source]
+        if not sources:
+            sources = [source]
+
+    intervals = {"M1": 60, "M5": 300, "M15": 900, "H1": 3600}
+    reports = []
+    for source_name in sources:
+        for bar_timeframe, interval in intervals.items():
+            query = MarketBar.objects.filter(
+                source=source_name, symbol=symbol, timeframe=bar_timeframe,
+            )
+            count = query.count()
+            latest_row = query.order_by("-timestamp").only("timestamp", "received_at").first()
+            oldest = query.order_by("timestamp").values_list("timestamp", flat=True).first()
+            recent_times = list(
+                query.order_by("-timestamp").values_list("timestamp", flat=True)[:500]
+            )
+            recent_times.reverse()
+            potential_gaps = []
+            for previous, current in zip(recent_times, recent_times[1:]):
+                gap_seconds = int((current - previous).total_seconds())
+                # Only same-weekday, same-date gaps are surfaced. Overnight,
+                # weekend and broker-session closures are not called missing data.
+                if (
+                    gap_seconds > interval * 1.5
+                    and previous.date() == current.date()
+                    and previous.weekday() < 5
+                    and current.weekday() < 5
+                ):
+                    potential_gaps.append({
+                        "from_utc": previous.isoformat(),
+                        "to_utc": current.isoformat(),
+                        "missing_interval_seconds": gap_seconds,
+                    })
+            reports.append({
+                "source": source_name,
+                "symbol": symbol,
+                "timeframe": bar_timeframe,
+                "candle_count": count,
+                "oldest_candle_utc": oldest.isoformat() if oldest else None,
+                "last_successful_candle_utc": (
+                    latest_row.timestamp.isoformat() if latest_row else None
+                ),
+                "last_received_at_utc": (
+                    latest_row.received_at.isoformat() if latest_row else None
+                ),
+                "potential_intraday_gaps": potential_gaps,
+                "status": "COLLECTING" if count else "NO_DATA",
+            })
+
+    return JsonResponse({
+        "ok": True,
+        "symbol": symbol,
+        "timeframes": reports,
+        "note": (
+            "Gap entries are candidates for review, not definitive missing-candle "
+            "alerts; broker maintenance and instrument-specific sessions must be considered."
+        ),
     })
