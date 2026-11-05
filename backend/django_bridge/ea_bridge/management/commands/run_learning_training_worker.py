@@ -3,7 +3,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
+
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
@@ -50,6 +54,27 @@ def _claim_job():
         return job.pk
 
 
+def _persist_model_artifact(job, run, artifact_bytes):
+    """Write an immutable, versioned Joblib artifact to persistent Django storage."""
+    if not isinstance(artifact_bytes, bytes) or not artifact_bytes:
+        raise ValueError("Training returned an empty or invalid model artifact.")
+    digest = hashlib.sha256(artifact_bytes).hexdigest()
+    symbol = re.sub(r"[^A-Za-z0-9_-]+", "_", job.symbol).strip("_") or "unknown"
+    relative_path = f"learning_models/{symbol}/{run.model_key}/{run.version}.pkl"
+    if default_storage.exists(relative_path):
+        with default_storage.open(relative_path, "rb") as existing:
+            existing_digest = hashlib.sha256(existing.read()).hexdigest()
+        if existing_digest != digest:
+            raise ValueError("Artifact version collision: existing file checksum does not match.")
+        saved_path = relative_path
+    else:
+        saved_path = default_storage.save(relative_path, ContentFile(artifact_bytes))
+    run.artifact_path = saved_path
+    run.artifact_sha256 = digest
+    run.artifact_size_bytes = len(artifact_bytes)
+    run.artifact_format = "joblib"
+
+
 def _run_model(job, run):
     run.training_started_at = timezone.now()
     run.status = LearningModelRun.Status.RUNNING
@@ -57,9 +82,10 @@ def _run_model(job, run):
     try:
         if run.model_key in PIPELINES:
             trained = train_trade_outcome_pipeline(run.model_key, symbol=job.symbol)
-            run.metrics = {**trained["metrics"], "_artifact_joblib_b64": trained["artifact"]}
+            run.metrics = trained["metrics"]
             run.validation = trained["validation"]
             run.version = trained["version"]
+            _persist_model_artifact(job, run, trained["artifact_bytes"])
             run.status = (
                 LearningModelRun.Status.PASSED
                 if trained["validation"]["passed"]
@@ -165,6 +191,7 @@ def _run_model(job, run):
         run.training_finished_at = timezone.now()
         run.save(update_fields=[
             "status", "metrics", "validation", "version", "error",
+            "artifact_path", "artifact_sha256", "artifact_size_bytes", "artifact_format",
             "training_started_at", "training_finished_at",
         ])
 
