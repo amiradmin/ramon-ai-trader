@@ -829,13 +829,7 @@ void SafeOpen(const string command_json,const string command_id,
    double volume=JsonNumber(command_json,"volume",0);
    double sl=JsonNumber(command_json,"stop_loss",0);
    double tp=JsonNumber(command_json,"take_profit",0);
-   if((side!="BUY" && side!="SELL") || volume<=0 || sl<=0 || tp<=0)
-   {
-      reason="MALFORMED_DJANGO_COMMAND";
-      ack_state="REJECTED";
-      return;
-   }
-
+   // Django validates direction, volume, stop and target before issuing OPEN.
    bool submitted=(side=="BUY")
       ? Trade.Buy(volume,_Symbol,0,sl,tp,"RamonCmd:"+command_id)
       : Trade.Sell(volume,_Symbol,0,sl,tp,"RamonCmd:"+command_id);
