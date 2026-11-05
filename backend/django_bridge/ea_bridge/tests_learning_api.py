@@ -7,7 +7,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone as django_timezone
 
 from ea_bridge.learning_store import DjangoOutcomeStore
-from ea_bridge.models import EACommand, DecisionThresholdConfig, LearningRecommendation, LearningTradeOutcome, StrategyDecisionRecord
+from ea_bridge.models import EACommand, DecisionThresholdConfig, LearningRecommendation, LearningTradeOutcome, RiskVerdictRecord, StrategyDecisionRecord
 from ramon_pipeline.learning import EntryExitAnalyzer, LearningEngine, OptimizationEngine
 from ramon_pipeline.signalflow.learning import InMemoryOutcomeStore, Learning
 
@@ -75,6 +75,92 @@ class LearningOutcomeApiTests(TestCase):
         self.assertEqual(row.tags["setup_type"], "PULLBACK")
         self.assertEqual(row.tags["strategy_profile"], "BALANCED")
         self.assertTrue(row.tags["forecast_confirmed"])
+
+
+    @override_settings(EA_BEARER_TOKEN="learning-test-token")
+    def test_command_linked_outcome_uses_django_risk_and_broker_fill_slippage(self):
+        decision = StrategyDecisionRecord.objects.create(
+            decision_id="decision-risk-001", symbol="XAUUSD_o", action="BUY",
+            confidence=0.8, rationale_code="SIGNALFLOW_APPROVED",
+            model_version="test-v1",
+            features={
+                "strategy_profile": "BALANCED",
+                "market_snapshot": {"bid": 2300.10, "ask": 2300.20, "point": 0.01},
+                "stages": {"opportunities": {"regime": {"label": "BULLISH"}}},
+            },
+        )
+        verdict = RiskVerdictRecord.objects.create(
+            decision_id=decision.decision_id, approved=True,
+            reason_code="RISK_APPROVED_ADVISORY_ONLY",
+            approved_volume="0.01", stop_loss="2290.0", take_profit="2320.0",
+            details={"risk_stage": {"estimated_risk": 12.5, "volume": 0.01}},
+        )
+        EACommand.objects.create(
+            command_id="ramon-open-risk-001",
+            instance_id="ramon-command-ea-1", account_login="123456",
+            symbol="XAUUSD_o", action=EACommand.Action.OPEN,
+            payload={"side": "BUY", "volume": 0.01},
+            decision_id=decision.decision_id, risk_verdict_id=str(verdict.pk),
+            execution_authorized=True, state=EACommand.State.EXECUTED,
+            expires_at=django_timezone.now() + timedelta(minutes=1),
+            result={"broker_ticket": "risk-ticket-001"},
+        )
+        payload = {
+            "trade_id": "123456:position-risk-001",
+            "broker_ticket": "risk-ticket-001",
+            "instance_id": "ramon-command-ea-1", "account_login": "123456",
+            "symbol": "XAUUSD_o", "side": "BUY",
+            "entry_price": 2300.25, "realized_pnl": "6.25",
+            "opened_at": "2026-11-05T10:00:00Z",
+            "closed_at": "2026-11-05T11:00:00Z",
+        }
+        response = self.client.post(
+            self.url, data=json.dumps(payload), content_type="application/json", **self.headers
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+        row = LearningTradeOutcome.objects.get(trade_id="123456:position-risk-001")
+        self.assertEqual(row.decision_id, decision.decision_id)
+        self.assertEqual(row.risk_amount, 12.5)
+        self.assertAlmostEqual(float(row.r_multiple), 0.5)
+        self.assertEqual(row.execution_metrics["slippage_points"], 5.0)
+
+    @override_settings(EA_BEARER_TOKEN="learning-test-token")
+    def test_command_without_approved_risk_keeps_r_multiple_unavailable(self):
+        decision = StrategyDecisionRecord.objects.create(
+            decision_id="decision-no-risk-001", symbol="XAUUSD_o", action="BUY",
+            confidence=0.8, rationale_code="SIGNALFLOW_APPROVED",
+            model_version="test-v1", features={"market_snapshot": {"ask": 2300.2, "point": 0.01}},
+        )
+        verdict = RiskVerdictRecord.objects.create(
+            decision_id=decision.decision_id, approved=False,
+            reason_code="RISK_REJECTED", approved_volume="0",
+            details={"risk_stage": {"estimated_risk": 12.5, "volume": 0.01}},
+        )
+        EACommand.objects.create(
+            command_id="ramon-open-no-risk-001",
+            instance_id="ramon-command-ea-1", account_login="123456",
+            symbol="XAUUSD_o", action=EACommand.Action.OPEN,
+            payload={"side": "BUY", "volume": 0.01},
+            decision_id=decision.decision_id, risk_verdict_id=str(verdict.pk),
+            execution_authorized=True, state=EACommand.State.EXECUTED,
+            expires_at=django_timezone.now() + timedelta(minutes=1),
+            result={"broker_ticket": "no-risk-ticket-001"},
+        )
+        payload = {
+            "trade_id": "123456:position-no-risk-001",
+            "broker_ticket": "no-risk-ticket-001",
+            "instance_id": "ramon-command-ea-1", "account_login": "123456",
+            "symbol": "XAUUSD_o", "realized_pnl": "6.25",
+            "opened_at": "2026-11-05T10:00:00Z",
+            "closed_at": "2026-11-05T11:00:00Z",
+        }
+        response = self.client.post(
+            self.url, data=json.dumps(payload), content_type="application/json", **self.headers
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+        row = LearningTradeOutcome.objects.get(trade_id="123456:position-no-risk-001")
+        self.assertIsNone(row.risk_amount)
+        self.assertIsNone(row.r_multiple)
 
     @override_settings(EA_BEARER_TOKEN="learning-test-token")
     def test_duplicate_is_idempotent_and_conflict_does_not_overwrite(self):
