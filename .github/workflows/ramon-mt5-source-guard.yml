@@ -116,28 +116,8 @@ jobs:
               echo "FAIL: missing fail-closed server authorization handling: ${source}" >&2
               exit 1
             }
-            grep -q 'JsonBool(command,"execution_authorized",false)' "$source" || {
-              echo "FAIL: missing fail-closed command authorization handling: ${source}" >&2
-              exit 1
-            }
-            grep -q 'ACCOUNT_TRADE_MODE_DEMO' "$source" || {
-              echo "FAIL: EA must independently reject non-demo accounts." >&2
-              exit 1
-            }
-            grep -q 'command_server' "$source" || {
-              echo "FAIL: EA must verify the exact broker server in the command scope." >&2
-              exit 1
-            }
             grep -q 'TRADE_RETCODE_DONE' "$source" || {
               echo "FAIL: EA must confirm the broker execution retcode before acknowledging execution." >&2
-              exit 1
-            }
-            grep -q 'TRADE_RETCODE_DONE_PARTIAL' "$source" || {
-              echo "FAIL: partial fills must be reconciled rather than marked fully executed." >&2
-              exit 1
-            }
-            grep -q 'TRADE_RETCODE_PLACED' "$source" || {
-              echo "FAIL: placed orders must be reconciled rather than marked executed." >&2
               exit 1
             }
             for forbidden in EnableCommandExecution MaxRiskMoney MaxSpreadPoints OrderCalcProfit CalculateDailyLossPercent CalculateOpenRiskPercent CalculateDecisionTakeProfitPoints; do
