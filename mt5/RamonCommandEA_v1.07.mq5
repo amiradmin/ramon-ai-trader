@@ -883,8 +883,6 @@ bool SafeOpen(const string command_json,const string command_id,
 bool LocalExecutionPermitted(string &reason)
 {
    // Account mode and terminal permissions are broker/environment facts.
-   if(AccountInfoInteger(ACCOUNT_TRADE_MODE)!=ACCOUNT_TRADE_MODE_DEMO)
-   { reason="DEMO_ACCOUNT_REQUIRED"; return false; }
    if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) || !MQLInfoInteger(MQL_TRADE_ALLOWED))
    { reason="TERMINAL_OR_EA_TRADING_PERMISSION_DENIED"; return false; }
    reason=""; return true;
@@ -963,10 +961,15 @@ bool ProcessCommand(const string response)
 
    if(action=="OPEN")
    {
+      if(AccountInfoInteger(ACCOUNT_TRADE_MODE)!=ACCOUNT_TRADE_MODE_DEMO)
+      {
+         LastCommandId=command_id;
+         return AckCommand(command_id,"REJECTED","DEMO_ACCOUNT_REQUIRED");
+      }
       ulong ticket=0;
       string reason="";
       string ack_state="REJECTED";
-      bool submitted=SafeOpen(payload,command_id,ticket,reason,ack_state);
+      SafeOpen(payload,command_id,ticket,reason,ack_state);
       LastCommandId=command_id;
       return AckCommand(command_id,ack_state,reason,ticket);
    }
