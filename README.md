@@ -2,7 +2,7 @@
 
 Ramon is a local MT5 gold-trading project whose **Django service owns strategy decisions, risk checks, and command authorization**. The MT5 Expert Advisor (EA) is a telemetry/command bridge and broker-side executor; it must not become a second strategy engine.
 
-> **Deployment entry point:** `scripts/update_build_ramon.sh` is the single-command local deployment. It starts and validates the Compose services and compiles/installs only `RamonCommandEA_v1.06.ex5`. GitHub Actions verifies the command EA source contract and MetaEditor compilation. Local deployment still needs to be run on the target machine.
+> **Deployment entry point:** `scripts/update_build_ramon.sh` is the single-command local deployment. It starts and validates the Compose services and compiles/installs only `RamonCommandEA_v1.07.ex5`. GitHub Actions verifies the command EA source contract and MetaEditor compilation. Local deployment still needs to be run on the target machine.
 
 ## Current supported stack
 
@@ -29,11 +29,11 @@ cd ~/Documents/Presentation/ramon-ai-trader-bridge && bash scripts/update_build_
 
 If the clone lives elsewhere, set `RAMON_REPO_DIR` to its absolute path before running the script. Optional build settings include `RAMON_MT5_PREFIX`, `RAMON_MT5_TERMINAL_ID`, `RAMON_METAEDITOR`, and `RAMON_HEALTH_URL`; see [the update/build runbook](docs/operations/one-command-update-build.md).
 
-The script validates the Compose configuration, builds/starts services, applies forward migrations, runs Django's system check, verifies Django/Redis/TimescaleDB health and worker status, backs up the current command EA, then compiles and installs only `RamonCommandEA_v1.06.mq5`. The legacy `Ramon_v0.62.x` strategy EA is deliberately excluded to avoid installing a second EA alongside the command architecture. The script does not launch MT5, attach an EA, change trading flags, or place orders. It stops rather than accepting a missing compiler log or a stale EX5 as a successful build.
+The script validates the Compose configuration, builds/starts services, applies forward migrations, runs Django's system check, verifies Django/Redis/TimescaleDB health and worker status, backs up the current command EA, then compiles and installs only `RamonCommandEA_v1.07.mq5`. The legacy `Ramon_v0.62.x` strategy EA is deliberately excluded to avoid installing a second EA alongside the command architecture. The script does not launch MT5, attach an EA, change trading flags, or place orders. It stops rather than accepting a missing compiler log or a stale EX5 as a successful build.
 
 ## EA and API
 
-The versioned command EA source is `mt5/RamonCommandEA_v1.06.mq5`. It defaults to:
+The versioned command EA source is `mt5/RamonCommandEA_v1.07.mq5`. It defaults to:
 
 - empty `DjangoBearerToken` (set only in MT5 Inputs on the local machine)
 - no local strategy or risk-policy settings; the EA accepts an order only when Django supplies both `trading_authorization=true` and `execution_authorized=true`, and terminal/EA trading permissions allow it
@@ -46,13 +46,20 @@ Authenticated API routes are under `/api/ea/v1/`:
 | GET | `handshake` | Protocol handshake; never grants trading authorization |
 | POST | `heartbeat` | EA health/status heartbeat |
 | POST | `events` | Event ingestion; Redis pipeline use is controlled by configuration |
-| POST | `telemetry` | Account, quote, and completed-bar telemetry |
+| POST | `telemetry` | Account, quote, and completed M1/M5/M15/H1 candle telemetry |
+| GET | `market-data/status` | Per-source/timeframe candle coverage, last persisted candle, freshness, and potential intraday gaps |
 | POST | `decision` | Advisory Django decision and auditable risk verdict |
 | POST | `commands/next` | Poll/claim an eligible, scoped command |
 | POST | `commands/ack` | Acknowledge command lifecycle and broker outcome |
 | GET | `status` | Read EA heartbeat status |
 
 The decision endpoint can call the command producer, but creation and delivery remain gated by both `RAMON_EA_COMMAND_CREATION_ENABLED` and `RAMON_EA_COMMAND_EXECUTION_ENABLED`. Both default to `0`. A BUY/SELL decision alone is not permission to place an order.
+
+## Multi-timeframe market data
+
+The command EA sends completed M1, M5, M15 and H1 candles through the existing authenticated Django telemetry endpoint. Django validates and persists each timeframe independently in the existing `MarketBar` table; no separate candle tables are required. Repeated deliveries are idempotent, and the EA advances its in-memory candle cursor only after Django accepts the telemetry request. After an EA restart, its bounded recent history is sent again and database uniqueness prevents duplicate rows.
+
+Use `GET /api/ea/v1/market-data/status?symbol=XAUUSD_o` with the EA bearer token to inspect row counts, oldest/latest candle timestamps, last receipt time and candidate intraday gaps per source/timeframe. Gap entries are review candidates, not definitive outages: broker maintenance and instrument-specific sessions must be considered. The initial EA history request is capped at 512 completed candles per timeframe; collection then continues incrementally. This is not a substitute for a deeper broker-history backfill.
 
 ## Safety and validation
 
@@ -69,7 +76,7 @@ Useful runbooks:
 - [EA heartbeat troubleshooting](docs/EA-HEARTBEAT-TROUBLESHOOTING.md)
 - [Daily risk baseline recovery](docs/operations/daily-risk-baseline-recovery.md)
 - [Demo-only activation checklist](docs/operations/demo-trading-activation.md)
-- [Command EA v1.06 validation](docs/ramon-commandea-v1.06-validation.md)
+- [Command EA v1.07 validation](docs/ramon-commandea-v1.06-validation.md)
 - [Learning Engine package architecture](docs/architecture/learning-engine-package.md)
 - Learning Engine dashboard: `/api/ea/v1/learning/dashboard` (linked from the main Ramon dashboard)
 - [Django command protocol](docs/architecture/django-command-ea-protocol-v1.md)
