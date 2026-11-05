@@ -43,6 +43,9 @@ USE_I18N = True
 USE_TZ = True
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+# Persistent binary artifacts are stored outside the source tree and shared by Django workers.
+MEDIA_URL = "/media/"
+MEDIA_ROOT = Path(os.environ.get("RAMON_MEDIA_ROOT", str(BASE_DIR / "media")))
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 EA_BEARER_TOKEN = os.environ.get("RAMON_EA_BEARER_TOKEN", "")
 EA_MAX_BODY_BYTES = int(os.environ.get("RAMON_EA_MAX_BODY_BYTES", "65536"))
