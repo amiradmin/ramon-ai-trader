@@ -26,6 +26,8 @@ services:
       RAMON_EA_COMMAND_CREATION_ENABLED: "${RAMON_EA_COMMAND_CREATION_ENABLED:-0}"
       RAMON_EA_COMMAND_EXECUTION_ENABLED: "${RAMON_EA_COMMAND_EXECUTION_ENABLED:-0}"
       RAMON_PIPELINE_INGEST_ENABLED: "0"
+    volumes:
+      - learning_models:/app/media
     ports:
       - "127.0.0.1:8017:8016"
     depends_on:
@@ -107,6 +109,8 @@ services:
       DJANGO_DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       RAMON_REDIS_URL: redis://redis:6379/0
     command: ["python", "manage.py", "run_learning_training_worker", "--poll-seconds", "2"]
+    volumes:
+      - learning_models:/app/media
     depends_on:
       django:
         condition: service_healthy
@@ -159,3 +163,4 @@ networks:
 volumes:
   timescale_data:
   redis_data:
+  learning_models:
