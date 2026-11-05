@@ -184,7 +184,7 @@ jobs:
           grep -Fq 'DEAL_FEE' "$production_source"
           grep -Fq 'PostJson("/learning/outcomes"' "$production_source"
           grep -Fq 'broker_ticket' "$production_source"
-          grep -Fq 'RamonCommandEA v1.06' "$production_source"
+          grep -Fq 'RamonCommandEA v1.07' "$production_source"
 
           echo "Static safety contract passed. This does not replace MetaEditor compilation or demo validation."
 
