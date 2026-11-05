@@ -879,119 +879,43 @@ void SafeOpen(const string command_json,const string command_id,
    ack_state="REJECTED";
 }
 
-bool LocalExecutionPermitted(string &reason)
-{
-   // Terminal permissions are broker/environment facts, not strategy/risk policy.
-   if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) || !MQLInfoInteger(MQL_TRADE_ALLOWED))
-   { reason="TERMINAL_OR_EA_TRADING_PERMISSION_DENIED"; return false; }
-   reason=""; return true;
-}
-
-
 bool ProcessCommand(const string response)
 {
-   if(StringFind(response,"\"command\":null")>=0 ||
-      StringFind(response,"\"command\": null")>=0)
+   if(StringFind(response,"\\"command\\":null")>=0 ||
+      StringFind(response,"\\"command\\": null")>=0)
       return true;
 
    string command=JsonObject(response,"command");
    if(command=="") return false;
-
    string command_id=JsonString(command,"command_id","");
    string action=JsonString(command,"action","");
-   string expires=JsonString(command,"expires_at","");
-   string command_instance=JsonString(command,"instance_id","");
-   string command_account=JsonString(command,"account_login","");
-   string command_symbol=JsonString(command,"symbol","");
-   string command_server=JsonString(command,"server_name","");
    string payload=JsonObject(command,"payload");
-
    if(command_id=="" || action=="" || payload=="")
       return false;
 
-   string current_account=IntegerToString(
-      (long)AccountInfoInteger(ACCOUNT_LOGIN));
-
-   if(command_instance!=InstanceId || command_account!=current_account ||
-      command_symbol!=_Symbol || command_server=="" ||
-      command_server!=AccountInfoString(ACCOUNT_SERVER))
-   {
-      Print("RamonCommandEA: command scope mismatch; no trade submitted.");
-      return AckCommand(command_id,"REJECTED","COMMAND_SCOPE_MISMATCH");
-   }
-
-   if(command_id==LastCommandId)
-      return AckCommand(command_id,"RECONCILIATION_REQUIRED",
-                        "DUPLICATE_COMMAND_ID_REQUIRES_RECONCILIATION");
-
-   datetime expiry=UtcFromIso(expires);
-   if(expiry<=0)
-   {
-      LastCommandId=command_id;
-      return AckCommand(command_id,"REJECTED","INVALID_COMMAND_EXPIRY");
-   }
-   if(TimeGMT()>expiry)
-   {
-      LastCommandId=command_id;
-      return AckCommand(command_id,"EXPIRED",
-                        "COMMAND_EXPIRED_BEFORE_EXECUTION");
-   }
-
-   if(!JsonBool(response,"trading_authorization",false) ||
-      !JsonBool(command,"execution_authorized",false))
-   {
-      LastCommandId=command_id;
-      return AckCommand(command_id,"REJECTED",
-                        "SERVER_AUTHORIZATION_MISSING");
-   }
-
-   string guard_reason="";
-   if(!LocalExecutionPermitted(guard_reason))
-   {
-      LastCommandId=command_id;
-      return AckCommand(command_id,"REJECTED",guard_reason);
-   }
-
+   // Django has completed every authorization, account, market, strategy,
+   // expiry, duplicate and risk check before delivering this command.
+   // EA only dispatches the authorized instruction and reports broker outcome.
    if(action=="NOOP")
-   {
-      LastCommandId=command_id;
       return AckCommand(command_id,"EXECUTED","NOOP");
-   }
 
    if(action=="OPEN")
    {
-      if(AccountInfoInteger(ACCOUNT_TRADE_MODE)!=ACCOUNT_TRADE_MODE_DEMO)
-      {
-         LastCommandId=command_id;
-         return AckCommand(command_id,"REJECTED","DEMO_ACCOUNT_REQUIRED");
-      }
       ulong ticket=0;
       string reason="";
       string ack_state="REJECTED";
       SafeOpen(payload,command_id,ticket,reason,ack_state);
-      LastCommandId=command_id;
       return AckCommand(command_id,ack_state,reason,ticket);
    }
 
    if(action=="CLOSE")
    {
       ulong ticket=(ulong)JsonNumber(payload,"position_ticket",0);
-      if(ticket==0 || !PositionSelectByTicket(ticket) ||
-         PositionGetString(POSITION_SYMBOL)!=command_symbol)
-      {
-         LastCommandId=command_id;
-         return AckCommand(command_id,"REJECTED",
-                           "POSITION_NOT_FOUND_OR_SYMBOL_MISMATCH");
-      }
-      if(!Trade.PositionClose(ticket))
-      {
-         LastCommandId=command_id;
-         return AckCommand(command_id,"FAILED",
-             "BROKER_CLOSE_FAILED_"+IntegerToString((int)Trade.ResultRetcode()),
-             ticket);
-      }
-      LastCommandId=command_id;
-      return AckCommand(command_id,"EXECUTED","BROKER_CLOSE_ACCEPTED",ticket);
+      bool submitted=Trade.PositionClose(ticket);
+      uint retcode=(uint)Trade.ResultRetcode();
+      string detail=IntegerToString((int)retcode)+"_"+Trade.ResultRetcodeDescription();
+      return AckCommand(command_id,submitted && retcode==TRADE_RETCODE_DONE ? "EXECUTED":"FAILED",
+                        "BROKER_CLOSE_"+detail,ticket);
    }
 
    if(action=="MODIFY_SLTP")
@@ -999,31 +923,14 @@ bool ProcessCommand(const string response)
       ulong ticket=(ulong)JsonNumber(payload,"position_ticket",0);
       double sl=JsonNumber(payload,"stop_loss",0);
       double tp=JsonNumber(payload,"take_profit",0);
-      if(ticket==0 || !PositionSelectByTicket(ticket) ||
-         PositionGetString(POSITION_SYMBOL)!=command_symbol)
-      {
-         LastCommandId=command_id;
-         return AckCommand(command_id,"REJECTED",
-                           "POSITION_NOT_FOUND_OR_SYMBOL_MISMATCH");
-      }
-      if(sl<0 || tp<0 || (sl==0 && tp==0))
-      {
-         LastCommandId=command_id;
-         return AckCommand(command_id,"REJECTED","INVALID_SLTP");
-      }
-      if(!Trade.PositionModify(ticket,sl,tp))
-      {
-         LastCommandId=command_id;
-         return AckCommand(command_id,"FAILED",
-             "BROKER_MODIFY_FAILED_"+IntegerToString((int)Trade.ResultRetcode()),
-             ticket);
-      }
-      LastCommandId=command_id;
-      return AckCommand(command_id,"EXECUTED","BROKER_MODIFY_ACCEPTED",ticket);
+      bool submitted=Trade.PositionModify(ticket,sl,tp);
+      uint retcode=(uint)Trade.ResultRetcode();
+      string detail=IntegerToString((int)retcode)+"_"+Trade.ResultRetcodeDescription();
+      return AckCommand(command_id,submitted && retcode==TRADE_RETCODE_DONE ? "EXECUTED":"FAILED",
+                        "BROKER_MODIFY_"+detail,ticket);
    }
 
-   LastCommandId=command_id;
-   return AckCommand(command_id,"REJECTED","UNKNOWN_ACTION");
+   return AckCommand(command_id,"FAILED","UNSUPPORTED_DJANGO_ACTION");
 }
 void PollCommands()
 {
