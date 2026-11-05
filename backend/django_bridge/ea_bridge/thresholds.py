@@ -51,7 +51,7 @@ DEMO_DEFAULTS = {
 STANDARD_DEFAULTS = {
     "opportunities": {"minimum_score":0.55,"adx_trending":12.0,"adx_ranging":10.0,"min_ema_separation_atr":0.20,"regime_lookback":8,"support_tolerance_atr":0.65,"atr_ratio_min":0.6,"atr_ratio_max":2.5,"min_impulse_atr":1.5,"min_retracement":0.20,"max_retracement":0.82,"zone_tolerance_atr":0.40,"max_bars_since_pullback_low":8,"rsi_overbought":75.0,"breakout_lookback":20,"breakout_buffer_atr":0.10,"breakout_retest_tolerance_atr":0.25,"breakout_max_retest_bars":3},
     "entry_timing": {"minimum_quality":0.55,"maximum_spread_points":80.0,"max_signal_age_bars":1.0,"max_chase_atr":0.5,"min_risk_room_atr":0.25,"max_spread_atr":0.20,"max_spread_to_risk":0.25},
-    "risk_management": {"maximum_risk_percent":0.5,"max_total_risk_percent":2.0,"max_daily_loss_percent":3.0,"stop_buffer_atr":0.25,"min_stop_atr":0.5,"max_stop_atr":3.5,"target_reward_risk":1.25,"min_reward_risk":1.2},
+    "risk_management": {"maximum_risk_percent":0.5,"max_total_risk_percent":2.0,"stop_buffer_atr":0.25,"min_stop_atr":0.5,"max_stop_atr":3.5,"target_reward_risk":1.25,"min_reward_risk":1.2},
 }
 
 def defaults_for(profile):
