@@ -128,7 +128,8 @@ def _linked_open_command(payload, instance_id, account_login):
     command = commands.order_by("-created_at").first()
     if command is None:
         return None
-    if broker_ticket and command.result.get("broker_ticket") not in (None, "", broker_ticket):
+    command_result = command.result if isinstance(command.result, dict) else {}
+    if broker_ticket and command_result.get("broker_ticket") not in (None, "", broker_ticket):
         raise ValueError("broker_ticket does not match the linked Django command")
     supplied_decision_id = str(payload.get("decision_id") or "").strip()
     if supplied_decision_id and supplied_decision_id != command.decision_id:
