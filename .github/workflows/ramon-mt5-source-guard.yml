@@ -112,10 +112,12 @@ jobs:
               echo "FAIL: broker-local day field is missing: ${source}" >&2
               exit 1
             }
-            grep -q 'JsonBool(response,"trading_authorization",false)' "$source" || {
-              echo "FAIL: missing fail-closed server authorization handling: ${source}" >&2
-              exit 1
-            }
+            for django_only_guard in ACCOUNT_TRADE_MODE_DEMO LocalExecutionPermitted COMMAND_SCOPE_MISMATCH SERVER_AUTHORIZATION_MISSING COMMAND_EXPIRED_BEFORE_EXECUTION; do
+              if grep -Fq "$django_only_guard" "$source"; then
+                echo "FAIL: EA must not perform Django-owned authorization checks: $django_only_guard (${source})" >&2
+                exit 1
+              fi
+            done
             grep -q 'TRADE_RETCODE_DONE' "$source" || {
               echo "FAIL: EA must confirm the broker execution retcode before acknowledging execution." >&2
               exit 1
