@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from django.test import TestCase
 
-from ea_bridge.models import EAHeartbeat, MarketBar, StrategyDecisionRecord
+from ea_bridge.models import EAHeartbeat, MarketBar, RiskVerdictRecord, StrategyDecisionRecord
 
 
 class DashboardMarketSnapshotTests(TestCase):
@@ -70,3 +70,83 @@ class DashboardMarketSnapshotTests(TestCase):
         self.assertNotIn("account_login", data["broker"])
         self.assertNotIn("login", data["broker"]["account"])
         self.assertEqual(data["thresholds"]["profile"], "demo")
+
+
+class DashboardRiskVerdictTests(TestCase):
+    def test_dashboard_uses_persisted_risk_verdict_instead_of_pipeline_stage_pass(self):
+        StrategyDecisionRecord.objects.create(
+            decision_id="risk-verdict-decision",
+            symbol="XAUUSD_o",
+            action="BUY",
+            confidence=0.91,
+            rationale_code="SIGNALFLOW_APPROVED",
+            model_version="django-signalflow-structural-v2",
+            features={
+                "approved": True,
+                "stages": {
+                    "opportunities": {"approved": True, "status": "PASSED"},
+                    "entry_timing": {"approved": True, "status": "PASSED"},
+                    # This earlier stage result must not override the final verdict.
+                    "risk_management": {"approved": True, "status": "PASSED"},
+                },
+            },
+        )
+        RiskVerdictRecord.objects.create(
+            decision_id="risk-verdict-decision",
+            approved=False,
+            reason_code="UPSTREAM_STAGE_REJECTED",
+            approved_volume=Decimal("0"),
+            details={
+                "risk_stage": {
+                    "approved": False,
+                    "status": "REJECTED",
+                    "reason": "UPSTREAM_STAGE_REJECTED",
+                    "checks": [
+                        {
+                            "name": "risk_input_validation",
+                            "passed": None,
+                            "status": "NOT_EVALUATED",
+                        }
+                    ],
+                }
+            },
+        )
+
+        response = self.client.get("/api/ea/v1/dashboard-data")
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.content)
+        decision = data["decisions"][0]
+
+        self.assertFalse(decision["risk_verdict"]["approved"])
+        self.assertEqual(decision["risk_verdict"]["status"], "NOT_EVALUATED")
+        self.assertEqual(decision["risk_verdict"]["reason"], "UPSTREAM_STAGE_REJECTED")
+        self.assertEqual(
+            decision["risk_verdict"]["checks"][0]["status"],
+            "NOT_EVALUATED",
+        )
+        # Preserve the original pipeline evidence; the client applies the
+        # authoritative persisted verdict when rendering the Risk Management stage.
+        self.assertTrue(decision["features"]["stages"]["risk_management"]["approved"])
+
+    def test_dashboard_reports_missing_final_risk_verdict_as_not_evaluated(self):
+        StrategyDecisionRecord.objects.create(
+            decision_id="missing-risk-verdict",
+            symbol="XAUUSD_o",
+            action="BUY",
+            confidence=0.8,
+            rationale_code="SIGNALFLOW_APPROVED",
+            model_version="django-signalflow-structural-v2",
+            features={
+                "approved": True,
+                "stages": {
+                    "opportunities": {"approved": True, "status": "PASSED"},
+                    "entry_timing": {"approved": True, "status": "PASSED"},
+                    "risk_management": {"approved": True, "status": "PASSED"},
+                },
+            },
+        )
+
+        response = self.client.get("/api/ea/v1/dashboard-data")
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.content)
+        self.assertIsNone(data["decisions"][0]["risk_verdict"])

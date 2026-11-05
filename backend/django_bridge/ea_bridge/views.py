@@ -269,10 +269,51 @@ def _dashboard_execution_state(latest_symbol=""):
 
 @require_GET
 def dashboard_data(request):
-    """Read-only JSON feed for the local Ramon dashboard."""
+    """Read-only JSON feed with the persisted final risk verdict for each decision."""
     rows = list(StrategyDecisionRecord.objects.order_by("-created_at")[:50])
+    decision_ids = [row.decision_id for row in rows]
+    latest_verdicts = {}
+    for verdict in RiskVerdictRecord.objects.filter(
+        decision_id__in=decision_ids
+    ).order_by("-created_at"):
+        # Keep the newest persisted verdict for each decision.
+        latest_verdicts.setdefault(verdict.decision_id, verdict)
+
     decisions = []
     for row in rows:
+        verdict = latest_verdicts.get(row.decision_id)
+        risk_verdict = None
+        if verdict is not None:
+            details = verdict.details if isinstance(verdict.details, dict) else {}
+            risk_stage = details.get("risk_stage", {})
+            if not isinstance(risk_stage, dict):
+                risk_stage = {}
+            reason = verdict.reason_code or "RISK_REJECTED"
+            not_evaluated = reason in {
+                "UPSTREAM_STAGE_REJECTED",
+                "NO_APPROVED_OPPORTUNITY",
+            }
+            risk_verdict = {
+                "approved": bool(verdict.approved),
+                "status": (
+                    "APPROVED" if verdict.approved else
+                    "NOT_EVALUATED" if not_evaluated else "REJECTED"
+                ),
+                "reason": reason,
+                "volume": str(verdict.approved_volume),
+                "stop_loss": str(verdict.stop_loss) if verdict.stop_loss is not None else None,
+                "take_profit": str(verdict.take_profit) if verdict.take_profit is not None else None,
+                "explanation": (
+                    risk_stage.get("explanation")
+                    or (
+                        "Risk sizing was not evaluated because an upstream stage did not approve."
+                        if not_evaluated else
+                        "The persisted Django risk verdict did not approve this trade."
+                    )
+                ),
+                "checks": risk_stage.get("checks", []) if isinstance(risk_stage.get("checks", []), list) else [],
+            }
+
         decisions.append({
             "decision_id": row.decision_id,
             "symbol": row.symbol,
@@ -282,6 +323,8 @@ def dashboard_data(request):
             "model_version": row.model_version,
             "created_at": row.created_at.isoformat() if row.created_at else None,
             "features": row.features if isinstance(row.features, dict) else {},
+            # The final persisted verdict is authoritative for dashboard risk status.
+            "risk_verdict": risk_verdict,
         })
     latest_symbol = decisions[0]["symbol"] if decisions else ""
     return JsonResponse({
