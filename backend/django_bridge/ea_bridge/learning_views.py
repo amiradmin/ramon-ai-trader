@@ -3,6 +3,7 @@ import hashlib
 import json
 import math
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from functools import wraps
 
 from django.http import JsonResponse
@@ -13,7 +14,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from .auth import BearerTokenRequired
-from .models import (EACommand, LearningRecommendation, LearningTradeOutcome, OrderIntentRecord, LearningTrainingJob, LearningModelRun, MarketBar)
+from .models import (EACommand, LearningRecommendation, LearningTradeOutcome, OrderIntentRecord, LearningTrainingJob, LearningModelRun, MarketBar, RiskVerdictRecord, StrategyDecisionRecord)
 from .learning_store import DjangoOutcomeStore
 from ramon_pipeline.learning import LearningEngine, RecommendationEngine
 
@@ -107,6 +108,99 @@ def learning_overview(request):
     })
 
 
+
+def _linked_open_command(payload, instance_id, account_login):
+    """Resolve the exact Django OPEN command that produced this broker position."""
+    command_id = str(payload.get("command_id") or "").strip()
+    broker_ticket = str(payload.get("broker_ticket") or "").strip()
+    commands = EACommand.objects.filter(action=EACommand.Action.OPEN)
+    if command_id:
+        commands = commands.filter(command_id=command_id)
+    elif broker_ticket:
+        commands = commands.filter(result__broker_ticket=broker_ticket)
+    else:
+        return None
+
+    if instance_id:
+        commands = commands.filter(instance_id=instance_id)
+    if account_login:
+        commands = commands.filter(account_login=account_login)
+    command = commands.order_by("-created_at").first()
+    if command is None:
+        return None
+    if broker_ticket and command.result.get("broker_ticket") not in (None, "", broker_ticket):
+        raise ValueError("broker_ticket does not match the linked Django command")
+    supplied_decision_id = str(payload.get("decision_id") or "").strip()
+    if supplied_decision_id and supplied_decision_id != command.decision_id:
+        raise ValueError("decision_id does not match the linked Django command")
+    return command
+
+
+def _trusted_command_risk_amount(command, decision_id):
+    """Read initial cash risk only from the approved verdict bound to this command."""
+    if command is None or not decision_id or not command.risk_verdict_id:
+        return None
+    verdict = RiskVerdictRecord.objects.filter(
+        pk=command.risk_verdict_id,
+        decision_id=decision_id,
+        approved=True,
+    ).first()
+    if verdict is None or verdict.approved_volume <= 0:
+        return None
+    details = verdict.details if isinstance(verdict.details, dict) else {}
+    risk_stage = details.get("risk_stage")
+    if not isinstance(risk_stage, dict):
+        return None
+    try:
+        risk_amount = Decimal(str(risk_stage.get("estimated_risk")))
+        stage_volume = Decimal(str(risk_stage.get("volume")))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    if (
+        not risk_amount.is_finite()
+        or risk_amount <= 0
+        or not stage_volume.is_finite()
+        or stage_volume <= 0
+        or abs(stage_volume - verdict.approved_volume) > Decimal("0.00000001")
+    ):
+        return None
+    return risk_amount
+
+
+def _observed_entry_slippage(payload, decision):
+    """Calculate adverse entry slippage from the broker fill and Django's decision quote."""
+    if decision is None or payload.get("entry_price") is None:
+        return None
+    features = decision.features if isinstance(decision.features, dict) else {}
+    market = features.get("market_snapshot")
+    if not isinstance(market, dict):
+        return None
+    try:
+        entry_price = Decimal(str(payload["entry_price"]))
+        point = Decimal(str(market.get("point")))
+        expected_price = Decimal(str(
+            market.get("ask") if decision.action == "BUY" else market.get("bid")
+        ))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    if (
+        not entry_price.is_finite()
+        or not point.is_finite()
+        or not expected_price.is_finite()
+        or entry_price <= 0
+        or point <= 0
+        or expected_price <= 0
+        or decision.action not in ("BUY", "SELL")
+    ):
+        return None
+    adverse_difference = (
+        entry_price - expected_price
+        if decision.action == "BUY"
+        else expected_price - entry_price
+    )
+    return float(max(Decimal("0"), adverse_difference / point))
+
+
 @csrf_exempt
 @require_POST
 def record_outcome(request):
@@ -131,38 +225,22 @@ def record_outcome(request):
         decision_id = str(payload.get("decision_id") or "").strip()
         instance_id = str(payload.get("instance_id") or "").strip()
         account_login = str(payload.get("account_login") or "").strip()
-        if not decision_id and payload.get("command_id"):
-            commands = EACommand.objects.filter(command_id=str(payload["command_id"]))
-            if instance_id:
-                commands = commands.filter(instance_id=instance_id)
-            if account_login:
-                commands = commands.filter(account_login=account_login)
-            command = commands.first()
-            if command:
+        command = _linked_open_command(payload, instance_id, account_login)
+        if command is not None:
+            if not decision_id:
                 decision_id = command.decision_id
-        if not decision_id and payload.get("broker_ticket"):
-            # MT5/brokers may truncate the RamonCmd comment. The opening order
-            # ticket is also returned in the command acknowledgement, so use it
-            # as the durable, account-scoped attribution key.
-            commands = EACommand.objects.filter(
-                result__broker_ticket=str(payload["broker_ticket"])
+        elif not decision_id and payload.get("broker_ticket"):
+            # Preserve attribution for legacy intent-based integrations. An
+            # intent without its linked approved verdict cannot supply R risk.
+            intents = OrderIntentRecord.objects.filter(
+                broker_ticket=str(payload["broker_ticket"])
             ).order_by("-created_at")
             if instance_id:
-                commands = commands.filter(instance_id=instance_id)
-            if account_login:
-                commands = commands.filter(account_login=account_login)
-            command = commands.first()
-            if command:
-                decision_id = command.decision_id
-            else:
-                intents = OrderIntentRecord.objects.filter(
-                    broker_ticket=str(payload["broker_ticket"])
-                ).order_by("-created_at")
-                if instance_id:
-                    intents = intents.filter(instance_id=instance_id)
-                intent = intents.first()
-                if intent:
-                    decision_id = intent.decision_id
+                intents = intents.filter(instance_id=instance_id)
+            intent = intents.first()
+            if intent:
+                decision_id = intent.decision_id
+
         outcome = dict(payload)
         outcome["trade_id"] = trade_id[:128]
         if decision_id:
@@ -170,6 +248,19 @@ def record_outcome(request):
         for key in ("symbol", "instance_id", "account_login"):
             if payload.get(key) is not None:
                 outcome[key] = str(payload[key])[:128]
+
+        decision = StrategyDecisionRecord.objects.filter(
+            decision_id=decision_id
+        ).first() if decision_id else None
+        trusted_risk = _trusted_command_risk_amount(command, decision_id)
+        if trusted_risk is not None:
+            # Django's persisted approved verdict is authoritative; never trust
+            # an EA-calculated or caller-supplied risk amount for command trades.
+            outcome["risk_amount"] = str(trusted_risk)
+        observed_slippage = _observed_entry_slippage(outcome, decision)
+        if observed_slippage is not None:
+            outcome["slippage_points"] = observed_slippage
+
         result = _learning().observe(outcome)
         if not result.get("accepted"):
             status = 409 if result.get("reason") == "CONFLICTING_OUTCOME" else 400
