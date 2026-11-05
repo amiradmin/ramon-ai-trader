@@ -28,8 +28,8 @@ _SIGNAL_MEMORY_LOCK = threading.Lock()
 def _build_pipeline(*, demo_mode=False):
     """Build the Django-owned pipeline from persisted profile-specific thresholds.
 
-    Only strategy tuning values are editable. Account risk ceilings, daily-loss
-    protections, structural validation, quote requirements and execution guards
+    Only strategy tuning values are editable. Per-trade and portfolio risk ceilings,
+    structural validation, quote requirements and execution guards
     remain code-owned hard protections.
     """
     def opt(name, default):
