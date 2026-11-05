@@ -193,12 +193,37 @@ def train_trade_outcome_pipeline(model_key: str, *, symbol: str = "XAUUSD_o") ->
     chronological = train_rows[-1][0] < test_rows[0][0]
     passed = finite and chronological and mae < baseline_mae and rmse < baseline_rmse
 
+    # The chronological holdout is used only for the validation decision above.
+    # If it passes, refit a fresh inference bundle on every labeled observation so
+    # the eventual candidate uses all currently available training data.
+    artifact_fit_scope = "training_partition_only_validation_failed"
+    artifact_vectorizer = vectorizer
+    artifact_estimator = model
+    if passed:
+        all_features = [item[1] for item in samples]
+        all_targets = [item[2] for item in samples]
+        artifact_vectorizer = DictVectorizer(sparse=False, sort=True)
+        all_x = artifact_vectorizer.fit_transform(all_features)
+        artifact_estimator = _estimator(spec["estimator"])
+        artifact_estimator.fit(all_x, all_targets)
+        artifact_fit_scope = "all_labeled_observations_after_holdout_pass"
+
     artifact_buffer = io.BytesIO()
-    joblib.dump({"vectorizer": vectorizer, "estimator": model, "model_key": model_key}, artifact_buffer)
+    joblib.dump({
+        "vectorizer": artifact_vectorizer,
+        "estimator": artifact_estimator,
+        "model_key": model_key,
+        "feature_names": list(artifact_vectorizer.feature_names_),
+        "target": spec["target"],
+    }, artifact_buffer)
     artifact_bytes = artifact_buffer.getvalue()
     fingerprint = hashlib.sha256(artifact_bytes).hexdigest()[:16]
     return {
         "metrics": {
+            "artifact_fit_observations": (
+                len(samples) if passed else len(train_rows)
+            ),
+            "artifact_fit_scope": artifact_fit_scope,
             "observations": len(samples),
             "training_observations": len(train_rows),
             "test_observations": len(test_rows),
