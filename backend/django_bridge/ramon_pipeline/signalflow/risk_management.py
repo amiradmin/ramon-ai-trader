@@ -17,9 +17,8 @@ Two ways to obtain the stop distance:
 Sizing is the original rule: risk budget = balance * min(requested %, maximum %),
 volume = budget / (stop points * point value), rounded *down* to the volume step and
 never rounded up to the broker minimum. Optional account-state inputs add guards:
-``open_risk_percent`` (portfolio cap), ``daily_loss_percent`` (daily loss halt) and
-``take_profit_points`` (minimum reward:risk). Guards whose input is absent are reported
-as skipped, not silently assumed satisfied.
+``open_risk_percent`` (portfolio cap) and ``take_profit_points`` (minimum reward:risk).
+Guards whose input is absent are reported as skipped, not silently assumed satisfied.
 
 Results always contain ``approved``, ``reason`` and ``volume`` (what ``pipeline.py``
 reads) plus ``status`` (``ACCEPTED`` / ``REJECTED`` / ``DEFERRED``), ``checks`` and an
@@ -48,7 +47,6 @@ class RiskConfig:
     min_reward_risk: float = 1.2  # minimum acceptable planned reward/risk
     target_reward_risk: float = 1.25  # planned take-profit distance as a multiple of the structural stop
     max_total_risk_percent: float = 2.0  # open risk + this trade, applied when open_risk_percent is supplied
-    max_daily_loss_percent: float = 3.0  # halt after this realised loss, applied when daily_loss_percent is supplied
     # Validation / safety options. Defaults keep the original behaviour.
     # strict_structural: with a structural opportunity but no ``point``, reject instead of silently
     # falling back to the caller-supplied stop_loss_points.
@@ -62,7 +60,7 @@ class RiskConfig:
             raise ValueError("stop_buffer_atr must not be negative")
         if not 0 < self.min_stop_atr < self.max_stop_atr:
             raise ValueError("stop ATR bounds must satisfy 0 < min < max")
-        for name in ("min_reward_risk", "target_reward_risk", "max_total_risk_percent", "max_daily_loss_percent"):
+        for name in ("min_reward_risk", "target_reward_risk", "max_total_risk_percent"):
             if not getattr(self, name) > 0:
                 raise ValueError(f"{name} must be positive")
         if self.target_reward_risk < self.min_reward_risk:
@@ -134,7 +132,6 @@ class RiskManager:
             "min_reward_risk": self.config.min_reward_risk,
             "target_reward_risk": self.config.target_reward_risk,
             "max_total_risk_percent": self.config.max_total_risk_percent,
-            "max_daily_loss_percent": self.config.max_daily_loss_percent,
         }
         return result
 
@@ -281,14 +278,6 @@ class RiskManager:
                 if reward_risk < cfg.min_reward_risk:
                     raise _Reject("REWARD_RISK_TOO_LOW", f"reward:risk is {reward_risk:.2f} (minimum {cfg.min_reward_risk})", reward_risk=round(reward_risk, 3))
                 checks.append({"name": "reward_risk", "passed": True, "detail": f"reward:risk {reward_risk:.2f}"})
-
-        daily_loss = _optional(market, "daily_loss_percent")
-        if daily_loss is None:
-            checks.append({"name": "daily_loss", "passed": True, "detail": "skipped: no daily_loss_percent supplied"})
-        else:
-            if daily_loss >= cfg.max_daily_loss_percent:
-                raise _Reject("DAILY_LOSS_LIMIT_REACHED", f"daily loss today is {daily_loss:g}% (limit {cfg.max_daily_loss_percent:g}%)")
-            checks.append({"name": "daily_loss", "passed": True, "detail": f"daily loss {daily_loss:g}% below {cfg.max_daily_loss_percent:g}%"})
 
         risk_pct = min(requested_pct, self.maximum_risk_percent)
         open_risk = _optional(market, "open_risk_percent")

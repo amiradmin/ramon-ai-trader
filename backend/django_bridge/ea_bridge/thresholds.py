@@ -1,8 +1,8 @@
 """Editable, validated strategy thresholds for the Django-owned decision pipeline."""
 from copy import deepcopy
 
-# Only strategy thresholds are editable here. Account exposure ceilings, daily-loss
-# protection, closed-bar checks, account identity, and execution authorization stay hard guards.
+# Strategy thresholds are editable here. Per-trade and portfolio exposure ceilings,
+# closed-bar checks, account identity, and execution authorization remain hard guards.
 THRESHOLDS = {
     "opportunities": {
         "minimum_score": {"label":"Minimum opportunity score","unit":"0–1","min":0.10,"max":0.95,"step":0.01,"description":"Minimum composite opportunity score required to advance."},
@@ -39,7 +39,6 @@ THRESHOLDS = {
         "max_stop_atr": {"label":"Maximum stop distance","unit":"ATR","min":0.5,"max":10,"step":0.05,"description":"Reject setups whose structural stop is too far away."},
         "maximum_risk_percent": {"label":"Maximum risk per trade","unit":"% of balance","min":0.1,"max":2.0,"step":0.05,"description":"Demo risk budget and hard per-trade ceiling. Position size is always rounded down; the broker minimum is never forced."},
         "max_total_risk_percent": {"label":"Maximum total portfolio risk","unit":"% of balance","min":0.25,"max":5.0,"step":0.05,"description":"Maximum combined open-position risk plus the proposed trade."},
-        "max_daily_loss_percent": {"label":"Maximum daily loss","unit":"% of opening balance","min":0.5,"max":5.0,"step":0.1,"description":"Django blocks new entries when server-measured daily equity drawdown reaches this limit."},
         "target_reward_risk": {"label":"Target reward / risk","unit":"R:R","min":1.2,"max":5.0,"step":0.05,"description":"Take-profit distance as a multiple of the structural stop distance."},
         "min_reward_risk": {"label":"Minimum reward / risk","unit":"R:R","min":1.2,"max":3.0,"step":0.1,"description":"Reject trades whose planned target is below this reward/risk ratio. Cannot be lower than 1.2R."}
     },
@@ -47,12 +46,12 @@ THRESHOLDS = {
 DEMO_DEFAULTS = {
     "opportunities": {"minimum_score":0.42,"adx_trending":10.0,"adx_ranging":8.0,"min_ema_separation_atr":0.06,"regime_lookback":8,"support_tolerance_atr":1.0,"atr_ratio_min":0.6,"atr_ratio_max":2.5,"min_impulse_atr":0.8,"min_retracement":0.05,"max_retracement":0.95,"zone_tolerance_atr":0.9,"max_bars_since_pullback_low":16,"rsi_overbought":85.0,"breakout_lookback":12,"breakout_buffer_atr":0.0,"breakout_retest_tolerance_atr":0.5,"breakout_max_retest_bars":6},
     "entry_timing": {"minimum_quality":0.42,"maximum_spread_points":100.0,"max_signal_age_bars":1.5,"max_chase_atr":0.85,"min_risk_room_atr":0.15,"max_spread_atr":0.30,"max_spread_to_risk":0.40},
-    "risk_management": {"maximum_risk_percent":0.5,"max_total_risk_percent":2.0,"max_daily_loss_percent":3.0,"stop_buffer_atr":0.25,"min_stop_atr":0.5,"max_stop_atr":3.5,"target_reward_risk":1.25,"min_reward_risk":1.2},
+    "risk_management": {"maximum_risk_percent":0.5,"max_total_risk_percent":2.0,"stop_buffer_atr":0.25,"min_stop_atr":0.5,"max_stop_atr":3.5,"target_reward_risk":1.25,"min_reward_risk":1.2},
 }
 STANDARD_DEFAULTS = {
     "opportunities": {"minimum_score":0.55,"adx_trending":12.0,"adx_ranging":10.0,"min_ema_separation_atr":0.20,"regime_lookback":8,"support_tolerance_atr":0.65,"atr_ratio_min":0.6,"atr_ratio_max":2.5,"min_impulse_atr":1.5,"min_retracement":0.20,"max_retracement":0.82,"zone_tolerance_atr":0.40,"max_bars_since_pullback_low":8,"rsi_overbought":75.0,"breakout_lookback":20,"breakout_buffer_atr":0.10,"breakout_retest_tolerance_atr":0.25,"breakout_max_retest_bars":3},
     "entry_timing": {"minimum_quality":0.55,"maximum_spread_points":80.0,"max_signal_age_bars":1.0,"max_chase_atr":0.5,"min_risk_room_atr":0.25,"max_spread_atr":0.20,"max_spread_to_risk":0.25},
-    "risk_management": {"maximum_risk_percent":0.5,"max_total_risk_percent":2.0,"max_daily_loss_percent":3.0,"stop_buffer_atr":0.25,"min_stop_atr":0.5,"max_stop_atr":3.5,"target_reward_risk":1.25,"min_reward_risk":1.2},
+    "risk_management": {"maximum_risk_percent":0.5,"max_total_risk_percent":2.0,"stop_buffer_atr":0.25,"min_stop_atr":0.5,"max_stop_atr":3.5,"target_reward_risk":1.25,"min_reward_risk":1.2},
 }
 
 def defaults_for(profile):

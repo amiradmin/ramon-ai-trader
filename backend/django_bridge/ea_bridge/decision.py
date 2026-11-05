@@ -28,8 +28,8 @@ _SIGNAL_MEMORY_LOCK = threading.Lock()
 def _build_pipeline(*, demo_mode=False):
     """Build the Django-owned pipeline from persisted profile-specific thresholds.
 
-    Only strategy tuning values are editable. Account risk ceilings, daily-loss
-    protections, structural validation, quote requirements and execution guards
+    Only strategy tuning values are editable. Per-trade and portfolio risk ceilings,
+    structural validation, quote requirements and execution guards
     remain code-owned hard protections.
     """
     def opt(name, default):
@@ -271,77 +271,20 @@ def decision(request):
                 account_state_reason = "ACCOUNT_TELEMETRY_NOT_READY"
             elif not isinstance(account_snapshot, dict) or not isinstance(positions_snapshot, list):
                 account_state_reason = "ACCOUNT_SNAPSHOT_INVALID"
-            elif not isinstance(broker_day_raw, str):
-                account_state_reason = "DAILY_LOSS_BASELINE_UNAVAILABLE"
             else:
                 try:
-                    from datetime import date
-                    broker_day = date.fromisoformat(broker_day_raw)
-                    if broker_day.isoformat() != broker_day_raw:
-                        raise ValueError("invalid broker day")
                     snapshot_balance = _num(account_snapshot["balance"], "telemetry balance")
                     snapshot_equity = _num(account_snapshot["equity"], "telemetry equity")
                     account_snapshot_balance = snapshot_balance
                     daily_current_equity = snapshot_equity
-
                 except (KeyError, TypeError, ValueError, OverflowError):
                     account_state_reason = "ACCOUNT_BALANCE_UNAVAILABLE"
                 else:
                     if snapshot_balance <= 0 or snapshot_equity <= 0:
                         account_state_reason = "ACCOUNT_BALANCE_INVALID"
                     else:
-                        baseline = AccountDailyBaseline.objects.filter(
-                            account_login=account_login,
-                            server_name=server_name,
-                            broker_day=broker_day,
-                        ).first()
-                        if baseline is not None and baseline.opening_balance > 0:
-                            daily_baseline_balance = float(baseline.opening_balance)
-                            daily_baseline_capture_method = baseline.capture_method
-                            daily_loss_source = "SERVER_BASELINE_EQUITY_DRAWDOWN"
-                        else:
-                            # Demo-only fallback: use the EA's broker-history-derived opening
-                            # balance only when MT5 explicitly confirms complete history.
-                            # This preserves the daily-loss guard without trusting client inputs.
-                            opening_balance_raw = snapshot.get("broker_day_opening_balance")
-                            history_complete = snapshot.get("broker_day_history_complete") is True
-                            try:
-                                telemetry_opening_balance = _num(
-                                    opening_balance_raw, "broker day opening balance"
-                                )
-                            except (TypeError, ValueError, OverflowError):
-                                telemetry_opening_balance = 0.0
-                            if (
-                                is_demo_account
-                                and history_complete
-                                and snapshot.get("server_name") == server_name
-                                and telemetry_opening_balance > 0
-                            ):
-                                daily_baseline_balance = telemetry_opening_balance
-                                daily_baseline_capture_method = "BROKER_HISTORY_TELEMETRY_DEMO"
-                                daily_loss_source = "BROKER_HISTORY_TELEMETRY_DEMO"
-                            elif is_demo_account:
-                                # Explicitly aggressive Demo-only fallback: do not block
-                                # discovery/execution solely because today's baseline and
-                                # complete broker history are unavailable. Daily-loss
-                                # enforcement is unavailable for this session and is
-                                # recorded as such; all other risk gates remain mandatory.
-                                daily_baseline_day = broker_day.isoformat()
-                                daily_baseline_capture_method = "DEMO_NO_BASELINE_BYPASS"
-                                daily_loss_source = "DEMO_NO_BASELINE_BYPASS"
-                                server_daily_loss_percent = None
-                                account_state_reason = ""
-                            else:
-                                account_state_reason = "DAILY_LOSS_BASELINE_UNAVAILABLE"
-
-                        if daily_baseline_balance is not None:
-                            daily_baseline_day = broker_day.isoformat()
-                            # Equity drawdown includes realized and current floating losses.
-                            server_daily_loss_percent = max(
-                                0.0,
-                                (daily_baseline_balance - snapshot_equity) / daily_baseline_balance * 100.0,
-                            )
-                            account_state_reason = ""
+                        # Daily baselines remain optional reporting data, never trade gates.
+                        account_state_reason = ""
 
 
         # Derive all policy inputs on the server from raw account and symbol telemetry.
@@ -387,7 +330,7 @@ def decision(request):
             open_risk_percent_server = 100.0
             take_profit_points_server = 0.0
 
-        risk_guard_fields = ("stop_level_points", "take_profit_points", "daily_loss_percent", "open_risk_percent")
+        risk_guard_fields = ("stop_level_points", "take_profit_points", "open_risk_percent")
         risk_guards_complete = bool(
             heartbeat is not None and not account_state_reason and
             point_value_per_lot > 0 and min_volume > 0 and max_volume >= min_volume and
@@ -405,16 +348,7 @@ def decision(request):
           "volume_step":volume_step,"min_volume":min_volume,"max_volume":max_volume,
           "stop_level_points":stop_level_points,"take_profit_points":take_profit_points_server,
           "target_reward_risk":pipeline.risk_manager.config.target_reward_risk,
-          "daily_loss_percent":server_daily_loss_percent if server_daily_loss_percent is not None else 0.0,
           "open_risk_percent":open_risk_percent_server}
-        # The client value is required for protocol compatibility, but never used to
-        # authorize trading. The daily-loss guard receives only the server-derived value.
-        # SignalFlow requires a numeric value. Zero is only a pipeline placeholder
-        # when the Demo baseline is unavailable; the audit record remains None and the
-        # command producer independently enforces the same explicit Demo-only bypass.
-        market["daily_loss_percent"] = (
-            server_daily_loss_percent if server_daily_loss_percent is not None else 0.0
-        )
         configured_demo_profile = str(
             getattr(settings, "RAMON_DEMO_PROFILE", "expanded")
         ).strip().lower()

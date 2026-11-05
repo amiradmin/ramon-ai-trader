@@ -60,7 +60,7 @@ The decision endpoint can call the command producer, but creation and delivery r
 2. Keep `EnableCommandExecution=false` in MT5 while validating telemetry and decisions.
 3. Run only on the intended demo `XAUUSD_o` M15 chart for diagnostics.
 4. Do not run a legacy `Ramon_v0.62.x` strategy EA beside the command EA. Those strategy sources are not present in this repository and have not been reviewed here for duplicate order execution.
-5. A Django `WAIT`, stale/missing account data, incomplete daily-risk baseline, missing quote, or invalid authorization must remain fail-closed.
+5. A Django `WAIT`, stale/missing account data, missing quote, or invalid authorization must remain fail-closed.
 6. Never delete Docker volumes to silence Compose warnings.
 
 Useful runbooks:

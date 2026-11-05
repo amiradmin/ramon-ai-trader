@@ -48,7 +48,6 @@ class LegacyRiskTests(TestCase):
             min_reward_risk=1.8,
             target_reward_risk=1.8,
             max_total_risk_percent=1.5,
-            max_daily_loss_percent=2.5,
         )
         result = RiskManager(maximum_risk_percent=0.75, config=config).evaluate(legacy_market(), True)
 
@@ -60,7 +59,6 @@ class LegacyRiskTests(TestCase):
             "min_reward_risk": 1.8,
             "target_reward_risk": 1.8,
             "max_total_risk_percent": 1.5,
-            "max_daily_loss_percent": 2.5,
         })
 
     def test_requested_risk_is_capped_and_flagged(self):
@@ -218,9 +216,9 @@ class AccountGuardTests(TestCase):
         self.assertTrue(good["approved"])
         self.assertAlmostEqual(good["reward_risk"], 1.616, places=3)
 
-    def test_daily_loss_limit_halts_new_trades(self):
-        self.assertEqual(self.evaluate(daily_loss_percent=3.0)["reason"], "DAILY_LOSS_LIMIT_REACHED")
-        self.assertTrue(self.evaluate(daily_loss_percent=1.0)["approved"])
+    def test_daily_loss_does_not_halt_new_trades(self):
+        self.assertTrue(self.evaluate(daily_loss_percent=3.0)["approved"])
+        self.assertTrue(self.evaluate(daily_loss_percent=25.0)["approved"])
 
     def test_portfolio_risk_cap_defers_or_shrinks(self):
         full = self.evaluate(open_risk_percent=2.0)
@@ -232,22 +230,17 @@ class AccountGuardTests(TestCase):
         self.assertEqual(shrunk["volume"], 0.04)
 
     def test_invalid_guard_inputs_are_rejected_not_ignored(self):
-        self.assertEqual(self.evaluate(daily_loss_percent="lots")["reason"], "MISSING_OR_INVALID_RISK_INPUT")
         self.assertEqual(self.evaluate(open_risk_percent=float("nan"))["reason"], "NON_FINITE_RISK_INPUT")
         self.assertEqual(self.evaluate(take_profit_points=-5)["reason"], "NON_POSITIVE_OR_INCONSISTENT_RISK_INPUT")
         self.assertEqual(self.evaluate(stop_level_points=float("inf"))["reason"], "NON_FINITE_RISK_INPUT")
 
     def test_skipped_guards_are_reported_not_silently_passed(self):
         details = {c["name"]: c["detail"] for c in self.evaluate()["checks"]}
-        for name in ("reward_risk", "daily_loss", "portfolio_risk"):
+        for name in ("reward_risk", "portfolio_risk"):
             self.assertIn("skipped", details[name])
 
-    def test_guards_also_apply_to_the_legacy_stop(self):
-        result = RiskManager().evaluate(legacy_market(daily_loss_percent=5), True)
-        self.assertEqual(result["reason"], "DAILY_LOSS_LIMIT_REACHED")
-
     def test_config_validation(self):
-        for kwargs in ({"stop_buffer_atr": -1}, {"min_stop_atr": 4.0}, {"min_reward_risk": 0}, {"target_reward_risk": 1.0, "min_reward_risk": 1.2}, {"max_daily_loss_percent": -1}):
+        for kwargs in ({"stop_buffer_atr": -1}, {"min_stop_atr": 4.0}, {"min_reward_risk": 0}, {"target_reward_risk": 1.0, "min_reward_risk": 1.2}):
             with self.assertRaises(ValueError):
                 RiskConfig(**kwargs)
 
