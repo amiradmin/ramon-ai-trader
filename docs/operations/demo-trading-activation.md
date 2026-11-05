@@ -68,8 +68,8 @@ A successful path must show:
 2. A directional BUY/SELL decision with all three SignalFlow stages approved.
 3. An approved risk verdict with positive volume and valid SL/TP.
 4. One unexpired OPEN command scoped to the exact account and broker server.
-5. EA validation of the command and connected demo account.
-6. Broker `TRADE_RETCODE_DONE` plus an order/deal identifier.
+5. EA dispatches the command already authorized by Django; it does not validate trading conditions or account policy.
+6. EA reports the broker retcode and order/deal identifier to Django.
 7. Django acknowledgement as `EXECUTED`, followed by a refreshed telemetry snapshot showing the open position.
 
 Partial fills, merely placed orders, missing fill identifiers, and uncertain outcomes must be reconciled before any further action. A healthy API or passing CI is not proof of broker execution.
@@ -81,8 +81,8 @@ Partial fills, merely placed orders, missing fill identifiers, and uncertain out
 - [ ] Telemetry reports the intended account, exact broker server, and integer `account_trade_mode=0`.
 - [ ] Both server command gates are enabled only for the intended demo test.
 - [ ] A genuine strategy/risk-approved signal creates one account-scoped OPEN command.
-- [ ] EA checks demo mode and exact broker-server/account/symbol scope.
-- [ ] EA records the broker retcode and acknowledges `EXECUTED` only for a confirmed DONE fill.
+- [ ] Django checks demo mode and exact broker-server/account/symbol scope before command delivery.
+- [ ] EA reports the broker retcode; Django reconciles the result and records execution status.
 - [ ] The resulting position appears in MT5 and in subsequent Django telemetry.
 - [ ] Ambiguous broker outcomes are marked `RECONCILIATION_REQUIRED` and are not retried blindly.
 - [ ] No order is created when any required strategy, risk, account, quote, or execution condition fails.
