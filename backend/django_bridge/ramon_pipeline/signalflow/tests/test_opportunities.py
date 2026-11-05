@@ -279,6 +279,76 @@ class BreakoutRetestTests(TestCase):
         self.assertFalse(result["approved"])
 
 
+class RegimeTransitionDiagnosticsTests(TestCase):
+    def test_bullish_ema_against_bearish_structure_is_a_potential_bearish_reversal(self):
+        current = opportunities_module._Regime(
+            "UNCERTAIN", "BULL", "BEARISH", 31.76, 1.967, 0.992
+        )
+        previous = opportunities_module._Regime(
+            "BULLISH", "BULL", "BULLISH", 24.0, 1.2, 0.6
+        )
+
+        diagnostic = opportunities_module._regime_transition_diagnostics(current, previous)
+
+        self.assertEqual(diagnostic["state"], "POTENTIAL_BEARISH_REVERSAL")
+        self.assertEqual(diagnostic["candidate_reversal_direction"], "BEARISH")
+        self.assertFalse(diagnostic["trade_eligible"])
+
+    def test_bearish_ema_against_bullish_structure_is_a_potential_bullish_reversal(self):
+        current = opportunities_module._Regime(
+            "UNCERTAIN", "BEAR", "BULLISH", 29.0, -1.4, -0.7
+        )
+        previous = opportunities_module._Regime(
+            "BEARISH", "BEAR", "BEARISH", 25.0, -1.1, -0.5
+        )
+
+        diagnostic = opportunities_module._regime_transition_diagnostics(current, previous)
+
+        self.assertEqual(diagnostic["state"], "POTENTIAL_BULLISH_REVERSAL")
+        self.assertEqual(diagnostic["candidate_reversal_direction"], "BULLISH")
+        self.assertFalse(diagnostic["trade_eligible"])
+
+    def test_opposing_evidence_without_matching_prior_regime_is_only_a_conflict(self):
+        current = opportunities_module._Regime(
+            "UNCERTAIN", "BULL", "BEARISH", 20.0, 0.8, 0.3
+        )
+        previous = opportunities_module._Regime(
+            "RANGING", "NEUTRAL", "MIXED", 9.0, 0.1, 0.0
+        )
+
+        diagnostic = opportunities_module._regime_transition_diagnostics(current, previous)
+
+        self.assertEqual(diagnostic["state"], "DIRECTIONAL_CONFLICT")
+        self.assertIsNone(diagnostic["candidate_reversal_direction"])
+        self.assertFalse(diagnostic["trade_eligible"])
+
+    def test_transition_is_reported_but_never_approves_an_opportunity(self):
+        bars = make_bars(LONG_SETUP)
+        current = opportunities_module._Regime(
+            "UNCERTAIN", "BULL", "BEARISH", 31.76, 1.967, 0.992
+        )
+        previous = opportunities_module._Regime(
+            "BULLISH", "BULL", "BULLISH", 24.0, 1.2, 0.6
+        )
+        with patch.object(
+            opportunities_module, "_classify_regime", side_effect=[current, previous]
+        ):
+            result = OpportunityDetector().evaluate(snapshot(bars))
+
+        self.assertFalse(result["approved"])
+        self.assertEqual(result["status"], "DEFERRED")
+        self.assertEqual(result["side"], "HOLD")
+        self.assertEqual(result["reason"], "REGIME_TRANSITION_UNCONFIRMED")
+        self.assertEqual(
+            result["regime"]["transition"]["state"], "POTENTIAL_BEARISH_REVERSAL"
+        )
+        transition_check = next(
+            check for check in result["checks"] if check["name"] == "regime_transition"
+        )
+        self.assertFalse(transition_check["passed"])
+        self.assertFalse(transition_check["metrics"]["trade_eligible"])
+
+
 class DeferredAndWeakSetupTests(TestCase):
     def evaluate(self, legs, **kwargs):
         return OpportunityDetector(**kwargs).evaluate(snapshot(make_bars(legs)))
