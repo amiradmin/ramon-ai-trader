@@ -31,8 +31,11 @@ intentionally want to delete model artifacts.
 Each `LearningModelRun` stores the relative artifact path, SHA-256 checksum,
 byte size, format, model version, metrics and validation report. The artifact
 is saved even when validation rejects the candidate, so rejected candidates
-remain available for inspection and comparison. Only a validation-passed run
-is eligible for a later promotion review.
+remain available for inspection and comparison. A rejected candidate retains
+its training-partition estimator; a candidate that passes the chronological
+holdout is refit on all currently labeled observations before its artifact is
+written. The holdout metrics remain those from the untouched evaluation split.
+Only a validation-passed run is eligible for a later promotion review.
 
 ## Operational checks
 
