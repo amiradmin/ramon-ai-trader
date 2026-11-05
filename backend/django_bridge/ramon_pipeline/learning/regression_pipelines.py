@@ -5,7 +5,6 @@ live decision or risk path.
 """
 from __future__ import annotations
 
-import base64
 import hashlib
 import io
 import math
@@ -196,8 +195,8 @@ def train_trade_outcome_pipeline(model_key: str, *, symbol: str = "XAUUSD_o") ->
 
     artifact_buffer = io.BytesIO()
     joblib.dump({"vectorizer": vectorizer, "estimator": model, "model_key": model_key}, artifact_buffer)
-    artifact = base64.b64encode(artifact_buffer.getvalue()).decode("ascii")
-    fingerprint = hashlib.sha256(artifact_buffer.getvalue()).hexdigest()[:16]
+    artifact_bytes = artifact_buffer.getvalue()
+    fingerprint = hashlib.sha256(artifact_bytes).hexdigest()[:16]
     return {
         "metrics": {
             "observations": len(samples),
@@ -227,6 +226,6 @@ def train_trade_outcome_pipeline(model_key: str, *, symbol: str = "XAUUSD_o") ->
             },
             "note": "Research validation only. Model is stored for offline evaluation; it is not deployed to trading.",
         },
-        "artifact": artifact,
+        "artifact_bytes": artifact_bytes,
         "version": f"trade-{fingerprint}",
     }
