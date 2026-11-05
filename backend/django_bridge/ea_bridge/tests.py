@@ -1307,3 +1307,30 @@ class MultiTimeframeMarketDataTests(TestCase):
         self.assertEqual(reports["M1"]["last_successful_candle_utc"], "2026-11-02T03:32:00+00:00")
         self.assertEqual(len(reports["M1"]["potential_intraday_gaps"]), 1)
         self.assertEqual(reports["M5"]["status"], "NO_DATA")
+
+
+
+class MarketBarRetentionCommandTests(TestCase):
+    def test_retention_is_dry_run_by_default_and_requires_explicit_apply(self):
+        from datetime import timedelta
+        from django.core.management import call_command
+        from django.utils import timezone
+
+        old_stamp = timezone.now() - timedelta(days=800)
+        MarketBar.objects.create(
+            source="retention-test", symbol="XAUUSD_o", timeframe="M1",
+            timestamp=old_stamp, open="2300", high="2301", low="2299",
+            close="2300.5", volume="10",
+        )
+        MarketBar.objects.create(
+            source="retention-test", symbol="XAUUSD_o", timeframe="M5",
+            timestamp=old_stamp, open="2300", high="2301", low="2299",
+            close="2300.5", volume="10",
+        )
+
+        call_command("prune_market_bars", source="retention-test", stdout=Mock())
+        self.assertEqual(MarketBar.objects.filter(source="retention-test").count(), 2)
+
+        call_command("prune_market_bars", source="retention-test", apply=True, stdout=Mock())
+        self.assertFalse(MarketBar.objects.filter(source="retention-test", timeframe="M1").exists())
+        self.assertTrue(MarketBar.objects.filter(source="retention-test", timeframe="M5").exists())
