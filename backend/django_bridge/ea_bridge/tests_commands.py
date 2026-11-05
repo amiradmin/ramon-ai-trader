@@ -107,6 +107,7 @@ class EACommandEndpointTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["command"]["command_id"], valid.command_id)
         self.assertTrue(response.json()["trading_authorization"])
+        self.assertEqual(response.json()["command"]["server_name"], "LiteFinance-MT5-Demo")
         self.assertEqual(valid.__class__.objects.get(command_id="valid").state, EACommand.State.CLAIMED)
         self.assertEqual(valid.__class__.objects.get(command_id="expired").state, EACommand.State.EXPIRED)
 
