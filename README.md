@@ -61,6 +61,15 @@ The command EA sends completed M1, M5, M15 and H1 candles through the existing a
 
 Use `GET /api/ea/v1/market-data/status?symbol=XAUUSD_o` with the EA bearer token to inspect row counts, oldest/latest candle timestamps, last receipt time and candidate intraday gaps per source/timeframe. Gap entries are review candidates, not definitive outages: broker maintenance and instrument-specific sessions must be considered. The initial EA history request is capped at 512 completed candles per timeframe; collection then continues incrementally. This is not a substitute for a deeper broker-history backfill.
 
+### Candle-history retention
+
+The recommended retention horizon is 2 years for M1, 3 years for M5, and 5 years for M15/H1. The `prune_market_bars` management command is dry-run by default and reports expired rows without deleting anything. Review the counts first; only pass `--apply` when you intentionally want to prune data. You can scope it to a source with `--source`.
+
+```bash
+docker compose exec django python manage.py prune_market_bars --symbol XAUUSD_o
+docker compose exec django python manage.py prune_market_bars --symbol XAUUSD_o --source ramon-command-ea-1 --apply
+```
+
 ## Safety and validation
 
 1. Keep `RAMON_EA_COMMAND_CREATION_ENABLED=0` and `RAMON_EA_COMMAND_EXECUTION_ENABLED=0` until the demo-validation checklist is completed.
