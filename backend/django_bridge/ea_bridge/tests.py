@@ -1190,3 +1190,120 @@ class DashboardTemplateTests(TestCase):
         self.assertContains(response, "Trend Pullback")
         self.assertContains(response, "Breakout / Retest")
         self.assertContains(response, "NOT EVALUATED")
+
+
+
+class MultiTimeframeMarketDataTests(TestCase):
+    url = "/api/ea/v1/telemetry"
+    status_url = "/api/ea/v1/market-data/status"
+    headers = {"HTTP_AUTHORIZATION": "Bearer test-token"}
+
+    def _payload(self, bar_sets):
+        return {
+            "protocol_version": "ramon-ea-command-v1",
+            "instance_id": "multi-timeframe-ea",
+            "account_login": "98765432",
+            "server_name": "LiteFinance-MT5-Demo",
+            "broker_day": date.today().isoformat(),
+            "symbol": "XAUUSD_o",
+            "timeframe": "M15",
+            "quote": {"bid": 2320.30, "ask": 2320.35, "point": 0.01},
+            "account": {"balance": 10100, "equity": 10100, "margin": 0, "free_margin": 10100, "currency": "USD"},
+            "positions": [],
+            "bars": [],
+            "bar_sets": bar_sets,
+        }
+
+    @override_settings(EA_BEARER_TOKEN="test-token")
+    def test_all_four_timeframes_are_persisted_and_retries_are_idempotent(self):
+        candle = {
+            "open": "2320.00", "high": "2321.00", "low": "2319.00",
+            "close": "2320.35", "volume": "123", "closed": True,
+        }
+        bar_sets = [
+            {"timeframe": "M1", "bars": [dict(candle, timestamp="2026-11-02T03:30:00Z")]},
+            {"timeframe": "M5", "bars": [dict(candle, timestamp="2026-11-02T03:30:00Z")]},
+            {"timeframe": "M15", "bars": [dict(candle, timestamp="2026-11-02T03:30:00Z")]},
+            {"timeframe": "H1", "bars": [dict(candle, timestamp="2026-11-02T03:00:00Z")]},
+        ]
+        payload = self._payload(bar_sets)
+        first = self.client.post(
+            self.url, data=json.dumps(payload),
+            content_type="application/json", **self.headers,
+        )
+        self.assertEqual(first.status_code, 200, first.content)
+        self.assertEqual(first.json()["stored_bars"], 4)
+        self.assertEqual(first.json()["inserted_bars"], 4)
+        self.assertEqual(
+            set(MarketBar.objects.filter(source="multi-timeframe-ea").values_list("timeframe", flat=True)),
+            {"M1", "M5", "M15", "H1"},
+        )
+
+        second = self.client.post(
+            self.url, data=json.dumps(payload),
+            content_type="application/json", **self.headers,
+        )
+        self.assertEqual(second.status_code, 200, second.content)
+        self.assertEqual(second.json()["inserted_bars"], 0)
+        self.assertEqual(MarketBar.objects.filter(source="multi-timeframe-ea").count(), 4)
+
+    @override_settings(EA_BEARER_TOKEN="test-token")
+    def test_late_arriving_candle_is_reported_without_replacing_existing_data(self):
+        candle = {
+            "open": "2320.00", "high": "2321.00", "low": "2319.00",
+            "close": "2320.35", "volume": "123", "closed": True,
+        }
+        first_payload = self._payload([{
+            "timeframe": "M1",
+            "bars": [
+                dict(candle, timestamp="2026-11-02T03:30:00Z"),
+                dict(candle, timestamp="2026-11-02T03:31:00Z"),
+            ],
+        }])
+        first = self.client.post(
+            self.url, data=json.dumps(first_payload),
+            content_type="application/json", **self.headers,
+        )
+        self.assertEqual(first.status_code, 200, first.content)
+
+        late_payload = self._payload([{
+            "timeframe": "M1",
+            "bars": [dict(candle, timestamp="2026-11-02T03:29:00Z", close="2320.40")],
+        }])
+        late = self.client.post(
+            self.url, data=json.dumps(late_payload),
+            content_type="application/json", **self.headers,
+        )
+        self.assertEqual(late.status_code, 200, late.content)
+        self.assertEqual(late.json()["timeframes"][0]["late_arrivals"], 1)
+        self.assertEqual(MarketBar.objects.filter(source="multi-timeframe-ea", timeframe="M1").count(), 3)
+
+    @override_settings(EA_BEARER_TOKEN="test-token")
+    def test_status_reports_last_successful_candle_and_potential_intraday_gaps(self):
+        candle = {
+            "open": "2320.00", "high": "2321.00", "low": "2319.00",
+            "close": "2320.35", "volume": "123", "closed": True,
+        }
+        payload = self._payload([{
+            "timeframe": "M1",
+            "bars": [
+                dict(candle, timestamp="2026-11-02T03:30:00Z"),
+                dict(candle, timestamp="2026-11-02T03:32:00Z"),
+            ],
+        }])
+        response = self.client.post(
+            self.url, data=json.dumps(payload),
+            content_type="application/json", **self.headers,
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+
+        status = self.client.get(
+            self.status_url + "?symbol=XAUUSD_o&source=multi-timeframe-ea",
+            **self.headers,
+        )
+        self.assertEqual(status.status_code, 200, status.content)
+        reports = {item["timeframe"]: item for item in status.json()["timeframes"]}
+        self.assertEqual(reports["M1"]["candle_count"], 2)
+        self.assertEqual(reports["M1"]["last_successful_candle_utc"], "2026-11-02T03:32:00+00:00")
+        self.assertEqual(len(reports["M1"]["potential_intraday_gaps"]), 1)
+        self.assertEqual(reports["M5"]["status"], "NO_DATA")
