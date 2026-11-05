@@ -211,11 +211,21 @@ class LearningOutcomeApiTests(TestCase):
         response = self.client.get("/api/ea/v1/learning/dashboard")
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Learning Engine")
-        self.assertContains(response, "Equity progression")
-        self.assertContains(response, "Decision attribution")
-        self.assertContains(response, "Strategy profile evaluation")
-        self.assertContains(response, "Human review queue")
-        self.assertContains(response, "AUTO-APPLY OFF")
+        self.assertContains(response, "Recent completed trades")
+        self.assertContains(response, "Train Six Trade Models")
+        # These analysis panels were deliberately removed from the current
+        # learning dashboard; keep the contract aligned with the rendered UI.
+        for removed_section in (
+            "Performance by market regime",
+            "Evidence review",
+            "Decision attribution",
+            "Human review queue",
+            "Data quality",
+            "Equity progression",
+            "Entry & exit diagnostics",
+            "Strategy profile evaluation",
+        ):
+            self.assertNotContains(response, removed_section)
 
     def test_learning_overview_exposes_modular_analysis_report(self):
         response = self.client.get("/api/ea/v1/learning/overview")

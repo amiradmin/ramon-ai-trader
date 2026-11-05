@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.core.files.storage import default_storage
 
 from ea_bridge.models import LearningModelRun, LearningTrainingJob, MarketBar
 
@@ -58,10 +59,11 @@ class LearningTrainingApiTests(TestCase):
         run = LearningModelRun.objects.create(
             job=job, model_key="trade_performance", model_name="Performance · Random Forest"
         )
+        artifact_bytes = b"fake-joblib-model-artifact"
         trained = {
             "metrics": {"observations": 60, "mae": 0.4, "rmse": 0.6, "baseline_mae": 0.8, "baseline_rmse": 1.0},
             "validation": {"passed": True, "checks": {"no_post_trade_features": True}},
-            "artifact": "ZmFrZS1tb2RlbC1hcnRpZmFjdA==",
+            "artifact_bytes": artifact_bytes,
             "version": "trade-test123",
         }
         with patch(
@@ -71,7 +73,12 @@ class LearningTrainingApiTests(TestCase):
             self.assertTrue(process_one_job())
         run.refresh_from_db()
         self.assertEqual(run.status, LearningModelRun.Status.PASSED)
-        self.assertEqual(run.metrics["_artifact_joblib_b64"], trained["artifact"])
+        self.assertEqual(run.artifact_format, "joblib")
+        self.assertEqual(run.artifact_size_bytes, len(artifact_bytes))
+        self.assertTrue(run.artifact_path)
+        self.assertTrue(run.artifact_sha256)
+        with default_storage.open(run.artifact_path, "rb") as artifact_file:
+            self.assertEqual(artifact_file.read(), artifact_bytes)
         self.assertTrue(run.validation["checks"]["no_post_trade_features"])
 
     def test_rejects_ambiguous_market_data_sources(self):
