@@ -152,7 +152,9 @@ def telemetry(request):
                 stamp = stamp.astimezone(dt_timezone.utc)
                 if bar_timeframe == "M15":
                     stamp = _normalize_m15_timestamp(stamp, f"{field}.timestamp")
-                elif int(stamp.timestamp()) % timeframe_seconds[bar_timeframe] != 0:
+                elif stamp.second != 0 or (
+                    bar_timeframe == "M5" and stamp.minute % 5 != 0
+                ):
                     raise ValueError(f"{field}.timestamp must align to a {bar_timeframe} candle boundary")
 
                 o = _decimal(bar.get("open"), f"{field}.open")
@@ -391,7 +393,8 @@ def market_data_status(request):
                 source=source_name, symbol=symbol, timeframe=bar_timeframe,
             )
             count = query.count()
-            latest_row = query.order_by("-timestamp").only("timestamp", "received_at").first()
+            latest_row = query.order_by("-timestamp").only("timestamp").first()
+            last_received_at = query.order_by("-received_at").values_list("received_at", flat=True).first()
             oldest = query.order_by("timestamp").values_list("timestamp", flat=True).first()
             recent_times = list(
                 query.order_by("-timestamp").values_list("timestamp", flat=True)[:500]
@@ -423,7 +426,7 @@ def market_data_status(request):
                     latest_row.timestamp.isoformat() if latest_row else None
                 ),
                 "last_received_at_utc": (
-                    latest_row.received_at.isoformat() if latest_row else None
+                    last_received_at.isoformat() if last_received_at else None
                 ),
                 "potential_intraday_gaps": potential_gaps,
                 "status": "COLLECTING" if count else "NO_DATA",
