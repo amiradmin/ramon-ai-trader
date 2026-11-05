@@ -126,6 +126,18 @@ def _linked_open_command(payload, instance_id, account_login):
     if account_login:
         commands = commands.filter(account_login=account_login)
     command = commands.order_by("-created_at").first()
+    if command is None and command_id and broker_ticket:
+        # Broker comments can be truncated; retry with the account-scoped
+        # opening order ticket returned in the EA command acknowledgement.
+        commands = EACommand.objects.filter(
+            action=EACommand.Action.OPEN,
+            result__broker_ticket=broker_ticket,
+        )
+        if instance_id:
+            commands = commands.filter(instance_id=instance_id)
+        if account_login:
+            commands = commands.filter(account_login=account_login)
+        command = commands.order_by("-created_at").first()
     if command is None:
         return None
     command_result = command.result if isinstance(command.result, dict) else {}
