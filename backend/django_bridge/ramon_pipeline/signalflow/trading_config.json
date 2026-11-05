@@ -112,7 +112,6 @@
     "max_stop_atr": 3.5,
     "min_reward_risk": 1.2,
     "max_total_risk_percent": 2,
-    "max_daily_loss_percent": 3,
     "strict_structural": false,
     "short_stop_spread_adjust": false
   },
