@@ -1,5 +1,6 @@
 import json
 import logging
+import uuid
 from datetime import datetime, timezone
 from django.conf import settings
 from django.http import JsonResponse, HttpResponse
@@ -507,21 +508,67 @@ def decision_thresholds(request):
 
     profile = _active_threshold_profile()
     record, _ = DecisionThresholdConfig.objects.get_or_create(profile=profile)
+    latest_audit = EAEvent.objects.filter(
+        event_type="THRESHOLD_CONFIG_UPDATED",
+        payload__profile=profile,
+    ).order_by("-received_at").first()
+    audit = None
+    if latest_audit is not None:
+        audit = {
+            "actor": latest_audit.payload.get("actor", "unknown"),
+            "action": latest_audit.payload.get("action", "updated"),
+            "changed_at": latest_audit.received_at.isoformat(),
+        }
     if request.method == "GET":
-        return JsonResponse({"ok": True, **public_schema(profile, record.values)})
+        return JsonResponse({"ok": True, "audit": audit, **public_schema(profile, record.values)})
     if request.method != "POST":
         return JsonResponse({"ok": False, "error": "GET or POST required"}, status=405)
     try:
         payload = _body(request)
-        if payload.get("action") == "reset":
+        action = "reset" if payload.get("action") == "reset" else "update"
+        if action == "reset":
             record.values = {}
             record.save(update_fields=["values", "updated_at"])
-            return JsonResponse({"ok": True, "reset": True, **public_schema(profile, {})})
-        validated = validate_values(payload.get("values"), profile)
-        # Store the complete validated active profile, so a subsequent restart/worker
-        # cannot silently revert to constructor defaults.
-        record.values = validated
-        record.save(update_fields=["values", "updated_at"])
-        return JsonResponse({"ok": True, **public_schema(profile, record.values)})
+            saved_values = public_schema(profile, {})["values"]
+        else:
+            validated = validate_values(payload.get("values"), profile)
+            # Persist the complete validated active profile in Django.
+            record.values = validated
+            record.save(update_fields=["values", "updated_at"])
+            saved_values = record.values
+
+        authenticated_actor = (
+            request.user.get_username()
+            if getattr(request, "user", None) is not None and request.user.is_authenticated
+            else ""
+        )
+        remote_addr = request.META.get("REMOTE_ADDR", "")[:64]
+        actor = authenticated_actor or (f"dashboard-client@{remote_addr}" if remote_addr else "dashboard-client")
+        audit_payload = {
+            "profile": profile,
+            "action": action,
+            "actor": actor,
+            "authenticated": bool(authenticated_actor),
+            "remote_addr": remote_addr,
+            "values": saved_values,
+        }
+        audit_event = EAEvent.objects.create(
+            instance_id="ramon-dashboard",
+            event_id=f"threshold-config-{uuid.uuid4().hex}",
+            event_type="THRESHOLD_CONFIG_UPDATED",
+            occurred_at=datetime.now(timezone.utc),
+            payload=audit_payload,
+        )
+        audit = {
+            "actor": actor,
+            "action": action,
+            "changed_at": audit_event.received_at.isoformat(),
+        }
+        return JsonResponse({
+            "ok": True,
+            "audit": audit,
+            "reset": action == "reset",
+            **public_schema(profile, record.values),
+        })
     except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         return JsonResponse({"ok": False, "error": str(exc)}, status=400)
