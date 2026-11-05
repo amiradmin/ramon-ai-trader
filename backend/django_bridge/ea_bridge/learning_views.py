@@ -151,7 +151,13 @@ def _linked_open_command(payload, instance_id, account_login):
 
 def _trusted_command_risk_amount(command, decision_id):
     """Read initial cash risk only from the approved verdict bound to this command."""
-    if command is None or not decision_id or not command.risk_verdict_id:
+    if (
+        command is None
+        or command.state != EACommand.State.EXECUTED
+        or not command.execution_authorized
+        or not decision_id
+        or not command.risk_verdict_id
+    ):
         return None
     verdict = RiskVerdictRecord.objects.filter(
         pk=command.risk_verdict_id,
