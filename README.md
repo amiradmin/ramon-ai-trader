@@ -61,6 +61,8 @@ The command EA sends completed M1, M5, M15 and H1 candles through the existing a
 
 Use `GET /api/ea/v1/market-data/status?symbol=XAUUSD_o` with the EA bearer token to inspect row counts, oldest/latest candle timestamps, last receipt time and candidate intraday gaps per source/timeframe. Gap entries are review candidates, not definitive outages: broker maintenance and instrument-specific sessions must be considered. The initial EA history request is capped at 512 completed candles per timeframe; collection then continues incrementally. This is not a substitute for a deeper broker-history backfill.
 
+ARIMA/SARIMA jobs read the selected `MarketBar` symbol/timeframe series; each timeframe is trained and validated independently, with M15 remaining the default training timeframe. Do not combine M1, M5, M15 and H1 candles into one frequency-mixed series. `LearningTradeOutcome` remains the dataset for the six trade-outcome learning pipelines, not for ARIMA fitting. Forecast results remain research-only and do not authorize orders.
+
 ### Candle-history retention
 
 The recommended retention horizon is 2 years for M1, 3 years for M5, and 5 years for M15/H1. The `prune_market_bars` management command is dry-run by default and reports expired rows without deleting anything. Review the counts first; only pass `--apply` when you intentionally want to prune data. You can scope it to a source with `--source`.
