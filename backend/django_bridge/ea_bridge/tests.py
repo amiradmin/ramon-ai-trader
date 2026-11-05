@@ -995,6 +995,7 @@ class CommandPollingTests(TestCase):
             symbol="XAUUSD_o",
             action=EACommand.Action.OPEN,
             payload={
+                "server_name": "LiteFinance-MT5-Demo",
                 "side": "BUY",
                 "volume": 0.01,
                 "stop_loss": 2300.0,
