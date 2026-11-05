@@ -495,6 +495,48 @@ def _classify_regime(bars: _Bars, ind: _Indicators, t: int, config: OpportunityC
     return _Regime(label, bias, structure, adx, separation, slope)
 
 
+def _regime_transition_diagnostics(current: _Regime, previous: _Regime) -> dict[str, Any]:
+    """Describe opposing EMA/structure evidence without converting it into a trade signal.
+
+    A potential reversal is only labelled when the lookback regime agrees with the
+    current EMA bias while confirmed swing structure points the other way. The
+    result is diagnostic: it never supplies a candidate side or authorizes a setup.
+    """
+    if current.ema_bias == "BULL" and current.structure == "BEARISH":
+        reversal_direction = "BEARISH"
+        prior_regime = "BULLISH"
+        required_ema_bias = "BEAR"
+    elif current.ema_bias == "BEAR" and current.structure == "BULLISH":
+        reversal_direction = "BULLISH"
+        prior_regime = "BEARISH"
+        required_ema_bias = "BULL"
+    else:
+        return {
+            "state": "NONE",
+            "ema_bias": current.ema_bias,
+            "structure": current.structure,
+            "previous_regime": previous.label,
+            "candidate_reversal_direction": None,
+            "required_confirmation": None,
+            "trade_eligible": False,
+        }
+
+    is_transition = previous.label == prior_regime
+    return {
+        "state": f"POTENTIAL_{reversal_direction}_REVERSAL" if is_transition else "DIRECTIONAL_CONFLICT",
+        "ema_bias": current.ema_bias,
+        "structure": current.structure,
+        "previous_regime": previous.label,
+        "candidate_reversal_direction": reversal_direction if is_transition else None,
+        "required_confirmation": (
+            f"EMA bias must align {required_ema_bias} with the opposing confirmed structure "
+            "and the new regime must persist through the configured lookback"
+            if is_transition else "EMA bias and confirmed structure must agree"
+        ),
+        "trade_eligible": False,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Score components (each 0..1, oriented to the trade direction)
 # ---------------------------------------------------------------------------
@@ -941,8 +983,10 @@ class OpportunityDetector:
         bar_time = bars.times[t]
         regime = _classify_regime(bars, ind, t, config)
         previous = _classify_regime(bars, ind, t - config.regime_lookback, config)
+        transition = _regime_transition_diagnostics(regime, previous)
         regime_info = {
             **regime.as_dict(),
+            "transition": transition,
             "adx_trending_threshold": config.adx_trending,
             "adx_ranging_threshold": config.adx_ranging,
             "adx_period": config.adx_period,
@@ -1052,6 +1096,41 @@ class OpportunityDetector:
             _check(checks, "regime", False, regime_text, metrics={"value": round(regime.adx, 2), "threshold": config.adx_ranging, "factor": "ADX; ranging threshold"})
             return finish(REJECTED, "MARKET_RANGING", f"market is ranging: {regime_text}")
         if regime.label == "UNCERTAIN":
+            if transition["state"] == "POTENTIAL_BEARISH_REVERSAL" or transition["state"] == "POTENTIAL_BULLISH_REVERSAL":
+                direction = transition["candidate_reversal_direction"]
+                detail = (
+                    f"possible {direction.lower()} reversal: confirmed structure opposes the "
+                    f"{regime.ema_bias.lower()} EMA bias while the prior regime was {previous.label}; "
+                    "waiting for EMA/structure alignment and regime confirmation"
+                )
+                _check(
+                    checks, "regime_transition", False, detail,
+                    metrics={
+                        "state": transition["state"],
+                        "ema_bias": regime.ema_bias,
+                        "structure": regime.structure,
+                        "previous_regime": previous.label,
+                        "trade_eligible": False,
+                    },
+                )
+                return finish(DEFERRED, "REGIME_TRANSITION_UNCONFIRMED", detail)
+            if transition["state"] == "DIRECTIONAL_CONFLICT":
+                detail = (
+                    f"directional conflict: EMA bias {regime.ema_bias}, structure "
+                    f"{regime.structure}, previous regime {previous.label}; no directional "
+                    "setup is eligible until EMA and structure agree"
+                )
+                _check(
+                    checks, "regime_transition", False, detail,
+                    metrics={
+                        "state": transition["state"],
+                        "ema_bias": regime.ema_bias,
+                        "structure": regime.structure,
+                        "previous_regime": previous.label,
+                        "trade_eligible": False,
+                    },
+                )
+                return finish(DEFERRED, "MARKET_UNCERTAIN", detail)
             _check(checks, "regime", False, regime_text, metrics={"value": round(regime.adx, 2), "threshold": config.adx_trending, "factor": "ADX; trend threshold"})
             return finish(DEFERRED, "MARKET_UNCERTAIN", f"trend signals conflict or are unconfirmed: {regime_text}")
         _check(checks, "regime", True, regime_text, metrics={"value": round(regime.adx, 2), "threshold": config.adx_trending, "factor": "ADX; trend threshold"})
