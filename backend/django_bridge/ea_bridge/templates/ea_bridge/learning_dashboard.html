@@ -37,6 +37,24 @@ svg{width:100%;height:145px;display:block}.chart-label{fill:var(--muted);font-si
 </header>
 <div id="status" role="status">Loading learning data…</div>
 
+<section class="grid" id="kpis" aria-label="Trading performance summary"></section>
+<section class="panel">
+ <div class="split"><h2>Data quality & decision attribution</h2><span class="tag">Observed records only</span></div>
+ <div id="quality" class="pillrow"></div>
+ <p id="quality-note" class="section-note"></p>
+ <p id="actions" class="section-note"></p>
+</section>
+<section class="panel">
+ <h2>Equity progression</h2>
+ <div id="equity" aria-live="polite"><div class="empty">Loading completed-trade equity progression…</div></div>
+ <p class="section-note">Cumulative realized PnL from recorded closed outcomes, ordered by close time. This is a historical view, not a forecast.</p>
+</section>
+<div class="two">
+ <section class="panel"><h2>Performance by market regime</h2><div class="scroll"><table><thead><tr><th>Regime</th><th>Trades</th><th>Win rate</th><th>Net PnL</th><th>Expectancy</th></tr></thead><tbody id="regimes"></tbody></table></div></section>
+ <section class="panel"><div class="split"><h2>Evidence review</h2><span class="tag">Conservative findings</span></div><div id="findings"></div><p id="sample" class="section-note"></p></section>
+</div>
+
+
 
 <section class="panel" id="trade-regression-pipelines">
  <div class="split"><h2>Six independent trade-outcome regression pipelines</h2><span class="tag safe">Chronological validation</span></div>
