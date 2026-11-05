@@ -28,6 +28,8 @@ button{background:#1c3553;color:var(--text);border:1px solid #38577e;padding:8px
 svg{width:100%;height:145px;display:block}.chart-label{fill:var(--muted);font-size:10px}
 @media(max-width:900px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.two{grid-template-columns:1fr}.three{grid-template-columns:1fr 1fr}}
 @media(max-width:560px){main{padding:12px}.grid,.three{grid-template-columns:1fr 1fr}.metric strong{font-size:21px}.barrow{grid-template-columns:90px 1fr 55px}}
+
+.pipeline-train-dialog{width:min(480px,calc(100% - 28px));max-width:480px;border:1px solid var(--line);border-radius:16px;padding:0;background:var(--panel);color:var(--text);box-shadow:0 24px 80px #0009}.pipeline-train-dialog::backdrop{background:#020817c9;backdrop-filter:blur(4px)}.pipeline-train-head{display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid var(--line)}.pipeline-train-head h2{font-size:17px;margin:0}.pipeline-train-content{padding:18px 20px}.pipeline-train-content p{font-size:13px;line-height:1.6;color:var(--muted);margin:0 0 12px}.pipeline-train-summary{border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--panel2);font-size:12px;line-height:1.7}.pipeline-train-warning{margin-top:12px!important;color:var(--muted)!important}.pipeline-train-actions{display:flex;justify-content:flex-end;gap:9px;padding:14px 20px;border-top:1px solid var(--line)}.pipeline-train-actions button{min-width:100px}.pipeline-train-confirm{background:#146b50;border-color:#278d6b;font-weight:700}.pipeline-train-confirm:hover{background:#18835f}.pipeline-train-cancel{background:var(--panel2)}.pipeline-dialog-close{cursor:pointer}
 </style>
 </head>
 <body><main>
@@ -64,6 +66,12 @@ svg{width:100%;height:145px;display:block}.chart-label{fill:var(--muted);font-si
 <dialog id="pipeline-details-dialog" class="pipeline-dialog" aria-labelledby="pipeline-dialog-title">
  <div class="pipeline-dialog-head"><h2 id="pipeline-dialog-title">Pipeline model details</h2><button type="button" class="pipeline-dialog-close" id="pipeline-dialog-close" aria-label="Close">×</button></div>
  <div class="pipeline-dialog-body" id="pipeline-dialog-body"></div>
+</dialog>
+
+<dialog id="pipeline-train-dialog" class="pipeline-train-dialog" aria-labelledby="pipeline-train-title">
+ <div class="pipeline-train-head"><h2 id="pipeline-train-title">Confirm training</h2><button type="button" class="pipeline-dialog-close" id="pipeline-train-x" aria-label="Close">×</button></div>
+ <div class="pipeline-train-content"><p id="pipeline-train-description"></p><div class="pipeline-train-summary" id="pipeline-train-summary"></div><p class="pipeline-train-warning" id="pipeline-train-warning"></p></div>
+ <div class="pipeline-train-actions"><button type="button" class="pipeline-train-cancel" id="pipeline-train-cancel">Cancel</button><button type="button" class="pipeline-train-confirm" id="pipeline-train-confirm">Start training</button></div>
 </dialog>
 <footer class="small">Ramon Learning Engine · Django remains authoritative for every trading decision, risk verdict, and execution command.</footer>
 <form hidden>{% csrf_token %}</form>
@@ -145,21 +153,48 @@ function renderTraining(data){
 async function loadTraining(){try{const d=await request(API+"training/status");renderTraining(d);}catch(e){$("trade-training-status").textContent=e.message;}}
 async function load(){ $("refresh").disabled=true;$("status").textContent="Refreshing from Django…";try{const d=await request(API+"overview");render(d);$("status").textContent="Updated "+new Date().toLocaleTimeString()+" · Read-only analysis";}catch(e){$("status").textContent=e.message;}finally{$("refresh").disabled=false;}await loadTraining();}
 $("refresh").addEventListener("click",load);
-document.querySelectorAll("[data-train-pipeline]").forEach(button=>button.addEventListener("click",async()=>{
+let pendingTrainingButton=null;
+function closeTrainingDialog(){ $("pipeline-train-dialog").close(); pendingTrainingButton=null; }
+document.querySelectorAll("[data-train-pipeline]").forEach(button=>button.addEventListener("click",()=>{
+ const pipelineKey=button.dataset.trainPipeline;
+ const isArima=pipelineKey==="arima_forecast";
+ const pipelineName=button.textContent.replace(/^▶\\s*/,"").replace(/^Train /,"");
+ pendingTrainingButton=button;
+ $("pipeline-train-title").textContent=isArima?"Confirm ARIMA forecast":"Confirm pipeline training";
+ $("pipeline-train-description").textContent=isArima?"You are about to queue an ARIMA forecast training run using completed market candles.":"You are about to train one selected trade-outcome model.";
+ $("pipeline-train-summary").innerHTML="<strong>Selected pipeline:</strong> "+esc(pipelineName)+"<br><strong>Symbol:</strong> XAUUSD_o<br><strong>Timeframe:</strong> M15<br><strong>Scope:</strong> "+(isArima?"ARIMA market-candle forecasting":"This pipeline only; the other six pipelines will not be trained");
+ $("pipeline-train-warning").textContent=isArima?"At least 50 matching completed candles are required. The forecast is research evidence only and cannot authorize trades.":"Training uses eligible closed-trade outcomes. Training does not change live strategy settings, authorize trades, or bypass Django risk controls.";
+ $("pipeline-train-confirm").disabled=false;
+ $("pipeline-train-dialog").showModal();
+}));
+async function submitPipelineTraining(){
+ const button=pendingTrainingButton;
+ if(!button)return;
  const pipelineKey=button.dataset.trainPipeline;
  const modelKey=pipelineKey==="arima_forecast"?"arima":pipelineKey;
- const isArima=pipelineKey==="arima_forecast";
- const prompt=isArima?"Queue ARIMA forecasting for completed XAUUSD_o M15 candles? At least 50 candles are required. This is research only and will not authorize trades.":"Train only "+button.textContent.slice(2).replace("Train ","")+" from its eligible closed-trade outcomes? Other pipelines will not be trained. This will not change live trading.";
- if(!confirm(prompt))return;
- button.disabled=true;
  const status=button.parentElement.querySelector("[data-training-status]");
+ $("pipeline-train-confirm").disabled=true;
+ $("pipeline-train-confirm").textContent="Submitting…";
+ button.disabled=true;
  if(status)status.textContent="Submitting…";
  try{
   const d=await request(API+"training/start",{method:"POST",headers:{"Content-Type":"application/json","X-CSRFToken":csrf()},body:JSON.stringify({symbol:"XAUUSD_o",timeframe:"M15",models:[modelKey]})});
   if(status)status.textContent=d.message||"Training queued";
+  closeTrainingDialog();
   await loadTraining();
- }catch(e){if(status)status.textContent=e.message;await loadTraining();}
-}));
+ }catch(e){
+  if(status)status.textContent=e.message;
+  $("pipeline-train-warning").textContent=e.message;
+  $("pipeline-train-confirm").disabled=false;
+  $("pipeline-train-confirm").textContent="Try again";
+  await loadTraining();
+ }
+}
+$("pipeline-train-confirm").addEventListener("click",submitPipelineTraining);
+$("pipeline-train-cancel").addEventListener("click",closeTrainingDialog);
+$("pipeline-train-x").addEventListener("click",closeTrainingDialog);
+$("pipeline-train-dialog").addEventListener("click",e=>{if(e.target===$("pipeline-train-dialog"))closeTrainingDialog();});
+
 function openPipelineDetails(key){
  const spec=pipelineArticles[key],modelKey=key==="arima_forecast"?"arima":key,item=(latestTrainingData.registry||[]).find(x=>x.key===modelKey),run=item?.latest||{},m=run.metrics||{},v=run.validation||{},checks=v.checks||{};
  if(!spec)return;
