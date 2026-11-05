@@ -135,6 +135,7 @@ def next_command(request):
                 "instance_id": command.instance_id,
                 "account_login": command.account_login,
                 "symbol": command.symbol,
+                "server_name": heartbeat.server_name,
                 "action": command.action,
                 "payload": command.payload,
                 "decision_id": command.decision_id,
