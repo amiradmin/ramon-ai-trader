@@ -4,7 +4,7 @@
 
 The current implementation in `main` includes authenticated heartbeat/event/telemetry ingestion, an advisory decision endpoint, an auditable `RiskVerdictRecord`, a guarded strategy-to-command producer, and account-scoped command polling/acknowledgement. The decision endpoint calls `create_open_command()` when the advisory risk verdict is approved; command creation still returns without creating a command unless **both** `RAMON_EA_COMMAND_CREATION_ENABLED` and `RAMON_EA_COMMAND_EXECUTION_ENABLED` are explicitly enabled.
 
-Both settings default to `0`, and the EA input `EnableCommandExecution` defaults to `false`. Keep all gates disabled during telemetry/decision validation. Static tests and a healthy Django endpoint do not prove safe broker execution.
+Both settings default to `0`. Keep both gates disabled during telemetry/decision validation. Django validates demo mode, exact broker server, terminal permission telemetry, and all command authorization before delivery. The EA does not repeat those checks. Static tests and a healthy Django endpoint do not prove safe broker execution.
 
 ## Endpoints
 
@@ -25,7 +25,7 @@ The decision endpoint is not an order-placement endpoint. A directional BUY/SELL
 
 ## Command envelope and lifecycle
 
-Each durable command has a unique `command_id`, `instance_id`, account login, symbol, action, payload, decision reference, risk-verdict reference, expiry, and explicit `execution_authorized` flag.
+Each durable command has a unique `command_id`, `instance_id`, account login, broker server, symbol, action, payload, decision reference, risk-verdict reference, expiry, and explicit `execution_authorized` flag. The command payload persists the broker server that approved the decision; polling rejects it if the fresh heartbeat has moved to another server. The EA receives only the authorized command.
 
 Supported actions: `NOOP`, `OPEN`, `CLOSE`, and `MODIFY_SLTP`.
 
@@ -34,16 +34,16 @@ Supported actions: `NOOP`, `OPEN`, `CLOSE`, and `MODIFY_SLTP`.
 - `MODIFY_SLTP` must target a specific position and provide the requested stop/target values.
 - Unknown, malformed, expired, unauthorized, or account-mismatched commands must fail closed.
 
-Lifecycle: `PENDING → CLAIMED → RECEIVED → EXECUTING → EXECUTED`.
+Lifecycle: `PENDING → CLAIMED → RECEIVED → EXECUTING → EXECUTED`. The EA may acknowledge `EXECUTED` for an OPEN only after the broker returns `TRADE_RETCODE_DONE` and supplies an order/deal identifier. Partial fills, merely placed orders, or missing fill identifiers are `RECONCILIATION_REQUIRED`, never silently treated as a completed fill.
 
 Terminal alternatives include `REJECTED`, `FAILED`, `EXPIRED`, and `RECONCILIATION_REQUIRED`. Repeated identical terminal acknowledgements are idempotent; conflicting terminal acknowledgements are rejected. Delivery is at-least-once, not exactly-once.
 
 ## Safety invariants
 
 1. Strategy and risk decisions remain in Django; the EA is a bridge and guarded broker executor.
-2. Execution is disabled unless both Django gates and the local EA input are explicitly enabled.
+2. Execution is disabled unless both Django command gates are explicitly enabled and Django's broker/account/terminal telemetry checks pass.
 3. Django command creation rechecks fresh telemetry, account/server/symbol identity, demo mode, quote freshness, open positions, and daily-risk baseline before creating an OPEN command.
-4. The EA must recheck account identity, quote freshness, spread, symbol volume rules, SL/TP direction and distance, terminal permissions, local risk caps, and duplicate command IDs immediately before execution.
+4. Django must recheck instance/account/symbol/broker-server scope, demo-account mode, command expiry, server authorization, terminal permissions, and duplicate command IDs before delivery. The EA performs no trading-policy checks; it dispatches the authorized command and reports broker execution results.
 5. The EA must not blindly retry an OPEN after a timeout or uncertain broker result; it must reconcile broker orders/deals/positions and use `RECONCILIATION_REQUIRED` when necessary.
 6. A Django/network failure blocks new command-driven entries, not protective management of existing positions.
 7. Every decision, risk verdict, command, acknowledgement, and broker result must be auditable.

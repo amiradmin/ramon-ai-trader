@@ -123,6 +123,22 @@ def next_command(request):
                 "trading_authorization": False,
             })
 
+        # Bind delivery to the broker server that approved the original decision.
+        # Never substitute the latest heartbeat's server for a missing/mismatched
+        # command server, even if an account login happens to match on both servers.
+        command_payload = command.payload if isinstance(command.payload, dict) else {}
+        expected_server = str(command_payload.get("server_name", "")).strip()
+        if not expected_server or expected_server != heartbeat.server_name:
+            command.state = EACommand.State.REJECTED
+            command.result = {"detail": "COMMAND_SERVER_MISMATCH"}
+            command.completed_at = now
+            command.save(update_fields=["state", "result", "completed_at"])
+            return JsonResponse({
+                "ok": True, "commands_enabled": True, "command": None,
+                "trading_authorization": False,
+                "authorization_reason": "COMMAND_SERVER_MISMATCH",
+            })
+
         command.state = EACommand.State.CLAIMED
         command.claimed_at = now
         command.save(update_fields=["state", "claimed_at"])
@@ -135,6 +151,7 @@ def next_command(request):
                 "instance_id": command.instance_id,
                 "account_login": command.account_login,
                 "symbol": command.symbol,
+                "server_name": expected_server,
                 "action": command.action,
                 "payload": command.payload,
                 "decision_id": command.decision_id,

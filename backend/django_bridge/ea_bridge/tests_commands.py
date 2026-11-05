@@ -54,7 +54,7 @@ class EACommandEndpointTests(TestCase):
             account_login="12345",
             symbol="XAUUSD_o",
             action=EACommand.Action.OPEN,
-            payload={"side": "SELL", "volume": "0.01", "stop_loss": 2401.0, "take_profit": 2398.0},
+            payload={"server_name": "LiteFinance-MT5-Demo", "side": "SELL", "volume": "0.01", "stop_loss": 2401.0, "take_profit": 2398.0},
             decision_id="decision-test-1",
             risk_verdict_id="risk-test-1",
             execution_authorized=True,
@@ -107,8 +107,33 @@ class EACommandEndpointTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["command"]["command_id"], valid.command_id)
         self.assertTrue(response.json()["trading_authorization"])
+        self.assertEqual(response.json()["command"]["server_name"], "LiteFinance-MT5-Demo")
         self.assertEqual(valid.__class__.objects.get(command_id="valid").state, EACommand.State.CLAIMED)
         self.assertEqual(valid.__class__.objects.get(command_id="expired").state, EACommand.State.EXPIRED)
+
+
+    @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
+    def test_poll_rejects_command_bound_to_a_different_broker_server(self):
+        command = self.create_command(payload={
+            "server_name": "Different-Broker-Demo",
+            "side": "BUY",
+            "volume": 0.01,
+            "stop_loss": 2390.0,
+            "take_profit": 2420.0,
+        })
+        response = self.client.post(
+            self.next_url,
+            data=json.dumps({"instance_id": "ea-test-1", "account_login": "12345"}),
+            content_type="application/json",
+            **self.headers,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["command"])
+        self.assertFalse(response.json()["trading_authorization"])
+        self.assertEqual(response.json()["authorization_reason"], "COMMAND_SERVER_MISMATCH")
+        command.refresh_from_db()
+        self.assertEqual(command.state, EACommand.State.REJECTED)
+        self.assertEqual(command.result["detail"], "COMMAND_SERVER_MISMATCH")
 
     @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
     def test_ack_is_account_scoped_and_terminal_ack_is_idempotent(self):
