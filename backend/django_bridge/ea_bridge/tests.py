@@ -703,6 +703,7 @@ class DjangoDecisionApiTests(TestCase):
         self.assertEqual(command.instance_id, "ea-decision-test")
         self.assertEqual(command.account_login, "12345678")
         self.assertEqual(command.symbol, "XAUUSD_o")
+        self.assertEqual(command.payload["server_name"], "LiteFinance-MT5-Demo")
         self.assertEqual(command.payload["side"], "BUY")
         self.assertEqual(command.payload["volume"], 0.1)
         self.assertTrue(command.execution_authorized)
