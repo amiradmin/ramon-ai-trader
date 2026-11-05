@@ -37,7 +37,6 @@ class DecisionThresholdConfigurationTests(TestCase):
         self.assertEqual(risk_items["min_reward_risk"]["max"], 3.0)
         self.assertEqual(risk_items["maximum_risk_percent"]["value"], 0.5)
         self.assertEqual(risk_items["max_total_risk_percent"]["value"], 2.0)
-        self.assertEqual(risk_items["max_daily_loss_percent"]["value"], 3.0)
         self.assertEqual(risk_items["target_reward_risk"]["value"], 1.25)
         self.assertIn("entry_timing", groups)
         self.assertIn("risk_management", groups)
@@ -48,7 +47,7 @@ class DecisionThresholdConfigurationTests(TestCase):
             data=json.dumps({"values": {
                 "opportunities": {"atr_ratio_min": 0.75, "atr_ratio_max": 2.2},
                 "entry_timing": {"max_chase_atr": 0.7, "minimum_quality": 0.6, "maximum_spread_points": 90},
-                "risk_management": {"maximum_risk_percent": 0.75, "max_total_risk_percent": 2.5, "max_daily_loss_percent": 3.5, "target_reward_risk": 1.5, "min_reward_risk": 1.2},
+                "risk_management": {"maximum_risk_percent": 0.75, "max_total_risk_percent": 2.5, "target_reward_risk": 1.5, "min_reward_risk": 1.2},
             }}),
             content_type="application/json",
         )
@@ -64,7 +63,6 @@ class DecisionThresholdConfigurationTests(TestCase):
         self.assertEqual(pipeline.risk_manager.config.target_reward_risk, 1.5)
         self.assertEqual(pipeline.risk_manager.maximum_risk_percent, 0.75)
         self.assertEqual(pipeline.risk_manager.config.max_total_risk_percent, 2.5)
-        self.assertEqual(pipeline.risk_manager.config.max_daily_loss_percent, 3.5)
 
     def test_rejects_invalid_or_non_strategy_thresholds(self):
         response = self.client.post(
@@ -158,7 +156,6 @@ class DemoOpportunityProfileTests(TestCase):
         # Discovery is relaxed; account and portfolio risk remain unchanged.
         self.assertEqual(demo.risk_manager.maximum_risk_percent, 0.5)
         self.assertEqual(demo.risk_manager.config.max_total_risk_percent, 2.0)
-        self.assertEqual(demo.risk_manager.config.max_daily_loss_percent, 3.0)
         self.assertEqual(demo.risk_manager.config.min_reward_risk, 1.2)
 
 
@@ -816,102 +813,22 @@ class DjangoDecisionApiTests(TestCase):
         self.assertFalse(b["execution_enabled"])
 
     @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
-    def test_client_daily_loss_zero_does_not_authorize_real_account_without_server_baseline(self):
+    def test_missing_daily_baseline_does_not_block_decision(self):
         heartbeat = EAHeartbeat.objects.get(instance_id="ea-decision-test")
         heartbeat.payload["account_trade_mode"] = 1
+        heartbeat.payload.pop("broker_day", None)
+        heartbeat.payload.pop("broker_day_history_complete", None)
         heartbeat.save(update_fields=["payload"])
-
-        r=self.client.post(self.url,data=json.dumps(self.payload()),content_type="application/json",**self.headers)
-        self.assertEqual(r.status_code,200,r.content)
-        b=r.json()
-        self.assertEqual(b["decision"],"WAIT")
-        self.assertEqual(b["reason"],"DAILY_LOSS_BASELINE_UNAVAILABLE")
-        verdict = RiskVerdictRecord.objects.filter(decision_id=b["sample_key"]).latest("created_at")
-        self.assertFalse(verdict.approved)
-        self.assertEqual(verdict.reason_code, "DAILY_LOSS_BASELINE_UNAVAILABLE")
-        self.assertFalse(verdict.details["execution_authorized"])
-        self.assertFalse(b["trading_authorization"])
-        self.assertFalse(b["execution_enabled"])
-
-    @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
-    def test_verified_demo_without_baseline_uses_explicit_demo_bypass(self):
-        response = self.client.post(
-            self.url,
-            data=json.dumps(self.payload()),
-            content_type="application/json",
-            **self.headers,
-        )
-        self.assertEqual(response.status_code, 200, response.content)
-        body = response.json()
-        self.assertFalse(body["daily_baseline_available"])
-        self.assertIsNone(body["server_daily_loss_percent"])
-        self.assertEqual(body["daily_loss_source"], "DEMO_NO_BASELINE_BYPASS")
-        self.assertEqual(body["daily_baseline_day"], date.today().isoformat())
-
-        verdict = RiskVerdictRecord.objects.filter(
-            decision_id=body["sample_key"]
-        ).latest("created_at")
-        self.assertEqual(
-            verdict.details["daily_baseline_capture_method"],
-            "DEMO_NO_BASELINE_BYPASS",
-        )
-        self.assertIsNone(verdict.details["server_daily_loss_percent"])
-        self.assertEqual(verdict.details["account_state_reason"], "")
-
-    @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
-    def test_demo_uses_complete_broker_history_when_database_baseline_is_missing(self):
-        heartbeat = EAHeartbeat.objects.get(instance_id="ea-decision-test")
-        heartbeat.payload.update({
-            "broker_day_history_complete": True,
-            "broker_day_opening_balance": "10000.00",
-        })
-        heartbeat.payload["account"]["equity"] = "9600"
-        heartbeat.save(update_fields=["payload"])
-
         response = self.client.post(
             self.url, data=json.dumps(self.payload()),
             content_type="application/json", **self.headers,
         )
         self.assertEqual(response.status_code, 200, response.content)
-        body = response.json()
-        self.assertTrue(body["daily_baseline_available"])
-        self.assertEqual(body["daily_baseline_balance"], 10000.0)
-        self.assertAlmostEqual(body["server_daily_loss_percent"], 4.0, places=4)
-        self.assertEqual(body["daily_loss_source"], "BROKER_HISTORY_TELEMETRY_DEMO")
-        record = StrategyDecisionRecord.objects.get(decision_id=body["sample_key"])
-        self.assertEqual(
-            record.features["daily_risk"]["source"],
-            "BROKER_HISTORY_TELEMETRY_DEMO",
-        )
-        verdict = RiskVerdictRecord.objects.filter(
-            decision_id=body["sample_key"]
-        ).latest("created_at")
-        self.assertEqual(
-            verdict.details["daily_baseline_capture_method"],
-            "BROKER_HISTORY_TELEMETRY_DEMO",
-        )
-
-    @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
-    def test_non_demo_cannot_use_broker_history_fallback(self):
-        heartbeat = EAHeartbeat.objects.get(instance_id="ea-decision-test")
-        heartbeat.payload.update({
-            "account_trade_mode": 1,
-            "broker_day_history_complete": True,
-            "broker_day_opening_balance": "10000.00",
-        })
-        heartbeat.save(update_fields=["payload"])
-
-        response = self.client.post(
-            self.url, data=json.dumps(self.payload()),
-            content_type="application/json", **self.headers,
-        )
-        self.assertEqual(response.status_code, 200, response.content)
-        self.assertEqual(response.json()["reason"], "DAILY_LOSS_BASELINE_UNAVAILABLE")
+        self.assertNotEqual(response.json()["reason"], "DAILY_LOSS_BASELINE_UNAVAILABLE")
         self.assertFalse(response.json()["daily_baseline_available"])
 
     @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
-    def test_server_baseline_equity_drawdown_overrides_client_zero(self):
-        p = self.payload()
+    def test_large_daily_drawdown_does_not_create_daily_loss_rejection(self):
         AccountDailyBaseline.objects.create(
             account_login="12345678",
             server_name="LiteFinance-MT5-Demo",
@@ -920,20 +837,14 @@ class DjangoDecisionApiTests(TestCase):
             source_instance_id="ea-decision-test",
         )
         heartbeat = EAHeartbeat.objects.get(instance_id="ea-decision-test")
-        heartbeat.payload["account"]["equity"] = "9600"
+        heartbeat.payload["account"]["equity"] = "7000"
         heartbeat.save(update_fields=["payload"])
-        p["daily_loss_percent"] = 0
-        r = self.client.post(self.url, data=json.dumps(p), content_type="application/json", **self.headers)
-        self.assertEqual(r.status_code, 200, r.content)
-        body = r.json()
-        self.assertEqual(body["decision"], "WAIT")
-        self.assertTrue(body["daily_baseline_available"])
-        self.assertEqual(body["daily_baseline_day"], date.today().isoformat())
-        self.assertAlmostEqual(body["server_daily_loss_percent"], 4.0, places=4)
-        self.assertEqual(body["daily_loss_source"], "SERVER_BASELINE_EQUITY_DRAWDOWN")
-        audit = StrategyDecisionRecord.objects.get(decision_id=body["sample_key"])
-        self.assertAlmostEqual(audit.features["daily_risk"]["loss_percent"], 4.0, places=4)
-        self.assertEqual(audit.features["daily_risk"]["source"], "SERVER_BASELINE_EQUITY_DRAWDOWN")
+        response = self.client.post(
+            self.url, data=json.dumps(self.payload()),
+            content_type="application/json", **self.headers,
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertNotEqual(response.json()["reason"], "DAILY_LOSS_LIMIT_REACHED")
 
     @override_settings(EA_BEARER_TOKEN="test-token",RAMON_DJANGO_DECISION_ENABLED=True)
     def test_rejects_account_login_mismatch(self):
