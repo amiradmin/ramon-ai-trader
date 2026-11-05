@@ -19,3 +19,6 @@ compose.pg-canary.yaml
 
 # Local IDE settings
 .idea/
+
+# Runtime-trained model artifacts (persisted in Docker volume in deployments)
+/media/
