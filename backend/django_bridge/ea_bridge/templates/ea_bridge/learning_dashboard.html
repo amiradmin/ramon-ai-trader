@@ -158,13 +158,14 @@ function closeTrainingDialog(){ $("pipeline-train-dialog").close(); pendingTrain
 document.querySelectorAll("[data-train-pipeline]").forEach(button=>button.addEventListener("click",()=>{
  const pipelineKey=button.dataset.trainPipeline;
  const isArima=pipelineKey==="arima_forecast";
- const pipelineName=button.textContent.replace(/^▶\\s*/,"").replace(/^Train /,"");
+ const pipelineName=button.textContent.replace("▶","").replace("Train ","").trim();
  pendingTrainingButton=button;
  $("pipeline-train-title").textContent=isArima?"Confirm ARIMA forecast":"Confirm pipeline training";
  $("pipeline-train-description").textContent=isArima?"You are about to queue an ARIMA forecast training run using completed market candles.":"You are about to train one selected trade-outcome model.";
  $("pipeline-train-summary").innerHTML="<strong>Selected pipeline:</strong> "+esc(pipelineName)+"<br><strong>Symbol:</strong> XAUUSD_o<br><strong>Timeframe:</strong> M15<br><strong>Scope:</strong> "+(isArima?"ARIMA market-candle forecasting":"This pipeline only; the other six pipelines will not be trained");
  $("pipeline-train-warning").textContent=isArima?"At least 50 matching completed candles are required. The forecast is research evidence only and cannot authorize trades.":"Training uses eligible closed-trade outcomes. Training does not change live strategy settings, authorize trades, or bypass Django risk controls.";
  $("pipeline-train-confirm").disabled=false;
+ $("pipeline-train-confirm").textContent="Start training";
  $("pipeline-train-dialog").showModal();
 }));
 async function submitPipelineTraining(){
