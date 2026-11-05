@@ -59,9 +59,9 @@ Open **EA bridge → EA events**. The list is newest-first, paginated at 50 rows
 
 All timestamps stored by Django use UTC. The EA's `observed_utc_epoch` field is retained in the JSON snapshot payload, while `received_at` records the database insertion time.
 
-## Daily-risk baseline recovery
+## Daily account reporting
 
-If the decision endpoint reports `DAILY_LOSS_BASELINE_UNAVAILABLE`, follow [`docs/operations/daily-risk-baseline-recovery.md`](../../docs/operations/daily-risk-baseline-recovery.md). The command EA can derive the broker-day opening balance from complete broker deal history, including balance-affecting deal components, and Django records it immutably for the exact account/server/day. If history selection or validation fails, the system remains fail-closed; never substitute current equity or balance. Keep command creation and execution disabled while diagnosing.
+Daily account baselines may be retained for reporting and reconciliation, but they are not required for trading authorization and are never used as a daily-loss halt.
 
 ## Safety / rollout
 
