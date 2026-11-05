@@ -3,7 +3,8 @@ import json
 import logging
 import socket
 import time
-from datetime import datetime
+from datetime import datetime, timezone as dt_timezone
+from decimal import Decimal, InvalidOperation
 
 from django.core.management.base import BaseCommand
 from django.db import close_old_connections, transaction
@@ -49,23 +50,48 @@ class Command(BaseCommand):
         """Idempotently persist one decoded Redis record; caller ACKs after this returns."""
         event_id, instance_id, event_type, occurred_at, payload = _decode_event(fields)
         kind = str(fields.get("kind", "")).lower()
-        if kind == "market_bar" and all(key in payload for key in ("symbol", "timeframe", "timestamp", "open", "high", "low", "close")):
+        if kind == "market_bar":
+            required = ("symbol", "timeframe", "timestamp", "open", "high", "low", "close")
+            if not all(key in payload for key in required):
+                raise ValueError("market bar requires symbol, timeframe, timestamp and OHLC fields")
+            if payload.get("closed") is not True:
+                raise ValueError("market bar must be a completed candle")
+
             bar_time = parse_datetime(str(payload["timestamp"]))
-            if bar_time is None:
-                raise ValueError("market bar timestamp must be a valid ISO datetime")
-            if bar_time.tzinfo is None or bar_time.utcoffset() is None:
+            if bar_time is None or bar_time.tzinfo is None or bar_time.utcoffset() is None:
                 raise ValueError("market bar timestamp must include a timezone")
+            bar_time = bar_time.astimezone(dt_timezone.utc)
+
+            def finite_decimal(value, field):
+                try:
+                    number = Decimal(str(value))
+                except (InvalidOperation, TypeError, ValueError):
+                    raise ValueError(f"market bar {field} must be numeric") from None
+                if not number.is_finite():
+                    raise ValueError(f"market bar {field} must be finite")
+                return number
+
+            opening = finite_decimal(payload["open"], "open")
+            high = finite_decimal(payload["high"], "high")
+            low = finite_decimal(payload["low"], "low")
+            close = finite_decimal(payload["close"], "close")
+            volume = finite_decimal(payload.get("volume", 0), "volume")
+            if min(opening, high, low, close) <= 0 or volume < 0:
+                raise ValueError("market bar OHLC prices must be positive and volume non-negative")
+            if high < max(opening, close, low) or low > min(opening, close, high):
+                raise ValueError("market bar has invalid OHLC relationships")
+
             MarketBar.objects.get_or_create(
                 source=instance_id,
                 symbol=str(payload["symbol"])[:32],
                 timeframe=str(payload["timeframe"]).upper()[:16],
                 timestamp=bar_time,
                 defaults={
-                    "open": payload["open"],
-                    "high": payload["high"],
-                    "low": payload["low"],
-                    "close": payload["close"],
-                    "volume": payload.get("volume", 0),
+                    "open": opening,
+                    "high": high,
+                    "low": low,
+                    "close": close,
+                    "volume": volume,
                 },
             )
             return
