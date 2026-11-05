@@ -10,7 +10,7 @@ RUN pip install --no-cache-dir \
     -r /app/requirements.txt
 COPY backend/django_bridge/ /app/
 RUN DJANGO_SETTINGS_MODULE=ramon_django.settings python manage.py collectstatic --noinput
-RUN mkdir -p /app/data && useradd --create-home --uid 10001 appuser && chown -R appuser:appuser /app
+RUN mkdir -p /app/data /app/media && useradd --create-home --uid 10001 appuser && chown -R appuser:appuser /app
 USER appuser
 EXPOSE 8016
 CMD ["sh", "-c", "python manage.py migrate --noinput && gunicorn ramon_django.wsgi:application --bind 0.0.0.0:8016 --workers 2 --timeout 10"]
