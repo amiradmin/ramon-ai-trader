@@ -15,7 +15,7 @@ from django.utils.dateparse import parse_datetime
 
 from ramon_pipeline.signalflow.risk_management import RiskConfig
 
-from .models import AccountDailyBaseline, EACommand, EAHeartbeat, RiskVerdictRecord, StrategyDecisionRecord
+from .models import EACommand, EAHeartbeat, RiskVerdictRecord, StrategyDecisionRecord
 
 
 def _is_demo_account(snapshot):
@@ -76,7 +76,6 @@ def create_open_command(*, decision, verdict, instance_id, account_login, server
     positions = snapshot.get("positions")
     account = snapshot.get("account")
     quote = snapshot.get("quote")
-    broker_day_raw = snapshot.get("broker_day")
     if not isinstance(positions, list) or positions:
         return None, False, "OPEN_POSITION_RISK_UNVERIFIED"
     if not isinstance(account, dict) or not isinstance(quote, dict):
@@ -87,14 +86,7 @@ def create_open_command(*, decision, verdict, instance_id, account_login, server
     quote_age = (now - quote_time).total_seconds()
     if quote_age < -5 or quote_age > 60:
         return None, False, "QUOTE_STALE"
-    if not isinstance(broker_day_raw, str):
-        return None, False, "DAILY_LOSS_BASELINE_UNAVAILABLE"
-
     try:
-        from datetime import date
-        broker_day = date.fromisoformat(broker_day_raw)
-        if broker_day.isoformat() != broker_day_raw:
-            raise ValueError("invalid broker day")
         bid = _decimal(quote.get("bid"), "bid")
         ask = _decimal(quote.get("ask"), "ask")
         current_balance = _decimal(account.get("balance"), "balance")
@@ -102,76 +94,18 @@ def create_open_command(*, decision, verdict, instance_id, account_login, server
         decision_account = decision.features.get("account_snapshot", {})
         decision_balance = _decimal(decision_account.get("balance"), "decision balance")
         decision_equity = _decimal(decision_account.get("equity"), "decision equity")
-        baseline = AccountDailyBaseline.objects.filter(
-            account_login=account_login,
-            server_name=server_name,
-            broker_day=broker_day,
-        ).first()
         volume = _decimal(verdict.approved_volume, "approved_volume")
         stop_loss = _decimal(verdict.stop_loss, "stop_loss")
         take_profit = _decimal(verdict.take_profit, "take_profit")
     except (ValueError, TypeError, InvalidOperation):
         return None, False, "COMMAND_RISK_VALUES_INVALID"
 
-    if baseline is not None and baseline.opening_balance > 0:
-        baseline_opening_balance = _decimal(baseline.opening_balance, "daily baseline")
-        expected_baseline_source = "SERVER_BASELINE_EQUITY_DRAWDOWN"
-    else:
-        # Prefer a complete broker-history baseline. If it is unavailable, permit
-        # this explicitly identified Demo account to proceed without daily-loss
-        # enforcement; never apply this exception to a Real account.
-        try:
-            telemetry_opening_balance = _decimal(
-                snapshot.get("broker_day_opening_balance"), "broker day opening balance"
-            )
-        except ValueError:
-            telemetry_opening_balance = Decimal("0")
-        if (
-            snapshot.get("broker_day_history_complete") is True
-            and snapshot.get("server_name") == server_name
-            and telemetry_opening_balance > 0
-        ):
-            baseline_opening_balance = telemetry_opening_balance
-            expected_baseline_source = "BROKER_HISTORY_TELEMETRY_DEMO"
-        else:
-            baseline_opening_balance = None
-            expected_baseline_source = "DEMO_NO_BASELINE_BYPASS"
-
-    if verdict.details.get("daily_baseline_day") != broker_day.isoformat():
-        return None, False, "RISK_VERDICT_BASELINE_DAY_MISMATCH"
-    if verdict.details.get("daily_baseline_capture_method") not in (
-        baseline.capture_method if baseline is not None and baseline.opening_balance > 0 else None,
-        expected_baseline_source,
-    ):
-        return None, False, "RISK_VERDICT_BASELINE_SOURCE_MISMATCH"
-    if baseline_opening_balance is None:
-        if verdict.details.get("daily_baseline_balance") is not None:
-            return None, False, "RISK_VERDICT_BASELINE_MISMATCH"
-    else:
-        try:
-            verdict_baseline_balance = _decimal(
-                verdict.details.get("daily_baseline_balance"), "verdict daily baseline"
-            )
-        except ValueError:
-            return None, False, "RISK_VERDICT_BASELINE_MISMATCH"
-        if abs(verdict_baseline_balance - baseline_opening_balance) > Decimal("0.01"):
-            return None, False, "RISK_VERDICT_BASELINE_MISMATCH"
     if bid <= 0 or ask < bid or current_balance <= 0 or baseline_equity <= 0 or volume <= 0:
         return None, False, "ACCOUNT_OR_QUOTE_VALUES_INVALID"
     if abs(current_balance - decision_balance) > Decimal("0.01"):
         return None, False, "ACCOUNT_BALANCE_CHANGED_AFTER_DECISION"
     if abs(baseline_equity - decision_equity) > Decimal("0.01"):
         return None, False, "ACCOUNT_EQUITY_CHANGED_AFTER_DECISION"
-
-    # Enforce the daily-loss cap whenever a trustworthy baseline exists.
-    # With no baseline, this Demo-only path cannot calculate daily drawdown.
-    if baseline_opening_balance is not None:
-        daily_loss_percent = max(
-            Decimal("0"),
-            (baseline_opening_balance - baseline_equity) / baseline_opening_balance * Decimal("100"),
-        )
-        if daily_loss_percent >= Decimal(str(RiskConfig().max_daily_loss_percent)):
-            return None, False, "DAILY_LOSS_LIMIT_REACHED"
 
     if decision.action == "BUY":
         risk_distance, reward_distance = ask - stop_loss, take_profit - ask
