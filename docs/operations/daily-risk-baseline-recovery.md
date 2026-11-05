@@ -1,41 +1,16 @@
-# Ramon daily-risk baseline recovery
+# Daily account baseline telemetry (informational)
 
 ## Purpose
 
-The Django decision API deliberately returns `WAIT / DAILY_LOSS_BASELINE_UNAVAILABLE` when it cannot find an opening-balance baseline for the exact broker account, server, and broker-local date. This is fail-closed behavior, not an indicator bug. Current equity or current balance alone is never an acceptable substitute.
+Ramon no longer enforces a daily-loss cap and does not require an account daily baseline to evaluate or authorize a trade. Daily broker-day baselines may still be collected and retained for historical reporting, reconciliation, and analysis. Missing baseline data or a large daily drawdown must not block an otherwise valid OPEN command.
 
-## 1. Confirm the deployed code and migrations
+## What remains mandatory
 
-Run from the repository root after pulling the reviewed code:
+The absence of a daily baseline does not waive per-trade or execution checks. Django must still validate fresh account telemetry, demo-account eligibility where configured, current account and symbol data, open-position risk, approved volume, stop-loss and take-profit levels, reward-to-risk, command expiry, duplicate-command protection, and broker-server identity.
 
-```bash
-docker compose ps
-docker compose exec -T django python manage.py showmigrations ea_bridge
-docker compose exec -T django python manage.py migrate --check
-```
+## Inspecting historical baselines
 
-The `0005_accountdailybaseline_capture_method` migration must be marked `[X]`. Do not delete, reset, or recreate PostgreSQL/TimescaleDB volumes.
-
-## 2. Let the updated EA derive the opening balance from broker history
-
-Use `RamonCommandEA_v1.04.mq5` on the intended demo account. Keep `EnableCommandExecution=false`.
-
-On each telemetry cycle, the EA selects broker deal history from broker-local midnight through the current broker-server time and computes:
-
-```text
-opening balance = current account balance
-                - sum(balance-affecting deal profit + swap + commission + fee)
-
-Credit-only ledger entries are excluded because they do not change ACCOUNT_BALANCE.
-```
-
-The EA marks history complete only when history selection and every required deal-property read succeeds, the account balance remains unchanged while history is read, and the resulting opening balance is finite and positive. Django validates the explicit completeness flag, amount, and deal count before creating an immutable `BROKER_HISTORY_DERIVED` baseline. This allows first-time attachment after midnight and does not depend on observing the rollover.
-
-If broker history is unavailable or invalid, the EA sends telemetry without a complete-history assertion. Django retains the existing continuous-rollover fallback (same account/server, consecutive broker dates, and no more than 90 seconds between observations). Otherwise no baseline is created and decisions remain `WAIT`.
-
-## 3. Verify the baseline and its provenance
-
-After the updated EA is attached and at least one telemetry cycle has completed, inspect the baseline:
+The following command is optional and is intended only for observability:
 
 ```bash
 docker compose exec -T django python manage.py shell -c '
@@ -46,36 +21,4 @@ for row in AccountDailyBaseline.objects.order_by("-broker_day")[:10]:
 '
 ```
 
-Expected capture methods are:
-
-- `BROKER_HISTORY_DERIVED` — computed from complete broker deal history by the EA.
-- `ROLLOVER_CONTINUITY` — previous day's balance captured across a fresh, continuous rollover.
-- `MANUAL_BROKER_VERIFIED` — explicitly entered after checking the broker statement/history.
-
-Baselines are immutable. If a row already exists, inspect it; do not overwrite it automatically.
-
-## 4. Manual fallback only when broker history cannot be read
-
-Obtain the actual opening balance for the broker-local day from the broker's account history/statement. Account for deposits, withdrawals, credit adjustments, commissions, swaps, fees, and other balance operations. Do not guess from current equity or balance.
-
-Then run this command, replacing every placeholder with verified values:
-
-```bash
-docker compose exec -T django python manage.py capture_daily_baseline \
-  --account-login '<BROKER_ACCOUNT_LOGIN>' \
-  --server-name '<EXACT_BROKER_SERVER_NAME>' \
-  --broker-day '<BROKER_LOCAL_DATE_YYYY-MM-DD>' \
-  --opening-balance '<VERIFIED_OPENING_BALANCE>' \
-  --source-instance-id '<CURRENT_EA_INSTANCE_ID>' \
-  --confirm-broker-opening-balance
-```
-
-The command refuses unconfirmed values and never overwrites a baseline.
-
-## 5. Validate decisions without enabling execution
-
-Wait for fresh telemetry and a decision request. Inspect the latest `StrategyDecisionRecord` and confirm `daily_risk.baseline_available=true`, the exact broker day, opening balance, current equity, capture method, and server-derived daily-loss percentage.
-
-A valid baseline does not guarantee a trade: market regime, entry timing, news, spread, open-position risk, stop loss, reward-to-risk, sizing, and terminal permissions remain independent gates.
-
-Keep both `RAMON_EA_COMMAND_CREATION_ENABLED=0` and `RAMON_EA_COMMAND_EXECUTION_ENABLED=0` until end-to-end demo execution and reconciliation have been separately validated. A healthy dashboard or a passing decision test is not proof that broker execution is ready.
+Do not create or edit a baseline merely to unblock trading. Baseline capture and daily P/L values are not authorization inputs.
