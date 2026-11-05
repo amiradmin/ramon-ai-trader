@@ -1337,6 +1337,7 @@ class MarketBarRetentionCommandTests(TestCase):
         self.assertTrue(MarketBar.objects.filter(source="retention-test", timeframe="M5").exists())
 
 
+class MarketBarWorkerValidationTests(TestCase):
     def test_market_bar_rejects_incomplete_candle(self):
         record = {
             "kind": "market_bar",
