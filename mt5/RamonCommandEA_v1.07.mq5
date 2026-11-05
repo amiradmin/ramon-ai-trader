@@ -151,14 +151,14 @@ bool GetServerUtcOffsetSeconds(long &offset_seconds)
    datetime utc_now=TimeGMT();
    datetime server_after=TimeTradeServer();
    if(server_before<=0 || utc_now<=0 || server_after<=0)
-      return false;
+      return;
 
    long server_midpoint=(long)server_before+
       (((long)server_after-(long)server_before)/2);
    long raw_offset=server_midpoint-(long)utc_now;
    // Broker timezone offsets are minute-granular; discard clock sampling jitter.
    offset_seconds=(long)MathRound((double)raw_offset/60.0)*60;
-   return true;
+   return;
 }
 
 datetime NormalizeM15Utc(datetime utc_stamp)
@@ -247,7 +247,7 @@ string TfName(ENUM_TIMEFRAMES tf)
 
 bool PostJson(const string path,const string body,string &response)
 {
-   if(StringLen(DjangoBearerToken)<32) return false;
+   if(StringLen(DjangoBearerToken)<32) return;
    string headers="Content-Type: application/json\r\nAuthorization: Bearer "+DjangoBearerToken+"\r\n";
    char data[], result[];
    StringToCharArray(body,data,0,WHOLE_ARRAY,CP_UTF8);
@@ -258,13 +258,13 @@ bool PostJson(const string path,const string body,string &response)
    if(code<200 || code>=300)
    {
       Print("RamonCommandEA HTTP failure path=",path," code=",code," error=",GetLastError());
-      return false;
+      return;
    }
    response=CharArrayToString(result,0,-1,CP_UTF8);
    if(path=="/decision")
       Print("RamonCommandEA v1.04: Django decision HTTP success code=",code,
             " response_bytes=",ArraySize(result));
-   return true;
+   return;
 }
 
 string BuildBarsJson()
@@ -339,30 +339,30 @@ bool CalculateBrokerDayOpeningBalance(const datetime server_now,const double bal
    deal_count=0;
 
    if(server_now<=0 || !MathIsValidNumber(balance_before) || balance_before<=0.0)
-      return false;
+      return;
 
    MqlDateTime broker_day_parts;
-   if(!TimeToStruct(server_now,broker_day_parts)) return false;
+   if(!TimeToStruct(server_now,broker_day_parts)) return;
    broker_day_parts.hour=0;
    broker_day_parts.min=0;
    broker_day_parts.sec=0;
    datetime broker_day_start=StructToTime(broker_day_parts);
-   if(broker_day_start<=0 || broker_day_start>server_now) return false;
+   if(broker_day_start<=0 || broker_day_start>server_now) return;
 
    ResetLastError();
-   if(!HistorySelect(broker_day_start,server_now)) return false;
+   if(!HistorySelect(broker_day_start,server_now)) return;
 
    int total=HistoryDealsTotal();
-   if(total<0) return false;
+   if(total<0) return;
 
    double net_cashflow=0.0;
    for(int i=0;i<total;i++)
    {
       ulong deal=HistoryDealGetTicket(i);
-      if(deal==0) return false;
+      if(deal==0) return;
 
       long deal_type=0;
-      if(!HistoryDealGetInteger(deal,DEAL_TYPE,deal_type)) return false;
+      if(!HistoryDealGetInteger(deal,DEAL_TYPE,deal_type)) return;
       // CREDIT changes the separate account-credit ledger, not ACCOUNT_BALANCE.
       if((ENUM_DEAL_TYPE)deal_type==DEAL_TYPE_CREDIT) continue;
 
@@ -374,24 +374,24 @@ bool CalculateBrokerDayOpeningBalance(const datetime server_now,const double bal
          !HistoryDealGetDouble(deal,DEAL_SWAP,swap) ||
          !HistoryDealGetDouble(deal,DEAL_COMMISSION,commission) ||
          !HistoryDealGetDouble(deal,DEAL_FEE,fee))
-         return false;
+         return;
 
       net_cashflow+=profit+swap+commission+fee;
-      if(!MathIsValidNumber(net_cashflow)) return false;
+      if(!MathIsValidNumber(net_cashflow)) return;
    }
 
    double current_balance=AccountInfoDouble(ACCOUNT_BALANCE);
    // Avoid pairing a history snapshot with a balance changed during the read.
    if(!MathIsValidNumber(current_balance) ||
       MathAbs(current_balance-balance_before)>0.005)
-      return false;
+      return;
 
    opening_balance=current_balance-net_cashflow;
    if(!MathIsValidNumber(opening_balance) || opening_balance<=0.0)
-      return false;
+      return;
 
    deal_count=total;
-   return true;
+   return;
 }
 
 void RequestDjangoDecision()
@@ -546,16 +546,16 @@ bool IsPositionIdentifierOpen(const ulong position_id)
       ulong ticket=PositionGetTicket(i);
       if(ticket==0) continue;
       if((ulong)PositionGetInteger(POSITION_IDENTIFIER)==position_id)
-         return true;
+         return;
    }
-   return false;
+   return;
 }
 
 bool ContainsPositionId(const ulong &position_ids[],const ulong position_id)
 {
    for(int i=0;i<ArraySize(position_ids);i++)
-      if(position_ids[i]==position_id) return true;
-   return false;
+      if(position_ids[i]==position_id) return;
+   return;
 }
 
 void SaveLearningCursor(const string cursor_name,
@@ -597,10 +597,10 @@ bool BuildLearningOutcomeJson(const ulong position_id,
                               string &trade_id)
 {
    if(!HistorySelectByPosition(position_id))
-      return false;
+      return;
 
    int total=HistoryDealsTotal();
-   if(total<=0) return false;
+   if(total<=0) return;
 
    double net_pnl=0.0;
    double total_commission=0.0;
@@ -674,7 +674,7 @@ bool BuildLearningOutcomeJson(const ulong position_id,
    // is intentionally not merged into a completed position outcome.
    if(opened_server<=0 || closed_server<=0 || closed_server<opened_server ||
       symbol=="" || (side!="BUY" && side!="SELL"))
-      return false;
+      return;
 
    long login=(long)AccountInfoInteger(ACCOUNT_LOGIN);
    string server_key=StringSubstr(AccountInfoString(ACCOUNT_SERVER),0,64);
@@ -710,7 +710,7 @@ bool BuildLearningOutcomeJson(const ulong position_id,
    if(command_id!="")
       body+=",\"command_id\":\""+JsonEscape(command_id)+"\"";
    body+="}";
-   return true;
+   return;
 }
 
 void PollLearningOutcomes()
@@ -821,7 +821,7 @@ bool AckCommand(const string command_id,const string state,const string detail,c
    return PostJson("/commands/ack",body,response);
 }
 
-bool SafeOpen(const string command_json,const string command_id,
+void SafeOpen(const string command_json,const string command_id,
               ulong &ticket_out,string &reason,string &ack_state)
 {
    // Django owns strategy and risk. This function verifies broker submission outcome.
@@ -833,7 +833,7 @@ bool SafeOpen(const string command_json,const string command_id,
    {
       reason="MALFORMED_DJANGO_COMMAND";
       ack_state="REJECTED";
-      return false;
+      return;
    }
 
    bool submitted=(side=="BUY")
@@ -846,7 +846,7 @@ bool SafeOpen(const string command_json,const string command_id,
    {
       reason="BROKER_REJECTED_"+retcode_text;
       ack_state="REJECTED";
-      return false;
+      return;
    }
 
    ticket_out=Trade.ResultOrder();
@@ -859,11 +859,11 @@ bool SafeOpen(const string command_json,const string command_id,
       {
          reason="BROKER_FILL_WITHOUT_IDENTIFIER_"+retcode_text;
          ack_state="RECONCILIATION_REQUIRED";
-         return true;
+         return;
       }
       reason="BROKER_FILLED_"+retcode_text;
       ack_state="EXECUTED";
-      return true;
+      return;
    }
 
    // A partial fill or merely placed order is not reported as fully executed.
@@ -872,20 +872,20 @@ bool SafeOpen(const string command_json,const string command_id,
    {
       reason="BROKER_RESULT_REQUIRES_RECONCILIATION_"+retcode_text;
       ack_state="RECONCILIATION_REQUIRED";
-      return true;
+      return;
    }
 
    reason="BROKER_NOT_FILLED_"+retcode_text;
    ack_state="REJECTED";
-   return false;
+   return;
 }
 
 bool LocalExecutionPermitted(string &reason)
 {
    // Account mode and terminal permissions are broker/environment facts.
    if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) || !MQLInfoInteger(MQL_TRADE_ALLOWED))
-   { reason="TERMINAL_OR_EA_TRADING_PERMISSION_DENIED"; return false; }
-   reason=""; return true;
+   { reason="TERMINAL_OR_EA_TRADING_PERMISSION_DENIED"; return; }
+   reason=""; return;
 }
 
 
@@ -893,10 +893,10 @@ bool ProcessCommand(const string response)
 {
    if(StringFind(response,"\"command\":null")>=0 ||
       StringFind(response,"\"command\": null")>=0)
-      return true;
+      return;
 
    string command=JsonObject(response,"command");
-   if(command=="") return false;
+   if(command=="") return;
 
    string command_id=JsonString(command,"command_id","");
    string action=JsonString(command,"action","");
@@ -908,7 +908,7 @@ bool ProcessCommand(const string response)
    string payload=JsonObject(command,"payload");
 
    if(command_id=="" || action=="" || payload=="")
-      return false;
+      return;
 
    string current_account=IntegerToString(
       (long)AccountInfoInteger(ACCOUNT_LOGIN));
