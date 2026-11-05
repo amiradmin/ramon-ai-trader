@@ -38,16 +38,7 @@ svg{width:100%;height:145px;display:block}.chart-label{fill:var(--muted);font-si
 <div id="status" role="status">Loading learning data…</div>
 
 <section class="grid" id="kpis" aria-label="Trading performance summary"></section>
-<section class="panel">
- <div class="split"><h2>Data quality</h2><span class="tag">Observed records only</span></div>
- <div id="quality" class="pillrow"></div>
- <p id="quality-note" class="section-note"></p>
-</section>
-<section class="panel">
- <h2>Equity progression</h2>
- <div id="equity" aria-live="polite"><div class="empty">Loading completed-trade equity progression…</div></div>
- <p class="section-note">Cumulative realized PnL from recorded closed outcomes, ordered by close time. This is a historical view, not a forecast.</p>
-</section>
+ 
 
 
 
@@ -66,10 +57,7 @@ svg{width:100%;height:145px;display:block}.chart-label{fill:var(--muted);font-si
  <div class="train-actions"><button class="train-button" id="train-trade-models">▶ Train Six Trade Models</button><span class="status-line" id="trade-training-status">Independent of market-candle forecasting.</span></div>
  <p class="section-note">Each pipeline requires at least 48 labeled outcomes, uses an 80/20 chronological split and compares against the training-set median. Passing validation never deploys or authorizes a model.</p>
 </section>
-<div class="two">
- <section class="panel"><h2>Entry & exit diagnostics</h2><div class="scroll"><table><thead><tr><th>Metric</th><th>Observed</th><th>Unavailable</th><th>Average</th></tr></thead><tbody id="execution"></tbody></table></div><p class="section-note">Missing MAE/MFE, spread, slippage, and efficiency measurements are unavailable, never zero.</p></section>
- <section class="panel"><h2>Strategy profile evaluation</h2><div id="strategies"></div><p class="section-note">A profile is evaluated only after its configured minimum sample. No profile is ranked or activated automatically.</p></section>
-</div>
+ 
 <section class="panel"><h2>Recent completed trades</h2><div class="scroll"><table><thead><tr><th>Closed UTC</th><th>Trade</th><th>Symbol</th><th>Decision</th><th>Net PnL</th><th>R multiple</th><th>Setup / regime</th></tr></thead><tbody id="outcomes"></tbody></table></div></section>
 
 <dialog id="pipeline-details-dialog" class="pipeline-dialog" aria-labelledby="pipeline-dialog-title">
@@ -96,16 +84,6 @@ const pipelineArticles={
  trade_strategy:{title:"StrategyEvaluator",model:"Random Forest Regressor",target:"Expected R-multiple",purpose:"Evaluates outcomes for explicitly recorded strategy profiles without activating profiles automatically.",requirements:"A recorded strategy_profile and valid R-multiple label are required.",validation:"Chronological 80/20 holdout; minimum sample safeguards apply to each profile."}
 };
 function metric(label,value,sub=""){return '<div class="panel metric"><span>'+label+'</span><strong>'+value+'</strong><small>'+sub+'</small></div>';}
-function renderEquity(rows){
- const ordered=[...rows].filter(r=>Number.isFinite(Number(r.realized_pnl))).reverse();
- if(!ordered.length){$("equity").innerHTML='<div class="empty">No completed trades recorded yet.</div>';return;}
- let total=0;const points=[0,...ordered.map(r=>(total+=Number(r.realized_pnl)))];
- const min=Math.min(0,...points),max=Math.max(0,...points),range=max-min||1,w=700,h=130,pad=8;
- const coords=points.map((v,i)=>[pad+i*(w-2*pad)/Math.max(1,points.length-1),h-pad-((v-min)/range)*(h-2*pad)]);
- const line=coords.map(p=>p.join(",")).join(" ");
- const zeroY=h-pad-((0-min)/range)*(h-2*pad);
- $("equity").innerHTML='<svg viewBox="0 0 '+w+' '+h+'" role="img" aria-label="Cumulative realized profit and loss"><line x1="0" y1="'+zeroY+'" x2="'+w+'" y2="'+zeroY+'" stroke="#52657d" stroke-dasharray="4 4"/><polyline points="'+line+'" fill="none" stroke="#76a9ee" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><text x="8" y="12" class="chart-label">'+fmt(min)+'</text><text x="8" y="'+(h-2)+'" class="chart-label">'+fmt(max)+'</text></svg><div class="split small"><span>'+ordered.length+' latest trades</span><b class="'+(total>=0?"good":"bad")+'">Cumulative: '+fmt(total)+'</b></div>';
-}
 function render(d){
  const s=d.summary?.overall||{};
  $("kpis").innerHTML=[
@@ -114,14 +92,6 @@ function render(d){
  metric("Profit factor",fmt(s.profit_factor),"Gross profit "+fmt(s.gross_profit)+" / gross loss "+fmt(s.gross_loss)),
  metric("Expectancy",fmt(s.expectancy),"Net PnL "+fmt(s.net_pnl)+" · Avg R "+fmt(s.avg_r,3))
  ].join("");
- const q=d.data_quality||{};
- $("quality").innerHTML='<span class="pill">Closed outcomes: <b>'+safe(q.closed_outcomes)+'</b></span>';
- $("quality-note").textContent=q.note||"";
- renderEquity(d.recent_outcomes||[]);
- const metrics=d.analysis?.entry_exit?.metrics||d.execution_diagnostics?.metrics||{};
- $("execution").innerHTML=Object.entries(metrics).map(([k,v])=>'<tr><td>'+esc(k.replaceAll("_"," "))+'</td><td>'+safe(v.observations)+'</td><td>'+safe(v.unavailable)+'</td><td>'+fmt(v.average,4)+'</td></tr>').join("")||'<tr><td colspan="4">No execution diagnostics available.</td></tr>';
- const profiles=d.analysis?.strategies?.profiles||{};
- $("strategies").innerHTML=Object.entries(profiles).map(([name,p])=>'<div class="item"><div class="split"><b>'+esc(name)+'</b><span class="tag '+(p.sufficient_data?"safe":"warn")+'">'+(p.sufficient_data?"SAMPLE READY":"INSUFFICIENT SAMPLE")+'</span></div><div class="small">'+safe(p.trades)+' trades'+(p.metrics?" · Win rate "+pct(p.metrics.win_rate)+" · Expectancy "+fmt(p.metrics.expectancy):" · Need "+safe(d.analysis.strategies.minimum_samples)+" minimum trades")+'</div></div>').join("")||'<div class="empty">No strategy-profile tags recorded yet.</div>';
  $("outcomes").innerHTML=(d.recent_outcomes||[]).map(r=>'<tr><td>'+esc(r.closed_at)+'</td><td>'+esc(r.trade_id)+'</td><td>'+esc(r.symbol)+'</td><td>'+esc(r.decision?.action||"Unlinked")+'</td><td class="'+(Number(r.realized_pnl)>=0?"good":"bad")+'">'+fmt(r.realized_pnl)+'</td><td>'+fmt(r.r_multiple,3)+'</td><td>'+esc((r.tags?.setup_type||"—")+" / "+(r.tags?.regime||"—"))+'</td></tr>').join("")||'<tr><td colspan="7">No completed outcomes recorded yet.</td></tr>';
 }
 const csrf=()=>document.querySelector("[name=csrfmiddlewaretoken]")?.value||"";
