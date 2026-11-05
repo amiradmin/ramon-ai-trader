@@ -1,12 +1,11 @@
 import hashlib
-import os
 import tempfile
 from unittest.mock import patch
 
 from django.core.files.storage import default_storage
 from django.test import TestCase, override_settings
 
-from ea_bridge.management.commands.run_learning_training_worker import _run_model
+from ea_bridge.management.commands.run_learning_training_worker import _persist_model_artifact, _run_model
 from ea_bridge.models import LearningModelRun, LearningTrainingJob
 
 
@@ -59,7 +58,12 @@ class LearningModelArtifactTests(TestCase):
         with default_storage.open(self.run.artifact_path, "rb") as saved:
             self.assertEqual(saved.read(), artifact)
 
-    def test_training_run_without_artifact_keeps_artifact_fields_empty(self):
-        self.run.artifact_path = ""
-        self.run.save(update_fields=["artifact_path"])
-        self.assertEqual(self.run.artifact_path, "")
+    def test_identical_version_is_reused_and_checksum_collision_is_rejected(self):
+        artifact = b"immutable-artifact"
+        self.run.version = "trade-immutable"
+        _persist_model_artifact(self.job, self.run, artifact)
+        first_path = self.run.artifact_path
+        _persist_model_artifact(self.job, self.run, artifact)
+        self.assertEqual(self.run.artifact_path, first_path)
+        with self.assertRaises(ValueError):
+            _persist_model_artifact(self.job, self.run, b"different-content")
