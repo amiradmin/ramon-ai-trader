@@ -605,6 +605,8 @@ bool BuildLearningOutcomeJson(const ulong position_id,
    double net_pnl=0.0;
    double total_commission=0.0;
    double total_swap=0.0;
+   double opening_volume=0.0;
+   double weighted_entry_price=0.0;
    datetime opened_server=0;
    datetime closed_server=0;
    ulong opening_order=0;
@@ -634,6 +636,13 @@ bool BuildLearningOutcomeJson(const ulong position_id,
 
       if(entry==DEAL_ENTRY_IN)
       {
+         double deal_volume=HistoryDealGetDouble(deal,DEAL_VOLUME);
+         double deal_price=HistoryDealGetDouble(deal,DEAL_PRICE);
+         if(deal_volume>0.0 && deal_price>0.0)
+         {
+            opening_volume+=deal_volume;
+            weighted_entry_price+=deal_volume*deal_price;
+         }
          if(opened_server==0 || deal_time<opened_server)
          {
             opened_server=(datetime)deal_time;
