@@ -22,3 +22,6 @@ compose.pg-canary.yaml
 
 # Runtime-trained model artifacts (persisted in Docker volume in deployments)
 /media/
+
+# Local Django media and trained model artifacts
+backend/django_bridge/media/
