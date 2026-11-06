@@ -95,6 +95,17 @@ class ArimaForecastTests(TestCase):
                 close=close,
                 volume=1,
             )
+            MarketBar.objects.create(
+                source="arima-test-ea",
+                symbol="XAUUSD_o",
+                timeframe="M15",
+                timestamp=start + timedelta(minutes=15 * index, microseconds=1),
+                open=close - 0.03,
+                high=close + 0.15,
+                low=close - 0.15,
+                close=close,
+                volume=1,
+            )
 
         result = forecast_market_bars(
             symbol="XAUUSD_o",
