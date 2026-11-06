@@ -6,6 +6,7 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from functools import wraps
 
+from django.core.paginator import Paginator
 from django.http import JsonResponse
 from django.shortcuts import render
 from django.utils import timezone
@@ -76,6 +77,37 @@ def _execution_diagnostics():
 def learning_dashboard(request):
     return render(request, "ea_bridge/learning_dashboard.html")
 
+
+@require_GET
+def recent_learning_outcomes(request):
+    """Return one bounded page of completed trades for the learning dashboard."""
+    try:
+        page_size = int(request.GET.get("page_size", 10))
+        if page_size < 1:
+            raise ValueError
+    except (TypeError, ValueError):
+        return JsonResponse({"ok": False, "error": "page_size must be a positive integer"}, status=400)
+    page_size = min(page_size, 50)
+
+    outcomes = LearningTradeOutcome.objects.filter(closed_at__isnull=False).order_by(
+        "-closed_at", "-received_at", "-id"
+    )
+    paginator = Paginator(outcomes, page_size)
+    page_obj = paginator.get_page(request.GET.get("page", 1))
+    results = [{
+        "trade_id": row.trade_id, "decision_id": row.decision_id, "symbol": row.symbol,
+        "realized_pnl": float(row.realized_pnl),
+        "r_multiple": float(row.r_multiple) if row.r_multiple is not None else None,
+        "closed_at": row.closed_at.isoformat() if row.closed_at else None,
+        "tags": row.tags, "decision": row.decision_snapshot,
+        "execution_metrics": row.execution_metrics,
+    } for row in page_obj.object_list]
+    return JsonResponse({
+        "ok": True, "results": results, "count": paginator.count,
+        "page": page_obj.number, "page_size": page_size,
+        "num_pages": paginator.num_pages,
+        "has_next": page_obj.has_next(), "has_previous": page_obj.has_previous(),
+    })
 
 @require_GET
 def learning_overview(request):
