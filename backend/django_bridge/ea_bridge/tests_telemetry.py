@@ -98,3 +98,75 @@ class EATelemetryTests(TestCase):
         payload["bars"][0]["timestamp"] = "2026-10-27T09:30:00"
         response = self.client.post(self.url, data=json.dumps(payload), content_type="application/json", **self.headers)
         self.assertEqual(response.status_code, 400)
+
+    @override_settings(EA_BEARER_TOKEN="test-token")
+    def test_rejects_misaligned_boundaries_for_all_supported_timeframes(self):
+        invalid_timestamps = {
+            "M1": "2026-10-27T09:30:01Z",
+            "M5": "2026-10-27T09:31:00Z",
+            "M15": "2026-10-27T09:31:00Z",
+            "H1": "2026-10-27T10:01:00Z",
+        }
+        for timeframe, timestamp in invalid_timestamps.items():
+            with self.subTest(timeframe=timeframe):
+                payload = self.payload()
+                payload["bars"] = []
+                payload["bar_sets"] = [{
+                    "timeframe": timeframe,
+                    "bars": [{
+                        "timestamp": timestamp,
+                        "open": 2320.0,
+                        "high": 2322.0,
+                        "low": 2319.0,
+                        "close": 2321.0,
+                        "volume": 12,
+                        "closed": True,
+                    }],
+                }]
+                response = self.client.post(
+                    self.url, data=json.dumps(payload),
+                    content_type="application/json", **self.headers,
+                )
+                self.assertEqual(response.status_code, 400, response.content)
+        self.assertEqual(MarketBar.objects.count(), 0)
+        self.assertFalse(EAHeartbeat.objects.filter(instance_id="ea-telemetry-test").exists())
+
+    @override_settings(EA_BEARER_TOKEN="test-token")
+    def test_accepts_exact_m1_m5_m15_and_h1_boundaries(self):
+        payload = self.payload()
+        payload["bars"] = []
+        payload["bar_sets"] = [
+            {"timeframe": "M1", "bars": [{
+                "timestamp": "2026-10-27T09:30:00Z", "open": 2320, "high": 2322,
+                "low": 2319, "close": 2321, "volume": 12, "closed": True,
+            }]},
+            {"timeframe": "M5", "bars": [{
+                "timestamp": "2026-10-27T09:30:00Z", "open": 2320, "high": 2322,
+                "low": 2319, "close": 2321, "volume": 12, "closed": True,
+            }]},
+            {"timeframe": "M15", "bars": [{
+                "timestamp": "2026-10-27T09:30:00Z", "open": 2320, "high": 2322,
+                "low": 2319, "close": 2321, "volume": 12, "closed": True,
+            }]},
+            {"timeframe": "H1", "bars": [{
+                "timestamp": "2026-10-27T09:00:00Z", "open": 2320, "high": 2322,
+                "low": 2319, "close": 2321, "volume": 12, "closed": True,
+            }]},
+        ]
+        response = self.client.post(
+            self.url, data=json.dumps(payload),
+            content_type="application/json", **self.headers,
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(MarketBar.objects.filter(source="ea-telemetry-test").count(), 4)
+
+    @override_settings(EA_BEARER_TOKEN="test-token")
+    def test_rejects_m15_microsecond_jitter(self):
+        payload = self.payload()
+        payload["bars"][0]["timestamp"] = "2026-10-27T09:30:00.000001Z"
+        response = self.client.post(
+            self.url, data=json.dumps(payload),
+            content_type="application/json", **self.headers,
+        )
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertEqual(MarketBar.objects.count(), 0)

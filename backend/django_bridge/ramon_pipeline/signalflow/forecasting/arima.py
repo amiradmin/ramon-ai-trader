@@ -75,6 +75,28 @@ def _interval_for(timeframe: str) -> timedelta:
     return timedelta(minutes=TIMEFRAME_MINUTES[key])
 
 
+def _aligned_market_bar_queryset(query, timeframe: str):
+    """Exclude historical rows whose timestamps are not exact timeframe boundaries."""
+    minutes = TIMEFRAME_MINUTES[timeframe.upper()]
+    query = query.filter(timestamp__second=0, timestamp__microsecond=0)
+
+    if minutes < 60:
+        return query.filter(timestamp__minute__in=range(0, 60, minutes))
+
+    if minutes < 24 * 60:
+        hours = minutes // 60
+        return query.filter(
+            timestamp__minute=0,
+            timestamp__hour__in=range(0, 24, hours),
+        )
+
+    query = query.filter(timestamp__hour=0, timestamp__minute=0)
+    if minutes == 7 * 24 * 60:
+        # Django's week_day lookup uses Sunday=1 and Monday=2.
+        query = query.filter(timestamp__week_day=2)
+    return query
+
+
 def forecast_market_bars(
     *,
     symbol: str,
@@ -100,9 +122,11 @@ def forecast_market_bars(
         raise ValueError("ARIMA order must contain three non-negative integers")
     interval = _interval_for(timeframe)
 
-    query = MarketBar.objects.filter(symbol=symbol, timeframe=timeframe.upper())
+    timeframe = timeframe.upper()
+    query = MarketBar.objects.filter(symbol=symbol, timeframe=timeframe)
     if source:
         query = query.filter(source=source)
+    query = _aligned_market_bar_queryset(query, timeframe)
     bars = list(query.order_by("-timestamp")[:limit])
     bars.reverse()
     minimum = max(40, test_size + 20)

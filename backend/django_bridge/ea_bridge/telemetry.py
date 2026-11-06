@@ -66,21 +66,28 @@ def _normalize_symbol_info(value):
     return normalized
 
 
-M15_INTERVAL_SECONDS = 15 * 60
-M15_TIMESTAMP_TOLERANCE_SECONDS = 120
+TIMEFRAME_INTERVAL_SECONDS = {
+    "M1": 60,
+    "M5": 5 * 60,
+    "M15": 15 * 60,
+    "H1": 60 * 60,
+}
 
 
-def _normalize_m15_timestamp(stamp, field_name):
-    """Canonicalize small timestamp jitter without accepting a wrong candle."""
-    epoch = stamp.timestamp()
-    boundary_epoch = int((epoch + M15_INTERVAL_SECONDS / 2) // M15_INTERVAL_SECONDS) * M15_INTERVAL_SECONDS
-    drift_seconds = abs(epoch - boundary_epoch)
-    if drift_seconds > M15_TIMESTAMP_TOLERANCE_SECONDS:
+def _validate_candle_timestamp(stamp, timeframe, field_name):
+    """Require an exact UTC candle boundary; never round malformed timestamps."""
+    interval_seconds = TIMEFRAME_INTERVAL_SECONDS[timeframe]
+    epoch_seconds = int(stamp.timestamp())
+    if (
+        stamp.second != 0
+        or stamp.microsecond != 0
+        or epoch_seconds % interval_seconds != 0
+    ):
         raise ValueError(
-            f"{field_name} must be within "
-            f"{M15_TIMESTAMP_TOLERANCE_SECONDS} seconds of an M15 boundary"
+            f"{field_name} must align exactly to a {timeframe} candle boundary "
+            "(zero seconds and microseconds)"
         )
-    return datetime.fromtimestamp(boundary_epoch, tz=dt_timezone.utc)
+    return stamp
 
 
 @csrf_exempt
@@ -150,12 +157,9 @@ def telemetry(request):
                 if stamp is None or stamp.tzinfo is None:
                     raise ValueError(f"{field}.timestamp must include timezone")
                 stamp = stamp.astimezone(dt_timezone.utc)
-                if bar_timeframe == "M15":
-                    stamp = _normalize_m15_timestamp(stamp, f"{field}.timestamp")
-                elif stamp.second != 0 or (
-                    bar_timeframe == "M5" and stamp.minute % 5 != 0
-                ):
-                    raise ValueError(f"{field}.timestamp must align to a {bar_timeframe} candle boundary")
+                stamp = _validate_candle_timestamp(
+                    stamp, bar_timeframe, f"{field}.timestamp"
+                )
 
                 o = _decimal(bar.get("open"), f"{field}.open")
                 h = _decimal(bar.get("high"), f"{field}.high")

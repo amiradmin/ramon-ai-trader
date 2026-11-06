@@ -79,3 +79,29 @@ class ArimaForecastTests(TestCase):
         )
         self.assertEqual(result.test_observations, 10)
         self.assertEqual(result.train_observations, 50)
+
+    def test_excludes_historically_misaligned_rows_from_training(self):
+        start = datetime(2026, 10, 1, tzinfo=timezone.utc)
+        for index in range(8):
+            close = 2400.0 + index
+            MarketBar.objects.create(
+                source="arima-test-ea",
+                symbol="XAUUSD_o",
+                timeframe="M15",
+                timestamp=start + timedelta(minutes=15 * index, seconds=8),
+                open=close - 0.03,
+                high=close + 0.15,
+                low=close - 0.15,
+                close=close,
+                volume=1,
+            )
+
+        result = forecast_market_bars(
+            symbol="XAUUSD_o",
+            timeframe="M15",
+            source="arima-test-ea",
+            test_size=5,
+        )
+        self.assertEqual(result.observations, 60)
+        self.assertEqual(result.last_bar_time, (start + timedelta(minutes=15 * 59)).isoformat())
+        self.assertEqual(result.missing_intervals, 0)
