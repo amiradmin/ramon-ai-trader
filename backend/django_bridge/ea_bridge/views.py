@@ -1,12 +1,14 @@
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
+from decimal import Decimal
 from django.conf import settings
 from django.http import JsonResponse, HttpResponse
+from django.db.models import Count, Q, Sum
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST, require_http_methods
 from .auth import BearerTokenRequired
-from .models import (EAEvent, EAHeartbeat, MarketBar, StrategyDecisionRecord, RiskVerdictRecord, DecisionThresholdConfig)
+from .models import (EAEvent, EAHeartbeat, LearningTradeOutcome, MarketBar, StrategyDecisionRecord, RiskVerdictRecord, DecisionThresholdConfig)
 
 log = logging.getLogger(__name__)
 
@@ -482,3 +484,91 @@ def decision_thresholds(request):
         return JsonResponse({"ok": True, **public_schema(profile, record.values)})
     except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         return JsonResponse({"ok": False, "error": str(exc)}, status=400)
+
+@require_GET
+def dashboard_pnl_summary(request):
+    """Return realized P&L for the selected inclusive UTC date interval.
+
+    Results are scoped to the latest EA heartbeat's account and instance so
+    unrelated accounts or historical terminals are never mixed together.
+    """
+    start_raw = request.GET.get("from", "")
+    end_raw = request.GET.get("to", "")
+    try:
+        start_date = date.fromisoformat(start_raw)
+        end_date = date.fromisoformat(end_raw)
+    except (TypeError, ValueError):
+        return JsonResponse(
+            {"ok": False, "error": "from and to must be valid YYYY-MM-DD dates"},
+            status=400,
+        )
+    if start_date.isoformat() != start_raw or end_date.isoformat() != end_raw:
+        return JsonResponse({"ok": False, "error": "Dates must use YYYY-MM-DD format"}, status=400)
+    if end_date < start_date:
+        return JsonResponse({"ok": False, "error": "'to' date must be on or after 'from' date"}, status=400)
+    if (end_date - start_date).days > 3660:
+        return JsonResponse({"ok": False, "error": "Date interval cannot exceed 10 years"}, status=400)
+
+    start_at = datetime.combine(start_date, time.min, tzinfo=timezone.utc)
+    end_at = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=timezone.utc)
+
+    heartbeat = EAHeartbeat.objects.order_by("-last_seen").first()
+    if heartbeat is None or not heartbeat.account_login or not heartbeat.instance_id:
+        return JsonResponse({
+            "ok": True,
+            "from": start_date.isoformat(),
+            "to": end_date.isoformat(),
+            "currency": None,
+            "account_login": None,
+            "server_name": None,
+            "total_profit": "0",
+            "total_loss": "0",
+            "net_pnl": "0",
+            "closed_trades": 0,
+            "winning_trades": 0,
+            "losing_trades": 0,
+            "break_even_trades": 0,
+            "scope_available": False,
+            "note": "No active EA account scope is available. Connect the intended MT5 account to view its results.",
+        })
+
+    outcomes = LearningTradeOutcome.objects.filter(
+        account_login=heartbeat.account_login,
+        instance_id=heartbeat.instance_id,
+        closed_at__gte=start_at,
+        closed_at__lt=end_at,
+    )
+    totals = outcomes.aggregate(
+        total_profit=Sum("realized_pnl", filter=Q(realized_pnl__gt=0)),
+        total_loss=Sum("realized_pnl", filter=Q(realized_pnl__lt=0)),
+        net_pnl=Sum("realized_pnl"),
+        closed_trades=Count("id"),
+        winning_trades=Count("id", filter=Q(realized_pnl__gt=0)),
+        losing_trades=Count("id", filter=Q(realized_pnl__lt=0)),
+        break_even_trades=Count("id", filter=Q(realized_pnl=0)),
+    )
+    total_profit = totals["total_profit"] or Decimal("0")
+    total_loss = abs(totals["total_loss"] or Decimal("0"))
+    net_pnl = totals["net_pnl"] or Decimal("0")
+    account_payload = heartbeat.payload if isinstance(heartbeat.payload, dict) else {}
+    account = account_payload.get("account", {})
+    currency = account.get("currency") if isinstance(account, dict) else None
+
+    return JsonResponse({
+        "ok": True,
+        "from": start_date.isoformat(),
+        "to": end_date.isoformat(),
+        "currency": currency,
+        "account_login": heartbeat.account_login,
+        "server_name": heartbeat.server_name or account_payload.get("server_name"),
+        "instance_id": heartbeat.instance_id,
+        "total_profit": str(total_profit),
+        "total_loss": str(total_loss),
+        "net_pnl": str(net_pnl),
+        "closed_trades": totals["closed_trades"] or 0,
+        "winning_trades": totals["winning_trades"] or 0,
+        "losing_trades": totals["losing_trades"] or 0,
+        "break_even_trades": totals["break_even_trades"] or 0,
+        "scope_available": True,
+        "pnl_basis": "LearningTradeOutcome.realized_pnl; values must be broker-net of commission, swap and spread.",
+    })
