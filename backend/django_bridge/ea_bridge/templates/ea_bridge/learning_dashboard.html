@@ -30,6 +30,7 @@ svg{width:100%;height:145px;display:block}.chart-label{fill:var(--muted);font-si
 @media(max-width:560px){main{padding:12px}.grid,.three{grid-template-columns:1fr 1fr}.metric strong{font-size:21px}.barrow{grid-template-columns:90px 1fr 55px}}
 
 .pipeline-train-dialog{width:min(480px,calc(100% - 28px));max-width:480px;border:1px solid var(--line);border-radius:16px;padding:0;background:var(--panel);color:var(--text);box-shadow:0 24px 80px #0009}.pipeline-train-dialog::backdrop{background:#020817c9;backdrop-filter:blur(4px)}.pipeline-train-head{display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid var(--line)}.pipeline-train-head h2{font-size:17px;margin:0}.pipeline-train-content{padding:18px 20px}.pipeline-train-content p{font-size:13px;line-height:1.6;color:var(--muted);margin:0 0 12px}.pipeline-train-summary{border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--panel2);font-size:12px;line-height:1.7}.pipeline-train-warning{margin-top:12px!important;color:var(--muted)!important}.pipeline-train-actions{display:flex;justify-content:flex-end;gap:9px;padding:14px 20px;border-top:1px solid var(--line)}.pipeline-train-actions button{min-width:100px}.pipeline-train-confirm{background:#146b50;border-color:#278d6b;font-weight:700}.pipeline-train-confirm:hover{background:#18835f}.pipeline-train-cancel{background:var(--panel2)}.pipeline-dialog-close{cursor:pointer}
+.outcomes-pagination{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:14px 2px 2px;color:var(--muted);font-size:13px}.outcomes-pagination-actions{display:flex;gap:8px}.outcomes-pagination button{border:1px solid var(--border);border-radius:8px;background:var(--panel);color:var(--text);padding:8px 12px;cursor:pointer}.outcomes-pagination button:disabled{opacity:.4;cursor:not-allowed}
 </style>
 </head>
 <body><main>
@@ -61,7 +62,7 @@ svg{width:100%;height:145px;display:block}.chart-label{fill:var(--muted);font-si
  <p class="section-note">Each pipeline requires at least 48 labeled outcomes, uses an 80/20 chronological split and compares against the training-set median. Passing validation never deploys or authorizes a model.</p>
 </section>
  
-<section class="panel"><h2>Recent completed trades</h2><div class="scroll"><table><thead><tr><th>Closed UTC</th><th>Trade</th><th>Symbol</th><th>Decision</th><th>Net PnL</th><th>R multiple</th><th>Setup / regime</th></tr></thead><tbody id="outcomes"></tbody></table></div></section>
+<section class="panel"><h2>Recent completed trades</h2><div class="scroll"><table><thead><tr><th>Closed UTC</th><th>Trade</th><th>Symbol</th><th>Decision</th><th>Net PnL</th><th>R multiple</th><th>Setup / regime</th></tr></thead><tbody id="outcomes"></tbody></table></div><div class="outcomes-pagination"><span id="outcomes-page-info" aria-live="polite">Loading trades…</span><div class="outcomes-pagination-actions"><button type="button" id="outcomes-prev" disabled>← Previous</button><button type="button" id="outcomes-next" disabled>Next →</button></div></div></section>
 
 <dialog id="pipeline-details-dialog" class="pipeline-dialog" aria-labelledby="pipeline-dialog-title">
  <div class="pipeline-dialog-head"><h2 id="pipeline-dialog-title">Pipeline model details</h2><button type="button" class="pipeline-dialog-close" id="pipeline-dialog-close" aria-label="Close">×</button></div>
@@ -102,7 +103,7 @@ function render(d){
  metric("Profit factor",fmt(s.profit_factor),"Gross profit "+fmt(s.gross_profit)+" / gross loss "+fmt(s.gross_loss)),
  metric("Expectancy",fmt(s.expectancy),"Net PnL "+fmt(s.net_pnl)+" · Avg R "+fmt(s.avg_r,3))
  ].join("");
- $("outcomes").innerHTML=(d.recent_outcomes||[]).map(r=>'<tr><td>'+esc(r.closed_at)+'</td><td>'+esc(r.trade_id)+'</td><td>'+esc(r.symbol)+'</td><td>'+esc(r.decision?.action||"Unlinked")+'</td><td class="'+(Number(r.realized_pnl)>=0?"good":"bad")+'">'+fmt(r.realized_pnl)+'</td><td>'+fmt(r.r_multiple,3)+'</td><td>'+esc((r.tags?.setup_type||"—")+" / "+(r.tags?.regime||"—"))+'</td></tr>').join("")||'<tr><td colspan="7">No completed outcomes recorded yet.</td></tr>';
+
 }
 const csrf=()=>document.querySelector("[name=csrfmiddlewaretoken]")?.value||"";
 async function request(url,options={}){const r=await fetch(url,{credentials:"same-origin",...options});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||"Request failed ("+r.status+")");return d;}
@@ -151,7 +152,22 @@ function renderTraining(data){
  }
 }
 async function loadTraining(){try{const d=await request(API+"training/status");renderTraining(d);}catch(e){$("trade-training-status").textContent=e.message;}}
-async function load(){ $("refresh").disabled=true;$("status").textContent="Refreshing from Django…";try{const d=await request(API+"overview");render(d);$("status").textContent="Updated "+new Date().toLocaleTimeString()+" · Read-only analysis";}catch(e){$("status").textContent=e.message;}finally{$("refresh").disabled=false;}await loadTraining();}
+let outcomesPage=1;
+const outcomesPageSize=10;
+async function loadRecentOutcomes(page=1){
+ const body=$("outcomes"),info=$("outcomes-page-info"),previous=$("outcomes-prev"),next=$("outcomes-next");
+ previous.disabled=true;next.disabled=true;info.textContent="Loading trades…";
+ try{
+  const data=await request(API+"outcomes/recent?page="+encodeURIComponent(page)+"&page_size="+outcomesPageSize);
+  outcomesPage=data.page;
+  body.innerHTML=(data.results||[]).map(r=>'<tr><td>'+esc(r.closed_at)+'</td><td>'+esc(r.trade_id)+'</td><td>'+esc(r.symbol)+'</td><td>'+esc(r.decision?.action||"Unlinked")+'</td><td class="'+(Number(r.realized_pnl)>=0?"good":"bad")+'">'+fmt(r.realized_pnl)+'</td><td>'+fmt(r.r_multiple,3)+'</td><td>'+esc((r.tags?.setup_type||"—")+" / "+(r.tags?.regime||"—"))+'</td></tr>').join("")||'<tr><td colspan="7">No completed outcomes recorded yet.</td></tr>';
+  info.textContent=data.count+" completed trades · Page "+data.page+" of "+data.num_pages;
+  previous.disabled=!data.has_previous;next.disabled=!data.has_next;
+ }catch(error){body.innerHTML='<tr><td colspan="7">'+esc(error.message)+'</td></tr>';info.textContent="Could not load completed trades";}
+}
+$("outcomes-prev").addEventListener("click",()=>loadRecentOutcomes(Math.max(1,outcomesPage-1)));
+$("outcomes-next").addEventListener("click",()=>loadRecentOutcomes(outcomesPage+1));
+async function load(){ $("refresh").disabled=true;$("status").textContent="Refreshing from Django…";try{const d=await request(API+"overview");render(d);$("status").textContent="Updated "+new Date().toLocaleTimeString()+" · Read-only analysis";}catch(e){$("status").textContent=e.message;}finally{$("refresh").disabled=false;}await Promise.all([loadTraining(),loadRecentOutcomes(1)]);}
 $("refresh").addEventListener("click",load);
 let pendingTrainingButton=null;
 function closeTrainingDialog(){ $("pipeline-train-dialog").close(); pendingTrainingButton=null; }
