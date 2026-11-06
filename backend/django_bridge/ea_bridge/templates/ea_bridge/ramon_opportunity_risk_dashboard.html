@@ -205,6 +205,24 @@
   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><a class="btn" href="/api/ea/v1/learning/dashboard">Learning Engine ↗</a><button class="btn" id="copyMarketSnapshot" type="button">Copy Market Snapshot</button><span id="copySnapshotStatus" class="small" role="status" aria-live="polite"></span><div class="status"><span class="dot"></span><span id="connection">DJANGO · DECISION FEED</span></div></div>
 </header>
 <div class="notice"><strong>Read-only decision monitor:</strong> values come from saved Django decisions. Unprovided prices and risk settings are shown as unavailable. Pipeline approval does not prove that a broker order was executed.</div>
+<section class="card" id="pnlSummary" style="margin-bottom:18px">
+  <div class="section-head" style="margin:0 0 14px">
+    <div><h2>Profit &amp; Loss Summary</h2><p>Realized results from completed trades in the selected date interval.</p></div>
+    <div class="filters">
+      <label class="small" for="pnlFrom">From</label><input id="pnlFrom" type="date" aria-label="P&L start date">
+      <label class="small" for="pnlTo">To</label><input id="pnlTo" type="date" aria-label="P&L end date">
+      <button class="btn" id="applyPnlRange" type="button">Apply dates</button>
+    </div>
+  </div>
+  <div class="grid stats" style="margin:0 0 10px">
+    <div class="card"><div class="stat-label">Total Profit</div><div class="stat-value positive" id="pnlTotalProfit">—</div><div class="stat-foot">Sum of winning closed trades</div></div>
+    <div class="card"><div class="stat-label">Total Loss</div><div class="stat-value negative" id="pnlTotalLoss">—</div><div class="stat-foot">Absolute sum of losing closed trades</div></div>
+    <div class="card"><div class="stat-label">Net P&amp;L</div><div class="stat-value" id="pnlNet">—</div><div class="stat-foot">Profit less losses</div></div>
+    <div class="card"><div class="stat-label">Closed Trades</div><div class="stat-value" id="pnlClosedTrades">—</div><div class="stat-foot"><span id="pnlWinLoss">—</span></div></div>
+  </div>
+  <div class="small" id="pnlScope" role="status" aria-live="polite">Select a date interval to load realized results.</div>
+  <div class="small" id="pnlStatus" role="status" aria-live="polite" style="margin-top:5px"></div>
+</section>
 <div id="status" class="card" role="status" aria-live="polite" style="margin-bottom:18px">Loading the latest Django decision…</div>
 
 <div class="grid stats">
@@ -1164,6 +1182,50 @@ async function copyMarketSnapshot() {
 }
 $("copyMarketSnapshot").addEventListener("click", copyMarketSnapshot);
 
+function utcDateInputValue(date) {
+  return [date.getUTCFullYear(), String(date.getUTCMonth()+1).padStart(2,"0"), String(date.getUTCDate()).padStart(2,"0")].join("-");
+}
+function formatPnlAmount(value, currency) {
+  const amount = Number(value || 0);
+  if (!Number.isFinite(amount)) return "—";
+  return new Intl.NumberFormat(undefined, {style: currency ? "currency" : "decimal", currency: currency || "USD", minimumFractionDigits: 2, maximumFractionDigits: 2}).format(amount);
+}
+async function loadPnlSummary() {
+  const from = $("pnlFrom").value;
+  const to = $("pnlTo").value;
+  const status = $("pnlStatus");
+  const apply = $("applyPnlRange");
+  if (!from || !to) { status.textContent = "Choose both dates."; return; }
+  if (to < from) { status.textContent = "End date must be on or after start date."; return; }
+  apply.disabled = true;
+  status.className = "small";
+  status.textContent = "Loading realized results…";
+  try {
+    const query = new URLSearchParams({from, to});
+    const response = await fetch("/api/ea/v1/dashboard/pnl-summary?" + query.toString(), {cache:"no-store"});
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || "Could not load P&L summary");
+    const currency = data.currency || "USD";
+    $("pnlTotalProfit").textContent = formatPnlAmount(data.total_profit, currency);
+    $("pnlTotalLoss").textContent = formatPnlAmount(data.total_loss, currency);
+    $("pnlNet").textContent = formatPnlAmount(data.net_pnl, currency);
+    $("pnlNet").className = "stat-value " + (Number(data.net_pnl) > 0 ? "positive" : Number(data.net_pnl) < 0 ? "negative" : "");
+    $("pnlClosedTrades").textContent = fmt(data.closed_trades);
+    $("pnlWinLoss").textContent = fmt(data.winning_trades) + " wins · " + fmt(data.losing_trades) + " losses · " + fmt(data.break_even_trades) + " breakeven";
+    $("pnlScope").textContent = data.scope_available
+      ? "Account " + data.account_login + " · " + (data.server_name || "Broker server unavailable") + " · " + from + " through " + to + " (inclusive)"
+      : data.note;
+    status.textContent = data.scope_available
+      ? "Results use completed-trade realized P&L stored by Django. Confirm broker-net commission, swap and spread are included in the stored values."
+      : "No account-scoped results are available.";
+  } catch (error) {
+    status.textContent = error.message;
+    status.className = "small negative";
+  } finally {
+    apply.disabled = false;
+  }
+}
+$("applyPnlRange").addEventListener("click", loadPnlSummary);
 async function refresh() {
   const connection = $("connection");
   try {
@@ -1234,6 +1296,11 @@ async function refresh() {
     $("status").innerHTML = `<span class="negative">Could not load decision data: ${esc(error.message)}</span>`;
   }
 }
+const pnlToday = new Date();
+const pnlThirtyDaysAgo = new Date(pnlToday.getTime() - 29 * 86400000);
+$("pnlFrom").value = utcDateInputValue(pnlThirtyDaysAgo);
+$("pnlTo").value = utcDateInputValue(pnlToday);
+loadPnlSummary();
 loadDecisionThresholds().then(() => refresh()).catch(error => { const status = $("thresholdEditorStatus"); if (status) { status.className = "threshold-status error"; status.textContent = error.message; } refresh(); });
 setInterval(refresh, 10000);
 </script>
