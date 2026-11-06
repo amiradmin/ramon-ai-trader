@@ -78,7 +78,7 @@ def _interval_for(timeframe: str) -> timedelta:
 def _aligned_market_bar_queryset(query, timeframe: str):
     """Exclude historical rows whose timestamps are not exact timeframe boundaries."""
     minutes = TIMEFRAME_MINUTES[timeframe.upper()]
-    query = query.filter(timestamp__second=0, timestamp__microsecond=0)
+    query = query.filter(timestamp__second=0)
 
     if minutes < 60:
         return query.filter(timestamp__minute__in=range(0, 60, minutes))
@@ -127,7 +127,15 @@ def forecast_market_bars(
     if source:
         query = query.filter(source=source)
     query = _aligned_market_bar_queryset(query, timeframe)
-    bars = list(query.order_by("-timestamp")[:limit])
+    # Django has no portable DateTimeField microsecond lookup. Filter that
+    # component in Python, before applying the requested candle limit.
+    bars = []
+    for bar in query.order_by("-timestamp").iterator(chunk_size=2000):
+        if bar.timestamp.microsecond != 0:
+            continue
+        bars.append(bar)
+        if len(bars) >= limit:
+            break
     bars.reverse()
     minimum = max(40, test_size + 20)
     if len(bars) < minimum:
