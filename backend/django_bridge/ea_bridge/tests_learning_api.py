@@ -227,6 +227,47 @@ class LearningOutcomeApiTests(TestCase):
         ):
             self.assertNotContains(response, removed_section)
 
+    def test_recent_learning_outcomes_endpoint_paginates_and_orders_completed_trades(self):
+        now = django_timezone.now()
+        for index in range(23):
+            LearningTradeOutcome.objects.create(
+                trade_id=f"page-trade-{index:02d}",
+                realized_pnl=index,
+                closed_at=now - timedelta(minutes=index),
+                decision_snapshot={"action": "BUY"},
+                tags={"setup_type": "PULLBACK", "regime": "BULLISH"},
+            )
+
+        first = self.client.get("/api/ea/v1/learning/outcomes/recent")
+        self.assertEqual(first.status_code, 200)
+        first_data = first.json()
+        self.assertEqual(first_data["count"], 23)
+        self.assertEqual(first_data["page"], 1)
+        self.assertEqual(first_data["page_size"], 10)
+        self.assertEqual(first_data["num_pages"], 3)
+        self.assertTrue(first_data["has_next"])
+        self.assertFalse(first_data["has_previous"])
+        self.assertEqual(len(first_data["results"]), 10)
+        self.assertEqual(first_data["results"][0]["trade_id"], "page-trade-00")
+
+        second = self.client.get("/api/ea/v1/learning/outcomes/recent?page=2")
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(second.json()["results"][0]["trade_id"], "page-trade-10")
+        self.assertTrue(second.json()["has_previous"])
+        self.assertTrue(second.json()["has_next"])
+
+        last = self.client.get("/api/ea/v1/learning/outcomes/recent?page=3&page_size=10")
+        self.assertEqual(len(last.json()["results"]), 3)
+        self.assertFalse(last.json()["has_next"])
+        self.assertTrue(last.json()["has_previous"])
+
+    def test_recent_learning_outcomes_rejects_invalid_page_size_and_caps_large_values(self):
+        invalid = self.client.get("/api/ea/v1/learning/outcomes/recent?page_size=0")
+        self.assertEqual(invalid.status_code, 400)
+        capped = self.client.get("/api/ea/v1/learning/outcomes/recent?page_size=500")
+        self.assertEqual(capped.status_code, 200)
+        self.assertEqual(capped.json()["page_size"], 50)
+
     def test_learning_overview_exposes_modular_analysis_report(self):
         response = self.client.get("/api/ea/v1/learning/overview")
         self.assertEqual(response.status_code, 200)
