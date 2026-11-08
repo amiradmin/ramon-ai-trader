@@ -321,10 +321,6 @@ def dashboard_data(request):
                 range_deferred += 1
             elif status in {"REJECTED", "BLOCKED", "FAILED"}:
                 range_rejected += 1
-        elif is_range_context and str(opportunity.get("status", "")).upper() in {"REJECTED", "BLOCKED", "FAILED"}:
-            # In a ranging regime, no RANGE_EDGE_FADE candidate means the
-            # opportunity stage rejected the current range setup conditions.
-            range_rejected += 1
             if latest_range is None:
                 latest_range = {
                     "decision_id": row.decision_id,
@@ -338,6 +334,10 @@ def dashboard_data(request):
                     "reason": opportunity.get("reason"),
                     "explanation": opportunity.get("explanation"),
                 }
+        elif is_range_context and str(opportunity.get("status", "")).upper() in {"REJECTED", "BLOCKED", "FAILED"}:
+            # In a ranging regime, no RANGE_EDGE_FADE candidate means the
+            # opportunity stage rejected the current range setup conditions.
+            range_rejected += 1
 
     range_outcomes = LearningTradeOutcome.objects.none()
     heartbeat = EAHeartbeat.objects.order_by("-last_seen").first()
