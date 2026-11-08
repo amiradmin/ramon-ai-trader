@@ -323,9 +323,7 @@ def dashboard_data(request):
                     "rationale_code": row.rationale_code,
                 }
             evaluation_status = str(opportunity.get("status", "")).upper()
-            is_rejected_evaluation = evaluation_status in {"REJECTED", "BLOCKED", "FAILED"} or (
-                is_range_context and not is_range_setup
-            )
+            is_rejected_evaluation = evaluation_status in {"REJECTED", "BLOCKED", "FAILED"}
             if is_rejected_evaluation:
                 reason_text = str(opportunity.get("reason") or row.rationale_code or "UNSPECIFIED").strip()
                 if reason_text:
