@@ -2,6 +2,8 @@ import math
 from unittest import TestCase
 
 from ramon_pipeline.signalflow.additional_setups import detect_additional_opportunity
+from ramon_pipeline.signalflow import opportunities as opportunities_module
+from ramon_pipeline.signalflow.opportunities import OpportunityConfig
 
 
 def _setups(**overrides):
@@ -83,3 +85,19 @@ class RangeEdgeFadeTests(TestCase):
     def test_range_fade_rejects_ranges_that_are_too_narrow(self):
         candidate = self.detect("SELL", minimum_range_width_atr=6.0)
         self.assertIsNone(candidate)
+
+    def test_regime_detector_uses_low_directional_efficiency_to_confirm_ranges(self):
+        count = 120
+        close = [100.0 + 2.0 * math.sin(i * 0.55) for i in range(count)]
+        bars = opportunities_module._Bars(
+            times=[1_700_000_000 + i * 900 for i in range(count)],
+            high=[value + 0.5 for value in close],
+            low=[value - 0.5 for value in close],
+            close=close,
+            interval=900.0,
+        )
+        config = OpportunityConfig()
+        indicators = opportunities_module._compute_indicators(bars, config)
+        regime = opportunities_module._classify_regime(bars, indicators, count - 1, config)
+        self.assertLess(regime.range_efficiency, 0.28)
+        self.assertEqual(regime.label, "RANGING")
