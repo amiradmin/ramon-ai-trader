@@ -665,7 +665,7 @@ class MarketRegimeTests(TestCase):
         config = OpportunityConfig(adx_trending=60.0, adx_ranging=10.0)
         result = OpportunityDetector(config=config).evaluate(snapshot(make_bars(LONG_SETUP)))
         self.assertEqual(result["regime"]["label"], "UNCERTAIN")
-        self.assertEqual(result["reason"], "MARKET_RANGING")
+        self.assertEqual(result["reason"], "MARKET_UNCERTAIN")
 
 
 class LookAheadTests(TestCase):
@@ -843,7 +843,8 @@ class LegacyContractTests(TestCase):
             snapshot(make_bars([(10, 3), (10, -3)] * 10), trend="BUY", setup_score=0.99)
         )
         self.assertFalse(result["approved"])
-        self.assertEqual(result["reason"], "MARKET_UNCERTAIN")
+        # Alternating, low-efficiency candles form a structural range.
+        self.assertEqual(result["reason"], "MARKET_RANGING")
 
     def test_the_default_decision_endpoint_snapshot_shape_still_works(self):
         outcome = SignalFlowPipeline().run({"trend": "BUY", "setup_score": 0.9, "entry_quality": 0.8, "spread_points": 20})
