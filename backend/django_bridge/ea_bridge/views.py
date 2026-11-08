@@ -303,24 +303,28 @@ def dashboard_data(request):
         opportunity = stages.get("opportunities", {}) if isinstance(stages, dict) else {}
         if not isinstance(opportunity, dict):
             continue
-        checks = opportunity.get("checks", [])
-        range_check = next((
-            item for item in checks
-            if isinstance(item, dict) and str(item.get("name", "")).lower() == "range_edge_fade"
-        ), None) if isinstance(checks, list) else None
-        if range_check is not None:
-            range_evaluated += 1
-            check_status = str(range_check.get("status", "")).upper()
-            if check_status in {"REJECTED", "BLOCKED", "FAILED"} or range_check.get("passed") is False:
-                range_rejected += 1
-            elif check_status in {"DEFERRED", "WAIT", "WAITING", "PENDING"}:
-                range_deferred += 1
+        regime = opportunity.get("regime", {})
+        regime_label = str(regime.get("label", "")).upper() if isinstance(regime, dict) else ""
+        reason = str(opportunity.get("reason", "")).upper()
+        is_range_context = regime_label == "RANGING" or reason == "MARKET_RANGING"
         setup = opportunity.get("setup", {})
-        if isinstance(setup, dict) and str(setup.get("type", "")).upper() == "RANGE_EDGE_FADE":
+        is_range_setup = isinstance(setup, dict) and str(setup.get("type", "")).upper() == "RANGE_EDGE_FADE"
+        if is_range_context or is_range_setup:
+            range_evaluated += 1
+        if is_range_setup:
             range_detected += 1
             range_decision_ids.append(row.decision_id)
-            if opportunity.get("approved") is True:
+            status = str(opportunity.get("status", "")).upper()
+            if opportunity.get("approved") is True or status in {"ACCEPTED", "APPROVED"}:
                 range_approved += 1
+            elif status in {"DEFERRED", "WAIT", "WAITING", "PENDING"}:
+                range_deferred += 1
+            elif status in {"REJECTED", "BLOCKED", "FAILED"}:
+                range_rejected += 1
+        elif is_range_context and str(opportunity.get("status", "")).upper() in {"REJECTED", "BLOCKED", "FAILED"}:
+            # In a ranging regime, no RANGE_EDGE_FADE candidate means the
+            # opportunity stage rejected the current range setup conditions.
+            range_rejected += 1
             if latest_range is None:
                 latest_range = {
                     "decision_id": row.decision_id,
