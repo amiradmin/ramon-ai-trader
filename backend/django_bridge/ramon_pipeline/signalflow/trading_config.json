@@ -60,7 +60,14 @@
         "demo_enabled": true,
         "lookback_bars": 32,
         "edge_buffer_atr": 0.2,
-        "minimum_rejection_wick_ratio": 0.35
+        "minimum_rejection_wick_ratio": 0.35,
+        "minimum_range_width_atr": 2,
+        "maximum_range_width_atr": 12,
+        "boundary_touch_tolerance_atr": 0.35,
+        "minimum_boundary_touches": 2,
+        "minimum_close_reentry_atr": 0.05,
+        "maximum_sell_close_location": 0.45,
+        "minimum_buy_close_location": 0.55
       },
       "session_opening_range_breakout": {
         "enabled": false,
