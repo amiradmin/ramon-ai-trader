@@ -72,23 +72,60 @@ def detect_additional_opportunity(times: Sequence[float], opens: Sequence[float]
                 return {"type": "FAILED_BREAKOUT_SWEEP", "side": "BUY", "level": prior_low,
                         "sweep_extreme": lows[t], "invalidation_price": lows[t], "score": 0.60 + min(0.20, (prior_low - lows[t]) / atr * 0.10)}
 
-    # 2. Range-edge fade is permitted only in a confirmed ranging regime.
+    # 2. Range-edge fade: require a developed, two-sided range and a decisive
+    # rejection back inside it. A low ADX reading alone is not enough evidence.
     cfg = setups["range_edge_fade"]
     if cfg["enabled"] and regime_label == "RANGING":
         lookback = int(cfg["lookback_bars"])
         if t >= lookback:
-            top, bottom = max(highs[t-lookback:t]), min(lows[t-lookback:t])
+            prior_highs, prior_lows = highs[t-lookback:t], lows[t-lookback:t]
+            top, bottom = max(prior_highs), min(prior_lows)
+            width = top - bottom
+            width_atr = width / atr
+            edge = float(cfg["edge_buffer_atr"]) * atr
+            min_width = float(cfg["minimum_range_width_atr"])
+            max_width = float(cfg["maximum_range_width_atr"])
+            touch_tolerance = float(cfg["boundary_touch_tolerance_atr"]) * atr
+            min_touches = int(cfg["minimum_boundary_touches"])
+            # Count distinct prior candle reactions near each boundary. The current
+            # signal candle is excluded from boundary construction and touch counts.
+            upper_touches = sum(1 for h in prior_highs if h >= top - touch_tolerance)
+            lower_touches = sum(1 for lo in prior_lows if lo <= bottom + touch_tolerance)
             span = max(highs[t] - lows[t], 1e-12)
             upper_wick = highs[t] - max(opens[t], closes[t])
             lower_wick = min(opens[t], closes[t]) - lows[t]
-            ratio = float(cfg["minimum_rejection_wick_ratio"])
-            edge = float(cfg["edge_buffer_atr"]) * atr
-            if highs[t] >= top - edge and closes[t] < top and upper_wick / span >= ratio:
-                return {"type": "RANGE_EDGE_FADE", "side": "SELL", "range_high": top,
-                        "range_low": bottom, "invalidation_price": highs[t], "score": 0.55 + 0.30 * min(1.0, upper_wick / span)}
-            if lows[t] <= bottom + edge and closes[t] > bottom and lower_wick / span >= ratio:
-                return {"type": "RANGE_EDGE_FADE", "side": "BUY", "range_high": top,
-                        "range_low": bottom, "invalidation_price": lows[t], "score": 0.55 + 0.30 * min(1.0, lower_wick / span)}
+            upper_ratio, lower_ratio = upper_wick / span, lower_wick / span
+            close_location = (closes[t] - lows[t]) / span
+            min_wick = float(cfg["minimum_rejection_wick_ratio"])
+            min_reentry = float(cfg["minimum_close_reentry_atr"]) * atr
+            valid_range = min_width <= width_atr <= max_width
+            tested_both_sides = upper_touches >= min_touches and lower_touches >= min_touches
+
+            if valid_range and tested_both_sides:
+                # SELL: price probes the upper boundary, rejects it, and closes
+                # materially back inside the range in the lower part of the candle.
+                upper_probe = highs[t] >= top - edge
+                upper_reentry = top - closes[t] >= min_reentry
+                if (upper_probe and upper_reentry and upper_ratio >= min_wick
+                        and close_location <= float(cfg["maximum_sell_close_location"])):
+                    score = 0.55 + 0.15 * min(1.0, upper_ratio) + 0.10 * min(1.0, (top - closes[t]) / max(edge, atr * 0.01))
+                    return {"type": "RANGE_EDGE_FADE", "side": "SELL", "range_high": top,
+                            "range_low": bottom, "range_width_atr": round(width_atr, 3),
+                            "boundary_touches": {"upper": upper_touches, "lower": lower_touches},
+                            "close_location": round(close_location, 3),
+                            "invalidation_price": highs[t], "score": min(0.90, score)}
+                # BUY: symmetric lower-boundary rejection, closing in the upper
+                # part of the signal candle and back inside the established range.
+                lower_probe = lows[t] <= bottom + edge
+                lower_reentry = closes[t] - bottom >= min_reentry
+                if (lower_probe and lower_reentry and lower_ratio >= min_wick
+                        and close_location >= float(cfg["minimum_buy_close_location"])):
+                    score = 0.55 + 0.15 * min(1.0, lower_ratio) + 0.10 * min(1.0, (closes[t] - bottom) / max(edge, atr * 0.01))
+                    return {"type": "RANGE_EDGE_FADE", "side": "BUY", "range_high": top,
+                            "range_low": bottom, "range_width_atr": round(width_atr, 3),
+                            "boundary_touches": {"upper": upper_touches, "lower": lower_touches},
+                            "close_location": round(close_location, 3),
+                            "invalidation_price": lows[t], "score": min(0.90, score)}
 
     # 3. Session opening range breakout, using IANA zones so DST is handled.
     cfg = setups["session_opening_range_breakout"]
