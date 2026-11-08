@@ -38,7 +38,7 @@ def _market(side):
     if side == "SELL":
         opens.append(109.5); highs.append(110.3); lows.append(108.5); closes.append(108.8)
     else:
-        opens.append(100.5); highs.append(102.0); lows.append(99.7); closes.append(101.2)
+        opens.append(100.5); highs.append(101.8); lows.append(99.7); closes.append(101.2)
     atr = [2.0] * 40
     adx = [8.0] * 40
     rsi = [50.0] * 40
