@@ -232,6 +232,25 @@
   <div class="card"><div class="stat-label">Latest risk stage</div><div class="stat-value blue" id="statRisk">Unavailable</div><div class="stat-foot">Does not indicate broker execution</div></div>
 </div>
 
+<section class="range-analysis-shell" aria-labelledby="rangeAnalysisTitle">
+  <div class="section-head"><div><h2 id="rangeAnalysisTitle">Range Market Analysis</h2><p>Live range-edge diagnostics and realized performance from Django decisions and account-scoped closed trades.</p></div><span class="small" id="rangeAnalysisScope">Waiting for Django data…</span></div>
+  <div class="grid stats">
+    <div class="card"><div class="stat-label">Range setups detected</div><div class="stat-value" id="rangeDetected">—</div><div class="stat-foot" id="rangeEvaluated">Detector evaluations: —</div></div>
+    <div class="card"><div class="stat-label">Approved / Deferred / Rejected</div><div class="stat-value" id="rangeDecisionCounts">—</div><div class="stat-foot">Saved RANGE_EDGE_FADE decision outcomes</div></div>
+    <div class="card"><div class="stat-label">Completed range trades</div><div class="stat-value" id="rangeClosedTrades">—</div><div class="stat-foot" id="rangeWinRate">Win rate: —</div></div>
+    <div class="card"><div class="stat-label">Range net P&amp;L</div><div class="stat-value" id="rangeNetPnl">—</div><div class="stat-foot" id="rangeAverageR">Average R: —</div></div>
+  </div>
+  <div class="card" style="margin-top:12px">
+    <div class="risk-list">
+      <div class="risk-row"><span>Latest range setup</span><strong id="rangeLatestSide">Unavailable</strong></div>
+      <div class="risk-row"><span>Range boundaries</span><strong id="rangeBoundaries">Unavailable</strong></div>
+      <div class="risk-row"><span>Range width / boundary touches</span><strong id="rangeStructure">Unavailable</strong></div>
+      <div class="small" id="rangeLatestReason">No saved RANGE_EDGE_FADE setup is available yet.</div>
+      <div class="small" id="rangePerformanceNote">Trade performance appears only when a closed broker outcome is linked to a range decision.</div>
+    </div>
+  </div>
+</section>
+
 <section class="flow-shell" aria-labelledby="flowTitle">
   <div class="flow-head"><div><h2 id="flowTitle">Decision process flow</h2><p>Follow the actual Django evaluation from market opportunity to execution boundary.</p></div>
     <div class="flow-legend"><span style="color:var(--green)"><i></i>PASS</span><span style="color:var(--amber)"><i></i>WAIT</span><span style="color:var(--red)"><i></i>BLOCKED</span><span><i></i>UPCOMING</span></div>
@@ -1226,6 +1245,32 @@ async function loadPnlSummary() {
   }
 }
 $("applyPnlRange").addEventListener("click", loadPnlSummary);
+function renderRangeAnalysis(data) {
+  const range = data && typeof data === "object" ? data : {};
+  $("rangeDetected").textContent = fmt(range.detected ?? 0);
+  $("rangeEvaluated").textContent = "Detector evaluations: " + fmt(range.evaluated ?? 0) + " · latest " + fmt(range.lookback_decisions ?? 0) + " decisions";
+  $("rangeDecisionCounts").textContent = [range.approved ?? 0, range.deferred ?? 0, range.rejected ?? 0].join(" / ");
+  $("rangeClosedTrades").textContent = fmt(range.closed_trades ?? 0);
+  $("rangeWinRate").textContent = "Win rate: " + (range.win_rate_percent == null ? "Not available" : fmt(range.win_rate_percent) + "%") +
+    " · Wins " + fmt(range.winning_trades ?? 0) + " / Losses " + fmt(range.losing_trades ?? 0);
+  $("rangeNetPnl").textContent = fmt(Number(range.net_pnl ?? 0));
+  $("rangeAverageR").textContent = "Average R: " + (range.average_r_multiple == null ? "Not available" : fmt(range.average_r_multiple) + "R");
+  const latest = range.latest_setup;
+  $("rangeLatestSide").textContent = latest ? [latest.side || "Side unavailable", latest.status || "Status unavailable"].join(" · ") : "No detected setup in the recent decision window";
+  $("rangeBoundaries").textContent = latest ? fmt(latest.range_low) + " – " + fmt(latest.range_high) : "Unavailable";
+  const touches = latest?.boundary_touches;
+  $("rangeStructure").textContent = latest
+    ? (latest.range_width_atr == null ? "Width unavailable" : fmt(latest.range_width_atr) + " ATR") +
+      " · Upper " + fmt(touches?.upper) + " / Lower " + fmt(touches?.lower)
+    : "Unavailable";
+  $("rangeLatestReason").textContent = latest
+    ? (latest.explanation || latest.reason || "Latest saved RANGE_EDGE_FADE candidate; inspect the decision flow for downstream timing and risk verdicts.")
+    : "No saved RANGE_EDGE_FADE setup is available in the latest 500 decisions for this symbol.";
+  $("rangePerformanceNote").textContent = range.performance_note || "Closed-trade results are sourced from linked broker outcomes.";
+  $("rangeAnalysisScope").textContent = range.symbol
+    ? range.symbol + " · latest " + fmt(range.lookback_decisions) + " decisions"
+    : "No decision symbol available";
+}
 async function refresh() {
   const connection = $("connection");
   try {
@@ -1236,6 +1281,7 @@ async function refresh() {
       throw new Error("Unexpected dashboard data format");
     }
     const decisions = data.decisions;
+    renderRangeAnalysis(data.range_analysis);
     connection.textContent = "DJANGO · FEED CONNECTED";
 
     $("statDecisions").textContent = fmt(decisions.length);
@@ -1243,6 +1289,7 @@ async function refresh() {
       stage(d, "opportunities").approved === true).length);
 
     if (!decisions.length) {
+      renderRangeAnalysis(data.range_analysis);
       $("status").innerHTML = "<strong>No saved decisions yet.</strong> Waiting for a decision record from Django.";
       $("opportunities").innerHTML = '<tr><td colspan="9">No saved decisions available.</td></tr>';
       scannerDecisions = [];
