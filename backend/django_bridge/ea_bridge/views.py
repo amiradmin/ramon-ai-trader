@@ -4,7 +4,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from django.conf import settings
 from django.http import JsonResponse, HttpResponse
-from django.db.models import Count, Q, Sum
+from django.db.models import Avg, Count, Q, Sum
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST, require_http_methods
 from .auth import BearerTokenRequired
@@ -286,9 +286,94 @@ def dashboard_data(request):
             "features": row.features if isinstance(row.features, dict) else {},
         })
     latest_symbol = decisions[0]["symbol"] if decisions else ""
+
+    # Range diagnostics are derived only from saved Django decisions and
+    # broker-reported closed outcomes linked to those decisions.
+    range_rows = list(
+        StrategyDecisionRecord.objects.filter(symbol=latest_symbol)
+        .order_by("-created_at")[:500]
+    ) if latest_symbol else []
+    range_decision_ids = []
+    range_detected = range_approved = range_deferred = range_rejected = 0
+    range_evaluated = 0
+    latest_range = None
+    for row in range_rows:
+        features = row.features if isinstance(row.features, dict) else {}
+        stages = features.get("stages", {})
+        opportunity = stages.get("opportunities", {}) if isinstance(stages, dict) else {}
+        if not isinstance(opportunity, dict):
+            continue
+        checks = opportunity.get("checks", [])
+        range_check = next((
+            item for item in checks
+            if isinstance(item, dict) and str(item.get("name", "")).lower() == "range_edge_fade"
+        ), None) if isinstance(checks, list) else None
+        if range_check is not None:
+            range_evaluated += 1
+            check_status = str(range_check.get("status", "")).upper()
+            if check_status in {"REJECTED", "BLOCKED", "FAILED"} or range_check.get("passed") is False:
+                range_rejected += 1
+            elif check_status in {"DEFERRED", "WAIT", "WAITING", "PENDING"}:
+                range_deferred += 1
+        setup = opportunity.get("setup", {})
+        if isinstance(setup, dict) and str(setup.get("type", "")).upper() == "RANGE_EDGE_FADE":
+            range_detected += 1
+            range_decision_ids.append(row.decision_id)
+            if opportunity.get("approved") is True:
+                range_approved += 1
+            if latest_range is None:
+                latest_range = {
+                    "decision_id": row.decision_id,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                    "side": setup.get("side"),
+                    "range_high": setup.get("range_high"),
+                    "range_low": setup.get("range_low"),
+                    "range_width_atr": setup.get("range_width_atr"),
+                    "boundary_touches": setup.get("boundary_touches"),
+                    "status": opportunity.get("status"),
+                    "reason": opportunity.get("reason"),
+                    "explanation": opportunity.get("explanation"),
+                }
+
+    range_outcomes = LearningTradeOutcome.objects.none()
+    heartbeat = EAHeartbeat.objects.order_by("-last_seen").first()
+    if range_decision_ids and heartbeat is not None and heartbeat.instance_id and heartbeat.account_login:
+        range_outcomes = LearningTradeOutcome.objects.filter(
+            decision_id__in=range_decision_ids,
+            instance_id=heartbeat.instance_id,
+            account_login=heartbeat.account_login,
+            symbol=latest_symbol,
+            closed_at__isnull=False,
+        )
+    trade_totals = range_outcomes.aggregate(
+        closed_trades=Count("id"),
+        wins=Count("id", filter=Q(realized_pnl__gt=0)),
+        losses=Count("id", filter=Q(realized_pnl__lt=0)),
+        net_pnl=Sum("realized_pnl"),
+        avg_r=Avg("r_multiple"),
+    )
+    range_analysis = {
+        "symbol": latest_symbol or None,
+        "lookback_decisions": len(range_rows),
+        "evaluated": range_evaluated,
+        "detected": range_detected,
+        "approved": range_approved,
+        "deferred": range_deferred,
+        "rejected": range_rejected,
+        "closed_trades": trade_totals["closed_trades"] or 0,
+        "winning_trades": trade_totals["wins"] or 0,
+        "losing_trades": trade_totals["losses"] or 0,
+        "win_rate_percent": round((trade_totals["wins"] or 0) * 100 / trade_totals["closed_trades"], 2) if trade_totals["closed_trades"] else None,
+        "net_pnl": str(trade_totals["net_pnl"] or Decimal("0")),
+        "average_r_multiple": float(trade_totals["avg_r"]) if trade_totals["avg_r"] is not None else None,
+        "latest_setup": latest_range,
+        "performance_scope_available": bool(heartbeat and heartbeat.instance_id and heartbeat.account_login),
+        "performance_note": "Closed-trade metrics include only broker outcomes linked to RANGE_EDGE_FADE decisions for the latest EA account and instance.",
+    }
     return JsonResponse({
         "ok": True,
         "decisions": decisions,
+        "range_analysis": range_analysis,
         "execution": _dashboard_execution_state(latest_symbol),
     })
 
