@@ -297,6 +297,9 @@ def dashboard_data(request):
     range_detected = range_approved = range_deferred = range_rejected = 0
     range_evaluated = 0
     latest_range = None
+    rejection_reasons = {}
+    closed_market_skips = 0
+    latest_range_evaluation = None
     for row in range_rows:
         features = row.features if isinstance(row.features, dict) else {}
         stages = features.get("stages", {})
@@ -311,6 +314,21 @@ def dashboard_data(request):
         is_range_setup = isinstance(setup, dict) and str(setup.get("type", "")).upper() == "RANGE_EDGE_FADE"
         if is_range_context or is_range_setup:
             range_evaluated += 1
+            if latest_range_evaluation is None:
+                latest_range_evaluation = {
+                    "decision_id": row.decision_id,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                    "status": opportunity.get("status"),
+                    "reason": opportunity.get("reason"),
+                    "rationale_code": row.rationale_code,
+                }
+            reason_text = str(opportunity.get("reason") or row.rationale_code or "UNSPECIFIED").strip()
+            if reason_text:
+                rejection_reasons[reason_text] = rejection_reasons.get(reason_text, 0) + 1
+            market_state = str(features.get("market_status") or features.get("market_state") or "").upper()
+            decision_reason = (str(opportunity.get("reason") or "") + " " + str(row.rationale_code or "")).upper()
+            if market_state in {"CLOSED", "MARKET_CLOSED"} or "MARKET_CLOSED" in decision_reason or "MARKET_SESSION_CLOSED" in decision_reason:
+                closed_market_skips += 1
         if is_range_setup:
             range_detected += 1
             range_decision_ids.append(row.decision_id)
@@ -356,6 +374,35 @@ def dashboard_data(request):
         net_pnl=Sum("realized_pnl"),
         avg_r=Avg("r_multiple"),
     )
+    latest_bar = MarketBar.objects.filter(symbol=latest_symbol).order_by("-timestamp").first() if latest_symbol else None
+    now_utc = datetime.now(timezone.utc)
+    last_bar_at = latest_bar.timestamp if latest_bar else None
+    if last_bar_at is not None and (last_bar_at.tzinfo is None or last_bar_at.utcoffset() is None):
+        last_bar_at = last_bar_at.replace(tzinfo=timezone.utc)
+    market_data_age_seconds = max(0, int((now_utc - last_bar_at).total_seconds())) if last_bar_at else None
+    market_data_fresh = market_data_age_seconds is not None and market_data_age_seconds <= int(getattr(settings, "RAMON_DASHBOARD_MARKET_DATA_MAX_AGE_SECONDS", 1200))
+    # Weekend closure is a conservative session hint for FX/metals, not a broker-calendar guarantee.
+    weekend = now_utc.weekday() in {5, 6}
+    market_status = "OPEN" if market_data_fresh else "CLOSED" if weekend else "STALE_OR_UNAVAILABLE"
+    market_analysis = {
+        "status": market_status,
+        "last_market_data_at": last_bar_at.isoformat() if last_bar_at else None,
+        "market_data_age_seconds": market_data_age_seconds,
+        "market_data_fresh": market_data_fresh,
+        "last_decision_at": decisions[0]["created_at"] if decisions else None,
+        "closed_market_skips": closed_market_skips,
+        "status_note": (
+            "Recent market candles are being received; this is a data-freshness signal, not broker trading-session confirmation."
+            if market_data_fresh else
+            "Weekend with stale market data: likely closed for FX/metals. Broker symbol sessions can differ."
+            if weekend else
+            "No recent market candle is available. This may be a feed interruption or a closed session; it is not enough to assert market closure."
+        ),
+    }
+    top_rejection_reasons = sorted(
+        ({"reason": reason, "count": count} for reason, count in rejection_reasons.items()),
+        key=lambda item: (-item["count"], item["reason"]),
+    )[:8]
     range_analysis = {
         "symbol": latest_symbol or None,
         "lookback_decisions": len(range_rows),
@@ -371,6 +418,9 @@ def dashboard_data(request):
         "net_pnl": str(trade_totals["net_pnl"] or Decimal("0")),
         "average_r_multiple": float(trade_totals["avg_r"]) if trade_totals["avg_r"] is not None else None,
         "latest_setup": latest_range,
+        "latest_evaluation": latest_range_evaluation,
+        "rejection_reasons": top_rejection_reasons,
+        "market": market_analysis,
         "performance_scope_available": bool(heartbeat and heartbeat.instance_id and heartbeat.account_login),
         "performance_note": "Closed-trade metrics include only broker outcomes linked to RANGE_EDGE_FADE decisions for the latest EA account and instance.",
     }
