@@ -201,6 +201,7 @@ class _Regime:
     adx: float
     separation_atr: float
     slope_atr: float
+    range_efficiency: float = 1.0
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -210,6 +211,7 @@ class _Regime:
             "adx": round(self.adx, 2),
             "ema_separation_atr": round(self.separation_atr, 3),
             "ema_slope_atr": round(self.slope_atr, 3),
+            "directional_efficiency": round(self.range_efficiency, 3),
         }
 
 
@@ -484,15 +486,40 @@ def _classify_regime(bars: _Bars, ind: _Indicators, t: int, config: OpportunityC
         bias = "NEUTRAL"
 
     trending = adx >= config.adx_trending
+    # ADX measures trend strength, not range structure. Add a causal directional-
+    # efficiency measure so low-ADX directional drifts are not automatically called
+    # ranges, while oscillating markets with repeated back-and-forth movement are.
+    efficiency_lookback = min(32, t)
+    path = sum(
+        abs(bars.close[i] - bars.close[i - 1])
+        for i in range(t - efficiency_lookback + 1, t + 1)
+    ) if efficiency_lookback > 0 else 0.0
+    net_move = abs(bars.close[t] - bars.close[t - efficiency_lookback]) if efficiency_lookback > 0 else 0.0
+    range_efficiency = net_move / path if path > 0 else 0.0
+    structurally_range_bound = (
+        not trending
+        and range_efficiency <= 0.28
+        and abs(separation) <= 0.60
+        and abs(slope) <= 0.35
+    )
+
     if bias == "BULL" and structure != "BEARISH" and trending:
         label = "BULLISH"
     elif bias == "BEAR" and structure != "BULLISH" and trending:
         label = "BEARISH"
-    elif adx < config.adx_ranging or (bias == "NEUTRAL" and structure in ("MIXED", "UNKNOWN") and not trending):
+    elif structurally_range_bound or (
+        adx < config.adx_ranging
+        and bias == "NEUTRAL"
+        and structure in ("MIXED", "UNKNOWN")
+    ) or (
+        bias == "NEUTRAL"
+        and structure in ("MIXED", "UNKNOWN")
+        and not trending
+    ):
         label = "RANGING"
     else:
         label = "UNCERTAIN"
-    return _Regime(label, bias, structure, adx, separation, slope)
+    return _Regime(label, bias, structure, adx, separation, slope, range_efficiency)
 
 
 def _regime_transition_diagnostics(current: _Regime, previous: _Regime) -> dict[str, Any]:
