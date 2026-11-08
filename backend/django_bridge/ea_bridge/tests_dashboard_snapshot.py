@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from django.test import TestCase
@@ -138,3 +138,6 @@ class DashboardRangeAnalysisTests(TestCase):
         self.assertEqual(analysis["net_pnl"], "25.50000000")
         self.assertEqual(analysis["average_r_multiple"], 1.5)
         self.assertEqual(analysis["latest_setup"]["side"], "BUY")
+        self.assertEqual(analysis["market"]["status"], "STALE_OR_UNAVAILABLE")
+        self.assertEqual(analysis["market"]["last_market_data_at"], None)
+        self.assertEqual(analysis["rejection_reasons"][0]["reason"], "UNSPECIFIED")
