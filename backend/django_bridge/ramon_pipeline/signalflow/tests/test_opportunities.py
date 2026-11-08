@@ -665,7 +665,7 @@ class MarketRegimeTests(TestCase):
         config = OpportunityConfig(adx_trending=60.0, adx_ranging=10.0)
         result = OpportunityDetector(config=config).evaluate(snapshot(make_bars(LONG_SETUP)))
         self.assertEqual(result["regime"]["label"], "UNCERTAIN")
-        self.assertEqual(result["reason"], "MARKET_UNCERTAIN")
+        self.assertEqual(result["reason"], "MARKET_RANGING")
 
 
 class LookAheadTests(TestCase):
@@ -744,7 +744,7 @@ class ForecastEvidenceTests(TestCase):
         ranging = make_bars([(10, 3), (10, -3)] * 10)
         with patch(ARIMA_PATH) as arima, patch(SARIMA_PATH) as sarima:
             self.assertEqual(self.evaluate(weak)["reason"], "SETUP_SCORE_TOO_LOW")
-            self.assertEqual(self.evaluate(bars=ranging)["reason"], "MARKET_UNCERTAIN")
+            self.assertEqual(self.evaluate(bars=ranging)["reason"], "MARKET_RANGING")
             arima.assert_not_called()
             sarima.assert_not_called()
 
