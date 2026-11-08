@@ -488,7 +488,9 @@ def _classify_regime(bars: _Bars, ind: _Indicators, t: int, config: OpportunityC
     # ADX measures trend strength, not range structure. Add a causal directional-
     # efficiency measure so oscillating markets are not mistaken for trends merely
     # because ADX briefly rises during repeated boundary-to-boundary swings.
-    efficiency_lookback = min(32, t)
+    # Require a complete 32-bar window. Short/incomplete history is not
+    # sufficient evidence to relabel an otherwise uncertain market as ranging.
+    efficiency_lookback = 32 if t >= 32 else 0
     path = sum(
         abs(bars.close[i] - bars.close[i - 1])
         for i in range(t - efficiency_lookback + 1, t + 1)
