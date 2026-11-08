@@ -108,7 +108,8 @@ class DashboardRangeAnalysisTests(TestCase):
             model_version="test",
             features={"stages": {"opportunities": {
                 "status": "DEFERRED",
-                "checks": [{"name": "range_edge_fade", "passed": False, "status": "DEFERRED"}],
+                "regime": {"label": "RANGING"},
+                "setup": {"type": "RANGE_EDGE_FADE", "side": "BUY", "range_high": 2710.0, "range_low": 2690.0},
             }}},
         )
         from ea_bridge.models import LearningTradeOutcome
@@ -128,7 +129,7 @@ class DashboardRangeAnalysisTests(TestCase):
         self.assertEqual(response.status_code, 200)
         data = json.loads(response.content)
         analysis = data["range_analysis"]
-        self.assertEqual(analysis["detected"], 1)
+        self.assertEqual(analysis["detected"], 2)
         self.assertEqual(analysis["approved"], 1)
         self.assertEqual(analysis["deferred"], 1)
         self.assertEqual(analysis["closed_trades"], 1)
