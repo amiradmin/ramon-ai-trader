@@ -485,10 +485,9 @@ def _classify_regime(bars: _Bars, ind: _Indicators, t: int, config: OpportunityC
     else:
         bias = "NEUTRAL"
 
-    trending = adx >= config.adx_trending
     # ADX measures trend strength, not range structure. Add a causal directional-
-    # efficiency measure so low-ADX directional drifts are not automatically called
-    # ranges, while oscillating markets with repeated back-and-forth movement are.
+    # efficiency measure so oscillating markets are not mistaken for trends merely
+    # because ADX briefly rises during repeated boundary-to-boundary swings.
     efficiency_lookback = min(32, t)
     path = sum(
         abs(bars.close[i] - bars.close[i - 1])
@@ -497,11 +496,12 @@ def _classify_regime(bars: _Bars, ind: _Indicators, t: int, config: OpportunityC
     net_move = abs(bars.close[t] - bars.close[t - efficiency_lookback]) if efficiency_lookback > 0 else 0.0
     range_efficiency = net_move / path if path > 0 else 0.0
     structurally_range_bound = (
-        not trending
+        adx < max(config.adx_trending, 20.0)
         and range_efficiency <= 0.28
         and abs(separation) <= 0.60
         and abs(slope) <= 0.35
     )
+    trending = adx >= config.adx_trending and not structurally_range_bound
 
     if bias == "BULL" and structure != "BEARISH" and trending:
         label = "BULLISH"
