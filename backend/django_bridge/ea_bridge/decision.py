@@ -465,17 +465,40 @@ def decision(request):
                 if target_reward_risk < minimum_reward_risk or minimum_reward_risk < Decimal("1.2"):
                     raise ValueError("target reward/risk must meet the configured minimum of at least 1.2")
                 stop_distance = abs(entry_value - stop_loss_value)
-                take_profit_price = entry_value + stop_distance * target_reward_risk * (1 if record.action == "BUY" else -1)
+                opportunity_stage = result["stages"].get("opportunities", {})
+                setup = opportunity_stage.get("setup", {}) if isinstance(opportunity_stage, dict) else {}
+                if setup.get("type") == "RANGE_EDGE_FADE":
+                    # Mean-reversion trades must target the range midpoint, not an
+                    # arbitrary fixed-R target outside the range. Reject if the
+                    # midpoint does not offer the hard minimum reward/risk.
+                    range_high = Decimal(str(setup["range_high"]))
+                    range_low = Decimal(str(setup["range_low"]))
+                    midpoint = (range_high + range_low) / Decimal("2")
+                    favorable_distance = (
+                        midpoint - entry_value if record.action == "BUY"
+                        else entry_value - midpoint
+                    )
+                    range_reward_risk = favorable_distance / stop_distance if stop_distance > 0 else Decimal("0")
+                    if favorable_distance <= 0 or range_reward_risk < minimum_reward_risk:
+                        raise ValueError("RANGE_TARGET_RR_TOO_LOW")
+                    take_profit_price = midpoint
+                    verdict_reason = "RANGE_MIDPOINT_TARGET_RISK_APPROVED_ADVISORY_ONLY"
+                else:
+                    take_profit_price = entry_value + stop_distance * target_reward_risk * (1 if record.action == "BUY" else -1)
+                    verdict_reason = "RISK_APPROVED_ADVISORY_ONLY"
                 if approved_volume <= 0 or stop_loss_value <= 0 or take_profit_price <= 0:
                     raise ValueError("non-positive executable risk values")
                 take_profit_value = take_profit_price
-                verdict_reason = "RISK_APPROVED_ADVISORY_ONLY"
-            except (KeyError, TypeError, ValueError, ArithmeticError):
+            except (KeyError, TypeError, ValueError, ArithmeticError) as exc:
                 risk_approved = False
                 approved_volume = Decimal("0")
                 stop_loss_value = None
                 take_profit_value = None
-                verdict_reason = "RISK_VERDICT_INCOMPLETE"
+                verdict_reason = (
+                    "RANGE_TARGET_RR_TOO_LOW"
+                    if str(exc) == "RANGE_TARGET_RR_TOO_LOW"
+                    else "RISK_VERDICT_INCOMPLETE"
+                )
         verdict = RiskVerdictRecord.objects.create(
             decision_id=key,
             approved=risk_approved,
