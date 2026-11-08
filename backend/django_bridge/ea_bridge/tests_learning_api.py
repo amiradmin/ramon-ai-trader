@@ -212,7 +212,17 @@ class LearningOutcomeApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Learning Engine")
         self.assertContains(response, "Recent completed trades")
-        self.assertContains(response, "Train Six Trade Models")
+        # The dashboard now exposes each model as an independent training action.
+        for model_action in (
+            "Train PerformanceAnalyzer",
+            "Train DecisionAnalyzer",
+            "Train EntryExitAnalyzer",
+            "Train RegimeAnalyzer",
+            "Train MistakeDetector",
+            "Train StrategyEvaluator",
+            "Train ARIMA forecast",
+        ):
+            self.assertContains(response, model_action)
         # These analysis panels were deliberately removed from the current
         # learning dashboard; keep the contract aligned with the rendered UI.
         for removed_section in (
