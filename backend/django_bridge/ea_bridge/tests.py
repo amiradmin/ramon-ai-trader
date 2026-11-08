@@ -316,17 +316,17 @@ class ServerDailyBaselineTelemetryTests(TestCase):
         }
 
     @override_settings(EA_BEARER_TOKEN="test-token")
-    def test_m15_timestamp_jitter_is_canonicalized_and_deduplicated(self):
+    def test_m15_exact_boundary_duplicates_are_deduplicated(self):
         payload = self._payload(date.today())
         payload["instance_id"] = "m15-canonical-ea"
         payload["bars"] = [
             {
-                "timestamp": "2026-11-02T03:30:08Z",
+                "timestamp": "2026-11-02T03:30:00Z",
                 "open": "2320.00", "high": "2321.00", "low": "2319.00",
                 "close": "2320.35", "volume": "123", "closed": True,
             },
             {
-                "timestamp": "2026-11-02T03:30:54Z",
+                "timestamp": "2026-11-02T03:30:00Z",
                 "open": "2320.00", "high": "2321.00", "low": "2319.00",
                 "close": "2320.35", "volume": "123", "closed": True,
             },
@@ -337,14 +337,6 @@ class ServerDailyBaselineTelemetryTests(TestCase):
         )
         self.assertEqual(first.status_code, 200, first.content)
         self.assertEqual(first.json()["stored_bars"], 1)
-
-        payload["bars"] = [dict(payload["bars"][0], timestamp="2026-11-02T03:31:39Z")]
-        second = self.client.post(
-            self.url, data=json.dumps(payload),
-            content_type="application/json", **self.headers,
-        )
-        self.assertEqual(second.status_code, 200, second.content)
-        self.assertEqual(second.json()["stored_bars"], 1)
 
         bars = MarketBar.objects.filter(
             source="m15-canonical-ea", symbol="XAUUSD_o", timeframe="M15",
@@ -366,7 +358,7 @@ class ServerDailyBaselineTelemetryTests(TestCase):
             content_type="application/json", **self.headers,
         )
         self.assertEqual(response.status_code, 400)
-        self.assertIn("within 120 seconds", response.json()["error"])
+        self.assertIn("align exactly to a M15 candle boundary", response.json()["error"])
         self.assertFalse(MarketBar.objects.filter(source="m15-out-of-tolerance-ea").exists())
 
     @override_settings(EA_BEARER_TOKEN="test-token")
@@ -378,8 +370,8 @@ class ServerDailyBaselineTelemetryTests(TestCase):
             "close": "2320.35", "volume": "123", "closed": True,
         }
         payload["bars"] = [
-            dict(base, timestamp="2026-11-02T03:30:08Z"),
-            dict(base, timestamp="2026-11-02T03:30:54Z", close="2320.45"),
+            dict(base, timestamp="2026-11-02T03:30:00Z"),
+            dict(base, timestamp="2026-11-02T03:30:00Z", close="2320.45"),
         ]
         response = self.client.post(
             self.url, data=json.dumps(payload),
