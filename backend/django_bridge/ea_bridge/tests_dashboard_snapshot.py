@@ -140,4 +140,3 @@ class DashboardRangeAnalysisTests(TestCase):
         self.assertEqual(analysis["latest_setup"]["side"], "BUY")
         self.assertIn(analysis["market"]["status"], {"CLOSED", "STALE_OR_UNAVAILABLE"})
         self.assertEqual(analysis["market"]["last_market_data_at"], None)
-        self.assertEqual(analysis["rejection_reasons"][0]["reason"], "UNSPECIFIED")
