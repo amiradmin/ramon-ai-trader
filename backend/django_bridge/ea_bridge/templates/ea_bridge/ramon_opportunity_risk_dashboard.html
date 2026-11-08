@@ -242,6 +242,12 @@
   </div>
   <div class="card" style="margin-top:12px">
     <div class="risk-list">
+      <div class="risk-row"><span>Market status</span><strong id="rangeMarketStatus">Unavailable</strong></div>
+      <div class="risk-row"><span>Last market data (UTC)</span><strong id="rangeLastMarketData">Unavailable</strong></div>
+      <div class="risk-row"><span>Last decision (UTC)</span><strong id="rangeLastDecision">Unavailable</strong></div>
+      <div class="risk-row"><span>Evaluations explicitly skipped for closed market</span><strong id="rangeClosedSkips">0</strong></div>
+      <div class="small" id="rangeMarketNote">Market-session status will appear when Django supplies market data.</div>
+      <div class="small" id="rangeRejectionReasons">No rejection-reason breakdown available.</div>
       <div class="risk-row"><span>Latest range setup</span><strong id="rangeLatestSide">Unavailable</strong></div>
       <div class="risk-row"><span>Range boundaries</span><strong id="rangeBoundaries">Unavailable</strong></div>
       <div class="risk-row"><span>Range width / boundary touches</span><strong id="rangeStructure">Unavailable</strong></div>
@@ -1247,6 +1253,16 @@ async function loadPnlSummary() {
 $("applyPnlRange").addEventListener("click", loadPnlSummary);
 function renderRangeAnalysis(data) {
   const range = data && typeof data === "object" ? data : {};
+  const market = range.market || {};
+  $("rangeMarketStatus").textContent = market.status || "UNKNOWN";
+  $("rangeLastMarketData").textContent = market.last_market_data_at ? utc(market.last_market_data_at) : "Unavailable";
+  $("rangeLastDecision").textContent = market.last_decision_at ? utc(market.last_decision_at) : "Unavailable";
+  $("rangeClosedSkips").textContent = fmt(market.closed_market_skips ?? 0);
+  $("rangeMarketNote").textContent = market.status_note || "Market-session status unavailable.";
+  const rejectionReasons = Array.isArray(range.rejection_reasons) ? range.rejection_reasons : [];
+  $("rangeRejectionReasons").textContent = rejectionReasons.length
+    ? "Most common evaluation reasons: " + rejectionReasons.map(item => item.reason + " (" + item.count + ")").join(" · ")
+    : "No range evaluation rejection reasons recorded.";
   $("rangeDetected").textContent = fmt(range.detected ?? 0);
   $("rangeEvaluated").textContent = "Detector evaluations: " + fmt(range.evaluated ?? 0) + " · latest " + fmt(range.lookback_decisions ?? 0) + " decisions";
   $("rangeDecisionCounts").textContent = [range.approved ?? 0, range.deferred ?? 0, range.rejected ?? 0].join(" / ");
@@ -1256,7 +1272,7 @@ function renderRangeAnalysis(data) {
   $("rangeNetPnl").textContent = fmt(Number(range.net_pnl ?? 0));
   $("rangeAverageR").textContent = "Average R: " + (range.average_r_multiple == null ? "Not available" : fmt(range.average_r_multiple) + "R");
   const latest = range.latest_setup;
-  $("rangeLatestSide").textContent = latest ? [latest.side || "Side unavailable", latest.status || "Status unavailable"].join(" · ") : "No detected setup in the recent decision window";
+  $("rangeLatestSide").textContent = latest ? [latest.side || "Side unavailable", latest.status || "Status unavailable"].join(" · ") : "No RANGE_EDGE_FADE candidate emitted";
   $("rangeBoundaries").textContent = latest ? fmt(latest.range_low) + " – " + fmt(latest.range_high) : "Unavailable";
   const touches = latest?.boundary_touches;
   $("rangeStructure").textContent = latest
@@ -1265,7 +1281,10 @@ function renderRangeAnalysis(data) {
     : "Unavailable";
   $("rangeLatestReason").textContent = latest
     ? (latest.explanation || latest.reason || "Latest saved RANGE_EDGE_FADE candidate; inspect the decision flow for downstream timing and risk verdicts.")
-    : "No saved RANGE_EDGE_FADE setup is available in the latest 500 decisions for this symbol.";
+    : (range.latest_evaluation
+        ? "Latest range-context evaluation: " + (range.latest_evaluation.reason || range.latest_evaluation.rationale_code || "No explicit reason supplied") +
+          ". " + fmt(range.rejected) + " range-context evaluations were rejected without emitting a RANGE_EDGE_FADE candidate in this lookback."
+        : "No range-context evaluation or RANGE_EDGE_FADE candidate is available in the latest decision window.");
   $("rangePerformanceNote").textContent = range.performance_note || "Closed-trade results are sourced from linked broker outcomes.";
   $("rangeAnalysisScope").textContent = range.symbol
     ? range.symbol + " · latest " + fmt(range.lookback_decisions) + " decisions"
