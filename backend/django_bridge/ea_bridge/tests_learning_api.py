@@ -220,7 +220,7 @@ class LearningOutcomeApiTests(TestCase):
             "Train RegimeAnalyzer",
             "Train MistakeDetector",
             "Train StrategyEvaluator",
-            "Train ARIMA forecast",
+            "Train ARIMA Forecast",
         ):
             self.assertContains(response, model_action)
         # These analysis panels were deliberately removed from the current
