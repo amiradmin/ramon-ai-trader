@@ -63,6 +63,18 @@ def load_trading_config(path: str | Path | None = None) -> dict[str, Any]:
     wick_ratio = fade.get("minimum_rejection_wick_ratio")
     if not isinstance(wick_ratio, (int, float)) or isinstance(wick_ratio, bool) or not 0 <= wick_ratio <= 1:
         raise ValueError("range_edge_fade.minimum_rejection_wick_ratio must be between 0 and 1")
+    for key in ("minimum_range_width_atr", "maximum_range_width_atr", "boundary_touch_tolerance_atr", "minimum_close_reentry_atr"):
+        positive_number(fade, key)
+    if fade["minimum_range_width_atr"] >= fade["maximum_range_width_atr"]:
+        raise ValueError("range_edge_fade minimum range width must be below maximum range width")
+    if int(fade.get("minimum_boundary_touches", 0)) < 1:
+        raise ValueError("range_edge_fade.minimum_boundary_touches must be positive")
+    for key in ("maximum_sell_close_location", "minimum_buy_close_location"):
+        value = fade.get(key)
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or not 0 <= value <= 1:
+            raise ValueError(f"range_edge_fade.{key} must be between 0 and 1")
+    if fade["maximum_sell_close_location"] >= fade["minimum_buy_close_location"]:
+        raise ValueError("range-edge close-location thresholds must leave a neutral middle zone")
 
     session = setups["session_opening_range_breakout"]
     if int(session.get("opening_range_minutes", 0)) < 15:
