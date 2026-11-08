@@ -322,9 +322,14 @@ def dashboard_data(request):
                     "reason": opportunity.get("reason"),
                     "rationale_code": row.rationale_code,
                 }
-            reason_text = str(opportunity.get("reason") or row.rationale_code or "UNSPECIFIED").strip()
-            if reason_text:
-                rejection_reasons[reason_text] = rejection_reasons.get(reason_text, 0) + 1
+            evaluation_status = str(opportunity.get("status", "")).upper()
+            is_rejected_evaluation = evaluation_status in {"REJECTED", "BLOCKED", "FAILED"} or (
+                is_range_context and not is_range_setup
+            )
+            if is_rejected_evaluation:
+                reason_text = str(opportunity.get("reason") or row.rationale_code or "UNSPECIFIED").strip()
+                if reason_text:
+                    rejection_reasons[reason_text] = rejection_reasons.get(reason_text, 0) + 1
             market_state = str(features.get("market_status") or features.get("market_state") or "").upper()
             decision_reason = (str(opportunity.get("reason") or "") + " " + str(row.rationale_code or "")).upper()
             if market_state in {"CLOSED", "MARKET_CLOSED"} or "MARKET_CLOSED" in decision_reason or "MARKET_SESSION_CLOSED" in decision_reason:
@@ -383,7 +388,7 @@ def dashboard_data(request):
     market_data_fresh = market_data_age_seconds is not None and market_data_age_seconds <= int(getattr(settings, "RAMON_DASHBOARD_MARKET_DATA_MAX_AGE_SECONDS", 1200))
     # Weekend closure is a conservative session hint for FX/metals, not a broker-calendar guarantee.
     weekend = now_utc.weekday() in {5, 6}
-    market_status = "OPEN" if market_data_fresh else "CLOSED" if weekend else "STALE_OR_UNAVAILABLE"
+    market_status = "OPEN" if market_data_fresh else "CLOSED" if weekend and last_bar_at is not None else "STALE_OR_UNAVAILABLE"
     market_analysis = {
         "status": market_status,
         "last_market_data_at": last_bar_at.isoformat() if last_bar_at else None,
