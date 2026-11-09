@@ -225,6 +225,31 @@
 </section>
 <div id="status" class="card" role="status" aria-live="polite" style="margin-bottom:18px">Loading the latest Django decision…</div>
 
+<section class="card" aria-labelledby="arimaTitle" style="margin-bottom:18px">
+  <div class="section-head" style="margin:0 0 14px">
+    <div><h2 id="arimaTitle">ARIMA · next 15-minute close</h2><p>A separate forecasting observer. It does not approve, block, or change orders.</p></div>
+    <span class="pill ready">OBSERVATION ONLY</span>
+  </div>
+  <p id="arimaStatus" class="small" role="status" aria-live="polite">Connecting to the forecast observer…</p>
+  <div class="grid stats" style="margin:12px 0">
+    <div class="card"><div class="stat-label">Forecast close</div><div class="stat-value" id="arimaPrice">—</div><div class="stat-foot" id="arimaDirection">Waiting for a forecast</div></div>
+    <div class="card"><div class="stat-label">95% prediction range</div><div class="stat-value" id="arimaRange" style="font-size:20px">—</div><div class="stat-foot">Model uncertainty, not a win probability</div></div>
+    <div class="card"><div class="stat-label">Direction correct so far</div><div class="stat-value" id="arimaAccuracy">—</div><div class="stat-foot" id="arimaSample">No forward results yet</div></div>
+    <div class="card"><div class="stat-label">Against “price stays unchanged”</div><div class="stat-value" id="arimaBaseline" style="font-size:18px">Collecting results</div><div class="stat-foot">Lower prediction error is better</div></div>
+  </div>
+  <div class="small" id="arimaTarget">Forecasts are saved before the outcome, then checked when that candle closes.</div>
+  <div class="small" id="arimaErrors" style="margin-top:6px">Accuracy will appear after the first forecast is checked.</div>
+  <div class="small" id="arimaAlignment" style="margin-top:6px"></div>
+  <details style="margin-top:14px">
+    <summary>Recent forecasts and actual results</summary>
+    <div class="table-wrap"><table class="table" style="min-width:700px">
+      <thead><tr><th scope="col">Candle closes (UTC)</th><th scope="col">Forecast</th><th scope="col">Actual</th><th scope="col">ARIMA error</th><th scope="col">Unchanged-price error</th><th scope="col">Result</th></tr></thead>
+      <tbody id="arimaRecent"><tr><td colspan="6">No forward forecasts recorded yet.</td></tr></tbody>
+    </table></div>
+  </details>
+  <p class="small" style="margin:12px 0 0">Errors are measured in the symbol’s price units, not account profit or loss. The observer fits observed trading candles without filling market closures or data gaps. Early results are not proof of trading profitability.</p>
+</section>
+
 <div class="grid stats">
   <div class="card"><div class="stat-label">Saved decisions</div><div class="stat-value" id="statDecisions">—</div><div class="stat-foot">Latest 50 records available from Django</div></div>
   <div class="card"><div class="stat-label">Accepted setups</div><div class="stat-value positive" id="statSetups">—</div><div class="stat-foot">Among saved decisions shown</div></div>
@@ -266,6 +291,15 @@
     <div id="decisionFlow" class="flow-grid" aria-live="polite"><div class="small">Waiting for the latest Django decision…</div></div>
     <div id="thresholdEditorStatus" class="threshold-status" role="status" aria-live="polite">Loading Django strategy thresholds…</div>
     <div id="flowSummary" class="flow-summary">Waiting for decision diagnostics…</div>
+    <section id="playbookSelection" hidden aria-labelledby="playbookTitle">
+      <h3 id="playbookTitle">Opportunity comparison</h3>
+      <p class="small" id="playbookContext"></p>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th scope="col">Setup</th><th scope="col">Side</th><th scope="col">Rank / 100</th><th scope="col">Plan</th><th scope="col">Entry</th><th scope="col">Target / sizing</th></tr></thead>
+        <tbody id="playbookCandidates"></tbody>
+      </table></div>
+      <p class="small">Ranking compares setup quality, entry location, H1 direction, M5 confirmation, and target room. It is a rule-based score, not a win probability. An eligible plan still needs Django command authorization.</p>
+    </section>
     <div class="flow-note">The diagram is read-only. A passed strategy pipeline is not broker authorization and does not mean an MT5 order was sent.</div>
     <details class="variable-guide" id="decisionVariableGuide">
       <summary>48-variable decision reference · hover or focus each item for its description</summary>
@@ -915,7 +949,30 @@ function decorateDecisionFlowTooltips(markup) {
 }
 renderDecisionVariableGuide(null);
 
+function renderPlaybookSelection(decision) {
+  const selection = decision?.features?.selection;
+  const panel = $("playbookSelection");
+  panel.hidden = !Array.isArray(selection?.candidates);
+  if (panel.hidden) return;
+  const context = selection.context || {};
+  $("playbookContext").textContent = ["H1", "M5"].map(tf => {
+    const value = context[tf] || {};
+    return tf + ": " + (value.status || "MISSING") + " · " + (value.bias || "UNKNOWN") +
+      (tf === "M5" ? " · trigger " + (value.trigger || "NONE") : "");
+  }).join(" | ");
+  $("playbookCandidates").innerHTML = selection.candidates.map(candidate => {
+    const selected = candidate.approved && candidate.setup === selection.selected_setup;
+    const plan = selected ? "SELECTED" : candidate.approved ? "ELIGIBLE" : "WAIT / SKIP";
+    return "<tr><td>" + esc(candidate.setup) + "</td><td>" + esc(candidate.side) +
+      "</td><td>" + esc(((candidate.ranking?.score || 0) * 100).toFixed(1)) +
+      "</td><td>" + esc(plan) + "</td><td>" + esc(candidate.opportunity_reason !== "CONFIRMED" && !candidate.approved
+        ? candidate.opportunity_reason + " / " + candidate.entry_reason : candidate.entry_reason) +
+      "</td><td>" + esc(candidate.risk_reason) + (candidate.target_source ? " · " + esc(candidate.target_source) : "") + "</td></tr>";
+  }).join("");
+}
+
 function renderDecisionFlow(decision, execution = {}) {
+  renderPlaybookSelection(decision);
   const flow = $("decisionFlow");
   if (!flow) return;
   const openDetails = new Set(
@@ -1367,6 +1424,86 @@ const pnlThirtyDaysAgo = new Date(pnlToday.getTime() - 29 * 86400000);
 $("pnlFrom").value = utcDateInputValue(pnlThirtyDaysAgo);
 $("pnlTo").value = utcDateInputValue(pnlToday);
 loadPnlSummary();
+let arimaRequestInFlight = false;
+async function refreshArimaForecast() {
+  if (arimaRequestInFlight) return;
+  arimaRequestInFlight = true;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch("/api/ea/v1/forecast/arima", {cache:"no-store", signal:controller.signal});
+    if (!response.ok) throw new Error("Forecast feed unavailable (HTTP " + response.status + ")");
+    const data = await response.json();
+    if (!data.ok) throw new Error("Unexpected forecast response");
+    const latest = data.latest || {};
+    const accuracy = data.accuracy || {};
+    const price = value => Number.isFinite(value) ? value.toFixed(2) : "—";
+    const errorValue = value => Number.isFinite(value) ? value.toFixed(3) : "—";
+    const percent = value => Number.isFinite(value) ? (value*100).toFixed(1) + "%" : "—";
+    const messages = {
+      DISABLED:"The ARIMA observer is switched off.",
+      NO_DEMO_FEED:"Waiting for an MT5 demo feed.",
+      WAITING_FOR_FIRST_FORECAST:"Waiting for the worker and the next completed 15-minute candle.",
+      FORECAST_ACTIVE:"A forward forecast is active. Its accuracy will be checked after the target candle closes.",
+      WAITING_FOR_ACTUAL_CLOSE:"The target time has passed; waiting for its completed candle and the next worker poll.",
+      FEED_STALE:"The MT5 feed is stale. These are saved results, not a current forecast.",
+      RUNNING:"Calculating the next forecast in the background.",
+      SCORED:"The last forecast has been checked. Waiting for the next completed 15-minute candle.",
+      SKIPPED:"Waiting for the next eligible candle. This skipped attempt is excluded from accuracy.",
+      FAILED:"The last model attempt failed. The worker will try again on a new candle; trading continues independently."
+    };
+    const reasons = {
+      WAITING_FOR_NEXT_CANDLE:"The worker started too late for this candle; it will wait for the next one.",
+      INSUFFICIENT_CANDLE_HISTORY:"At least 128 completed M15 candles are needed.",
+      MODEL_DID_NOT_CONVERGE:"The model did not settle on a reliable fit.",
+      MODEL_FINISHED_TOO_LATE:"The fit finished too late to count as a timely forecast.",
+      TARGET_CANDLE_NOT_RECEIVED:"The exact target candle was not received, so this forecast was not scored.",
+      WORKER_INTERRUPTED_OR_TIMED_OUT:"The previous calculation was interrupted or took too long.",
+      MODEL_ERROR:"The model could not produce a usable forecast."
+    };
+    $("arimaStatus").textContent = (messages[data.state] || "Waiting for forecast status.") +
+      (reasons[latest.reason] ? " " + reasons[latest.reason] : "");
+    $("arimaStatus").className = "small";
+    $("arimaPrice").textContent = price(latest.forecast_close);
+    $("arimaRange").textContent = latest.lower_95 == null ? "—" : price(latest.lower_95) + " – " + price(latest.upper_95);
+    $("arimaDirection").textContent = latest.direction ? latest.direction +
+      (latest.interval_direction === "UNCERTAIN" ? " · range includes both directions" : "") : "No usable forecast yet";
+    $("arimaAccuracy").textContent = percent(accuracy.directional_accuracy);
+    $("arimaSample").textContent = (accuracy.observations || 0) + " forward forecasts checked · latest 100 maximum";
+    const comparison = accuracy.comparison;
+    $("arimaBaseline").textContent = comparison === "BEATS_BASELINE" ? "Lower error so far" :
+      comparison === "DOES_NOT_BEAT_BASELINE" ? "No improvement so far" : "Collecting results";
+    $("arimaTarget").textContent = latest.target_close_time ?
+      (data.symbol || "") + " · Target closes " + utc(latest.target_close_time) + " · Issued " +
+      (latest.generated_at ? utc(latest.generated_at) : "not issued") : "First results will appear automatically as new candles arrive.";
+    $("arimaErrors").textContent = accuracy.observations ?
+      "Average price error: ARIMA " + errorValue(accuracy.mae) + " / unchanged price " + errorValue(accuracy.baseline_mae) +
+      ". RMSE: " + errorValue(accuracy.rmse) + " / " + errorValue(accuracy.baseline_rmse) +
+      ". Inside prediction range: " + percent(accuracy.interval_coverage) + "." +
+      (accuracy.observations < 20 ? " Collecting at least 20 results before comparing the models." : "") :
+      "No forecasts have been checked yet. Accuracy starts with future outcomes; historical test results are not mixed in.";
+    const alignment = {NO_APPROVED_TRADE:"No approved trade to compare with this forecast.",
+      DIFFERENT_SIGNAL_CANDLE:"The latest trade decision belongs to a different candle.",
+      ALIGNS_WITH_TRADE:"The forecast direction agrees with the current trade plan.",
+      OPPOSES_TRADE:"The forecast direction disagrees with the current trade plan."};
+    $("arimaAlignment").textContent = alignment[data.alignment] || "";
+    const recent = Array.isArray(data.recent) ? data.recent : [];
+    $("arimaRecent").innerHTML = recent.length ? recent.map(row => "<tr><td>" + esc(utc(row.target_close_time)) +
+      "</td><td>" + esc(price(row.forecast_close)) + "</td><td>" + esc(price(row.actual_close)) +
+      "</td><td>" + esc(errorValue(row.absolute_error)) + "</td><td>" + esc(errorValue(row.baseline_absolute_error)) +
+      "</td><td>" + esc(row.status === "SCORED" ? "Checked" : row.status === "READY" ? "Waiting for result" :
+        row.status === "RUNNING" ? "Calculating" : row.status === "SKIPPED" ? "Skipped" : "Failed") + "</td></tr>").join("") :
+      '<tr><td colspan="6">No forward forecasts recorded yet.</td></tr>';
+  } catch (error) {
+    $("arimaStatus").textContent = "Forecast panel unavailable; displayed values may be old. The trading monitor updates separately.";
+    $("arimaStatus").className = "small negative";
+  } finally {
+    clearTimeout(timeout);
+    arimaRequestInFlight = false;
+  }
+}
+refreshArimaForecast();
+setInterval(refreshArimaForecast, 15000);
 loadDecisionThresholds().then(() => refresh()).catch(error => { const status = $("thresholdEditorStatus"); if (status) { status.className = "threshold-status error"; status.textContent = error.message; } refresh(); });
 setInterval(refresh, 10000);
 </script>

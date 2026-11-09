@@ -16,6 +16,7 @@ from .entry_timing import EntryTimer
 from .learning import Learning
 from .opportunities import OpportunityDetector
 from .risk_management import RiskManager
+from .trade_planning import market_context, plan_target, rank_candidate
 
 # Server-owned calculation definitions. These describe the rules implemented by the
 # corresponding stage methods; per-decision operands and active thresholds are attached
@@ -41,8 +42,8 @@ _CALCULATION_RULES = {
         "forecast": "Optional forecast veto: pass only when the enabled ARIMA/SARIMA evidence accepts the already-approved technical direction; forecasts cannot create an opportunity.",
         "failed_breakout_sweep": "A completed candle trades beyond a prior lookback high/low by sweep_buffer_atr × ATR and closes back inside that prior range; the sweep extreme is the invalidation reference.",
         "range_edge_fade": "Only in the RANGING regime: require a prior two-sided range within configured ATR width bounds, repeated reactions at both boundaries, a wick rejection, material close back inside the range, and a directional close-location threshold; Django targets the range midpoint only when it meets the minimum reward/risk, otherwise it rejects the trade.",
-        "session_opening_range_breakout": "After the configured IANA-timezone opening range has fully completed, require a completed close beyond its high/low by breakout_buffer_atr × ATR. Session clock uses timezone-aware local time and DST.",
-        "volatility_compression_expansion": "Require the preceding compression_lookback_bars range to fit within compression_max_atr × current ATR × lookback, followed by a directional candle body >= expansion_body_atr × ATR.",
+        "session_opening_range_breakout": "Require every completed M15 opening-range candle and a fresh close across its high/low by breakout_buffer_atr × ATR; the preceding close must not already be beyond that boundary. Session clock uses the configured IANA timezone and DST.",
+        "volatility_compression_expansion": "Require the immediately preceding compression_lookback_bars range to fit within compression_max_atr × current ATR × sqrt(lookback), followed by a directional body >= expansion_body_atr × ATR and a close outside the compression range.",
         "exhaustion_reversal": "Last-priority setup: require an extension of minimum_extension_atr over extension_lookback_bars, RSI extreme, and a close through the last confirmed opposite swing (CHoCH).",
         "configuration": "Stage thresholds are loaded from the versioned trading_config.json. Structural opportunity results expose config_version for audit; invalid configuration fails closed."
     },
@@ -62,6 +63,7 @@ _CALCULATION_RULES = {
         "quality": "If supplied quality is accepted, use market.entry_quality. Otherwise quality = 0.40 × spread_eff + 0.35 × location + 0.25 × freshness, where spread_eff = 1 − 0.5 × clip(spread_ATR / max_spread_atr), location = 1 − 0.5 × clip(max(chase_ATR, 0) / max_chase_atr), and freshness = 1 − age_bars / (max_signal_age_bars + 1). Pass when 0 <= quality <= 1 and quality >= minimum_quality.",
     },
     "risk_management": {
+        "target_structure": "For the demo comparison path, range fades target their midpoint; other targets are capped before the nearest unbroken confirmed M15/H1 swing by 0.10 ATR. Reject when available reward/risk is below the configured minimum. All swing confirmation uses completed candles available at decision time.",
         "stop": "Structural stop = invalidation price − direction_sign × stop_buffer_atr × setup ATR (SELL stop may additionally be moved by ask − bid when short_stop_spread_adjust is enabled). Stop distance = (entry price − stop price) × direction_sign; normalize by ATR and require min_stop_atr <= stop_ATR <= max_stop_atr. Legacy mode uses supplied stop_loss_points.",
         "stop_below_broker_minimum": "Pass when planned stop distance in points >= broker stop_level_points.",
         "reward_risk": "When target_reward_risk is supplied, planned take-profit distance = structural stop distance × target_reward_risk; require target_reward_risk >= min_reward_risk. Legacy callers may still supply take_profit_points directly.",
@@ -182,11 +184,12 @@ _STAGE_ORDER = ("opportunities", "entry_timing", "risk_management")
 
 
 class SignalFlowPipeline:
-    def __init__(self, opportunities: OpportunityDetector | None = None, entry_timer: EntryTimer | None = None, risk_manager: RiskManager | None = None, learning: Learning | None = None) -> None:
+    def __init__(self, opportunities: OpportunityDetector | None = None, entry_timer: EntryTimer | None = None, risk_manager: RiskManager | None = None, learning: Learning | None = None, *, compare_candidates: bool = False) -> None:
         self.opportunities = opportunities or OpportunityDetector()
         self.entry_timer = entry_timer or EntryTimer()
         self.risk_manager = risk_manager or RiskManager()
         self.learning = learning or Learning()
+        self.compare_candidates = compare_candidates
 
     def _evaluate_risk(self, market: Mapping[str, Any], upstream: bool, opportunity: Mapping[str, Any], timing: Mapping[str, Any]) -> dict[str, Any]:
         """Call the risk stage with stage context, tolerating custom managers with the old signature."""
@@ -198,9 +201,47 @@ class SignalFlowPipeline:
 
     def run(self, market: Mapping[str, Any], outcome: Mapping[str, Any] | None = None) -> dict[str, Any]:
         learning_result = self.learning.observe(outcome)
+        if self.compare_candidates and isinstance(market, Mapping) and market.get("bars") is not None:
+            return self._run_candidates(market, learning_result)
         opportunity = self.opportunities.evaluate(market)
         timing = self.entry_timer.evaluate(opportunity, market)
         risk = self._evaluate_risk(market, bool(opportunity.get("approved") and timing.get("approved")), opportunity, timing)
+        return self._assemble(market, learning_result, opportunity, timing, risk)
+
+    def _run_candidates(self, market: Mapping[str, Any], learning_result: dict[str, Any]) -> dict[str, Any]:
+        context = market_context(market)
+        evaluated = []
+        for opportunity in self.opportunities.evaluate_candidates(market):
+            timing = self.entry_timer.evaluate(opportunity, market)
+            risk = self._evaluate_risk(market, bool(opportunity.get("approved") and timing.get("approved")), opportunity, timing)
+            risk = plan_target(opportunity, risk, market, self.risk_manager.config.min_reward_risk)
+            approved = all(stage.get("approved") for stage in (opportunity, timing, risk))
+            rank = rank_candidate(opportunity, timing, risk, context)
+            # Prefer executable candidates, then the one furthest through the stages.
+            progress = sum(bool(stage.get("approved")) for stage in (opportunity, timing, risk))
+            evaluated.append((approved, progress, rank, opportunity, timing, risk))
+        evaluated.sort(key=lambda item: (item[0], item[1], item[2]["score"]), reverse=True)
+        approved, _, _, opportunity, timing, risk = evaluated[0]
+        if approved:
+            self.opportunities.remember(opportunity)
+        result = self._assemble(market, learning_result, opportunity, timing, risk)
+        result["selection"] = {
+            "version": "demo-playbook-v1", "policy": "BEST_EXECUTABLE_PLAN",
+            "context": context, "selected_setup": opportunity.get("setup", {}).get("type") if approved else None,
+            "best_waiting_setup": None if approved else opportunity.get("setup", {}).get("type"),
+            "executable_candidates": sum(bool(item[0]) for item in evaluated),
+            "candidates": [{
+                "setup": op.get("setup", {}).get("type", op.get("setup_name", "UNKNOWN").upper()),
+                "side": op.get("side", "NONE"), "approved": bool(ok), "ranking": ranking,
+                "opportunity_reason": op.get("reason"), "entry_reason": entry.get("reason"),
+                "risk_reason": sizing.get("reason"), "target_price": sizing.get("target_price"),
+                "target_source": sizing.get("target_source"),
+            } for ok, _, ranking, op, entry, sizing in evaluated],
+        }
+        return result
+
+    def _assemble(self, market: Mapping[str, Any], learning_result: dict[str, Any],
+                  opportunity: dict[str, Any], timing: dict[str, Any], risk: dict[str, Any]) -> dict[str, Any]:
         stages = {"opportunities": opportunity, "entry_timing": timing, "risk_management": risk}
         # Keep every documented gate visible; missing gates remain NOT_EVALUATED.
         _complete_stage_checks(stages)

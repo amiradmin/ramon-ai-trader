@@ -88,7 +88,7 @@ def _build_pipeline(*, demo_mode=False):
         config=EntryTimingConfig(
             **entry_values,
             require_signal_time=True,
-            ignore_supplied_quality=bool(opt("RAMON_USE_COMPUTED_ENTRY_QUALITY", False)),
+            ignore_supplied_quality=relaxed or bool(opt("RAMON_USE_COMPUTED_ENTRY_QUALITY", False)),
         ),
     )
     # EntryTimer preserves legacy file-based defaults when passed its historical
@@ -104,7 +104,8 @@ def _build_pipeline(*, demo_mode=False):
             short_stop_spread_adjust=bool(opt("RAMON_SHORT_STOP_SPREAD_ADJUST", False)),
         )
     )
-    return SignalFlowPipeline(opportunities=detector, entry_timer=timer, risk_manager=risk)
+    return SignalFlowPipeline(opportunities=detector, entry_timer=timer, risk_manager=risk,
+                              compare_candidates=relaxed and bool(opt("RAMON_DEMO_COMPARE_CANDIDATES", True)))
 
 def _num(v, name):
     v=float(v)
@@ -358,6 +359,12 @@ def decision(request):
             else "STANDARD"
         )
         risk_policy = _apply_demo_risk_policy(market, pipeline, demo_mode=is_demo_account)
+        if pipeline.compare_candidates:
+            from .market_context import load_decision_context
+            market["decision_time"] = time.time()
+            market["context_bars"] = load_decision_context(
+                source=instance_id, symbol=symbol, decision_time=market["decision_time"],
+            )
         result = pipeline.run(market)
         if account_state_reason:
             action = "WAIT"
@@ -381,15 +388,18 @@ def decision(request):
           "ema50": slow,
           "atr": atr,
           "setup_score": setup,
-          "entry_quality": quality,
+          "entry_quality": result["stages"]["entry_timing"].get("quality", quality),
+          "legacy_entry_momentum": quality,
           "spread_points": spread,
           "approved": bool(result["approved"]),
           "stages": result["stages"],
+          "selection": result.get("selection", {}),
           "opportunity_input_path": "completed_ohlc_structural",
           "strategy_profile": strategy_profile,
           "risk_policy": risk_policy,
           "structural_candle_count": len(bars),
           "market_snapshot": {
+            "source": instance_id,
             "symbol": symbol,
             "timeframe": "M15",
             "bar_time": bar_time,
@@ -483,6 +493,12 @@ def decision(request):
                         raise ValueError("RANGE_TARGET_RR_TOO_LOW")
                     take_profit_price = midpoint
                     verdict_reason = "RANGE_MIDPOINT_TARGET_RISK_APPROVED_ADVISORY_ONLY"
+                elif risk_stage.get("target_price") is not None:
+                    take_profit_price = Decimal(str(risk_stage["target_price"]))
+                    favorable_distance = (take_profit_price - entry_value) * (1 if record.action == "BUY" else -1)
+                    if stop_distance <= 0 or favorable_distance / stop_distance < minimum_reward_risk:
+                        raise ValueError("STRUCTURAL_TARGET_RR_TOO_LOW")
+                    verdict_reason = "STRUCTURAL_TARGET_RISK_APPROVED_ADVISORY_ONLY"
                 else:
                     take_profit_price = entry_value + stop_distance * target_reward_risk * (1 if record.action == "BUY" else -1)
                     verdict_reason = "RISK_APPROVED_ADVISORY_ONLY"
@@ -556,6 +572,7 @@ def decision(request):
         response["server_daily_loss_percent"] = server_daily_loss_percent
         response["daily_loss_source"] = daily_loss_source
         response["stages"] = result["stages"]
+        response["selection"] = result.get("selection", {})
         return JsonResponse(response, json_dumps_params={"separators": (",", ":")})
     except (KeyError,TypeError,ValueError,OverflowError,json.JSONDecodeError) as exc:
         logger.warning("Ramon decision request rejected: %s", exc)

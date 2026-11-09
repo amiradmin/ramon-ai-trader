@@ -97,6 +97,36 @@ def _aligned_market_bar_queryset(query, timeframe: str):
     return query
 
 
+def forecast_next_close(closes: list[float]) -> dict:
+    """Fit one bounded ARIMA(1,1,1) forecast, without retrospective holdout fits.
+
+    The background observer supplies only candles available before the forecast.
+    A non-converged or non-finite model is not published as a usable prediction.
+    """
+    values = np.asarray(closes, dtype=float)
+    if values.ndim != 1 or len(values) < 128:
+        raise ValueError("at least 128 one-dimensional candle closes are required")
+    if not np.isfinite(values).all() or np.any(values <= 0):
+        raise ValueError("candle closes must be finite and positive")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        fitted = ARIMA(values, order=(1, 1, 1), enforce_stationarity=False,
+                       enforce_invertibility=False).fit(method_kwargs={"maxiter": 100})
+        prediction = fitted.get_forecast(steps=1)
+    convergence_warnings = sum(issubclass(item.category, ConvergenceWarning) for item in caught)
+    if convergence_warnings or not fitted.mle_retvals.get("converged", False):
+        raise ValueError("MODEL_DID_NOT_CONVERGE")
+    mean = float(np.asarray(prediction.predicted_mean).reshape(-1)[0])
+    bounds = np.asarray(prediction.conf_int(alpha=0.05), dtype=float).reshape(-1)
+    if len(bounds) != 2 or not np.isfinite([mean, *bounds]).all():
+        raise ValueError("MODEL_OUTPUT_NOT_FINITE")
+    lower, upper = map(float, bounds)
+    if not 0 < lower <= mean <= upper:
+        raise ValueError("MODEL_INTERVAL_INVALID")
+    return {"forecast_close": mean, "lower_95": lower, "upper_95": upper,
+            "warning_count": len(caught), "convergence_warnings": convergence_warnings}
+
+
 def forecast_market_bars(
     *,
     symbol: str,

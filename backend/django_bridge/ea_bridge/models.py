@@ -277,3 +277,45 @@ class LearningModelRun(models.Model):
     class Meta:
         ordering = ["-training_started_at", "-id"]
         indexes = [models.Index(fields=["model_key", "-training_finished_at"], name="learn_model_run_latest_idx")]
+
+
+class ArimaShadowForecast(models.Model):
+    """Immutable forecast inputs and forward outcomes; never trading authority."""
+
+    class Status(models.TextChoices):
+        RUNNING = "RUNNING", "Calculating"
+        READY = "READY", "Awaiting target candle"
+        SCORED = "SCORED", "Compared with actual close"
+        SKIPPED = "SKIPPED", "Not eligible for forward scoring"
+        FAILED = "FAILED", "Forecast failed"
+
+    source = models.CharField(max_length=128)
+    symbol = models.CharField(max_length=32)
+    timeframe = models.CharField(max_length=16, default="M15")
+    model_version = models.CharField(max_length=64)
+    origin_bar_time = models.DateTimeField()
+    target_bar_time = models.DateTimeField()
+    target_close_time = models.DateTimeField()
+    origin_close = models.DecimalField(max_digits=24, decimal_places=10)
+    forecast_close = models.DecimalField(max_digits=24, decimal_places=10, null=True, blank=True)
+    lower_95 = models.DecimalField(max_digits=24, decimal_places=10, null=True, blank=True)
+    upper_95 = models.DecimalField(max_digits=24, decimal_places=10, null=True, blank=True)
+    actual_close = models.DecimalField(max_digits=24, decimal_places=10, null=True, blank=True)
+    observations = models.PositiveIntegerField(default=0)
+    input_sha256 = models.CharField(max_length=64, blank=True, default="")
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.RUNNING)
+    reason = models.CharField(max_length=128, blank=True, default="")
+    diagnostics = models.JSONField(default=dict)
+    started_at = models.DateTimeField()
+    generated_at = models.DateTimeField(null=True, blank=True)
+    settled_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=["source", "symbol", "timeframe", "origin_bar_time", "model_version"],
+            name="arima_shadow_origin_uniq",
+        )]
+        indexes = [
+            models.Index(fields=["source", "symbol", "model_version", "-origin_bar_time"], name="arima_shadow_scope_latest"),
+            models.Index(fields=["status", "target_close_time"], name="arima_shadow_due_idx"),
+        ]

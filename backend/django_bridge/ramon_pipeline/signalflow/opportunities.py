@@ -872,6 +872,39 @@ class OpportunityDetector:
                 )
         return self._evaluate_legacy(market)
 
+    def evaluate_candidates(self, market: Mapping[str, Any]) -> list[dict[str, Any]]:
+        """Preview every enabled setup independently, without consuming any signal.
+
+        Timing and sizing may disqualify the highest-scoring technical pattern.
+        The pipeline commits only its final executable selection with ``remember``.
+        """
+        if not isinstance(market, Mapping) or market.get("bars") is None:
+            return [self.evaluate(market)]
+        results = []
+        for name, settings in self.trading_settings["opportunity_finder"]["setups"].items():
+            if not settings["enabled"]:
+                continue
+            try:
+                result = self._evaluate_structure(market, setup_name=name, remember=False)
+            except Exception as exc:
+                logger.exception("Candidate evaluation failed: %s", name)
+                result = self._result(REJECTED, "OPPORTUNITY_EVALUATION_ERROR",
+                                      detail=f"{type(exc).__name__}: {exc}")
+            result["setup_name"] = name
+            results.append(result)
+        return results or [self._result(REJECTED, "NO_ENABLED_SETUP")]
+
+    def remember(self, opportunity: Mapping[str, Any]) -> None:
+        """Consume the selected signal only after entry and sizing pass."""
+        key = opportunity.get("dedupe_key")
+        stamp = opportunity.get("signal_bar_time")
+        if key and stamp is not None:
+            with self._lock:
+                self._accepted[key] = parse_timestamp(stamp)
+                self._accepted.move_to_end(key)
+                while len(self._accepted) > 512:
+                    self._accepted.popitem(last=False)
+
     # ------------------------------------------------------------------
     # Legacy path: trend + setup_score supplied by the caller
     # ------------------------------------------------------------------
@@ -962,11 +995,16 @@ class OpportunityDetector:
         result.update(extra)
         return result
 
-    def _evaluate_structure(self, market: Mapping[str, Any]) -> dict[str, Any]:
+    def _evaluate_structure(self, market: Mapping[str, Any], *, setup_name: str | None = None,
+                            remember: bool = True) -> dict[str, Any]:
         config = self.config
         checks: list[dict[str, Any]] = []
         symbol = str(market.get("symbol", "")).strip()
         timeframe = str(market.get("timeframe", "M15")).upper()
+        setup_settings = {
+            name: {**settings, "enabled": settings["enabled"] and (setup_name is None or name == setup_name)}
+            for name, settings in self.trading_settings["opportunity_finder"]["setups"].items()
+        }
 
         def done(status: str, reason: str, **kwargs: Any) -> dict[str, Any]:
             setup_switches = {
@@ -991,6 +1029,10 @@ class OpportunityDetector:
         except InvalidMarketData as exc:
             _check(checks, "data_valid", False, exc.detail)
             return done(REJECTED, exc.reason, detail=exc.detail)
+        if timeframe == "M15" and any(b-a < 900 for a, b in zip(bars.times, bars.times[1:])):
+            detail = "M15 candles must be at least 900 seconds apart; shifted duplicates are not independent bars"
+            _check(checks, "data_valid", False, detail)
+            return done(REJECTED, "INVALID_CANDLE_CADENCE", detail=detail)
         _check(checks, "data_valid", True, f"{len(bars.close)} completed bars", metrics={"value": len(bars.close), "threshold": config.min_bars, "factor": "completed bars"})
 
         closed_flag = market.get("last_bar_closed")
@@ -1052,7 +1094,7 @@ class OpportunityDetector:
         # Range fades are the sole exception to directional-trend requirements.
         supplemental_settings = {
             name: dict(settings)
-            for name, settings in self.trading_settings["opportunity_finder"]["setups"].items()
+            for name, settings in setup_settings.items()
         }
         volatility_ready = config.atr_ratio_min <= atr_ratio <= config.atr_ratio_max
         opposite_regime = "BEARISH" if regime.label == "BULLISH" else "BULLISH"
@@ -1105,11 +1147,8 @@ class OpportunityDetector:
                                   f"{setup_type} passed technical gates but forecast evidence vetoed it",
                                   candidate_side, **extra)
                 _check(checks, "forecast", True, "ARIMA/SARIMA agree with setup direction")
-            with self._lock:
-                self._accepted[signal_key] = bar_time
-                self._accepted.move_to_end(signal_key)
-                while len(self._accepted) > 512:
-                    self._accepted.popitem(last=False)
+            if remember:
+                self.remember({"dedupe_key": signal_key, "signal_bar_time": bar_time})
             signal_id = hashlib.sha256(f"{signal_key}|{bar_time}".encode()).hexdigest()[:16]
             return done(ACCEPTED, reason, side=candidate_side, candidate_side=candidate_side,
                         score=score, regime=regime_info, components={k: round(v, 4) for k, v in components.items()},
@@ -1199,7 +1238,7 @@ class OpportunityDetector:
 
         breakout_candidate = None
         first_breakout = max(config.breakout_lookback, t - config.breakout_max_retest_bars - 1)
-        for breakout_index in (range(t - 2, first_breakout - 1, -1) if self.trading_settings["opportunity_finder"]["setups"]["breakout_retest"]["enabled"] else ()):
+        for breakout_index in (range(t - 2, first_breakout - 1, -1) if setup_settings["breakout_retest"]["enabled"] else ()):
             range_start = breakout_index - config.breakout_lookback
             if range_start < 0:
                 continue
@@ -1301,11 +1340,8 @@ class OpportunityDetector:
                                   side, **extra)
                 _check(checks, "forecast", True, "ARIMA and SARIMA agree with the breakout direction")
                 reason = "BREAKOUT_RETEST_CONFIRMED_WITH_FORECAST"
-            with self._lock:
-                self._accepted[signal_key] = bar_time
-                self._accepted.move_to_end(signal_key)
-                while len(self._accepted) > 512:
-                    self._accepted.popitem(last=False)
+            if remember:
+                self.remember({"dedupe_key": signal_key, "signal_bar_time": bar_time})
             signal_id = hashlib.sha256(f"{signal_key}|{bar_time}".encode()).hexdigest()[:16]
             explanation = (
                 f"{side} accepted: confirmed close beyond the prior {config.breakout_lookback}-bar range, "
@@ -1332,7 +1368,7 @@ class OpportunityDetector:
             "no confirmed breakout, retest and continuation sequence was found in the recent completed candles",
         )
 
-        if not self.trading_settings["opportunity_finder"]["setups"]["trend_pullback"]["enabled"]:
+        if not setup_settings["trend_pullback"]["enabled"]:
             return finish(REJECTED, "NO_ENABLED_SETUP",
                           "trend pullback is disabled and no other enabled setup was confirmed", side)
 
@@ -1474,11 +1510,8 @@ class OpportunityDetector:
             _check(checks, "forecast", True, "ARIMA and SARIMA agree with the trade direction")
             reason = "OPPORTUNITY_FOUND_WITH_FORECAST_CONFIRMATION"
 
-        with self._lock:
-            self._accepted[signal_key] = bar_time
-            self._accepted.move_to_end(signal_key)
-            while len(self._accepted) > 512:
-                self._accepted.popitem(last=False)
+        if remember:
+            self.remember({"dedupe_key": signal_key, "signal_bar_time": bar_time})
         signal_id = hashlib.sha256(f"{signal_key}|{bar_time}".encode()).hexdigest()[:16]
         explanation = (
             f"{side} accepted: {regime.label.lower()} regime (ADX {regime.adx:.1f}, structure "

@@ -4,6 +4,7 @@ from . import decision as decision_views
 from . import commands as command_views
 from . import telemetry as telemetry_views
 from . import learning_views
+from . import forecast_views
 
 urlpatterns = [
     path("handshake", views.handshake, name="ea-handshake"),
@@ -17,6 +18,7 @@ urlpatterns = [
     path("status", views.status, name="ea-status"),
     path("dashboard", views.dashboard, name="ramon-dashboard"),
     path("dashboard-data", views.dashboard_data, name="ramon-dashboard-data"),
+    path("forecast/arima", forecast_views.arima_status, name="ramon-arima-shadow-status"),
     path("dashboard/pnl-summary", views.dashboard_pnl_summary, name="ramon-dashboard-pnl-summary"),
     path("dashboard-snapshot", views.dashboard_snapshot, name="ramon-dashboard-snapshot"),
     path("decision-thresholds", views.decision_thresholds, name="ramon-decision-thresholds"),

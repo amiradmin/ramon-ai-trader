@@ -26,18 +26,21 @@ def _session_open_range(times: Sequence[float], highs: Sequence[float], lows: Se
         end_ts = start_ts + int(settings["opening_range_minutes"]) * 60
         # The opening range must be fully completed before a later bar can break it.
         indices = [i for i, ts in enumerate(times[:-1]) if start_ts <= ts < end_ts]
-        if not indices or times[-1] < end_ts:
+        expected_bars = int(settings["opening_range_minutes"]) // 15
+        if (len(indices) != expected_bars or times[indices[0]] != start_ts
+                or any(times[b] - times[a] != 900 for a, b in zip(indices, indices[1:]))
+                or times[-1] < end_ts):
             continue
         after = [i for i, ts in enumerate(times) if ts >= end_ts]
         if not after or after[-1] != len(times) - 1:
             continue
         top, bottom = max(highs[i] for i in indices), min(lows[i] for i in indices)
         buffer = float(settings["breakout_buffer_atr"]) * atr
-        if closes[-1] > top + buffer:
+        if closes[-1] > top + buffer and closes[-2] <= top + buffer:
             return {"type": "SESSION_OPENING_RANGE_BREAKOUT", "side": "BUY",
                     "session": label, "range_high": top, "range_low": bottom,
                     "opening_range_start": start_ts, "opening_range_end": end_ts}
-        if closes[-1] < bottom - buffer:
+        if closes[-1] < bottom - buffer and closes[-2] >= bottom - buffer:
             return {"type": "SESSION_OPENING_RANGE_BREAKOUT", "side": "SELL",
                     "session": label, "range_high": top, "range_low": bottom,
                     "opening_range_start": start_ts, "opening_range_end": end_ts}
@@ -142,12 +145,16 @@ def detect_additional_opportunity(times: Sequence[float], opens: Sequence[float]
     if cfg["enabled"]:
         lookback = int(cfg["compression_lookback_bars"])
         if t >= lookback + 1:
-            prior_width = max(highs[t-lookback-1:t-1]) - min(lows[t-lookback-1:t-1])
-            compressed = prior_width <= float(cfg["compression_max_atr"]) * atr * lookback
+            prior_top, prior_bottom = max(highs[t-lookback:t]), min(lows[t-lookback:t])
+            prior_width = prior_top - prior_bottom
+            # Normalize by sqrt(time), not linearly by the bar count: the old
+            # threshold accepted broad ranges as compression. Exclude the trigger.
+            compressed = prior_width <= float(cfg["compression_max_atr"]) * atr * math.sqrt(lookback)
             body = abs(closes[t] - opens[t])
             if compressed and body >= float(cfg["expansion_body_atr"]) * atr:
                 side = "BUY" if closes[t] > opens[t] else "SELL" if closes[t] < opens[t] else None
-                if side:
+                outside_range = closes[t] > prior_top if side == "BUY" else closes[t] < prior_bottom
+                if side and outside_range:
                     return {"type": "VOLATILITY_COMPRESSION_EXPANSION", "side": side,
                             "compression_range": prior_width,
                             "invalidation_price": lows[t] if side == "BUY" else highs[t], "score": 0.55 + min(0.25, body / atr * 0.10)}

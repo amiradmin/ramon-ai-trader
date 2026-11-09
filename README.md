@@ -10,6 +10,7 @@ The single `docker-compose.yaml` defines:
 
 - `django`: Django API, bound to `127.0.0.1:8017` on the host.
 - `worker`: Redis Streams consumer that persists queued events.
+- `forecast-worker`: forward ARIMA forecasts and automatic accuracy tracking; observation only.
 - `redis`: event buffer.
 - `timescaledb`: PostgreSQL/TimescaleDB durable store.
 
@@ -93,6 +94,18 @@ Useful runbooks:
 - [Django command protocol](docs/architecture/django-command-ea-protocol-v1.md)
 
 ## Research code vs. running service
+
+The expanded demo profile now compares all enabled setups after entry timing,
+sizing, and structural target checks. It uses H1/M5 context when available and
+records candidate rankings and rejection reasons in the dashboard. See the
+[professional demo playbook](docs/architecture/professional-demo-playbook.md)
+for the research basis, exact rules, read-only replay command, and limitations.
+The comparison score is a heuristic, not a win probability.
+
+The dashboard also includes an [ARIMA forecast observer](docs/operations/arima-forecast-observer.md).
+It forecasts the next M15 close in a separate worker, saves the prediction before
+the outcome, and checks it against the actual close and an unchanged-price baseline.
+Its forecasts do not influence trade decisions or order authorization.
 
 The repository also contains SignalFlow, forecasting, learning, and historical research code. Optional research dependencies in `pyproject.toml` are not the same as the current Compose runtime. Do not assume a Chronos model service, `scripts/setup_local.sh`, `scripts/mt5_container.sh`, or an optional `mt5` Compose profile exists in the current checkout; use the actual tracked files and current runbooks.
 

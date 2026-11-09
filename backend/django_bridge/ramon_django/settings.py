@@ -54,6 +54,11 @@ RAMON_DJANGO_DECISION_ENABLED = os.environ.get("RAMON_DJANGO_DECISION_ENABLED", 
 # Validation options for the SignalFlow decision path. All default OFF so live behaviour is unchanged.
 RAMON_DEDUPE_SIGNALS = os.environ.get("RAMON_DEDUPE_SIGNALS", "0") == "1"
 RAMON_USE_COMPUTED_ENTRY_QUALITY = os.environ.get("RAMON_USE_COMPUTED_ENTRY_QUALITY", "0") == "1"
+# The expanded demo profile compares complete executable plans; standard/live paths are unchanged.
+RAMON_DEMO_COMPARE_CANDIDATES = os.environ.get("RAMON_DEMO_COMPARE_CANDIDATES", "1") == "1"
+# Forward-only ARIMA observation, isolated from decision/command authorization.
+RAMON_ARIMA_SHADOW_ENABLED = os.environ.get("RAMON_ARIMA_SHADOW_ENABLED", "1") == "1"
+RAMON_ARIMA_SHADOW_WINDOW = int(os.environ.get("RAMON_ARIMA_SHADOW_WINDOW", "256"))
 RAMON_SHORT_STOP_SPREAD_ADJUST = os.environ.get("RAMON_SHORT_STOP_SPREAD_ADJUST", "0") == "1"
 RAMON_IMPULSE_START_MODE = os.environ.get("RAMON_IMPULSE_START_MODE", "LAST_SWING_LOW")
 RAMON_ENFORCE_BAR_CLOSE = os.environ.get("RAMON_ENFORCE_BAR_CLOSE", "0") == "1"
