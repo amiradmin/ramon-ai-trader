@@ -319,6 +319,9 @@ def record_outcome(request):
             outcome["instance_id"] = command.instance_id
             outcome["account_login"] = command.account_login
             outcome["symbol"] = command.symbol or str(payload.get("symbol") or "")
+            if command.payload.get("engine") == "STRATEGY":
+                outcome["strategy_profile"] = "SETUP_"+str(command.payload.get("strategy_setup", "UNKNOWN"))
+                outcome["strategy_setup"] = command.payload.get("strategy_setup")
             if command.payload.get("engine") == "SCALPER":
                 outcome["strategy_profile"] = "SCALPER_M1_M5"
                 outcome["setup_type"] = "SCALP_M1_PULLBACK"

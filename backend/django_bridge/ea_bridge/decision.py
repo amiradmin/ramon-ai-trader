@@ -25,7 +25,7 @@ _SIGNAL_MEMORY = OrderedDict()
 _SIGNAL_MEMORY_LOCK = threading.Lock()
 
 
-def _build_pipeline(*, demo_mode=False):
+def _build_pipeline(*, demo_mode=False, strategy_setup=None):
     """Build the Django-owned pipeline from persisted profile-specific thresholds.
 
     Only strategy tuning values are editable. Per-trade and portfolio risk ceilings,
@@ -81,6 +81,12 @@ def _build_pipeline(*, demo_mode=False):
         accepted_store=_SIGNAL_MEMORY if dedupe else None,
         accepted_lock=_SIGNAL_MEMORY_LOCK if dedupe else None,
     )
+    if strategy_setup is not None:
+        from .strategy_registry import STRATEGIES
+        if strategy_setup not in STRATEGIES:
+            raise ValueError("Unknown strategy setup")
+        for name, policy in detector.trading_settings["opportunity_finder"]["setups"].items():
+            policy["enabled"] = bool(policy["enabled"] and name == strategy_setup.lower())
     timer = EntryTimer(
         minimum_quality=minimum_quality,
         maximum_spread_points=maximum_spread_points,
@@ -105,7 +111,7 @@ def _build_pipeline(*, demo_mode=False):
         )
     )
     return SignalFlowPipeline(opportunities=detector, entry_timer=timer, risk_manager=risk,
-                              compare_candidates=relaxed and bool(opt("RAMON_DEMO_COMPARE_CANDIDATES", True)))
+                              compare_candidates=bool(strategy_setup) or (relaxed and bool(opt("RAMON_DEMO_COMPARE_CANDIDATES", True))))
 
 def _num(v, name):
     v=float(v)
@@ -190,8 +196,20 @@ def decision(request):
     if denied: return denied
     if not settings.RAMON_DJANGO_DECISION_ENABLED: return JsonResponse({"ok":False,"error":"Django decision API disabled"},status=503)
     if len(request.body)>settings.EA_MAX_BODY_BYTES: return JsonResponse({"ok":False,"error":"request body too large"},status=413)
+    if getattr(settings,"RAMON_STRATEGY_CONTAINERS_ENABLED",False):
+        return JsonResponse({"ok":True,"decision":"WAIT","reason":"MONOLITH_RETIRED_USE_STRATEGY_CONTAINERS",
+            "protocol":"ramon-django-decision-v1","command_created":False,"command_available":False,
+            "risk_approved":False,"execution_enabled":False})
     try:
-        p=json.loads(request.body or b"{}")
+        payload=json.loads(request.body or b"{}")
+    except (ValueError,UnicodeDecodeError):
+        return JsonResponse({"ok":False,"error":"invalid JSON"},status=400)
+    return evaluate_payload(payload)
+
+
+def evaluate_payload(p, *, strategy_setup=None):
+    """Shared entry/risk mechanics; each strategy worker supplies its own setup."""
+    try:
         if not isinstance(p,dict): raise ValueError("JSON object required")
         symbol=str(p.get("symbol","")).strip()[:32]; bars=p.get("bars")
         if not symbol or str(p.get("timeframe","")).upper()!="M15" or not isinstance(bars,list) or not 128<=len(bars)<=512:
@@ -339,7 +357,7 @@ def decision(request):
         )
         missing_risk_inputs = [] if risk_guards_complete else ["server_symbol_metadata", "server_position_risk", "server_account_state"]
         # Build the profile-specific Django pipeline before constructing its risk inputs.
-        pipeline = _build_pipeline(demo_mode=is_demo_account)
+        pipeline = _build_pipeline(demo_mode=is_demo_account, strategy_setup=strategy_setup)
         market={"symbol":symbol,"timeframe":"M15","bars":bars,"last_bar_closed":True,
           "latest_bar_time":bar_time,"bid":bid,"ask":ask,"point":point,
           "trend":direction,"setup_score":setup,"entry_quality":quality,"spread_points":spread,
@@ -379,7 +397,9 @@ def decision(request):
             reason = next((s.get("reason","SIGNALFLOW_REJECTED") for s in
               (result["stages"]["opportunities"],result["stages"]["entry_timing"],result["stages"]["risk_management"])
               if not s.get("approved",False)),"SIGNALFLOW_REJECTED")
-        key=hashlib.sha256(f"{symbol}:{bar_time}:django-signalflow-v1".encode()).hexdigest()[:16]
+        identity = (f"{instance_id}|{account_login}|{server_name}|{symbol}|{bar_time}|{strategy_setup}"
+                    if strategy_setup else f"{symbol}:{bar_time}:django-signalflow-v1")
+        key=hashlib.sha256(identity.encode()).hexdigest()[:32 if strategy_setup else 16]
         confidence=max(0.0,min(1.0,float(result["stages"]["opportunities"].get("score",min(setup,quality)))))
         median=closes[-1]+(atr*.1 if action=="BUY" else -atr*.1 if action=="SELL" else 0)
         features = {
@@ -395,6 +415,8 @@ def decision(request):
           "selection": result.get("selection", {}),
           "opportunity_input_path": "completed_ohlc_structural",
           "strategy_profile": strategy_profile,
+          "strategy_setup": strategy_setup,
+          "engine": "STRATEGY" if strategy_setup else "LEGACY",
           "risk_policy": risk_policy,
           "structural_candle_count": len(bars),
           "market_snapshot": {
@@ -444,7 +466,7 @@ def decision(request):
             "action": action,
             "confidence": confidence,
             "rationale_code": reason,
-            "model_version": "django-signalflow-structural-v2",
+            "model_version": "setup-container-v1" if strategy_setup else "django-signalflow-structural-v2",
             "features": features,
           },
         )

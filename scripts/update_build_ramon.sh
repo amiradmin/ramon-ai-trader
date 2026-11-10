@@ -57,10 +57,14 @@ for attempt in $(seq 1 40); do
   django_state="$(docker inspect -f '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' ramon-django 2>/dev/null || true)"
   redis_state="$(docker inspect -f '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' ramon-redis 2>/dev/null || true)"
   db_state="$(docker inspect -f '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' ramon-timescaledb 2>/dev/null || true)"
-  worker_state="$(docker inspect -f '{{.State.Status}}' ramon-worker 2>/dev/null || true)"
+  worker_state="$(docker inspect -f '{{.State.Status}}' ramon-ingest-worker 2>/dev/null || true)"
   forecast_state="$(docker inspect -f '{{.State.Status}}' ramon-forecast-worker 2>/dev/null || true)"
   candidate_state="$(docker inspect -f '{{.State.Status}}' ramon-candidate-worker 2>/dev/null || true)"
-  if [[ "$django_state" == "running healthy" && "$redis_state" == "running healthy" && "$db_state" == "running healthy" && "$worker_state" == "running" && "$forecast_state" == "running" && "$candidate_state" == "running" ]] && curl --fail --silent --max-time 3 "$HEALTH_URL" >/dev/null 2>&1; then
+  strategies_ready=1
+  for strategy in trend-pullback breakout-retest failed-breakout-sweep range-edge-fade session-opening-range-breakout volatility-compression-expansion exhaustion-reversal; do
+    [[ "$(docker inspect -f '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' "ramon-$strategy" 2>/dev/null || true)" == "running healthy" ]] || strategies_ready=0
+  done
+  if [[ "$strategies_ready" == 1 && "$django_state" == "running healthy" && "$redis_state" == "running healthy" && "$db_state" == "running healthy" && "$worker_state" == "running" && "$forecast_state" == "running" && "$candidate_state" == "running" ]] && curl --fail --silent --max-time 3 "$HEALTH_URL" >/dev/null 2>&1; then
     stack_ready=1
     break
   fi
@@ -68,11 +72,16 @@ for attempt in $(seq 1 40); do
 done
 if [[ "$stack_ready" != 1 ]]; then
   docker compose -f "$COMPOSE_FILE" ps
-  docker compose -f "$COMPOSE_FILE" logs --tail=100 django worker forecast-worker candidate-worker redis timescaledb
+  docker compose -f "$COMPOSE_FILE" logs --tail=100 django ingest-worker forecast-worker candidate-worker redis timescaledb
   die "Compose stack did not reach healthy/running state (Django=$django_state Redis=$redis_state TimescaleDB=$db_state Worker=$worker_state Forecast=$forecast_state Candidate=$candidate_state)"
 fi
 docker compose -f "$COMPOSE_FILE" exec -T redis redis-cli ping | grep -qx PONG || die "Redis ping failed"
 docker compose -f "$COMPOSE_FILE" exec -T timescaledb sh -lc 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' || die "TimescaleDB readiness check failed"
+# Retire only the old persistence container after its replacement is ready.
+if [[ "$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}/{{index .Config.Labels "com.docker.compose.service"}}' ramon-worker 2>/dev/null || true)" == "ramon/worker" ]]; then
+  docker stop ramon-worker
+  docker rm ramon-worker
+fi
 docker compose -f "$COMPOSE_FILE" ps
 
 # The command EA uses only the standard MQL5 Trade include.

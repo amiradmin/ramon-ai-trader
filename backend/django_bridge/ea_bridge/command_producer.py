@@ -85,7 +85,27 @@ def create_open_command(*, decision, verdict, instance_id, account_login, server
     account = snapshot.get("account")
     quote = snapshot.get("quote")
     from .scalper_engine import allow_main_alongside_scalps
-    if not isinstance(positions, list) or (positions and not allow_main_alongside_scalps(heartbeat)):
+    from .strategy_registry import STRATEGIES, verified_engine_positions, strategy_commands
+    strategy_setup = decision.features.get('strategy_setup')
+    if strategy_setup:
+        from .models import StrategyWorkerControl
+        if strategy_setup not in STRATEGIES:
+            return None, False, 'UNKNOWN_STRATEGY'
+        control = StrategyWorkerControl.objects.filter(setup=strategy_setup,source=instance_id,
+            account_login=account_login,server_name=server_name,symbol=decision.symbol,automatic=True).first()
+        if not control: return None, False, 'STRATEGY_PAUSED_OR_SCOPE_MISMATCH'
+        if not verified_engine_positions(heartbeat): return None, False, 'STRATEGY_HEDGING_OWNERSHIP_REQUIRED'
+        if any(p.get('magic')==STRATEGIES[strategy_setup][2] for p in positions):
+            return None, False, 'STRATEGY_POSITION_ALREADY_OPEN'
+        own = strategy_commands(heartbeat,strategy_setup)
+        if own.filter(action='OPEN',state__in=['PENDING','CLAIMED','RECEIVED','EXECUTING','RECONCILIATION_REQUIRED']).exists():
+            # Return the existing same-signal command below, never create another entry.
+            if not own.filter(action='OPEN',decision_id=decision.decision_id).exists():
+                return None, False, 'STRATEGY_COMMAND_UNSETTLED'
+        if own.filter(action='OPEN',state='EXECUTED',completed_at__gte=heartbeat.last_seen).exists():
+            return None, False, 'STRATEGY_FILL_NOT_YET_OBSERVED'
+    if not isinstance(positions, list) or (positions and not (
+        verified_engine_positions(heartbeat) if strategy_setup else allow_main_alongside_scalps(heartbeat))):
         return None, False, "OPEN_POSITION_RISK_UNVERIFIED"
     if not isinstance(account, dict) or not isinstance(quote, dict):
         return None, False, "ACCOUNT_SNAPSHOT_INVALID"
@@ -136,6 +156,10 @@ def create_open_command(*, decision, verdict, instance_id, account_login, server
         tick_value = _decimal(snapshot.get("symbol_info", {}).get("tick_value"), "tick value")
         if min(tick_size,tick_value)<=0: raise ValueError("contract")
         reserved_risk = risk_distance/tick_size*tick_value*volume
+        if strategy_setup:
+            per_trade_cap = _decimal(decision.features.get('risk_policy',{}).get('maximum_risk_percent'), 'per-trade cap')
+            if per_trade_cap<=0 or reserved_risk>current_balance*per_trade_cap/100:
+                return None, False, 'STRATEGY_RISK_CHANGED_AFTER_SIZING'
         if not EACommand.objects.filter(command_id=command_id).exists():
             from .scalper_engine import exposure_money, limits
             cap, _ = limits()
@@ -151,6 +175,8 @@ def create_open_command(*, decision, verdict, instance_id, account_login, server
         "stop_loss": float(stop_loss),
         "take_profit": float(take_profit),
     }
+    if strategy_setup:
+        payload.update(engine='STRATEGY',strategy_setup=strategy_setup,magic=STRATEGIES[strategy_setup][2])
     with transaction.atomic():
         command, created = EACommand.objects.get_or_create(
             command_id=command_id,

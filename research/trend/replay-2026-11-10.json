@@ -1,0 +1,164 @@
+{
+  "generated_at": "2026-11-10T08:56:08.158399+00:00",
+  "source": "ramon-command-ea-1",
+  "symbol": "XAUUSD_o",
+  "server": "LiteFinance-MT5-Demo",
+  "git_commit": "UNAVAILABLE_IN_IMAGE; USE_POLICY_SHA256",
+  "policy_sha256": "063b11e652fd7d69f95b7a92fda46d6ab791cd21122a523c294d59e7170079d6",
+  "input_sha256": "52e17d372264dad2bbb72e46b47e9d4668376f7de0d2bfd4b0c5092ce6766e50",
+  "policy": {
+    "h1_window": 64,
+    "h4_window": 64,
+    "breakout_bars": 20,
+    "stop_atr": 2.0,
+    "reward_risk": 3.0,
+    "max_holding_bars": 48,
+    "maximum_cost_to_risk": 0.2
+  },
+  "contract": {
+    "point": 0.01,
+    "tick_size": 0.01
+  },
+  "first_h1": 1791273600.0,
+  "last_h1": 1794294000.0,
+  "data_quality": {
+    "raw_h1": 575,
+    "valid_h1": 575,
+    "excluded_invalid_or_off_grid": 0,
+    "h1_gap_count": 25,
+    "complete_derived_h4": 125
+  },
+  "main_thresholds": [
+    {
+      "profile": "demo",
+      "values": {
+        "entry_timing": {
+          "max_chase_atr": 0.9,
+          "max_spread_atr": 0.3,
+          "minimum_quality": 0.42,
+          "min_risk_room_atr": 0.15,
+          "max_spread_to_risk": 0.4,
+          "max_signal_age_bars": 1.5,
+          "maximum_spread_points": 100
+        },
+        "opportunities": {
+          "adx_ranging": 8.0,
+          "adx_trending": 10.0,
+          "atr_ratio_max": 2.5,
+          "atr_ratio_min": 0.6,
+          "minimum_score": 0.42,
+          "rsi_overbought": 85,
+          "max_retracement": 0.95,
+          "min_impulse_atr": 0.8,
+          "min_retracement": 0.05,
+          "regime_lookback": 8,
+          "breakout_lookback": 8,
+          "zone_tolerance_atr": 0.9,
+          "breakout_buffer_atr": 0.0,
+          "support_tolerance_atr": 1.0,
+          "min_ema_separation_atr": 0.06,
+          "breakout_max_retest_bars": 6,
+          "max_bars_since_pullback_low": 16,
+          "breakout_retest_tolerance_atr": 0.5
+        },
+        "risk_management": {
+          "max_stop_atr": 3.0,
+          "min_stop_atr": 0.6,
+          "min_reward_risk": 1.2,
+          "stop_buffer_atr": 0.2,
+          "target_reward_risk": 1.25,
+          "maximum_risk_percent": 1.6,
+          "max_daily_loss_percent": 5.0,
+          "max_total_risk_percent": 2.0
+        }
+      },
+      "updated_at": "2026-11-05 09:23:02.595557+00:00"
+    }
+  ],
+  "execution": "NEXT_FULL_H1_AFTER_RECORDING; ONE_HOUR_DELAY_FROM_SIGNAL_CLOSE; STOP_FIRST; ASK_SHORTS",
+  "limitations": [
+    "Descriptive development history; not untouched out-of-sample",
+    "Historical receipt availability and executable quotes not reconstructed",
+    "Fixed costs; overnight debit at assumed UTC rollover with Wednesday triple, not broker swap",
+    "Indicators use observed session bars; gaps not filled; recent breakout window must be consecutive",
+    "Outcome gaps skipped, not bridged; H1 stop/target ambiguity resolves stop-first",
+    "R results are hypothetical price-risk units; no lot sizing or broker minimum applied",
+    "Closed cumulative-R drawdown, not intratrade or account drawdown",
+    "Main/scalper have different execution horizons; no like-for-like ranking established",
+    "Unchanged-price forecast and no-position baseline are zero price movement/zero trading P&L"
+  ],
+  "base": {
+    "version": "h1-h4-breakout-v1",
+    "policy": {
+      "h1_window": 64,
+      "h4_window": 64,
+      "breakout_bars": 20,
+      "stop_atr": 2.0,
+      "reward_risk": 3.0,
+      "max_holding_bars": 48,
+      "maximum_cost_to_risk": 0.2
+    },
+    "costs": {
+      "point": 0.01,
+      "spread_points": 22.0,
+      "slippage_points": 5.0,
+      "commission_points": 5.0,
+      "overnight_points": 50.0,
+      "rollover_utc_hour": 22
+    },
+    "trade_count": 0,
+    "trades": [],
+    "rejections": {
+      "H4_WARMUP": 231,
+      "RECENT_H1_GAP": 194,
+      "AWAITING_H1_BREAKOUT": 24,
+      "H4_STALE": 48,
+      "H1_H4_TREND_NOT_ALIGNED": 9,
+      "INVALID_DATA": 1
+    },
+    "net_r": 0.0,
+    "expectancy_r": null,
+    "win_rate": null,
+    "net_points": 0,
+    "closed_cumulative_r_drawdown": 0.0,
+    "no_trade_baseline_net_points": 0,
+    "validation": "DESCRIPTIVE_NOT_OUT_OF_SAMPLE"
+  },
+  "stress": {
+    "version": "h1-h4-breakout-v1",
+    "policy": {
+      "h1_window": 64,
+      "h4_window": 64,
+      "breakout_bars": 20,
+      "stop_atr": 2.0,
+      "reward_risk": 3.0,
+      "max_holding_bars": 48,
+      "maximum_cost_to_risk": 0.2
+    },
+    "costs": {
+      "point": 0.01,
+      "spread_points": 44.0,
+      "slippage_points": 10.0,
+      "commission_points": 5.0,
+      "overnight_points": 100.0,
+      "rollover_utc_hour": 22
+    },
+    "trade_count": 0,
+    "trades": [],
+    "rejections": {
+      "H4_WARMUP": 231,
+      "RECENT_H1_GAP": 194,
+      "AWAITING_H1_BREAKOUT": 24,
+      "H4_STALE": 48,
+      "H1_H4_TREND_NOT_ALIGNED": 9,
+      "INVALID_DATA": 1
+    },
+    "net_r": 0.0,
+    "expectancy_r": null,
+    "win_rate": null,
+    "net_points": 0,
+    "closed_cumulative_r_drawdown": 0.0,
+    "no_trade_baseline_net_points": 0,
+    "validation": "DESCRIPTIVE_NOT_OUT_OF_SAMPLE"
+  }
+}

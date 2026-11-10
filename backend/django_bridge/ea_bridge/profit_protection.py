@@ -17,7 +17,7 @@ from .command_producer import _decimal, _is_demo_account
 from .models import EACommand, EAHeartbeat, LearningTradeOutcome
 
 
-def protection_status(feed):
+def protection_status(feed, *, strategy_setup=None):
     enabled = bool(getattr(settings, 'RAMON_DEMO_PROFIT_PROTECTION_ENABLED', False))
     result = dict(mode='DEMO_ENABLED' if enabled else 'OBSERVE_ONLY', calculation_owner='DJANGO',
         rule='At +1 original R, move SL to entry; preserve TP. Price breakeven excludes costs.',
@@ -45,8 +45,13 @@ def protection_status(feed):
     except (ValueError,TypeError,AttributeError):
         result['state']='INVALID_QUOTE_METADATA'
         return result
-    commands = list(EACommand.objects.filter(instance_id=feed.instance_id, account_login=feed.account_login,
-        symbol=feed.symbol, action='OPEN', state='EXECUTED', execution_authorized=True).filter(Q(payload__engine__isnull=True) | ~Q(payload__engine='SCALPER')).order_by('-created_at')[:200])
+    commands_query = EACommand.objects.filter(instance_id=feed.instance_id, account_login=feed.account_login,
+        symbol=feed.symbol, action='OPEN', state='EXECUTED', execution_authorized=True)
+    if strategy_setup:
+        commands_query = commands_query.filter(payload__engine='STRATEGY',payload__strategy_setup=strategy_setup)
+    else:
+        commands_query = commands_query.filter(Q(payload__engine__isnull=True) | ~Q(payload__engine__in=['SCALPER','STRATEGY']))
+    commands = list(commands_query.order_by('-created_at')[:200])
     positions = p.get('positions',[])
     if not isinstance(positions,list):
         result['state']='INVALID_POSITIONS'
@@ -65,6 +70,9 @@ def protection_status(feed):
             and c.payload.get('server_name')==feed.server_name]
         if len(matched)!=1: continue
         original = matched[0]
+        if strategy_setup:
+            from .strategy_registry import owned_strategy_position
+            if owned_strategy_position(feed,pos,setup=strategy_setup) is None: continue
         try:
             side=original.payload['side']; sign=Decimal(1 if side=='BUY' else -1)
             if side not in {'BUY','SELL'} or type(pos.get('type')) is not int or pos['type']!=(0 if side=='BUY' else 1): continue
@@ -121,23 +129,30 @@ def protection_status(feed):
     return result
 
 
-def create_protection_commands(instance_id, account_login):
+def create_protection_commands(instance_id, account_login, *, strategy_setup=None):
     if not all(getattr(settings,k,False) for k in ['RAMON_DEMO_PROFIT_PROTECTION_ENABLED',
         'RAMON_EA_COMMAND_CREATION_ENABLED','RAMON_EA_COMMAND_EXECUTION_ENABLED']): return
     with transaction.atomic():
         feed=EAHeartbeat.objects.select_for_update().filter(instance_id=instance_id,account_login=account_login).first()
         if not feed: return
-        status=protection_status(feed)
+        status=protection_status(feed,strategy_setup=strategy_setup)
         for row in status['positions']:
             if row['state']!='READY': continue
             # A pending manual/automatic change must settle first. Never retry an
             # uncertain or failed command; its result stays visible for review.
-            if EACommand.objects.filter(instance_id=instance_id,account_login=account_login,symbol=feed.symbol,
-                state__in=['PENDING','CLAIMED','RECEIVED','EXECUTING','RECONCILIATION_REQUIRED']).exists(): continue
+            pending = EACommand.objects.filter(instance_id=instance_id,account_login=account_login,symbol=feed.symbol,
+                state__in=['PENDING','CLAIMED','RECEIVED','EXECUTING','RECONCILIATION_REQUIRED'])
+            if strategy_setup:
+                pending = pending.filter(payload__engine='STRATEGY',payload__strategy_setup=strategy_setup)
+            if pending.exists(): continue
+            engine_payload = {}
+            if strategy_setup:
+                from .strategy_registry import STRATEGIES
+                engine_payload = dict(engine='STRATEGY',strategy_setup=strategy_setup,magic=STRATEGIES[strategy_setup][2])
             EACommand.objects.get_or_create(command_id=row['command_id'],defaults=dict(
                 instance_id=instance_id,account_login=account_login,symbol=feed.symbol,action='MODIFY_SLTP',
                 decision_id=row['decision_id'],risk_verdict_id=row['risk_verdict_id'],execution_authorized=True,
                 expires_at=timezone.now()+timedelta(seconds=20),payload=dict(server_name=feed.server_name,
                 position_ticket=int(row['ticket']),stop_loss=row['proposed_stop'],take_profit=row['take_profit'],
                 protection_rule='BREAKEVEN_AT_1R',calculation_owner='DJANGO',original_risk=row['original_risk'],
-                trigger_r=row['current_r'],original_command_id=row['original_command_id'])))
+                trigger_r=row['current_r'],original_command_id=row['original_command_id'],**engine_payload)))

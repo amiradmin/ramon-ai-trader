@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>RAMON | Trading Opportunities</title>
+<title>Ramon | Independent Strategy Dashboard</title>
 <style>
 :root{--bg:#0a0e14;--panel:#111823;--panel2:#151f2c;--line:#263244;--text:#edf3fb;--muted:#8c9bb0;--green:#42d6a0;--red:#ff7185;--amber:#f4c56a;--blue:#7eaaff}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 15% -10%,#182941 0,transparent 40%),var(--bg);color:var(--text);font:14px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif}
@@ -11,6 +11,9 @@
 .notice{border:1px solid #55492e;background:#211d14;color:#e8d6a7;padding:12px 15px;border-radius:12px;margin-bottom:18px;font-size:12px}
 .grid{display:grid;gap:15px}.stats{grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:18px}.card{background:linear-gradient(145deg,rgba(21,31,44,.96),rgba(15,22,32,.96));border:1px solid var(--line);border-radius:16px;padding:18px;min-width:0}.stat-label{font-size:12px;color:var(--muted)}.stat-value{font-size:27px;font-weight:800;letter-spacing:-.8px;margin:8px 0 3px}.stat-foot{font-size:11px;color:var(--muted)}.positive{color:var(--green)}.negative{color:var(--red)}.amber{color:var(--amber)}.blue{color:var(--blue)}
 .section-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:25px 0 12px}.section-head h2{font-size:16px;margin:0}.section-head p{margin:3px 0 0;color:var(--muted);font-size:12px}.filters{display:flex;gap:8px;flex-wrap:wrap}.filters select,.filters input,.btn{background:#0d141e;color:var(--text);border:1px solid var(--line);border-radius:9px;padding:9px 11px;font:inherit;font-size:12px}.btn{cursor:pointer}.btn:hover{border-color:var(--blue)}.table-wrap{overflow-x:auto}.table{width:100%;border-collapse:collapse;min-width:900px}.table th{text-align:left;color:var(--muted);font-weight:600;font-size:11px;letter-spacing:.5px;text-transform:uppercase;padding:12px 10px;border-bottom:1px solid var(--line)}.table td{padding:14px 10px;border-bottom:1px solid #202b39;vertical-align:middle}.table tr:last-child td{border-bottom:0}.pagination{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 4px 4px;color:var(--muted);font-size:11px}.pagination-controls{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.pagination select{background:#0d141e;color:var(--text);border:1px solid var(--line);border-radius:9px;padding:8px 10px;font:inherit;font-size:11px}.pagination .btn:disabled{opacity:.4;cursor:not-allowed}.symbol{font-weight:800}.small{font-size:11px;color:var(--muted)}.pill{display:inline-flex;align-items:center;gap:6px;border-radius:99px;padding:4px 8px;font-size:10px;font-weight:800;letter-spacing:.4px}.pill.buy{background:#123328;color:var(--green)}.pill.sell{background:#3a2028;color:var(--red)}.pill.watch{background:#382f1c;color:var(--amber)}.pill.ready{background:#18304b;color:#9bc5ff}.details{display:none;background:#0c131d}.details.open{display:table-row}.details td{padding:0 14px 16px}.detail-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;padding:15px 0}.detail-box{background:#121d2a;border:1px solid #243247;border-radius:10px;padding:11px}.detail-box label{display:block;color:var(--muted);font-size:10px;margin-bottom:4px}.detail-box strong{font-size:13px}.expand{border:1px solid var(--line);background:#121d2a;color:var(--blue);border-radius:8px;padding:5px 9px;cursor:pointer}.lower{grid-template-columns:1.2fr .8fr}.risk-list{display:grid;gap:14px}.risk-row{display:flex;justify-content:space-between;gap:15px;align-items:center}.risk-row span{color:var(--muted);font-size:12px}.risk-row strong{font-size:13px}
+.strategy-card{transition:background .2s,border-color .2s,box-shadow .2s}
+.strategy-card.strategy-on{background:linear-gradient(145deg,#153b2d,#10271f);border-color:#42d6a0;box-shadow:inset 0 0 0 1px rgba(66,214,160,.12)}
+.strategy-card.strategy-on h3{color:#7aefbf}
 /* Decision-flow HMI */
 .flow-shell{margin-bottom:20px}
 .flow-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
@@ -176,7 +179,7 @@
 @media(max-width:1050px){.variable-guide-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:620px){.variable-guide-grid{grid-template-columns:1fr}.variable-chip:after{left:auto;right:0}}
 
-/* Live Learning Mode */
+/* Trading lesson · saved evaluation */
 .learning-shell{margin:20px 0}
 .learning-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
 .learning-tab{border:1px solid var(--line);background:#0d141e;color:var(--muted);padding:9px 12px;border-radius:9px;cursor:pointer;font:inherit;font-size:11px}
@@ -201,10 +204,22 @@
 <body>
 <div class="wrap">
 <header class="top">
-  <div class="brand"><div class="logo">R</div><div><div class="eyebrow">RAMON · SMART TRADER</div><div class="title">Opportunity & Risk Desk</div><div class="sub">XAUUSD · M15 · Decision overview</div></div></div>
-  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><a class="btn" href="/api/ea/v1/learning/dashboard">Learning Engine ↗</a><button class="btn" id="copyMarketSnapshot" type="button">Copy Market Snapshot</button><span id="copySnapshotStatus" class="small" role="status" aria-live="polite"></span><div class="status"><span class="dot"></span><span id="connection">DJANGO · DECISION FEED</span></div></div>
+  <div class="brand"><div class="logo">R</div><div><div class="eyebrow">RAMON · SMART TRADER</div><div class="title">Independent Strategy Desk</div><div class="sub">XAUUSD · Seven independent M15 strategy containers</div></div></div>
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><a class="btn" href="/api/ea/v1/learning/dashboard">Legacy learning history ↗</a><button class="btn" id="copyMarketSnapshot" type="button">Copy Market Snapshot</button><span id="copySnapshotStatus" class="small" role="status" aria-live="polite"></span><div class="status"><span class="dot"></span><span id="connection">DJANGO · DECISION FEED</span></div></div>
 </header>
-<div class="notice"><strong>Read-only decision monitor:</strong> values come from saved Django decisions. Unprovided prices and risk settings are shown as unavailable. Pipeline approval does not prove that a broker order was executed.</div>
+<div class="notice"><strong>Fleet overview:</strong> green boxes indicate a running worker with automatic entries On. Open a strategy for its controls, positions and broker results. An enabled worker may still be waiting for its setup or risk checks.</div>
+<section aria-labelledby="strategyFleetTitle" style="margin-bottom:24px">
+  <div class="section-head"><div><h2 id="strategyFleetTitle">Independent strategy containers</h2><p>Each container owns one setup, its decisions and its positions. No central best-setup selector. Shared account exposure limits still apply.</p></div></div>
+  <p class="small" id="strategyFleetStatus" role="status" aria-live="polite">Loading container status…</p>
+  <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(min(100%,290px),1fr))">
+    {% for worker in strategy_workers %}
+    <article id="strategy-card-{{ worker.slug }}" class="card strategy-card{% if worker.fresh and worker.automatic %} strategy-on{% endif %}"><h3 style="font-size:14px;overflow-wrap:anywhere;margin-top:0">{{ worker.setup }}</h3><p class="small">{{ worker.description }}</p>
+      <p class="small" id="strategy-{{ worker.slug }}">{% if worker.fresh %}Running{% else %}Stopped or stale{% endif %} · {{ worker.state }}</p>
+      <a class="btn" style="display:inline-block;text-decoration:none" href="{{ worker.url }}">Open strategy ↗</a>
+    </article>
+    {% endfor %}
+  </div>
+</section>
 <section class="card" id="pnlSummary" style="margin-bottom:18px">
   <div class="section-head" style="margin:0 0 14px">
     <div><h2>Profit &amp; Loss Summary</h2><p>Realized results from completed trades in the selected date interval.</p></div>
@@ -223,7 +238,7 @@
   <div class="small" id="pnlScope" role="status" aria-live="polite">Select a date interval to load realized results.</div>
   <div class="small" id="pnlStatus" role="status" aria-live="polite" style="margin-top:5px"></div>
 </section>
-<div id="status" class="card" role="status" aria-live="polite" style="margin-bottom:18px">Loading the latest Django decision…</div>
+
 
 <section class="card" aria-labelledby="eventsTitle" style="margin-bottom:18px">
   <div class="section-head" style="margin:0 0 12px"><div><h2 id="eventsTitle">US economic events · gold context</h2><p>TipRanks research snapshot · High and Medium impact · context only</p></div><span class="pill">EVENT CONTEXT</span></div>
@@ -236,7 +251,7 @@
 </section>
 
 <section class="card" aria-labelledby="candidatesTitle" style="margin-bottom:18px">
-  <div class="section-head" style="margin:0 0 12px"><div><h2 id="candidatesTitle">Opportunity outcomes · forward journal</h2><p>Selected plans, eligible alternatives and rejected candidates recorded before their outcomes.</p></div><span class="pill">OBSERVATION ONLY</span></div>
+  <div class="section-head" style="margin:0 0 12px"><div><h2 id="candidatesTitle">Paper outcome journal · includes legacy history</h2><p>Historical combined-engine candidates and independent strategy evaluations. Decision-group labels describe the recorded policy at that time; they are not a current selector between containers.</p></div><span class="pill">OBSERVATION ONLY</span></div>
   <p class="small" id="candidatesStatus" role="status" aria-live="polite">Loading candidate journal…</p>
   <p class="small" id="candidateContextStatus"></p>
   <p class="small">Measures one hour from the next full M15 opening candle. Movement includes the recorded spread, but excludes slippage, commission and swap. It is not broker profit or an SL/TP backtest. Candidates without a direction are recorded and left unscored.</p>
@@ -249,11 +264,21 @@
 
 <section class="card" aria-labelledby="scalpTitle" style="margin-bottom:18px">
   <h2 id="scalpTitle">Independent scalper · M1 / M5</h2>
-  <p class="small">Separate engine and position ownership. Paper holds end at SL, TP or five minutes. Broker entries require separate activation and a hedging-capable bridge.</p>
+  <p class="small">Independent scalper alongside the seven M15 workers. Broker trades and paper observations are tracked separately; both can hold for up to five minutes.</p>
+  <p id="scalpBrokerStatus" class="small" role="status" aria-live="polite">Loading scalper execution state…</p>
   <p id="scalpStatus" class="small" role="status" aria-live="polite">Loading paper observations…</p>
-  <p class="small">The initial historical replay lost 7.22R over 81 paper trades after assumed costs. Forward results are collecting; broker execution starts disabled.</p>
+  <p class="small">The initial historical replay lost 7.22R over 81 paper trades after assumed costs. This is research evidence, not broker P&amp;L or a demonstrated trading edge.</p>
   <p><a href="/api/ea/v1/scalper" style="color:#8bd5ff">Open scalper controls · staff sign-in required ↗</a></p>
   <div class="table-wrap"><table class="table"><thead><tr><th>Recorded (UTC)</th><th>Action</th><th>Reason</th><th>Paper outcome</th></tr></thead><tbody id="scalpRows"></tbody></table></div>
+</section>
+
+<section class="card" aria-labelledby="trendTitle" style="margin-bottom:18px">
+  <h2 id="trendTitle">Trend candidate · H1 / H4 · Paper only</h2>
+  <p class="small">Separate research container. H1 breakouts aligned with the H4 trend; up to 48 hours per paper position. No broker orders. Profitability is unproven.</p>
+  <p id="trendStatus" class="small" role="status" aria-live="polite">Loading trend observations…</p>
+  <p id="trendCosts" class="small"></p>
+  <p class="small">Paper entry: next full H1 open after recording. Missing outcome bars are skipped. Results are hypothetical; no like-for-like comparison with the other engines is established.</p>
+  <div class="table-wrap"><table class="table"><thead><tr><th>Recorded (UTC)</th><th>Action</th><th>Reason</th><th>Paper outcome</th></tr></thead><tbody id="trendRows"></tbody></table></div>
 </section>
 
 <section class="card" aria-labelledby="reliabilityTitle" style="margin-bottom:18px">
@@ -272,8 +297,10 @@
   <details style="margin-top:12px"><summary>Recent request prices and fills</summary><div class="table-wrap"><table class="table"><thead><tr><th>Reported (UTC)</th><th>Requested price</th><th>Broker fill</th><th>Signed slippage (points)</th></tr></thead><tbody id="executionFills"></tbody></table></div></details>
 </section>
 
+<details class="card" style="margin-bottom:18px"><summary>Legacy position protection and historical exit research</summary>
+<p class="small">This panel covers verified trades from the retired combined engine. Each new strategy manages its own positions; use its strategy page for current commands.</p>
 <section class="card" id="profitProtection" aria-labelledby="protectionTitle" style="margin-bottom:18px">
-  <div class="section-head" style="margin:0 0 12px"><div><h2 id="protectionTitle">Profit protection</h2><p>Django-owned demo position management and broker results.</p></div></div>
+  <div class="section-head" style="margin:0 0 12px"><div><h2 id="protectionTitle">Legacy trade protection</h2><p>Existing combined-engine positions and broker results.</p></div></div>
   <p class="small">All calculations run in Django. MT5 only executes the authorized stop change and reports the broker result. At +1 original R, Django moves SL to entry and preserves TP. Price breakeven can still lose money after costs or gaps.</p>
   <p id="protectionStatus" class="small" role="status">Loading protection status…</p>
   <div class="table-wrap"><table class="table" style="min-width:650px"><thead><tr><th>Position</th><th>Status</th><th>Current R</th><th>Current SL</th><th>Proposed SL</th><th>TP</th></tr></thead><tbody id="protectionPositions"></tbody></table></div>
@@ -286,6 +313,7 @@
 
 
 </section>
+</details>
 
 <section class="card" aria-labelledby="arimaTitle" style="margin-bottom:18px">
   <div class="section-head" style="margin:0 0 14px">
@@ -312,15 +340,19 @@
   <p class="small" style="margin:12px 0 0">Errors are measured in the symbol’s price units, not account profit or loss. The observer fits observed trading candles without filling market closures or data gaps. Early results are not proof of trading profitability.</p>
 </section>
 
+<details class="card" id="decisionDiagnostics" style="margin-bottom:18px"><summary>Decision diagnostics, history and educational reference</summary>
+<p class="small">These panels explain saved evaluations, including legacy history. They do not control the fleet or select between containers. Risk threshold edits below apply to every M15 strategy using the same profile.</p>
+<div class="filters" style="margin:14px 0"><label for="diagnosticStrategyFilter">Strategy scope</label><select id="diagnosticStrategyFilter"><option value="all">All strategies and legacy history</option>{% for worker in strategy_workers %}<option value="{{ worker.setup }}">{{ worker.setup }}</option>{% endfor %}<option value="LEGACY">Retired combined engine</option></select></div>
+<div id="status" class="card" role="status" aria-live="polite" style="margin-bottom:18px">Loading saved evaluations…</div>
 <div class="grid stats">
-  <div class="card"><div class="stat-label">Saved decisions</div><div class="stat-value" id="statDecisions">—</div><div class="stat-foot">Latest 50 records available from Django</div></div>
+  <div class="card"><div class="stat-label">Saved evaluations in scope</div><div class="stat-value" id="statDecisions">—</div><div class="stat-foot">Current filter within the latest 50 saved records</div></div>
   <div class="card"><div class="stat-label">Accepted setups</div><div class="stat-value positive" id="statSetups">—</div><div class="stat-foot">Among saved decisions shown</div></div>
-  <div class="card"><div class="stat-label">Latest entry quality</div><div class="stat-value" id="statEntryQuality">Unavailable</div><div class="stat-foot">Actual pipeline output</div></div>
-  <div class="card"><div class="stat-label">Latest risk stage</div><div class="stat-value blue" id="statRisk">Unavailable</div><div class="stat-foot">Does not indicate broker execution</div></div>
+  <div class="card"><div class="stat-label">Latest scoped entry quality</div><div class="stat-value" id="statEntryQuality">Unavailable</div><div class="stat-foot">Actual pipeline output</div></div>
+  <div class="card"><div class="stat-label">Latest scoped risk stage</div><div class="stat-value blue" id="statRisk">Unavailable</div><div class="stat-foot">Does not indicate broker execution</div></div>
 </div>
 
 <section class="range-analysis-shell" aria-labelledby="rangeAnalysisTitle">
-  <div class="section-head"><div><h2 id="rangeAnalysisTitle">Range Market Analysis</h2><p>Live range-edge diagnostics and realized performance from Django decisions and account-scoped closed trades.</p></div><span class="small" id="rangeAnalysisScope">Waiting for Django data…</span></div>
+  <div class="section-head"><div><h2 id="rangeAnalysisTitle">Range history · account overview</h2><p>Account-scoped range history, including legacy evaluations. This overview is independent of the strategy filter; open RANGE_EDGE_FADE for its current worker.</p></div><span class="small" id="rangeAnalysisScope">Waiting for Django data…</span></div>
   <div class="grid stats">
     <div class="card"><div class="stat-label">Range setups detected</div><div class="stat-value" id="rangeDetected">—</div><div class="stat-foot" id="rangeEvaluated">Detector evaluations: —</div></div>
     <div class="card"><div class="stat-label">Approved / Deferred / Rejected</div><div class="stat-value" id="rangeDecisionCounts">—</div><div class="stat-foot">Saved RANGE_EDGE_FADE decision outcomes</div></div>
@@ -345,7 +377,7 @@
 </section>
 
 <section class="flow-shell" aria-labelledby="flowTitle">
-  <div class="flow-head"><div><h2 id="flowTitle">Decision process flow</h2><p>Follow the actual Django evaluation from market opportunity to execution boundary.</p></div>
+  <div class="flow-head"><div><h2 id="flowTitle">Latest scoped evaluation · diagnostic flow</h2><p>One saved strategy evaluation, not an account-wide trading decision.</p></div>
     <div class="flow-legend"><span style="color:var(--green)"><i></i>PASS</span><span style="color:var(--amber)"><i></i>WAIT</span><span style="color:var(--red)"><i></i>BLOCKED</span><span><i></i>UPCOMING</span></div>
   </div>
   <div class="card">
@@ -354,17 +386,17 @@
     <div id="thresholdEditorStatus" class="threshold-status" role="status" aria-live="polite">Loading Django strategy thresholds…</div>
     <div id="flowSummary" class="flow-summary">Waiting for decision diagnostics…</div>
     <section id="playbookSelection" hidden aria-labelledby="playbookTitle">
-      <h3 id="playbookTitle">Opportunity comparison</h3>
+      <h3 id="playbookTitle">Evaluated setup</h3>
       <p class="small" id="playbookContext"></p>
       <div style="overflow-x:auto"><table>
         <thead><tr><th scope="col">Setup</th><th scope="col">Side</th><th scope="col">Rank / 100</th><th scope="col">Plan</th><th scope="col">Entry</th><th scope="col">Target / sizing</th></tr></thead>
         <tbody id="playbookCandidates"></tbody>
       </table></div>
-      <p class="small">Ranking compares setup quality, entry location, H1 direction, M5 confirmation, and target room. It is a rule-based score, not a win probability. An eligible plan still needs Django command authorization.</p>
+      <p class="small">Each strategy evaluates only its own setup. The score describes setup quality, entry location, H1 direction, M5 confirmation and target room; it is not a win probability or a selector between containers.</p>
     </section>
     <div class="flow-note">The diagram is read-only. A passed strategy pipeline is not broker authorization and does not mean an MT5 order was sent.</div>
     <details class="variable-guide" id="decisionVariableGuide">
-      <summary>48-variable decision reference · hover or focus each item for its description</summary>
+      <summary>Legacy concept reference · educational, not active trading gates</summary>
       <div class="variable-guide-intro">These are the proposed decision inputs and controls. A tooltip explains the meaning; it does not imply that a variable is currently calculated, enabled, or used as a mandatory gate. The live PASS / WAIT / BLOCKED states above come only from saved Django decisions.</div>
       <div class="variable-guide-grid" id="decisionVariableGuideItems"></div>
     </details>
@@ -373,7 +405,7 @@
 
 
 <section class="learning-shell" aria-labelledby="learningTitle">
-  <div class="section-head"><div><h2 id="learningTitle">Live Learning Mode</h2><p>Learn trading concepts against Ramon’s latest saved XAUUSD decision—not a fabricated example.</p></div>
+  <div class="section-head"><div><h2 id="learningTitle">Trading lesson · saved evaluation</h2><p>Educational explanation of the latest evaluation in the selected scope; this does not train or control strategy workers.</p></div>
     <span id="learningFeedStatus" class="learning-status">WAITING FOR MARKET DATA</span>
   </div>
   <div class="card">
@@ -399,7 +431,7 @@
   </div>
 </section>
 
-<div class="section-head"><div><h2>Opportunity scanner</h2><p>Review the setup, planned entry window, invalidation and trade management.</p></div>
+<div class="section-head"><div><h2>Saved strategy evaluations</h2><p>Historical snapshots in the selected scope; an old approved plan is not a current entry instruction.</p></div>
 <div class="filters"><select id="sideFilter" aria-label="Filter direction"><option value="all">All directions</option><option value="BUY">Buy</option><option value="SELL">Sell</option><option value="WATCH">Watch</option></select><select id="stateFilter" aria-label="Filter status"><option value="all">All statuses</option><option value="READY">Ready</option><option value="CONDITIONAL">Conditional</option><option value="WAIT">Wait</option></select><button class="btn" id="reset">Reset filters</button></div></div>
 
 <div class="card table-wrap" style="padding:8px 14px">
@@ -410,7 +442,7 @@
 <div id="scannerPagination" class="pagination" aria-label="Opportunity scanner pagination"></div>
 </div>
 
-<div class="section-head"><div><h2>Risk management</h2><p>Pre-trade checks and sizing framework.</p></div></div>
+<div class="section-head"><div><h2>Recorded risk checks</h2><p>Values below belong to the latest saved evaluation in scope; they are not a fleet-wide readiness verdict.</p></div></div>
 <div class="grid lower">
   <div class="card"><h3 style="font-size:14px;margin:0 0 18px">Risk controls</h3><div class="risk-list">
     <div><div class="risk-row"><span>Risk budget (latest decision)</span><strong id="riskBudget">Unavailable</strong></div><div class="bar"><i id="riskBar" style="width:0%"></i></div></div>
@@ -424,11 +456,12 @@
   <div class="card"><h3 style="font-size:14px;margin:0 0 18px">Entry-time workflow</h3><div class="timeline">
     <div class="event"><time>On scan</time><div class="line"></div><div><strong>Detect opportunity</strong><p>Record symbol, timeframe, direction, model score and setup reasons.</p></div></div>
     <div class="event"><time>Candle close</time><div class="line"></div><div><strong>Confirm entry trigger</strong><p>Use the closed candle; validate signal freshness and avoid look-ahead.</p></div></div>
-    <div class="event"><time>Pre-order</time><div class="line"></div><div><strong>Run risk gates</strong><p>Check SL/TP, R:R, spread, news, exposure and daily drawdown.</p></div></div>
+    <div class="event"><time>Pre-order</time><div class="line"></div><div><strong>Run risk gates</strong><p>Check SL/TP, reward/risk, spread, sizing, ownership and shared account exposure.</p></div></div>
     <div class="event"><time>After fill</time><div class="line"></div><div><strong>Manage and log</strong><p>Track fill price, slippage, stop/target updates and outcome.</p></div></div>
   </div></div>
 </div>
-<div class="footer">RAMON · Django decision feed · Read-only · UTC timestamps</div>
+</details>
+<div class="footer">Ramon · Independent strategy fleet · Account results and saved evaluations · UTC timestamps</div>
 </div>
 <script>
 const $ = id => document.getElementById(id);
@@ -502,7 +535,7 @@ function renderDecisionRow(decision, index) {
 
   return `
     <tr class="opportunity" data-side="${esc(side)}" data-state="${esc(state)}">
-      <td><div class="symbol">${esc(decision.symbol)}</div>
+      <td><div class="symbol">${esc(decision.symbol)}</div><div class="small">${esc(decision.features?.strategy_setup || "Retired combined engine")}</div>
           <div class="small">${esc(val(quote, "timeframe"))} · ${esc(setupName)}</div></td>
       <td>${pill(side, state)}</td>
       <td>${esc(utc(decision.created_at))}<div class="small">${esc(val(timing, "timing"))}</div></td>
@@ -735,7 +768,7 @@ function thresholdEditorMarkup(stageName) {
   if (!group) return "";
   const values = thresholdDraft || thresholdConfig.values;
   const riskNote = stageName === "risk_management"
-    ? '<div class="small threshold-risk-note">These controls are enforced by Django. Maximum risk per trade is the demo sizing budget and hard per-trade cap. Portfolio exposure and daily loss are checked against server-side account telemetry. Position size is always rounded down; Ramon will never force the broker minimum lot when it exceeds the risk budget. Live-account risk remains fail-closed.</div>'
+    ? '<div class="small threshold-risk-note">These controls are enforced by Django. Maximum risk per trade is the demo sizing budget and hard per-trade cap. Portfolio exposure is checked against server-side account telemetry across all engines. Only checks explicitly recorded by the strategy are shown as active. Position size is always rounded down; Ramon will never force the broker minimum lot when it exceeds the risk budget. Live-account risk remains fail-closed.</div>'
     : "";
   const rows = group.items.map(item => {
     const value = values?.[stageName]?.[item.key] ?? item.value;
@@ -1194,14 +1227,14 @@ function renderRisk(decision) {
   const newsCheck = check("news_guard");
   const duplicateCheck = check("duplicate_position");
   $("riskBudget").textContent = fmt(val(risk, "risk_budget"));
-  $("dailyLossLimit").textContent = dailyCheck ? dailyCheck.detail : "Unavailable";
+  $("dailyLossLimit").textContent = dailyCheck ? dailyCheck.detail : "No daily-loss gate recorded";
   $("rrGate").textContent = rrCheck ? rrCheck.detail : "Unavailable";
   $("stopRequired").textContent = stopCheck
     ? `${stopCheck.passed === true ? "Passed" : "Failed"} · ${fmt(stopCheck.detail)}`
     : "Unavailable";
   $("spreadStatus").textContent = fmt(val(timing, "spread_points")) === "Unavailable"
     ? "Unavailable" : `${fmt(timing.spread_points)} points`;
-  $("newsGuard").textContent = newsCheck ? newsCheck.detail : "Unavailable";
+  $("newsGuard").textContent = newsCheck ? newsCheck.detail : "No news gate recorded";
   $("duplicateCheck").textContent = duplicateCheck ? duplicateCheck.detail : "Unavailable";
   $("riskBar").style.width = "0%";
 }
@@ -1419,7 +1452,8 @@ async function refresh() {
     if (!data.ok || !Array.isArray(data.decisions)) {
       throw new Error("Unexpected dashboard data format");
     }
-    const decisions = data.decisions;
+    const scope = $("diagnosticStrategyFilter").value;
+    const decisions = data.decisions.filter(d => scope === "all" || (d.features?.strategy_setup || "LEGACY") === scope);
     renderRangeAnalysis(data.range_analysis);
     connection.textContent = "DJANGO · FEED CONNECTED";
 
@@ -1457,6 +1491,7 @@ async function refresh() {
     renderDecisionFlow(latest, data.execution || {});
     renderDecisionVariableGuide(latest, data.execution || {});
     const latestFeatures = latest.features || {};
+    const strategyName = latestFeatures.strategy_setup || "Retired combined engine";
     const latestTiming = stage(latest, "entry_timing");
     const latestRisk = stage(latest, "risk_management");
     const approved = latestFeatures.approved === true;
@@ -1464,13 +1499,13 @@ async function refresh() {
     $("status").innerHTML = `
       <div class="brand">
         <span class="pill ${approved ? "ready" : "watch"}">${esc(action)}</span>
-        <strong>${esc(latest.symbol)}</strong>
+        <strong>${esc(strategyName)} · ${esc(latest.symbol)}</strong>
         <span class="small">Confidence: ${esc(fmt(latest.confidence))}</span>
       </div>
-      <p><strong>Final decision:</strong> ${approved ? "Approved by pipeline" : "Not approved"}
+      <p><strong>This saved evaluation:</strong> ${approved ? "Approved by pipeline" : "Not approved"}
       · <strong>Reason:</strong> ${esc(val(latest, "rationale_code"))}</p>
       <div class="small">Decision ${esc(latest.decision_id)} · Saved ${esc(utc(latest.created_at))}
-      · Approval does not confirm broker execution.</div>`;
+      · This snapshot is not a fleet-wide decision or confirmation of broker execution.</div>`;
 
     $("statEntryQuality").textContent = fmt(val(latestTiming, "quality"));
     $("statRisk").textContent = fmt(val(latestRisk, "status"));
@@ -1482,6 +1517,7 @@ async function refresh() {
     $("status").innerHTML = `<span class="negative">Could not load decision data: ${esc(error.message)}</span>`;
   }
 }
+$("diagnosticStrategyFilter").addEventListener("change", () => { scannerPage = 1; refresh(); });
 const pnlToday = new Date();
 const pnlThirtyDaysAgo = new Date(pnlToday.getTime() - 29 * 86400000);
 $("pnlFrom").value = utcDateInputValue(pnlThirtyDaysAgo);
@@ -1526,6 +1562,51 @@ async function refreshCandidateJournal() {
 }
 refreshCandidateJournal();
 setInterval(refreshCandidateJournal, 30000);
+let strategyFleetInFlight = false;
+async function refreshStrategyFleet() {
+  if (strategyFleetInFlight) return;
+  strategyFleetInFlight = true;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch("/api/ea/v1/strategies", {cache:"no-store",signal:controller.signal});
+    if (!response.ok) throw new Error("Container status unavailable");
+    const data = await response.json();
+    $("strategyFleetStatus").textContent = data.monolith_retired ? "Independent mode active · old combined entry engine retired. Open a strategy page for controls and broker results." : "Independent mode disabled.";
+    for (const worker of data.workers || []) {
+      const card = $("strategy-card-" + worker.slug);
+      if (card) card.classList.toggle("strategy-on", Boolean(worker.fresh && worker.automatic));
+      const el = $("strategy-" + worker.slug);
+      if (el) el.textContent = `${worker.fresh ? "Running" : "Stopped or stale"} · Entries ${worker.automatic ? "On" : "Paused"} · ${worker.state} · ${worker.latest.action || "No decision yet"}`;
+    }
+  } catch (error) {
+    document.querySelectorAll(".strategy-card.strategy-on").forEach(card => card.classList.remove("strategy-on"));
+    $("strategyFleetStatus").textContent = "Container status unavailable; previous values may be stale.";
+  } finally { clearTimeout(timeout); strategyFleetInFlight = false; }
+}
+refreshStrategyFleet();
+setInterval(refreshStrategyFleet, 15000);
+
+let trendInFlight = false;
+async function refreshTrend() {
+  if (trendInFlight) return;
+  trendInFlight = true;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch("/api/ea/v1/research/trend", {cache:"no-store",signal:controller.signal});
+    if (!response.ok) throw new Error("Trend status unavailable");
+    const data = await response.json();
+    $("trendStatus").textContent = `${data.mode} · Worker ${data.worker_fresh ? "running" : "stale / stopped"} · ${data.worker_reason} · ${data.scored} scored · ${data.pending} pending · ${data.skipped} skipped · ${data.net_points.toFixed(1)} net paper points · Mean R: ${data.mean_net_r == null ? "not available" : data.mean_net_r.toFixed(3)}`;
+    $("trendCosts").textContent = data.costs_note;
+    $("trendRows").innerHTML = (data.recent || []).map(r => "<tr><td>" + esc(r.recorded_at) + "</td><td>" + esc(r.action) + "</td><td>" + esc(r.reason) + "</td><td>" + esc(r.result || r.status) + "</td></tr>").join("") || "<tr><td colspan='4'>Waiting for the next completed H1 evaluation window.</td></tr>";
+  } catch (error) {
+    $("trendStatus").textContent = "Trend observations unavailable; previous values may be stale.";
+  } finally { clearTimeout(timeout); trendInFlight = false; }
+}
+refreshTrend();
+setInterval(refreshTrend, 30000);
+
 let scalpInFlight = false;
 async function refreshScalp() {
   if (scalpInFlight) return;
@@ -1536,9 +1617,11 @@ async function refreshScalp() {
     const response = await fetch("/api/ea/v1/research/scalping", {cache:"no-store",signal:controller.signal});
     if (!response.ok) throw new Error();
     const data = await response.json();
+    $("scalpBrokerStatus").textContent = `Broker readiness: ${data.broker_readiness || "Unavailable"} · Automatic entries: ${data.automatic_entries ? "On" : "Paused"} · Execution gates: ${data.broker_execution_enabled ? "Enabled" : "Disabled"}`;
     $("scalpStatus").textContent = `${data.mode} · ${data.scored} scored · ${data.pending || 0} pending · ${data.skipped || 0} skipped · ${data.net_points == null ? "unavailable" : data.net_points.toFixed(1)} net paper points. Costs: quote spread, assumed 5-point slippage each side and 5-point round-trip commission.`;
     $("scalpRows").innerHTML = (data.recent || []).map(r => "<tr><td>" + esc(r.recorded_at) + "</td><td>" + esc(r.action) + "</td><td>" + esc(r.reason) + "</td><td>" + esc(r.result || r.status) + "</td></tr>").join("") || "<tr><td colspan='4'>Waiting for a fresh completed M1 candle.</td></tr>";
   } catch(error) {
+    $("scalpBrokerStatus").textContent = "Scalper execution state unavailable; reload its controls for current status.";
     $("scalpStatus").textContent = "Scalper observations unavailable; previous values may be stale.";
   } finally { clearTimeout(timeout); scalpInFlight = false; }
 }

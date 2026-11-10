@@ -22,6 +22,7 @@ services:
       DJANGO_DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       RAMON_REDIS_URL: redis://redis:6379/0
       RAMON_DJANGO_DECISION_ENABLED: "1"
+      RAMON_STRATEGY_CONTAINERS_ENABLED: "1"
       RAMON_SCALP_SHADOW_ENABLED: "1"
       RAMON_SCALP_EXECUTION_ENABLED: "${RAMON_SCALP_EXECUTION_ENABLED:-0}"
       # Fail closed by default. Opt in locally only after verifying a demo account.
@@ -55,11 +56,11 @@ services:
       retries: 3
       start_period: 45s
 
-  worker:
+  ingest-worker:
     build:
       context: .
       dockerfile: backend/django_bridge/Dockerfile
-    container_name: ramon-worker
+    container_name: ramon-ingest-worker
     restart: unless-stopped
     init: true
     env_file:
@@ -75,7 +76,7 @@ services:
       DJANGO_DB_USER: ${POSTGRES_USER:-ramon}
       DJANGO_DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       RAMON_REDIS_URL: redis://redis:6379/0
-      RAMON_REDIS_CONSUMER: ramon-worker-1
+      RAMON_REDIS_CONSUMER: ramon-ingest-worker-1
       RAMON_PIPELINE_INGEST_ENABLED: "0"
     command:
       - python
@@ -94,6 +95,265 @@ services:
         condition: service_healthy
     networks:
       - ramon_backend
+
+  trend-pullback:
+    build:
+      context: .
+      dockerfile: backend/django_bridge/Dockerfile
+    container_name: ramon-trend-pullback
+    restart: unless-stopped
+    init: true
+    env_file: [.env]
+    environment:
+      DJANGO_SETTINGS_MODULE: ramon_django.settings
+      DJANGO_DEBUG: "0"
+      DJANGO_DB_ENGINE: postgresql
+      DJANGO_DB_HOST: timescaledb
+      DJANGO_DB_PORT: "5432"
+      DJANGO_DB_NAME: ${POSTGRES_DB:-ramon}
+      DJANGO_DB_USER: ${POSTGRES_USER:-ramon}
+      DJANGO_DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      RAMON_STRATEGY_CONTAINERS_ENABLED: "1"
+      RAMON_STRATEGY_SETUP: TREND_PULLBACK
+      RAMON_SCALP_EXECUTION_ENABLED: "0"
+      RAMON_EA_COMMAND_CREATION_ENABLED: "${RAMON_EA_COMMAND_CREATION_ENABLED:-0}"
+      RAMON_EA_COMMAND_EXECUTION_ENABLED: "${RAMON_EA_COMMAND_EXECUTION_ENABLED:-0}"
+      RAMON_DEMO_PROFIT_PROTECTION_ENABLED: "${RAMON_DEMO_PROFIT_PROTECTION_ENABLED:-0}"
+    command: ["python", "manage.py", "run_strategy_worker"]
+    depends_on:
+      django:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import pathlib,time; p=pathlib.Path('/tmp/strategy-worker-heartbeat'); assert p.exists() and time.time()-p.stat().st_mtime<90"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    networks: [ramon_backend]
+
+  breakout-retest:
+    build:
+      context: .
+      dockerfile: backend/django_bridge/Dockerfile
+    container_name: ramon-breakout-retest
+    restart: unless-stopped
+    init: true
+    env_file: [.env]
+    environment:
+      DJANGO_SETTINGS_MODULE: ramon_django.settings
+      DJANGO_DEBUG: "0"
+      DJANGO_DB_ENGINE: postgresql
+      DJANGO_DB_HOST: timescaledb
+      DJANGO_DB_PORT: "5432"
+      DJANGO_DB_NAME: ${POSTGRES_DB:-ramon}
+      DJANGO_DB_USER: ${POSTGRES_USER:-ramon}
+      DJANGO_DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      RAMON_STRATEGY_CONTAINERS_ENABLED: "1"
+      RAMON_STRATEGY_SETUP: BREAKOUT_RETEST
+      RAMON_SCALP_EXECUTION_ENABLED: "0"
+      RAMON_EA_COMMAND_CREATION_ENABLED: "${RAMON_EA_COMMAND_CREATION_ENABLED:-0}"
+      RAMON_EA_COMMAND_EXECUTION_ENABLED: "${RAMON_EA_COMMAND_EXECUTION_ENABLED:-0}"
+      RAMON_DEMO_PROFIT_PROTECTION_ENABLED: "${RAMON_DEMO_PROFIT_PROTECTION_ENABLED:-0}"
+    command: ["python", "manage.py", "run_strategy_worker"]
+    depends_on:
+      django:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import pathlib,time; p=pathlib.Path('/tmp/strategy-worker-heartbeat'); assert p.exists() and time.time()-p.stat().st_mtime<90"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    networks: [ramon_backend]
+
+  failed-breakout-sweep:
+    build:
+      context: .
+      dockerfile: backend/django_bridge/Dockerfile
+    container_name: ramon-failed-breakout-sweep
+    restart: unless-stopped
+    init: true
+    env_file: [.env]
+    environment:
+      DJANGO_SETTINGS_MODULE: ramon_django.settings
+      DJANGO_DEBUG: "0"
+      DJANGO_DB_ENGINE: postgresql
+      DJANGO_DB_HOST: timescaledb
+      DJANGO_DB_PORT: "5432"
+      DJANGO_DB_NAME: ${POSTGRES_DB:-ramon}
+      DJANGO_DB_USER: ${POSTGRES_USER:-ramon}
+      DJANGO_DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      RAMON_STRATEGY_CONTAINERS_ENABLED: "1"
+      RAMON_STRATEGY_SETUP: FAILED_BREAKOUT_SWEEP
+      RAMON_SCALP_EXECUTION_ENABLED: "0"
+      RAMON_EA_COMMAND_CREATION_ENABLED: "${RAMON_EA_COMMAND_CREATION_ENABLED:-0}"
+      RAMON_EA_COMMAND_EXECUTION_ENABLED: "${RAMON_EA_COMMAND_EXECUTION_ENABLED:-0}"
+      RAMON_DEMO_PROFIT_PROTECTION_ENABLED: "${RAMON_DEMO_PROFIT_PROTECTION_ENABLED:-0}"
+    command: ["python", "manage.py", "run_strategy_worker"]
+    depends_on:
+      django:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import pathlib,time; p=pathlib.Path('/tmp/strategy-worker-heartbeat'); assert p.exists() and time.time()-p.stat().st_mtime<90"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    networks: [ramon_backend]
+
+  range-edge-fade:
+    build:
+      context: .
+      dockerfile: backend/django_bridge/Dockerfile
+    container_name: ramon-range-edge-fade
+    restart: unless-stopped
+    init: true
+    env_file: [.env]
+    environment:
+      DJANGO_SETTINGS_MODULE: ramon_django.settings
+      DJANGO_DEBUG: "0"
+      DJANGO_DB_ENGINE: postgresql
+      DJANGO_DB_HOST: timescaledb
+      DJANGO_DB_PORT: "5432"
+      DJANGO_DB_NAME: ${POSTGRES_DB:-ramon}
+      DJANGO_DB_USER: ${POSTGRES_USER:-ramon}
+      DJANGO_DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      RAMON_STRATEGY_CONTAINERS_ENABLED: "1"
+      RAMON_STRATEGY_SETUP: RANGE_EDGE_FADE
+      RAMON_SCALP_EXECUTION_ENABLED: "0"
+      RAMON_EA_COMMAND_CREATION_ENABLED: "${RAMON_EA_COMMAND_CREATION_ENABLED:-0}"
+      RAMON_EA_COMMAND_EXECUTION_ENABLED: "${RAMON_EA_COMMAND_EXECUTION_ENABLED:-0}"
+      RAMON_DEMO_PROFIT_PROTECTION_ENABLED: "${RAMON_DEMO_PROFIT_PROTECTION_ENABLED:-0}"
+    command: ["python", "manage.py", "run_strategy_worker"]
+    depends_on:
+      django:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import pathlib,time; p=pathlib.Path('/tmp/strategy-worker-heartbeat'); assert p.exists() and time.time()-p.stat().st_mtime<90"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    networks: [ramon_backend]
+
+  session-opening-range-breakout:
+    build:
+      context: .
+      dockerfile: backend/django_bridge/Dockerfile
+    container_name: ramon-session-opening-range-breakout
+    restart: unless-stopped
+    init: true
+    env_file: [.env]
+    environment:
+      DJANGO_SETTINGS_MODULE: ramon_django.settings
+      DJANGO_DEBUG: "0"
+      DJANGO_DB_ENGINE: postgresql
+      DJANGO_DB_HOST: timescaledb
+      DJANGO_DB_PORT: "5432"
+      DJANGO_DB_NAME: ${POSTGRES_DB:-ramon}
+      DJANGO_DB_USER: ${POSTGRES_USER:-ramon}
+      DJANGO_DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      RAMON_STRATEGY_CONTAINERS_ENABLED: "1"
+      RAMON_STRATEGY_SETUP: SESSION_OPENING_RANGE_BREAKOUT
+      RAMON_SCALP_EXECUTION_ENABLED: "0"
+      RAMON_EA_COMMAND_CREATION_ENABLED: "${RAMON_EA_COMMAND_CREATION_ENABLED:-0}"
+      RAMON_EA_COMMAND_EXECUTION_ENABLED: "${RAMON_EA_COMMAND_EXECUTION_ENABLED:-0}"
+      RAMON_DEMO_PROFIT_PROTECTION_ENABLED: "${RAMON_DEMO_PROFIT_PROTECTION_ENABLED:-0}"
+    command: ["python", "manage.py", "run_strategy_worker"]
+    depends_on:
+      django:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import pathlib,time; p=pathlib.Path('/tmp/strategy-worker-heartbeat'); assert p.exists() and time.time()-p.stat().st_mtime<90"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    networks: [ramon_backend]
+
+  volatility-compression-expansion:
+    build:
+      context: .
+      dockerfile: backend/django_bridge/Dockerfile
+    container_name: ramon-volatility-compression-expansion
+    restart: unless-stopped
+    init: true
+    env_file: [.env]
+    environment:
+      DJANGO_SETTINGS_MODULE: ramon_django.settings
+      DJANGO_DEBUG: "0"
+      DJANGO_DB_ENGINE: postgresql
+      DJANGO_DB_HOST: timescaledb
+      DJANGO_DB_PORT: "5432"
+      DJANGO_DB_NAME: ${POSTGRES_DB:-ramon}
+      DJANGO_DB_USER: ${POSTGRES_USER:-ramon}
+      DJANGO_DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      RAMON_STRATEGY_CONTAINERS_ENABLED: "1"
+      RAMON_STRATEGY_SETUP: VOLATILITY_COMPRESSION_EXPANSION
+      RAMON_SCALP_EXECUTION_ENABLED: "0"
+      RAMON_EA_COMMAND_CREATION_ENABLED: "${RAMON_EA_COMMAND_CREATION_ENABLED:-0}"
+      RAMON_EA_COMMAND_EXECUTION_ENABLED: "${RAMON_EA_COMMAND_EXECUTION_ENABLED:-0}"
+      RAMON_DEMO_PROFIT_PROTECTION_ENABLED: "${RAMON_DEMO_PROFIT_PROTECTION_ENABLED:-0}"
+    command: ["python", "manage.py", "run_strategy_worker"]
+    depends_on:
+      django:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import pathlib,time; p=pathlib.Path('/tmp/strategy-worker-heartbeat'); assert p.exists() and time.time()-p.stat().st_mtime<90"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    networks: [ramon_backend]
+
+  exhaustion-reversal:
+    build:
+      context: .
+      dockerfile: backend/django_bridge/Dockerfile
+    container_name: ramon-exhaustion-reversal
+    restart: unless-stopped
+    init: true
+    env_file: [.env]
+    environment:
+      DJANGO_SETTINGS_MODULE: ramon_django.settings
+      DJANGO_DEBUG: "0"
+      DJANGO_DB_ENGINE: postgresql
+      DJANGO_DB_HOST: timescaledb
+      DJANGO_DB_PORT: "5432"
+      DJANGO_DB_NAME: ${POSTGRES_DB:-ramon}
+      DJANGO_DB_USER: ${POSTGRES_USER:-ramon}
+      DJANGO_DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      RAMON_STRATEGY_CONTAINERS_ENABLED: "1"
+      RAMON_STRATEGY_SETUP: EXHAUSTION_REVERSAL
+      RAMON_SCALP_EXECUTION_ENABLED: "0"
+      RAMON_EA_COMMAND_CREATION_ENABLED: "${RAMON_EA_COMMAND_CREATION_ENABLED:-0}"
+      RAMON_EA_COMMAND_EXECUTION_ENABLED: "${RAMON_EA_COMMAND_EXECUTION_ENABLED:-0}"
+      RAMON_DEMO_PROFIT_PROTECTION_ENABLED: "${RAMON_DEMO_PROFIT_PROTECTION_ENABLED:-0}"
+    command: ["python", "manage.py", "run_strategy_worker"]
+    depends_on:
+      django:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import pathlib,time; p=pathlib.Path('/tmp/strategy-worker-heartbeat'); assert p.exists() and time.time()-p.stat().st_mtime<90"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    networks: [ramon_backend]
 
   learning-worker:
     build:
@@ -182,6 +442,43 @@ services:
         condition: service_healthy
       timescaledb:
         condition: service_healthy
+    networks:
+      - ramon_backend
+
+  trend-worker:
+    build:
+      context: .
+      dockerfile: backend/django_bridge/Dockerfile
+    container_name: ramon-trend-worker
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    environment:
+      DJANGO_SETTINGS_MODULE: ramon_django.settings
+      DJANGO_DEBUG: "0"
+      DJANGO_DB_ENGINE: postgresql
+      DJANGO_DB_HOST: timescaledb
+      DJANGO_DB_PORT: "5432"
+      DJANGO_DB_NAME: ${POSTGRES_DB:-ramon}
+      DJANGO_DB_USER: ${POSTGRES_USER:-ramon}
+      DJANGO_DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      RAMON_TREND_SHADOW_ENABLED: "1"
+      RAMON_SCALP_EXECUTION_ENABLED: "0"
+      RAMON_EA_COMMAND_CREATION_ENABLED: "0"
+      RAMON_EA_COMMAND_EXECUTION_ENABLED: "0"
+    command: ["python", "manage.py", "run_trend_worker"]
+    depends_on:
+      django:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import pathlib,time; p=pathlib.Path('/tmp/trend-worker-heartbeat'); assert p.exists() and time.time()-p.stat().st_mtime<90"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     networks:
       - ramon_backend
 

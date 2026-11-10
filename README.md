@@ -1,18 +1,23 @@
 # Ramon AI Trader
 
-Ramon is a local MT5 gold-trading project whose **Django service owns strategy decisions, risk checks, and command authorization**. The MT5 Expert Advisor (EA) is a telemetry/command bridge and broker-side executor; it must not become a second strategy engine.
+Ramon is a local MT5 gold-trading project whose **seven independent strategy containers own their decisions, entry checks, sizing and position management**. Shared Django APIs provide monitoring, telemetry and command delivery. The MT5 Expert Advisor (EA) is a telemetry/command bridge and broker-side executor; it must not become a second strategy engine.
 
-> **Deployment entry point:** `scripts/update_build_ramon.sh` is the single-command local deployment. It starts and validates the Compose services and compiles/installs only `RamonCommandEA_v1.07.ex5`. GitHub Actions verifies the command EA source contract and MetaEditor compilation. Local deployment still needs to be run on the target machine.
+> **Deployment entry point:** `scripts/update_build_ramon.sh` is the single-command local deployment. It starts and validates the Compose services and compiles/installs only `RamonCommandEA_v1.09.ex5`. GitHub Actions verifies the command EA source contract and MetaEditor compilation. Local deployment still needs to be run on the target machine.
 
 ## Current supported stack
 
 The single `docker-compose.yaml` defines:
 
 - `django`: Django API, bound to `127.0.0.1:8017` on the host.
-- `worker`: Redis Streams consumer that persists queued events.
+- `ingest-worker`: Redis Streams consumer that persists queued events; replaces the old `ramon-worker` container.
+- `trend-pullback`, `breakout-retest`, `failed-breakout-sweep`, `range-edge-fade`, `session-opening-range-breakout`, `volatility-compression-expansion`, `exhaustion-reversal`: independent M15 strategy containers. Each can issue its own demo orders within the shared account budget.
+- `scalper-worker`: existing independent M1/M5 scalper.
+- `trend-worker`: existing H1/H4 paper-only research candidate.
 - `forecast-worker`: forward ARIMA forecasts and automatic accuracy tracking; observation only.
 - `redis`: event buffer.
 - `timescaledb`: PostgreSQL/TimescaleDB durable store.
+
+Dashboard: `http://127.0.0.1:8017/api/ea/v1/dashboard` contains a link to each strategy’s controls, positions and history. See [independent strategy operations](docs/operations/independent-strategy-containers.md).
 
 Health check: `http://127.0.0.1:8017/healthz`
 
@@ -30,11 +35,11 @@ cd ~/Documents/Presentation/ramon-ai-trader-bridge && bash scripts/update_build_
 
 If the clone lives elsewhere, set `RAMON_REPO_DIR` to its absolute path before running the script. Optional build settings include `RAMON_MT5_PREFIX`, `RAMON_MT5_TERMINAL_ID`, `RAMON_METAEDITOR`, and `RAMON_HEALTH_URL`; see [the update/build runbook](docs/operations/one-command-update-build.md).
 
-The script validates the Compose configuration, builds/starts services, applies forward migrations, runs Django's system check, verifies Django/Redis/TimescaleDB health and worker status, backs up the current command EA, then compiles and installs only `RamonCommandEA_v1.07.mq5`. The legacy `Ramon_v0.62.x` strategy EA is deliberately excluded to avoid installing a second EA alongside the command architecture. The script does not launch MT5, attach an EA, change trading flags, or place orders. It stops rather than accepting a missing compiler log or a stale EX5 as a successful build.
+The script validates the Compose configuration, builds/starts services, applies forward migrations, runs Django's system check, verifies Django/Redis/TimescaleDB health and worker status, backs up the current command EA, then compiles and installs only `RamonCommandEA_v1.09.mq5`. The legacy `Ramon_v0.62.x` strategy EA is deliberately excluded to avoid installing a second EA alongside the command architecture. The script does not launch MT5, attach an EA, change trading flags, or place orders. It stops rather than accepting a missing compiler log or a stale EX5 as a successful build.
 
 ## EA and API
 
-The versioned command EA source is `mt5/RamonCommandEA_v1.07.mq5`. It defaults to:
+The versioned command EA source is `mt5/RamonCommandEA_v1.09.mq5`. It defaults to:
 
 - empty `DjangoBearerToken` (set only in MT5 Inputs on the local machine)
 - no local strategy or risk-policy settings; the EA accepts an order only when Django supplies both `trading_authorization=true` and `execution_authorized=true`, and terminal/EA trading permissions allow it

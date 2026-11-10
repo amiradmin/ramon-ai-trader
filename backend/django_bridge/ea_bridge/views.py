@@ -111,7 +111,8 @@ def events(request):
 def dashboard(request):
     """Render the original read-only Ramon opportunity dashboard."""
     from django.shortcuts import render
-    return render(request, "ea_bridge/ramon_opportunity_risk_dashboard.html")
+    from .strategy_views import worker_rows
+    return render(request, "ea_bridge/ramon_opportunity_risk_dashboard.html", {"strategy_workers": worker_rows()})
 
 
 

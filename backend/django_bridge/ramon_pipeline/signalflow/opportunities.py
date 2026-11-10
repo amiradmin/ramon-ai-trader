@@ -1369,7 +1369,9 @@ class OpportunityDetector:
         )
 
         if not setup_settings["trend_pullback"]["enabled"]:
-            return finish(REJECTED, "NO_ENABLED_SETUP",
+            awaiting = bool(setup_name and setup_settings.get(setup_name, {}).get("enabled"))
+            return finish(REJECTED, "AWAITING_"+setup_name.upper() if awaiting else "NO_ENABLED_SETUP",
+                          "the assigned setup has not confirmed" if awaiting else
                           "trend pullback is disabled and no other enabled setup was confirmed", side)
 
         # 3. Pullback geometry, oriented so "up" is the trade direction ---------

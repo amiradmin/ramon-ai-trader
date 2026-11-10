@@ -11,8 +11,13 @@ from . import execution_observer
 from . import reliability
 from . import scalp_observer
 from . import scalper_views
+from . import trend_observer
+from . import strategy_views
 
 urlpatterns = [
+    path("strategies", strategy_views.strategies_status, name="strategy-workers-status"),
+    path("strategies/<slug:slug>", strategy_views.strategy_console, name="strategy-worker-console"),
+    path("research/trend", trend_observer.trend_status, name="ramon-trend-shadow"),
     path("scalper", scalper_views.scalper_console, name="ramon-scalper-console"),
     path("research/scalping", scalp_observer.scalp_status, name="ramon-scalping-shadow"),
     path("reliability", reliability.reliability_status, name="ramon-reliability"),

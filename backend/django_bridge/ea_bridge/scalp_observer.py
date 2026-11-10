@@ -15,7 +15,7 @@ from django.views.decorators.http import require_GET
 from ramon_pipeline.signalflow.scalping import (
     VERSION, ScalpConfig, ScalpCosts, detect_scalp, resolve_scalp,
 )
-from .models import EAHeartbeat, MarketBar, ScalpObservation
+from .models import EAHeartbeat, MarketBar, ScalpObservation, ScalperControl
 from .scalper_audit import health_skip, provenance, policy_artifact
 
 
@@ -141,7 +141,14 @@ def scalp_status(request):
     result = dict(mode='FORWARD_PAPER_ONLY', execution_enabled=False, version=VERSION,
         enabled=getattr(settings, 'RAMON_SCALP_SHADOW_ENABLED', False), recent=[], scored=0,
         policy=asdict(ScalpConfig()), costs_note='Quote spread plus assumed 5-point slippage per side and 5-point round-trip commission. No broker P&L.')
+    result.update(broker_readiness='NO_FEED',automatic_entries=False,broker_execution_enabled=False)
     if feed:
+        from .scalper_engine import readiness
+        control=ScalperControl.objects.filter(source=feed.instance_id,account_login=feed.account_login,
+            server_name=feed.server_name,symbol=feed.symbol).first()
+        result.update(broker_readiness=readiness(feed),automatic_entries=bool(control and control.automatic),
+            broker_execution_enabled=all(getattr(settings,k,False) for k in ['RAMON_SCALP_EXECUTION_ENABLED',
+                'RAMON_EA_COMMAND_CREATION_ENABLED','RAMON_EA_COMMAND_EXECUTION_ENABLED']))
         rows = list(ScalpObservation.objects.filter(source=feed.instance_id, account_login=feed.account_login,
             server_name=feed.server_name, symbol=feed.symbol, version=VERSION).order_by('-recorded_at')[:2000])
         scored = [r for r in rows if r.status == 'SCORED']

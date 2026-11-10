@@ -152,4 +152,4 @@ class DjangoOutcomeStore:
 
     def all(self):
         return [_record(row) for row in LearningTradeOutcome.objects.filter(
-            Q(tags__strategy_profile__isnull=True) | ~Q(tags__strategy_profile="SCALPER_M1_M5")).iterator()]
+            Q(tags__strategy_profile__isnull=True) | (~Q(tags__strategy_profile="SCALPER_M1_M5") & ~Q(tags__strategy_profile__startswith="SETUP_"))).iterator()]

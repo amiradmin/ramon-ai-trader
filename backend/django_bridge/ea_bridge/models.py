@@ -394,6 +394,46 @@ class ReliabilityIncident(models.Model):
     details = models.JSONField(default=dict)
 
 
+class StrategyWorkerControl(models.Model):
+    setup = models.CharField(max_length=64, unique=True)
+    source = models.CharField(max_length=128)
+    account_login = models.CharField(max_length=32)
+    server_name = models.CharField(max_length=128)
+    symbol = models.CharField(max_length=32)
+    automatic = models.BooleanField(default=True)
+    last_seen = models.DateTimeField(null=True, blank=True)
+    state = models.CharField(max_length=128, default='STARTING')
+    latest = models.JSONField(default=dict)
+
+
+class TrendObservation(models.Model):
+    """H1/H4 paper candidate, isolated from commands and broker learning."""
+    source = models.CharField(max_length=128)
+    account_login = models.CharField(max_length=32)
+    server_name = models.CharField(max_length=128)
+    symbol = models.CharField(max_length=32)
+    version = models.CharField(max_length=64)
+    signal_bar_time = models.DateTimeField()
+    recorded_at = models.DateTimeField()
+    evaluation_start = models.DateTimeField()
+    evaluation_end = models.DateTimeField()
+    action = models.CharField(max_length=8)
+    reason = models.CharField(max_length=128)
+    status = models.CharField(max_length=16, db_index=True)
+    snapshot = models.JSONField(default=dict)
+    outcome = models.JSONField(default=dict)
+    settled_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['source','account_login','server_name','symbol','version','signal_bar_time'], name='trend_signal_scope_unique')]
+
+
+class TrendWorkerState(models.Model):
+    source = models.CharField(max_length=128, unique=True)
+    updated_at = models.DateTimeField()
+    reason = models.CharField(max_length=128)
+
+
 class ScalpObservation(models.Model):
     """Forward-only paper scalper. No order authorization or broker P&L."""
     source = models.CharField(max_length=128)
