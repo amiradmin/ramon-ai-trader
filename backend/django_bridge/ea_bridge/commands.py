@@ -1,8 +1,8 @@
 """Authenticated polling and acknowledgement for Django-authorized EA commands.
 
 The decision pipeline may create an OPEN command only after strategy approval,
-a passing risk verdict, and server-side account validation. This module only
-delivers those durable commands; it never creates or independently approves trades.
+a passing risk verdict, and server-side account validation. This module delivers durable commands and invokes the separately gated Django
+profit-protection planner for demo positions.
 Execution remains gated by RAMON_EA_COMMAND_EXECUTION_ENABLED.
 """
 import json
@@ -66,10 +66,16 @@ def next_command(request):
     now = timezone.now()
 
     # Expire old rows even when the bridge is currently offline.
+    expired_ids = list(EACommand.objects.filter(instance_id=instance_id,account_login=account_login,
+        state=EACommand.State.PENDING,expires_at__lte=now,payload__engine='SCALPER').values_list('pk',flat=True))
     EACommand.objects.filter(instance_id=instance_id, account_login=account_login,
         state=EACommand.State.PENDING, expires_at__lte=now).update(
             state=EACommand.State.EXPIRED, completed_at=now
         )
+
+    from .scalper_audit import command_event
+    for expired in EACommand.objects.filter(pk__in=expired_ids,state=EACommand.State.EXPIRED):
+        command_event(expired,'COMMAND_EXPIRY',now=now)
 
     # Django is the execution authority: revalidate the live bridge/account state.
     heartbeat = EAHeartbeat.objects.filter(instance_id=instance_id).first()
@@ -102,6 +108,9 @@ def next_command(request):
             "ok": True, "commands_enabled": True, "command": None,
             "trading_authorization": False, "authorization_reason": reason,
         })
+
+    from .profit_protection import create_protection_commands
+    create_protection_commands(instance_id, account_login)
 
     with transaction.atomic():
         command = (
@@ -142,6 +151,8 @@ def next_command(request):
         command.state = EACommand.State.CLAIMED
         command.claimed_at = now
         command.save(update_fields=["state", "claimed_at"])
+        from .scalper_audit import command_event
+        command_event(command,"COMMAND_CLAIM",now=now)
         return JsonResponse({
             "ok": True,
             "commands_enabled": True,
@@ -224,4 +235,6 @@ def acknowledge_command(request):
             command.completed_at = now
             fields.append("completed_at")
         command.save(update_fields=fields)
+        from .scalper_audit import command_event
+        command_event(command,"BROKER_ACK",now=now)
     return JsonResponse({"ok": True, "duplicate": False, "state": state})

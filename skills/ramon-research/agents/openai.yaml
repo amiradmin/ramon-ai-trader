@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ramon Research"
+  short_description: "Compare Ramon strategies with causal data and costs"
+  default_prompt: "Use $ramon-research to compare a proposed strategy with Ramon's current policy and record reproducible evidence."

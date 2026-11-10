@@ -37,7 +37,9 @@ _Z_OVERALL = 1.96  # ~95% two-sided
 _Z_SEGMENT = 2.58  # ~99%: stricter because many segments are compared
 _ALLOWED_SIDES = {"BUY", "SELL"}
 _TAG_KEYS = ("side", "regime", "exit_reason", "setup_type", "forecast_confirmed", "signal_id", "score", "decision_id", "symbol", "strategy_profile", "model_version", "entry_timing", "instance_id", "account_login", "command_id", "broker_ticket")
-_METRIC_KEYS = ("mae", "mfe", "entry_efficiency", "exit_efficiency", "spread_points", "slippage_points", "commission", "swap")
+_METRIC_KEYS = ("mae", "mfe", "entry_efficiency", "exit_efficiency", "spread_points", "slippage_points", "commission", "swap",
+                "entry_price", "decision_quote_price", "decision_to_fill_points", "decision_spread_points",
+                "request_price", "request_fill_price", "request_slippage_points", "submission_spread_points", "broker_commission", "fee")
 _SEGMENT_KEYS = ("side", "regime", "exit_reason", "setup_type")
 
 
@@ -235,6 +237,8 @@ class Learning:
             if value is None:
                 continue
             number = _finite(value, key)
+            if key in {"entry_price","decision_quote_price","request_price","request_fill_price"} and number <= 0:
+                raise _Invalid(f"{key} must be positive")
             if key in {"mae", "mfe", "entry_efficiency", "exit_efficiency", "spread_points", "slippage_points"} and number < 0:
                 raise _Invalid(f"{key} must be non-negative")
             if key in {"entry_efficiency", "exit_efficiency"} and number > 1:

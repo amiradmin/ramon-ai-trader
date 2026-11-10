@@ -325,6 +325,8 @@ def telemetry(request):
                 "last_received_at_utc": latest_received.isoformat() if latest_received else None,
             })
 
+        from .reliability import record_telemetry_gap
+        record_telemetry_gap(previous, account_login, server_name, p.get("quote_time"))
         EAHeartbeat.objects.update_or_create(
             instance_id=instance_id,
             defaults={
@@ -342,6 +344,8 @@ def telemetry(request):
                     "quote_time": p.get("quote_time"),
                     "server_name": server_name,
                     "account_trade_mode": account_trade_mode,
+                    "account_margin_mode": p.get("account_margin_mode"),
+                    "execution_profile": p.get("execution_profile"),
                     "broker_day": broker_day.isoformat() if broker_day else None,
                     "broker_day_history_complete": broker_day_history_complete,
                     "broker_day_opening_balance": (

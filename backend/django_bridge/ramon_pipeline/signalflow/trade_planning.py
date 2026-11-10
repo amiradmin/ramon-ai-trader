@@ -6,11 +6,25 @@ All thresholds here are hypotheses to evaluate on chronological demo replays.
 from __future__ import annotations
 
 import math
+from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from .common import REJECTED, parse_timestamp
 
 _INTERVALS = {"M5": 300, "H1": 3600}
+
+
+def weekend_break(previous: float, following: float, interval: int) -> bool:
+    """Recognize only a narrow Friday-night to Sunday-night break shape.
+
+    This is a timestamp-pattern classification, not broker calendar verification.
+    A gap extending into Monday or beginning earlier on Friday remains an outage.
+    """
+    closed = datetime.fromtimestamp(previous + interval, timezone.utc)
+    reopened = datetime.fromtimestamp(following, timezone.utc)
+    return (closed.weekday() == 4 and 21 <= closed.hour <= 23
+            and reopened.weekday() == 6 and 21 <= reopened.hour <= 23
+            and 46*3600 <= following-(previous+interval) <= 50*3600)
 
 
 def completed_context(market: Mapping[str, Any], timeframe: str) -> tuple[list[dict], str]:
@@ -44,7 +58,9 @@ def completed_context(market: Mapping[str, Any], timeframe: str) -> tuple[list[d
             return [], "STALE"
         # Do not infer a continuous trend across a large recent data outage.
         recent = bars[-20:]
-        if any(b["time"] - a["time"] > interval * 8 for a, b in zip(recent, recent[1:])):
+        if any(b["time"] - a["time"] > interval * 8
+               and not weekend_break(a["time"], b["time"], interval)
+               for a, b in zip(recent, recent[1:])):
             return [], "GAPPED"
         return bars, "AVAILABLE"
     except (KeyError, TypeError, ValueError, OverflowError):
@@ -65,6 +81,14 @@ def market_context(market: Mapping[str, Any]) -> dict[str, Any]:
     for timeframe, minimum, fast, slow in (("H1", 60, 20, 50), ("M5", 24, 8, 21)):
         bars, status = completed_context(market, timeframe)
         item = {"status": status, "bars": len(bars), "bias": "UNKNOWN", "trigger": "NONE"}
+        if bars:
+            breaks = [{"last_bar": a["time"], "reopened_bar": b["time"]}
+                      for a, b in zip(bars[-20:], bars[-20:][1:])
+                      if b["time"]-a["time"] > _INTERVALS[timeframe]*8
+                      and weekend_break(a["time"], b["time"], _INTERVALS[timeframe])]
+            if breaks:
+                item.update(session_breaks=breaks, continuity="OBSERVED_WEEKEND_BREAK",
+                            broker_calendar_verified=False)
         if status == "AVAILABLE" and len(bars) < minimum:
             item["status"] = "INSUFFICIENT_HISTORY"
         elif status == "AVAILABLE":

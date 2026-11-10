@@ -77,12 +77,26 @@ class DemoPlaybookApiTests(TestCase):
         self.assertEqual(body["selection"]["context"]["H1"]["status"], "MISSING")
         decision = StrategyDecisionRecord.objects.get(decision_id=body["sample_key"])
         self.assertEqual(decision.features["selection"], body["selection"])
+        from .models import CandidateObservation
+        self.assertEqual(CandidateObservation.objects.filter(decision=decision,source="playbook-demo").count(),7)
         self.assertEqual(body["stages"]["entry_timing"]["quality_source"], "COMPUTED")
         verdict = RiskVerdictRecord.objects.get(decision_id=body["sample_key"])
         self.assertFalse(verdict.approved)
         self.assertEqual(body["reason"], "TARGET_ROOM_TOO_SMALL")
         self.assertEqual(body["decision"], "WAIT")
         self.assertFalse(EACommand.objects.exists())
+        from .models import DecisionEvaluation
+        evaluation = DecisionEvaluation.objects.get(pk=body["evaluation_id"])
+        self.assertEqual(evaluation.verdict_id, verdict.pk)
+        self.assertEqual(evaluation.features, decision.features)
+        self.assertEqual(evaluation.instance_id, "playbook-demo")
+        again = self.client.post("/api/ea/v1/decision", json.dumps(payload), content_type="application/json",
+                                 HTTP_AUTHORIZATION="Bearer test-token")
+        self.assertEqual(again.status_code, 200, again.content)
+        self.assertNotEqual(again.json()["evaluation_id"], evaluation.pk)
+        self.assertEqual(DecisionEvaluation.objects.filter(decision_id=decision.decision_id).count(), 2)
+        evaluation.refresh_from_db()
+        self.assertEqual(evaluation.features, decision.features)
 
     @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_CREATION_ENABLED=False,
                        RAMON_EA_COMMAND_EXECUTION_ENABLED=False)

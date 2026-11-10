@@ -67,6 +67,22 @@ class ContextTests(TestCase):
         snapshot["context_bars"]["M5"].append(duplicate)
         self.assertEqual(completed_context(snapshot, "M5")[1], "INVALID_CADENCE")
 
+    def test_weekend_shaped_break_does_not_erase_current_h1_context(self):
+        friday=datetime(2026,11,6,21,tzinfo=timezone.utc).timestamp()
+        sunday=datetime(2026,11,8,23,tzinfo=timezone.utc).timestamp()
+        rows=context_bars(64,3600,friday+3600)+context_bars(10,3600,sunday+10*3600)
+        snapshot={"bars":[{"time":sunday+9*3600}],"decision_time":sunday+10*3600,
+                  "context_bars":{"H1":rows}}
+        item=market_context(snapshot)["H1"]
+        self.assertEqual(item["status"],"AVAILABLE")
+        self.assertEqual(item["continuity"],"OBSERVED_WEEKEND_BREAK")
+        self.assertFalse(item["broker_calendar_verified"])
+        # Missing early Friday hours or an extended Monday outage are not excused.
+        rows[63]["time"]-=4*3600
+        rows=rows[:60]+rows[64:]
+        snapshot["context_bars"]["H1"]=rows
+        self.assertEqual(market_context(snapshot)["H1"]["status"],"GAPPED")
+
     def test_context_changes_rank_but_is_not_a_fake_probability(self):
         context = market_context(self.snapshot())
         timing, risk = {"quality": 0.8}, {"reward_risk": 1.5}

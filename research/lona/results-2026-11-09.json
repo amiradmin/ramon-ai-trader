@@ -1,0 +1,227 @@
+{
+  "provider": "LONA",
+  "validation": "DESCRIPTIVE_FIXED_RULE_COMPARISON_NOT_PRODUCTION_SIGNALFLOW",
+  "strategy_version": "1.0.0",
+  "source_dataset_sha256": null,
+  "source_checksum_note": "Connector exposes dataset identity and coverage, not a content checksum; not independently audited here.",
+  "spread_and_slippage": "NOT_MODELED",
+  "broker_contract_and_timezone": "Use provider UTC timestamps and Backtrader units; not MT5 lot or margin parity.",
+  "reports": [
+    {
+      "report_id": "d2831866-7b8e-4aac-8759-7ef542d6007d",
+      "status": "COMPLETED",
+      "name": "Ramon research — EMA trend baseline v1.0.0 - Run #3",
+      "strategy_id": "bbea84a9-a960-434a-bad1-5c134f694b4f",
+      "start_date": "2025-01-01T00:00:00+00:00",
+      "end_date": "2025-06-30T00:00:00+00:00",
+      "data_sources": [
+        {
+          "id": "5971a9c3-0671-4acb-b785-19e849c4901b",
+          "symbol": "XAUUSD_o M15 LiteFinance MT5 History",
+          "frequency": "15m"
+        }
+      ],
+      "parameters": [
+        {
+          "name": "order_size_pct",
+          "value": 0.1
+        }
+      ],
+      "simulation_parameters": {
+        "initial_cash": 100000,
+        "commission_schema": {
+          "leverage": 1,
+          "commission": 0.0001
+        },
+        "buy_on_close": false
+      },
+      "total_stats": {
+        "final_portfolio_value": 100303.54,
+        "realized_pnl": 303.54,
+        "total_return": 0.3,
+        "maximum_drawdown_percentage": 0.61,
+        "number_of_trades": 175,
+        "open_trades": 0,
+        "percentage_of_winning_trades": 45.14,
+        "annualized_sharpe_ratio": 0,
+        "cagr": null,
+        "profit_factor": 1.12,
+        "payoff_ratio": 1.36,
+        "expectancy": 1.73,
+        "average_trade": 1.73,
+        "recovery_factor": 0.5,
+        "calmar_ratio": null,
+        "hpr_drawdown_ratio": 0.5,
+        "std_dev_returns": 0.0044,
+        "annualized_volatility": 0.67,
+        "avg_bars_held": 14.2,
+        "beta": null,
+        "alpha": null,
+        "sortino_ratio": -5.47,
+        "information_ratio": -0.61
+      }
+    },
+    {
+      "report_id": "bf350f83-7019-484f-b147-63654b58c6ce",
+      "status": "COMPLETED",
+      "name": "Ramon research — EMA pullback challenger v1.0.0 - Run #3",
+      "strategy_id": "22893569-c2de-47fb-ba72-61af5bac4431",
+      "start_date": "2025-01-01T00:00:00+00:00",
+      "end_date": "2025-06-30T00:00:00+00:00",
+      "data_sources": [
+        {
+          "id": "5971a9c3-0671-4acb-b785-19e849c4901b",
+          "symbol": "XAUUSD_o M15 LiteFinance MT5 History",
+          "frequency": "15m"
+        }
+      ],
+      "parameters": [
+        {
+          "name": "order_size_pct",
+          "value": 0.1
+        }
+      ],
+      "simulation_parameters": {
+        "initial_cash": 100000,
+        "commission_schema": {
+          "leverage": 1,
+          "commission": 0.0001
+        },
+        "buy_on_close": false
+      },
+      "total_stats": {
+        "final_portfolio_value": 100086.83,
+        "realized_pnl": 86.83,
+        "total_return": 0.09,
+        "maximum_drawdown_percentage": 0.76,
+        "number_of_trades": 325,
+        "open_trades": 0,
+        "percentage_of_winning_trades": 42.46,
+        "annualized_sharpe_ratio": 0,
+        "cagr": null,
+        "profit_factor": 1.02,
+        "payoff_ratio": 1.38,
+        "expectancy": 0.27,
+        "average_trade": 0.27,
+        "recovery_factor": 0.11,
+        "calmar_ratio": null,
+        "hpr_drawdown_ratio": 0.11,
+        "std_dev_returns": 0.0063,
+        "annualized_volatility": 0.97,
+        "avg_bars_held": 14,
+        "beta": null,
+        "alpha": null,
+        "sortino_ratio": -4.79,
+        "information_ratio": -0.63
+      }
+    },
+    {
+      "report_id": "372df0c4-d7ed-43e1-a436-838494f4694c",
+      "status": "COMPLETED",
+      "name": "Ramon research — EMA trend baseline v1.0.0 - Run #2",
+      "strategy_id": "bbea84a9-a960-434a-bad1-5c134f694b4f",
+      "start_date": "2025-07-01T00:00:00+00:00",
+      "end_date": "2026-01-01T00:00:00+00:00",
+      "data_sources": [
+        {
+          "id": "5971a9c3-0671-4acb-b785-19e849c4901b",
+          "symbol": "XAUUSD_o M15 LiteFinance MT5 History",
+          "frequency": "15m"
+        }
+      ],
+      "parameters": [
+        {
+          "name": "order_size_pct",
+          "value": 0.1
+        }
+      ],
+      "simulation_parameters": {
+        "initial_cash": 100000,
+        "commission_schema": {
+          "leverage": 1,
+          "commission": 0.0001
+        },
+        "buy_on_close": false
+      },
+      "total_stats": {
+        "final_portfolio_value": 100218.51,
+        "realized_pnl": 218.51,
+        "total_return": 0.22,
+        "maximum_drawdown_percentage": 0.35,
+        "number_of_trades": 188,
+        "open_trades": 0,
+        "percentage_of_winning_trades": 43.09,
+        "annualized_sharpe_ratio": 0,
+        "cagr": null,
+        "profit_factor": 1.08,
+        "payoff_ratio": 1.43,
+        "expectancy": 1.16,
+        "average_trade": 1.16,
+        "recovery_factor": 0.62,
+        "calmar_ratio": null,
+        "hpr_drawdown_ratio": 0.62,
+        "std_dev_returns": 0.0046,
+        "annualized_volatility": 0.71,
+        "avg_bars_held": 14.7,
+        "beta": null,
+        "alpha": null,
+        "sortino_ratio": -6.43,
+        "information_ratio": -1.94
+      }
+    },
+    {
+      "report_id": "5ca9afcb-77f4-4f64-9ff8-cd9377762603",
+      "status": "COMPLETED",
+      "name": "Ramon research — EMA pullback challenger v1.0.0 - Run #2",
+      "strategy_id": "22893569-c2de-47fb-ba72-61af5bac4431",
+      "start_date": "2025-07-01T00:00:00+00:00",
+      "end_date": "2026-01-01T00:00:00+00:00",
+      "data_sources": [
+        {
+          "id": "5971a9c3-0671-4acb-b785-19e849c4901b",
+          "symbol": "XAUUSD_o M15 LiteFinance MT5 History",
+          "frequency": "15m"
+        }
+      ],
+      "parameters": [
+        {
+          "name": "order_size_pct",
+          "value": 0.1
+        }
+      ],
+      "simulation_parameters": {
+        "initial_cash": 100000,
+        "commission_schema": {
+          "leverage": 1,
+          "commission": 0.0001
+        },
+        "buy_on_close": false
+      },
+      "total_stats": {
+        "final_portfolio_value": 100653.53,
+        "realized_pnl": 653.53,
+        "total_return": 0.65,
+        "maximum_drawdown_percentage": 0.67,
+        "number_of_trades": 340,
+        "open_trades": 1,
+        "percentage_of_winning_trades": 43.24,
+        "annualized_sharpe_ratio": 0,
+        "cagr": null,
+        "profit_factor": 1.14,
+        "payoff_ratio": 1.49,
+        "expectancy": 1.85,
+        "average_trade": 1.85,
+        "recovery_factor": 0.97,
+        "calmar_ratio": null,
+        "hpr_drawdown_ratio": 0.98,
+        "std_dev_returns": 0.006,
+        "annualized_volatility": 0.93,
+        "avg_bars_held": 14.4,
+        "beta": null,
+        "alpha": null,
+        "sortino_ratio": -3.95,
+        "information_ratio": -1.83
+      }
+    }
+  ]
+}

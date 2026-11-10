@@ -130,6 +130,13 @@ class LearningOutcomeApiTests(TestCase):
         self.assertEqual(row.tags["command_id"], "ramon-open-risk-001")
         self.assertEqual(row.tags["broker_ticket"], "risk-ticket-001")
         self.assertEqual(row.execution_metrics["slippage_points"], 5.0)
+        self.assertEqual(row.execution_metrics["entry_price"],2300.25)
+        self.assertEqual(row.execution_metrics["decision_to_fill_points"],5.0)
+        retry=self.client.post(self.url,data=json.dumps(payload),content_type="application/json",**self.headers)
+        self.assertEqual(retry.status_code,200,retry.content)
+        changed={**payload,"realized_pnl":"999"}
+        conflict=self.client.post(self.url,data=json.dumps(changed),content_type="application/json",**self.headers)
+        self.assertEqual(conflict.status_code,409)
 
     @override_settings(EA_BEARER_TOKEN="learning-test-token")
     def test_command_without_approved_risk_keeps_r_multiple_unavailable(self):

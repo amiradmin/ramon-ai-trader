@@ -78,3 +78,19 @@ else:
     DB_PATH = Path(os.environ.get("DJANGO_DB_PATH", str(BASE_DIR / "data" / "django.sqlite3")))
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": str(DB_PATH)}}
+
+# Django calculates protection; the EA only executes the authorized command.
+RAMON_DEMO_PROFIT_PROTECTION_ENABLED = os.environ.get("RAMON_DEMO_PROFIT_PROTECTION_ENABLED", "0") == "1"
+RAMON_PROFIT_PROTECTION_INSTANCE = os.environ.get("RAMON_PROFIT_PROTECTION_INSTANCE", "")
+RAMON_PROFIT_PROTECTION_LOGIN = os.environ.get("RAMON_PROFIT_PROTECTION_LOGIN", "")
+RAMON_PROFIT_PROTECTION_SERVER = os.environ.get("RAMON_PROFIT_PROTECTION_SERVER", "")
+
+# Separate paper scalper; this never grants broker execution permission.
+RAMON_SCALP_SHADOW_ENABLED = os.environ.get("RAMON_SCALP_SHADOW_ENABLED", "0") == "1"
+RAMON_SCALP_SLIPPAGE_POINTS = 5.0
+RAMON_SCALP_COMMISSION_POINTS = 5.0
+
+RAMON_SCALP_EXECUTION_ENABLED = os.environ.get("RAMON_SCALP_EXECUTION_ENABLED", "0") == "1"
+RAMON_SCALP_INSTANCE = os.environ.get("RAMON_SCALP_INSTANCE", os.environ.get("RAMON_PROFIT_PROTECTION_INSTANCE", ""))
+RAMON_SCALP_LOGIN = os.environ.get("RAMON_SCALP_LOGIN", os.environ.get("RAMON_PROFIT_PROTECTION_LOGIN", ""))
+RAMON_SCALP_SERVER = os.environ.get("RAMON_SCALP_SERVER", os.environ.get("RAMON_PROFIT_PROTECTION_SERVER", ""))

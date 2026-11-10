@@ -1,0 +1,19 @@
+{
+  "source": {
+    "path": "mt5/RamonCommandEA_v1.09.mq5",
+    "sha256": "83be11ab91a01068b7560b729ccd7ef458991549371455b54ef849c899761a53",
+    "bytes": 39284
+  },
+  "binary": {
+    "path": "research/scalping/bridge/RamonCommandEA_v1.09.ex5",
+    "sha256": "90aa9979a8f56df6eaf1211fccee72dd80b6fd0dca6655f8f08d469817da3f11",
+    "bytes": 111806
+  },
+  "compiler_log": {
+    "path": "research/scalping/bridge/RamonCommandEA_v1.09.log",
+    "sha256": "0adfffde2e62f72e35cb356a066df746096c51c08bce51f0678f6a0d62e604c4",
+    "bytes": 4998
+  },
+  "compiler_result": "0 errors, 0 warnings",
+  "attached_to_chart": false
+}

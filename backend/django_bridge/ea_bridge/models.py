@@ -153,6 +153,7 @@ class EACommand(models.Model):
     payload = models.JSONField(default=dict)
     decision_id = models.CharField(max_length=128, blank=True, default="")
     risk_verdict_id = models.CharField(max_length=128, blank=True, default="")
+    evaluation = models.ForeignKey("DecisionEvaluation", null=True, blank=True, on_delete=models.PROTECT)
     execution_authorized = models.BooleanField(default=False)
     state = models.CharField(max_length=32, choices=State.choices, default=State.PENDING, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -279,6 +280,35 @@ class LearningModelRun(models.Model):
         indexes = [models.Index(fields=["model_key", "-training_finished_at"], name="learn_model_run_latest_idx")]
 
 
+class CandidateObservation(models.Model):
+    """Immutable decision-time candidates and later hypothetical price outcomes."""
+    decision = models.ForeignKey(StrategyDecisionRecord, on_delete=models.PROTECT, related_name="candidate_observations")
+    source = models.CharField(max_length=128)
+    symbol = models.CharField(max_length=32)
+    signal_bar_time = models.DateTimeField()
+    setup = models.CharField(max_length=64)
+    version = models.CharField(max_length=32, default="candidate-1h-v1")
+    side = models.CharField(max_length=8)
+    disposition = models.CharField(max_length=32)
+    snapshot = models.JSONField(default=dict)
+    recorded_at = models.DateTimeField()
+    evaluation_start = models.DateTimeField()
+    evaluation_end = models.DateTimeField(db_index=True)
+    status = models.CharField(max_length=16, default="WAITING", db_index=True)
+    reason = models.CharField(max_length=64, blank=True, default="")
+    outcome = models.JSONField(default=dict)
+    settled_at = models.DateTimeField(null=True, blank=True)
+    plan_status = models.CharField(max_length=16, default="NOT_TRACKED", db_index=True)
+    plan_end = models.DateTimeField(null=True, blank=True)
+    plan_outcome = models.JSONField(default=dict)
+    plan_settled_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["source", "symbol", "signal_bar_time", "setup", "version"],
+                                               name="candidate_observation_unique")]
+        indexes = [models.Index(fields=["source", "symbol", "-recorded_at"], name="candidate_scope_latest")]
+
+
 class ArimaShadowForecast(models.Model):
     """Immutable forecast inputs and forward outcomes; never trading authority."""
 
@@ -319,3 +349,109 @@ class ArimaShadowForecast(models.Model):
             models.Index(fields=["source", "symbol", "model_version", "-origin_bar_time"], name="arima_shadow_scope_latest"),
             models.Index(fields=["status", "target_close_time"], name="arima_shadow_due_idx"),
         ]
+
+
+class AppendOnlyEvaluationQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        raise ValueError("Decision evaluations are append-only")
+
+    def delete(self):
+        raise ValueError("Decision evaluations are append-only")
+
+
+class DecisionEvaluation(models.Model):
+    """Append-only evaluation; legacy decision rows remain a latest-view cache."""
+    objects = AppendOnlyEvaluationQuerySet.as_manager()
+    decision_id = models.CharField(max_length=128, db_index=True)
+    instance_id = models.CharField(max_length=128, db_index=True)
+    account_login = models.CharField(max_length=32)
+    server_name = models.CharField(max_length=128)
+    symbol = models.CharField(max_length=32)
+    action = models.CharField(max_length=8)
+    rationale_code = models.CharField(max_length=128)
+    confidence = models.FloatField()
+    model_version = models.CharField(max_length=128)
+    features = models.JSONField(default=dict)
+    verdict = models.OneToOneField(RiskVerdictRecord, on_delete=models.PROTECT, related_name="evaluation")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValueError("Decision evaluations are append-only")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("Decision evaluations are append-only")
+
+
+class ReliabilityIncident(models.Model):
+    instance_id = models.CharField(max_length=128, db_index=True)
+    account_login = models.CharField(max_length=32)
+    server_name = models.CharField(max_length=128)
+    kind = models.CharField(max_length=32)
+    started_at = models.DateTimeField()
+    detected_at = models.DateTimeField(auto_now_add=True)
+    details = models.JSONField(default=dict)
+
+
+class ScalpObservation(models.Model):
+    """Forward-only paper scalper. No order authorization or broker P&L."""
+    source = models.CharField(max_length=128)
+    account_login = models.CharField(max_length=32)
+    server_name = models.CharField(max_length=128)
+    symbol = models.CharField(max_length=32)
+    version = models.CharField(max_length=64)
+    signal_bar_time = models.DateTimeField()
+    action = models.CharField(max_length=8)
+    reason = models.CharField(max_length=128)
+    recorded_at = models.DateTimeField()
+    evaluation_start = models.DateTimeField()
+    evaluation_end = models.DateTimeField()
+    status = models.CharField(max_length=16, db_index=True)
+    snapshot = models.JSONField(default=dict)
+    outcome = models.JSONField(default=dict)
+    settled_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=['source', 'account_login', 'server_name', 'symbol', 'version', 'signal_bar_time'],
+            name='scalp_signal_scope_unique')]
+        indexes = [models.Index(fields=['source', '-recorded_at'], name='scalp_source_recorded')]
+
+
+class ScalperControl(models.Model):
+    """Explicit, separately controlled demo engine; shared broker transport only."""
+    source = models.CharField(max_length=128)
+    account_login = models.CharField(max_length=32)
+    server_name = models.CharField(max_length=128)
+    symbol = models.CharField(max_length=32)
+    automatic = models.BooleanField(default=False)
+    risk_percent = models.DecimalField(max_digits=6, decimal_places=3, default='0.100')
+    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['source','account_login','server_name','symbol'],
+                                               name='scalper_control_scope_unique')]
+
+
+class ScalpAuditEvent(models.Model):
+    """Append-only decision, health, execution and broker outcome journal."""
+    objects = AppendOnlyEvaluationQuerySet.as_manager()
+    event_key = models.CharField(max_length=64, unique=True)
+    source = models.CharField(max_length=128, db_index=True)
+    account_login = models.CharField(max_length=32)
+    server_name = models.CharField(max_length=128)
+    symbol = models.CharField(max_length=32)
+    kind = models.CharField(max_length=32)
+    reason = models.CharField(max_length=128)
+    observed_at = models.DateTimeField(db_index=True)
+    observation = models.ForeignKey(ScalpObservation, null=True, blank=True, on_delete=models.PROTECT)
+    command = models.ForeignKey(EACommand, null=True, blank=True, on_delete=models.PROTECT)
+    details = models.JSONField(default=dict)
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValueError('Scalp audit events are append-only')
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError('Scalp audit events are append-only')

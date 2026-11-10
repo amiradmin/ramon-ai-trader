@@ -318,8 +318,7 @@ def decision(request):
                 if min(vol, entry, sl, pos_tick_size, pos_tick_value) <= 0:
                     raise ValueError("position risk facts unavailable")
                 adverse = entry - sl if pos_type == 0 else sl - entry
-                if adverse < 0:
-                    raise ValueError("position stop is not loss-side")
+                adverse = max(0.0, adverse)
                 open_risk_money += adverse / pos_tick_size * pos_tick_value * vol
             risk_balance = _num(account_snapshot.get("balance"), "risk balance")
             open_risk_percent_server = open_risk_money / risk_balance * 100.0
@@ -449,8 +448,10 @@ def decision(request):
             "features": features,
           },
         )
-        # Persist a separate, auditable risk verdict. It is never an order command
-        # and deliberately cannot grant execution authorization.
+        if is_demo_account and result.get("selection", {}).get("candidates"):
+            from .candidate_observer import record_candidates
+            record_candidates(record, features["market_snapshot"])
+        # Persist a separate risk verdict; it cannot grant execution authorization.
         risk_stage = result["stages"].get("risk_management", {})
         risk_approved = bool(
             record.action in ("BUY", "SELL")
@@ -535,6 +536,13 @@ def decision(request):
                 "risk_stage": risk_stage,
             },
         )
+        from .models import DecisionEvaluation
+        evaluation = DecisionEvaluation.objects.create(
+            decision_id=key, instance_id=instance_id, account_login=account_login,
+            server_name=server_name, symbol=symbol, action=record.action,
+            rationale_code=record.rationale_code, confidence=confidence,
+            model_version=record.model_version, features=features, verdict=verdict,
+        )
         command = None
         command_created = False
         command_reason = "RISK_VERDICT_NOT_APPROVED" if not risk_approved else "COMMAND_CREATION_DISABLED"
@@ -546,6 +554,7 @@ def decision(request):
                 instance_id=instance_id,
                 account_login=account_login,
                 server_name=server_name,
+                evaluation=evaluation,
             )
             if command is not None:
                 verdict.details["command_created"] = True
@@ -554,6 +563,7 @@ def decision(request):
           record.action, record.rationale_code, key, bar_time, bid, ask, atr, median,
           spread, confidence, risk_approved,
         )
+        response["evaluation_id"] = evaluation.pk
         response["strategy_profile"] = strategy_profile
         response["risk_policy"] = risk_policy
         response["command_created"] = command_created

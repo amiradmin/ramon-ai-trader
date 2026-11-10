@@ -236,6 +236,7 @@ class SignalFlowPipeline:
                 "opportunity_reason": op.get("reason"), "entry_reason": entry.get("reason"),
                 "risk_reason": sizing.get("reason"), "target_price": sizing.get("target_price"),
                 "target_source": sizing.get("target_source"),
+                "stop_price": sizing.get("stop_price"),
             } for ok, _, ranking, op, entry, sizing in evaluated],
         }
         return result

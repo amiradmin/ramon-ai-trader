@@ -37,7 +37,8 @@ def _decimal(value, field):
     return number
 
 
-def create_open_command(*, decision, verdict, instance_id, account_login, server_name):
+@transaction.atomic
+def create_open_command(*, decision, verdict, instance_id, account_login, server_name, evaluation=None):
     """Return (command, created, reason); never create anything unless both gates are on."""
     if not getattr(settings, "RAMON_EA_COMMAND_CREATION_ENABLED", False):
         return None, False, "COMMAND_CREATION_DISABLED"
@@ -49,11 +50,18 @@ def create_open_command(*, decision, verdict, instance_id, account_login, server
         return None, False, "RISK_VERDICT_NOT_APPROVED"
     if verdict.decision_id != decision.decision_id:
         return None, False, "DECISION_VERDICT_MISMATCH"
+    if evaluation is not None and (
+        evaluation.verdict_id != verdict.pk or evaluation.decision_id != decision.decision_id
+        or evaluation.instance_id != instance_id or evaluation.account_login != account_login
+        or evaluation.server_name != server_name or evaluation.action != decision.action
+        or evaluation.symbol != decision.symbol
+    ):
+        return None, False, "EVALUATION_SCOPE_MISMATCH"
     if not instance_id or not account_login or not server_name:
         return None, False, "ACCOUNT_IDENTITY_MISSING"
 
     now = timezone.now()
-    heartbeat = EAHeartbeat.objects.filter(instance_id=instance_id).first()
+    heartbeat = EAHeartbeat.objects.select_for_update().filter(instance_id=instance_id).first()
     if heartbeat is None:
         return None, False, "ACCOUNT_TELEMETRY_UNAVAILABLE"
     age = (now - heartbeat.last_seen).total_seconds()
@@ -76,7 +84,8 @@ def create_open_command(*, decision, verdict, instance_id, account_login, server
     positions = snapshot.get("positions")
     account = snapshot.get("account")
     quote = snapshot.get("quote")
-    if not isinstance(positions, list) or positions:
+    from .scalper_engine import allow_main_alongside_scalps
+    if not isinstance(positions, list) or (positions and not allow_main_alongside_scalps(heartbeat)):
         return None, False, "OPEN_POSITION_RISK_UNVERIFIED"
     if not isinstance(account, dict) or not isinstance(quote, dict):
         return None, False, "ACCOUNT_SNAPSHOT_INVALID"
@@ -122,7 +131,20 @@ def create_open_command(*, decision, verdict, instance_id, account_login, server
     command_id = "ramon-open-" + hashlib.sha256(
         f"{decision.decision_id}|{instance_id}|{account_login}".encode()
     ).hexdigest()[:32]
+    try:
+        tick_size = _decimal(snapshot.get("symbol_info", {}).get("tick_size"), "tick size")
+        tick_value = _decimal(snapshot.get("symbol_info", {}).get("tick_value"), "tick value")
+        if min(tick_size,tick_value)<=0: raise ValueError("contract")
+        reserved_risk = risk_distance/tick_size*tick_value*volume
+        if not EACommand.objects.filter(command_id=command_id).exists():
+            from .scalper_engine import exposure_money, limits
+            cap, _ = limits()
+            if exposure_money(heartbeat)+reserved_risk > current_balance*cap/100:
+                return None, False, "PORTFOLIO_RISK_LIMIT_REACHED"
+    except (ValueError,TypeError,ArithmeticError):
+        return None, False, "PORTFOLIO_RISK_UNVERIFIED"
     payload = {
+        "reserved_risk_money": float(reserved_risk),
         "server_name": server_name,
         "side": decision.action,
         "volume": float(volume),
@@ -140,6 +162,7 @@ def create_open_command(*, decision, verdict, instance_id, account_login, server
                 "payload": payload,
                 "decision_id": decision.decision_id,
                 "risk_verdict_id": str(verdict.pk),
+                "evaluation": evaluation,
                 "execution_authorized": True,
                 "expires_at": now + timedelta(seconds=60),
             },

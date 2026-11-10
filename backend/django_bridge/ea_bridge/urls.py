@@ -5,8 +5,17 @@ from . import commands as command_views
 from . import telemetry as telemetry_views
 from . import learning_views
 from . import forecast_views
+from . import economic_calendar
+from . import candidate_observer
+from . import execution_observer
+from . import reliability
+from . import scalp_observer
+from . import scalper_views
 
 urlpatterns = [
+    path("scalper", scalper_views.scalper_console, name="ramon-scalper-console"),
+    path("research/scalping", scalp_observer.scalp_status, name="ramon-scalping-shadow"),
+    path("reliability", reliability.reliability_status, name="ramon-reliability"),
     path("handshake", views.handshake, name="ea-handshake"),
     path("heartbeat", views.heartbeat, name="ea-heartbeat"),
     path("events", views.events, name="ea-events"),
@@ -19,6 +28,9 @@ urlpatterns = [
     path("dashboard", views.dashboard, name="ramon-dashboard"),
     path("dashboard-data", views.dashboard_data, name="ramon-dashboard-data"),
     path("forecast/arima", forecast_views.arima_status, name="ramon-arima-shadow-status"),
+    path("research/economic-calendar", economic_calendar.calendar_status, name="ramon-economic-calendar"),
+    path("research/candidates", candidate_observer.candidate_status, name="ramon-candidate-observer"),
+    path("research/execution", execution_observer.execution_status, name="ramon-execution-observer"),
     path("dashboard/pnl-summary", views.dashboard_pnl_summary, name="ramon-dashboard-pnl-summary"),
     path("dashboard-snapshot", views.dashboard_snapshot, name="ramon-dashboard-snapshot"),
     path("decision-thresholds", views.decision_thresholds, name="ramon-decision-thresholds"),

@@ -55,6 +55,14 @@ Opposing context penalizes a plan rather than prohibiting every reversal trade.
 Context is scoped to the same EA source and symbol, with candle completion and
 receipt times bounded by decision time.
 
+The continuity checker now distinguishes a narrowly defined Friday-night to
+Sunday-night timestamp pattern from weekday outages. It preserves the observed
+bars without interpolation and marks the break as observed, with the broker
+calendar explicitly unverified. See [H1 continuity and the forward candidate
+journal](../operations/candidate-journal.md) for the exact rule and measurement
+limits. The journal records new demo candidates before their later price windows;
+it does not fabricate entries for non-directional rejections or train live weights.
+
 The session detector now needs the complete M15 opening range and a fresh close
 across its boundary. Continued closes beyond the level are not new breakout
 triggers. Compression uses the immediately preceding range with square-root-of-
@@ -107,8 +115,11 @@ the same sample and call it out-of-sample validation.
 
 ## What this version does not yet implement
 
-The robot still exits through its broker stop and target. It does not automatically
-scale out, trail stops, exit on regime changes, or pyramid positions. Such policies
+The robot exits through its broker stop and target. An explicitly enabled, account-scoped
+demo rule now allows Django to move SL to entry at +1 original R while preserving TP;
+see [profit protection](../research/profit-protection-2026-11-09.md). All calculations
+run in Django; MT5 only executes its command and reports the broker result.
+It does not automatically scale out, trail stops, exit on regime changes, or pyramid positions. Such policies
 need separate comparative evidence and broker-lifecycle tests. Existing learning
 models remain research-only; they do not rewrite live ranking weights. Tick volume
 is not treated as centralized gold order flow, and no undocumented “institutional”

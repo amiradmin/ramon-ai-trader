@@ -319,6 +319,10 @@ def record_outcome(request):
             outcome["instance_id"] = command.instance_id
             outcome["account_login"] = command.account_login
             outcome["symbol"] = command.symbol or str(payload.get("symbol") or "")
+            if command.payload.get("engine") == "SCALPER":
+                outcome["strategy_profile"] = "SCALPER_M1_M5"
+                outcome["setup_type"] = "SCALP_M1_PULLBACK"
+                outcome["model_version"] = "m1-m5-pullback-v1"
         if decision_id:
             outcome["decision_id"] = decision_id[:128]
         for key in ("symbol", "instance_id", "account_login"):
@@ -337,6 +341,9 @@ def record_outcome(request):
         observed_slippage = _observed_entry_slippage(outcome, decision)
         if observed_slippage is not None:
             outcome["slippage_points"] = observed_slippage
+
+        from .execution_observer import enrich_outcome
+        enrich_outcome(outcome,decision,command)
 
         result = _learning().observe(outcome)
         if not result.get("accepted"):

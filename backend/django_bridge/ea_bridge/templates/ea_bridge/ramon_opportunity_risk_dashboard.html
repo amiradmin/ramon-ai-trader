@@ -225,6 +225,68 @@
 </section>
 <div id="status" class="card" role="status" aria-live="polite" style="margin-bottom:18px">Loading the latest Django decision…</div>
 
+<section class="card" aria-labelledby="eventsTitle" style="margin-bottom:18px">
+  <div class="section-head" style="margin:0 0 12px"><div><h2 id="eventsTitle">US economic events · gold context</h2><p>TipRanks research snapshot · High and Medium impact · context only</p></div><span class="pill">EVENT CONTEXT</span></div>
+  <p class="small" id="eventsStatus" role="status" aria-live="polite">Loading the latest imported event snapshot…</p>
+  <div class="small" id="eventsScope"></div>
+  <details style="margin-top:12px"><summary>View economic events</summary>
+    <div class="table-wrap"><table class="table" style="min-width:650px"><thead><tr><th scope="col">Provider time</th><th scope="col">Event</th><th scope="col">Impact</th><th scope="col">Estimate</th><th scope="col">Previous</th></tr></thead><tbody id="eventsRows"><tr><td colspan="5">No imported events.</td></tr></tbody></table></div>
+  </details>
+  <p class="small" style="margin:12px 0 0">This snapshot requires a new import to refresh. It does not change trade decisions or orders.</p>
+</section>
+
+<section class="card" aria-labelledby="candidatesTitle" style="margin-bottom:18px">
+  <div class="section-head" style="margin:0 0 12px"><div><h2 id="candidatesTitle">Opportunity outcomes · forward journal</h2><p>Selected plans, eligible alternatives and rejected candidates recorded before their outcomes.</p></div><span class="pill">OBSERVATION ONLY</span></div>
+  <p class="small" id="candidatesStatus" role="status" aria-live="polite">Loading candidate journal…</p>
+  <p class="small" id="candidateContextStatus"></p>
+  <p class="small">Measures one hour from the next full M15 opening candle. Movement includes the recorded spread, but excludes slippage, commission and swap. It is not broker profit or an SL/TP backtest. Candidates without a direction are recorded and left unscored.</p>
+  <details style="margin-top:12px"><summary>Compare setups and decision groups</summary><div class="table-wrap"><table class="table" style="min-width:650px"><thead><tr><th>Setup</th><th>Decision group</th><th>Recorded</th><th>Scored</th><th>Positive movement</th><th>Mean movement (points)</th></tr></thead><tbody id="candidatesGroups"><tr><td colspan="6">Waiting for new decisions.</td></tr></tbody></table></div></details>
+  <details style="margin-top:12px"><summary>Stop and target results · up to six hours</summary>
+    <p class="small">Frozen plans only. Entry at the next full M15 open; recorded spread assumed throughout. Same-candle stop and target resolves stop-first. No invented stops or targets; no slippage, commission or swap included. Existing journal rows are not backfilled.</p>
+    <div class="table-wrap"><table class="table" style="min-width:650px"><thead><tr><th>Setup</th><th>Decision group</th><th>Targets</th><th>Stops / gaps</th><th>Time exits</th><th>Waiting / open</th><th>Unavailable / skipped</th><th>Mean simulated R</th></tr></thead><tbody id="candidatePlans"></tbody></table></div>
+  </details>
+</section>
+
+<section class="card" aria-labelledby="scalpTitle" style="margin-bottom:18px">
+  <h2 id="scalpTitle">Independent scalper · M1 / M5</h2>
+  <p class="small">Separate engine and position ownership. Paper holds end at SL, TP or five minutes. Broker entries require separate activation and a hedging-capable bridge.</p>
+  <p id="scalpStatus" class="small" role="status" aria-live="polite">Loading paper observations…</p>
+  <p class="small">The initial historical replay lost 7.22R over 81 paper trades after assumed costs. Forward results are collecting; broker execution starts disabled.</p>
+  <p><a href="/api/ea/v1/scalper" style="color:#8bd5ff">Open scalper controls · staff sign-in required ↗</a></p>
+  <div class="table-wrap"><table class="table"><thead><tr><th>Recorded (UTC)</th><th>Action</th><th>Reason</th><th>Paper outcome</th></tr></thead><tbody id="scalpRows"></tbody></table></div>
+</section>
+
+<section class="card" aria-labelledby="reliabilityTitle" style="margin-bottom:18px">
+  <h2 id="reliabilityTitle">Reliability · feed and broker verification</h2>
+  <p class="small">Current broker evidence is checked separately from acknowledgements. Historical commands without an evaluation link remain labelled legacy. This panel does not retry orders.</p>
+  <p id="reliabilityStatus" class="small" role="status" aria-live="polite">Loading reliability observations…</p>
+  <div id="reliabilityFeeds"></div>
+</section>
+
+<section class="card" aria-labelledby="executionTitle" style="margin-bottom:18px">
+  <div class="section-head" style="margin:0 0 12px"><div><h2 id="executionTitle">Broker execution · measured costs</h2><p>Actual reported fills and cash charges, kept separate from simulated candidates.</p></div></div>
+  <p id="executionStatus" class="small" role="status" aria-live="polite">Loading broker observations…</p>
+  <div class="table-wrap"><table class="table"><thead><tr><th>Measurement</th><th>Average</th><th>Observed</th><th>Unavailable</th></tr></thead><tbody id="executionMetrics"></tbody></table></div>
+  <p class="small">Price differences and spread use symbol points. Positive request slippage is adverse; negative is favorable. Decision-to-fill movement includes delay before submission. Commission/fees and swap use account currency, signed as reported by the broker. They are already included in reported net P&amp;L and are not subtracted again. Missing measurements stay unavailable.</p>
+  <p class="small" id="executionUpgrade"></p>
+  <details style="margin-top:12px"><summary>Recent request prices and fills</summary><div class="table-wrap"><table class="table"><thead><tr><th>Reported (UTC)</th><th>Requested price</th><th>Broker fill</th><th>Signed slippage (points)</th></tr></thead><tbody id="executionFills"></tbody></table></div></details>
+</section>
+
+<section class="card" id="profitProtection" aria-labelledby="protectionTitle" style="margin-bottom:18px">
+  <div class="section-head" style="margin:0 0 12px"><div><h2 id="protectionTitle">Profit protection</h2><p>Django-owned demo position management and broker results.</p></div></div>
+  <p class="small">All calculations run in Django. MT5 only executes the authorized stop change and reports the broker result. At +1 original R, Django moves SL to entry and preserves TP. Price breakeven can still lose money after costs or gaps.</p>
+  <p id="protectionStatus" class="small" role="status">Loading protection status…</p>
+  <div class="table-wrap"><table class="table" style="min-width:650px"><thead><tr><th>Position</th><th>Status</th><th>Current R</th><th>Current SL</th><th>Proposed SL</th><th>TP</th></tr></thead><tbody id="protectionPositions"></tbody></table></div>
+  <h4>Broker protection results</h4>
+  <div class="table-wrap"><table class="table" style="min-width:650px"><thead><tr><th>Created (UTC)</th><th>Position</th><th>State</th><th>Requested SL</th><th>Broker result</th><th>Closed net P&amp;L</th></tr></thead><tbody id="protectionCommands"></tbody></table></div>
+  <h4>Historical exit comparison · 9 November 2026</h4>
+  <p id="exitComparisonStatus" class="small"></p>
+  <div class="table-wrap"><table class="table" style="min-width:650px"><thead><tr><th>Rule</th><th>Trades</th><th>Net R</th><th>Average R</th><th>Win rate</th><th>Closed R drawdown</th></tr></thead><tbody id="exitComparisonRows"></tbody></table></div>
+  <p class="small">Descriptive comparison of frozen entries, not a portfolio backtest or proof of future profit. 50-point spread, 5-point slippage each side, zero assumed commission. 24-bar research exit; protection starts on the next bar. Partial-profit results assume ideal half-volume without broker lot rounding. Drawdown uses closed cumulative R, not account percentage or intratrade equity. Live protection uses current executable quotes; it does not reconstruct past peaks. Broker acknowledgement confirms execution, not profitability. Closed net P&amp;L is in account currency for a linked protected trade; it does not measure profit caused by protection.</p>
+
+
+</section>
+
 <section class="card" aria-labelledby="arimaTitle" style="margin-bottom:18px">
   <div class="section-head" style="margin:0 0 14px">
     <div><h2 id="arimaTitle">ARIMA · next 15-minute close</h2><p>A separate forecasting observer. It does not approve, block, or change orders.</p></div>
@@ -958,6 +1020,7 @@ function renderPlaybookSelection(decision) {
   $("playbookContext").textContent = ["H1", "M5"].map(tf => {
     const value = context[tf] || {};
     return tf + ": " + (value.status || "MISSING") + " · " + (value.bias || "UNKNOWN") +
+      (value.continuity === "OBSERVED_WEEKEND_BREAK" ? " · weekend-shaped break (calendar unverified)" : "") +
       (tf === "M5" ? " · trigger " + (value.trigger || "NONE") : "");
   }).join(" | ");
   $("playbookCandidates").innerHTML = selection.candidates.map(candidate => {
@@ -1424,6 +1487,178 @@ const pnlThirtyDaysAgo = new Date(pnlToday.getTime() - 29 * 86400000);
 $("pnlFrom").value = utcDateInputValue(pnlThirtyDaysAgo);
 $("pnlTo").value = utcDateInputValue(pnlToday);
 loadPnlSummary();
+let candidatesRequestInFlight = false;
+async function refreshCandidateJournal() {
+  if (candidatesRequestInFlight) return;
+  candidatesRequestInFlight = true;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch("/api/ea/v1/research/candidates", {cache:"no-store", signal:controller.signal});
+    if (!response.ok) throw new Error("Candidate journal unavailable");
+    const data = await response.json();
+    const counts = data.counts || {};
+    $("candidateContextStatus").textContent = ["H1", "M5"].map(tf => {
+      const context = data.current_context?.[tf] || {};
+      return tf + ": " + (context.status || "MISSING") + " · " + (context.bias || "UNKNOWN") +
+        (context.continuity === "OBSERVED_WEEKEND_BREAK" ? " · weekend-shaped break; broker calendar unverified" : "");
+    }).join(" | ");
+    $("candidatesStatus").textContent = data.state === "NO_DEMO_FEED" ? "No demo feed available." :
+      data.state === "WAITING_FOR_NEW_DECISION" ? "Waiting for the next new demo decision. Historical decisions are not counted as forward observations." :
+      (counts.WAITING || 0) + " awaiting outcomes · " + (counts.SCORED || 0) + " scored · " + (counts.SKIPPED || 0) + " unscored · latest " + data.sample_limit + " candidates maximum";
+    $("candidatesGroups").innerHTML = (data.groups || []).map(row => "<tr><td>" + esc(row.setup) + "</td><td>" + esc(row.disposition) +
+      "</td><td>" + row.observations + "</td><td>" + row.scored + "</td><td>" + (row.scored ? row.positive + " / " + row.scored : "—") +
+      "</td><td>" + (row.mean_points == null ? "—" : Number(row.mean_points).toFixed(1)) + "</td></tr>").join("") || '<tr><td colspan="6">Waiting for new decisions.</td></tr>';
+    $("candidatePlans").innerHTML = (data.groups || []).map(row => {
+      const c = row.plan_counts || {};
+      return "<tr><td>" + esc(row.setup) + "</td><td>" + esc(row.disposition) + "</td><td>" + (c.TARGET || 0) +
+        "</td><td>" + ((c.STOP || 0) + (c.STOP_GAP || 0)) + "</td><td>" + (c.TIME_EXIT || 0) +
+        "</td><td>" + ((c.WAITING || 0) + (c.OPEN || 0)) + "</td><td>" +
+        Object.entries(c).filter(([key]) => !["TARGET","STOP","STOP_GAP","TIME_EXIT","WAITING","OPEN"].includes(key)).reduce((sum,[key,n]) => sum+n,0) +
+        "</td><td>" + (row.plan_mean_r == null ? "—" : Number(row.plan_mean_r).toFixed(3)) + "</td></tr>";
+    }).join("") || '<tr><td colspan="8">Waiting for new plans with valid stop and target levels.</td></tr>';
+  } catch (error) {
+    $("candidatesStatus").textContent = "Candidate journal unavailable; any displayed results may be old.";
+  } finally {
+    clearTimeout(timeout);
+    candidatesRequestInFlight = false;
+  }
+}
+refreshCandidateJournal();
+setInterval(refreshCandidateJournal, 30000);
+let scalpInFlight = false;
+async function refreshScalp() {
+  if (scalpInFlight) return;
+  scalpInFlight = true;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await fetch("/api/ea/v1/research/scalping", {cache:"no-store",signal:controller.signal});
+    if (!response.ok) throw new Error();
+    const data = await response.json();
+    $("scalpStatus").textContent = `${data.mode} · ${data.scored} scored · ${data.pending || 0} pending · ${data.skipped || 0} skipped · ${data.net_points == null ? "unavailable" : data.net_points.toFixed(1)} net paper points. Costs: quote spread, assumed 5-point slippage each side and 5-point round-trip commission.`;
+    $("scalpRows").innerHTML = (data.recent || []).map(r => "<tr><td>" + esc(r.recorded_at) + "</td><td>" + esc(r.action) + "</td><td>" + esc(r.reason) + "</td><td>" + esc(r.result || r.status) + "</td></tr>").join("") || "<tr><td colspan='4'>Waiting for a fresh completed M1 candle.</td></tr>";
+  } catch(error) {
+    $("scalpStatus").textContent = "Scalper observations unavailable; previous values may be stale.";
+  } finally { clearTimeout(timeout); scalpInFlight = false; }
+}
+refreshScalp();
+setInterval(refreshScalp, 15000);
+
+let reliabilityInFlight = false;
+async function refreshReliability() {
+  if (reliabilityInFlight) return;
+  reliabilityInFlight = true;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await fetch("/api/ea/v1/reliability", {cache:"no-store", signal:controller.signal});
+    if (!response.ok) throw new Error("Reliability unavailable");
+    const data = await response.json();
+    $("reliabilityStatus").textContent = "Observed " + data.observed_at + " · " + data.feeds.length + " feed(s)";
+    const expanded = new Set(Array.from($("reliabilityFeeds").querySelectorAll("details[open]"), d => d.dataset.key));
+    $("reliabilityFeeds").innerHTML = data.feeds.map(feed =>
+      "<h3>" + esc(feed.source) + " · " + esc(feed.state) + "</h3>" +
+      "<p class='small'>Heartbeat age: " + Math.round(feed.heartbeat_age_seconds) + "s · Quote age: " +
+      (feed.quote_age_seconds == null ? "unavailable" : Math.round(feed.quote_age_seconds) + "s") + " · " +
+      Object.entries(feed.bars).map(([tf, bar]) => esc(tf) + ": " + (bar.fresh ? "fresh" : "stale / missing")).join(" · ") + "</p>" +
+      "<details data-key='" + esc(feed.source + ":evaluations") + "'><summary>Recent immutable evaluations</summary><div class='table-wrap'><table class='table'><thead><tr><th>Evaluation</th><th>Recorded (UTC)</th><th>Action</th><th>Reason</th><th>Risk verdict</th></tr></thead><tbody>" +
+      feed.evaluations.map(e => "<tr><td>" + esc(String(e.id)) + "</td><td>" + esc(e.created_at) + "</td><td>" + esc(e.action) + "</td><td>" + esc(e.rationale_code) + "</td><td>" + esc(e.verdict__reason_code) + "</td></tr>").join("") +
+      "</tbody></table></div></details><details data-key='" + esc(feed.source + ":commands") + "'><summary>Recent command verification</summary><div class='table-wrap'><table class='table'><thead><tr><th>Command</th><th>Acknowledgement</th><th>Broker evidence</th><th>Evaluation</th></tr></thead><tbody>" +
+      feed.commands.map(c => "<tr><td>" + esc(c.action) + " · " + esc(c.command_id) + "</td><td>" + esc(c.ack_state) +
+      "</td><td>" + esc(c.verification) + "</td><td>" + esc(c.evaluation_id == null ? "Legacy / unavailable" : String(c.evaluation_id)) + "</td></tr>").join("") +
+      "</tbody></table></div></details><details data-key='" + esc(feed.source + ":incidents") + "'><summary>Recorded telemetry gaps</summary>" +
+      (feed.incidents.map(i => "<p class='small'>" + esc(i.started_at) + " · " + esc(i.kind) + " · " + esc(i.details.seconds == null ? i.details.meaning : String(i.details.seconds) + "s") + "</p>").join("") || "<p class='small'>No gaps recorded since this feature began collecting.</p>") + "</details>"
+    ).join("");
+    $("reliabilityFeeds").querySelectorAll("details").forEach(d => { d.open = expanded.has(d.dataset.key); });
+  } catch (error) {
+    $("reliabilityStatus").textContent = "Reliability unavailable; previous observations may be stale.";
+  } finally {
+    clearTimeout(timeout);
+    reliabilityInFlight = false;
+  }
+}
+refreshReliability();
+setInterval(refreshReliability, 15000);
+
+let executionRequestInFlight = false;
+async function refreshExecutionCosts() {
+  if (executionRequestInFlight) return;
+  executionRequestInFlight = true;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch("/api/ea/v1/research/execution", {cache:"no-store",signal:controller.signal});
+    if (!response.ok) throw new Error("Execution data unavailable");
+    const data = await response.json();
+    const pp = data.profit_protection || {};
+    $("protectionStatus").textContent = (pp.mode || "Unavailable") + " · " + (pp.state || "Waiting for demo feed") + " · Calculations: Django";
+    const fmtProtection = v => v == null ? "—" : Number(v).toFixed(3);
+    $("protectionPositions").innerHTML = (pp.positions || []).map(row => "<tr><td>" + esc(row.ticket) + "</td><td>" + esc(row.state) + "</td><td>" + fmtProtection(row.current_r) + "</td><td>" + fmtProtection(row.current_stop) + "</td><td>" + fmtProtection(row.proposed_stop) + "</td><td>" + fmtProtection(row.take_profit) + "</td></tr>").join("") || '<tr><td colspan="6">No open positions in the current telemetry.</td></tr>';
+    $("protectionCommands").innerHTML = (pp.recent_commands || []).map(row => "<tr><td>" + esc(row.created_at) + "</td><td>" + esc(row.payload.position_ticket) + "</td><td>" + esc(row.state) + "</td><td>" + fmtProtection(row.payload.stop_loss) + "</td><td>" + esc(row.result.detail || "Awaiting broker acknowledgement") + "</td><td>" + (row.closed_result ? fmtProtection(row.closed_result.net_pnl) : "Awaiting linked closed outcome") + "</td></tr>").join("") || '<tr><td colspan="6">No protection commands yet. A live +1R trigger and a verified Ramon position are required.</td></tr>';
+    const comparison = data.exit_comparison || {};
+    const names = {current:"Current target",target_1_2R:"Target capped at 1.2R",target_1R:"Target at 1R",breakeven_1R:"Breakeven at +1R",trail_1R:"Trail 0.5R after +1R",partial_1R:"Half profit at +1R (ideal volume)"};
+    $("exitComparisonStatus").textContent = (comparison.baseline_trades || 0) + " baseline trades · " + (comparison.excluded_incomplete_or_gapped_windows || 0) + " incomplete/gapped windows excluded · period " + (comparison.first_bar ? new Date(comparison.first_bar*1000).toISOString().slice(0,10) : "—") + " to " + (comparison.last_bar ? new Date(comparison.last_bar*1000).toISOString().slice(0,10) : "—");
+    $("exitComparisonRows").innerHTML = Object.entries(comparison.results || {}).map(([key,row]) => "<tr><td>" + esc(names[key] || key) + "</td><td>" + row.trades + "</td><td>" + fmtProtection(row.net_r) + "</td><td>" + fmtProtection(row.expectancy_r) + "</td><td>" + (row.win_rate == null ? "—" : (row.win_rate*100).toFixed(1)+"%") + "</td><td>" + fmtProtection(row.max_closed_cumulative_r_drawdown) + "</td></tr>").join("");
+    $("executionStatus").textContent = data.state === "NO_DEMO_FEED" ? "No demo feed available." :
+      (data.closed_trades || 0) + " closed trades · " + (data.executed_open_commands || 0) + " executed OPEN commands · latest 200 of each for this account/source/symbol";
+    const labels={request_slippage_points:"Request-to-fill slippage (points)",submission_spread_points:"Submission spread (points)",
+      decision_to_fill_points:"Decision-to-fill movement (points)",decision_spread_points:"Decision spread (points)",
+      commission:"Commission + fees (account currency)",swap:"Swap (account currency)"};
+    $("executionMetrics").innerHTML = Object.entries(labels).map(([key,label]) => {
+      const m = data.metrics?.[key] || {};
+      return "<tr><td>" + esc(label) + "</td><td>" + (m.average == null ? "—" : Number(m.average).toFixed(3)) +
+        "</td><td>" + (m.observations || 0) + "</td><td>" + (m.unavailable == null ? "—" : m.unavailable) + "</td></tr>";
+    }).join("");
+    const showNumber = v => v == null ? "—" : Number(v).toFixed(3);
+    $("executionFills").innerHTML = (data.recent_requests || []).map(row => "<tr><td>" + esc(row.reported_at || "—") +
+      "</td><td>" + showNumber(row.metrics.request_price) + "</td><td>" + showNumber(row.metrics.request_fill_price) +
+      "</td><td>" + showNumber(row.metrics.request_slippage_points) + "</td></tr>").join("") || '<tr><td colspan="4">No request-price observations received yet.</td></tr>';
+    $("executionUpgrade").textContent = (data.metrics?.request_slippage_points?.observations || 0) ? "Request-to-fill measurements are arriving from broker acknowledgements." : data.ea_version === "1.08" ?
+      "EA v1.08 is reporting. Waiting for a completed OPEN acknowledgement with usable request and fill prices." :
+      "Precise request-to-fill measurement requires RamonCommandEA v1.08. Existing EA versions can continue reporting closed-trade commission, swap and entry fills.";
+  } catch (error) {
+    $("executionStatus").textContent = "Broker cost panel unavailable; any displayed values may be old.";
+    $("protectionStatus").textContent = "Protection data unavailable; displayed values may be stale.";
+  } finally {
+    clearTimeout(timeout);
+    executionRequestInFlight = false;
+  }
+}
+refreshExecutionCosts();
+setInterval(refreshExecutionCosts, 30000);
+let eventsRequestInFlight = false;
+async function refreshEconomicEvents() {
+  if (eventsRequestInFlight) return;
+  eventsRequestInFlight = true;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch("/api/ea/v1/research/economic-calendar", {cache:"no-store", signal:controller.signal});
+    if (!response.ok) throw new Error("Events unavailable");
+    const data = await response.json();
+    const messages = {NOT_IMPORTED:"No event snapshot imported yet.",
+      TIMEZONE_UNVERIFIED:"Provider timezone is unverified. Times below are shown exactly as supplied; no countdown is calculated.",
+      STALE:"This event snapshot is out of date. Import a fresh snapshot before relying on its schedule.",
+      UNAVAILABLE:"The event snapshot could not be read.", READY:"Imported schedule available. Times include their UTC offset."};
+    $("eventsStatus").textContent = messages[data.state] || "Event status unavailable.";
+    $("eventsStatus").className = data.state === "READY" ? "small" : "small negative";
+    $("eventsScope").textContent = data.retrieved_at ? "Retrieved: " + data.retrieved_at + " · Coverage: " + data.from_date + " to " + data.to_date + " · US High/Medium only" : "";
+    const rows = Array.isArray(data.events) ? data.events : [];
+    const value = (v, unit) => v == null ? "—" : String(v) + (unit ? " " + unit : "");
+    $("eventsRows").innerHTML = rows.length ? rows.map(row => "<tr><td>" + esc(row.provider_time) +
+      "</td><td>" + esc(row.name) + "</td><td>" + esc(row.impact) + "</td><td>" + esc(value(row.estimate, row.unit)) +
+      "</td><td>" + esc(value(row.prev, row.unit)) + "</td></tr>").join("") : '<tr><td colspan="5">No events available in this snapshot.</td></tr>';
+  } catch (error) {
+    $("eventsStatus").textContent = "Event panel unavailable. Any displayed schedule may be old.";
+    $("eventsStatus").className = "small negative";
+  } finally {
+    clearTimeout(timeout);
+    eventsRequestInFlight = false;
+  }
+}
+refreshEconomicEvents();
+setInterval(refreshEconomicEvents, 60000);
 let arimaRequestInFlight = false;
 async function refreshArimaForecast() {
   if (arimaRequestInFlight) return;

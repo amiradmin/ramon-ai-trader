@@ -136,9 +136,10 @@ def train_trade_outcome_pipeline(model_key: str, *, symbol: str = "XAUUSD_o") ->
     if spec is None:
         raise ValueError(f"Unknown trade-outcome pipeline: {model_key}")
 
+    from django.db.models import Q
     query = LearningTradeOutcome.objects.filter(
         closed_at__isnull=False, symbol=symbol
-    ).order_by("closed_at", "id")
+    ).filter(Q(tags__strategy_profile__isnull=True) | ~Q(tags__strategy_profile="SCALPER_M1_M5")).order_by("closed_at", "id")
     if model_key == "trade_decision":
         query = query.exclude(decision_id="")
     elif model_key == "trade_regime":

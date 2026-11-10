@@ -1,0 +1,209 @@
+{
+  "validation": "DESCRIPTIVE_PAIRED_EXITS_NOT_OUT_OF_SAMPLE_OR_PORTFOLIO",
+  "snapshot_sha256": "21a3c0fc79dd5de7e02719ca0ade97fe8a6476be2a8a345d46cccb14848f7bb4",
+  "source": "ramon-command-ea-1",
+  "symbol": "XAUUSD_o",
+  "first_bar": 1792980900.0,
+  "last_bar": 1794235500.0,
+  "input_bars": 967,
+  "off_grid_excluded": 1243,
+  "baseline_trades": 48,
+  "excluded_incomplete_or_gapped_windows": 10,
+  "config": {
+    "risk": {
+      "stop_buffer_atr": 0.2,
+      "min_stop_atr": 0.6,
+      "max_stop_atr": 3.0,
+      "min_reward_risk": 1.2,
+      "target_reward_risk": 1.25,
+      "max_total_risk_percent": 2.0,
+      "strict_structural": true,
+      "short_stop_spread_adjust": true
+    },
+    "maximum_risk_percent": 1.6,
+    "opportunity": {
+      "min_bars": 100,
+      "max_bars": 500,
+      "max_gap_intervals": 8.0,
+      "gap_window": 40,
+      "symbol_prefixes": [
+        "XAUUSD"
+      ],
+      "session_timezone": "Europe/Helsinki",
+      "session_hours": [
+        [
+          0,
+          1,
+          6,
+          23,
+          59
+        ],
+        [
+          1,
+          1,
+          2,
+          23,
+          59
+        ],
+        [
+          2,
+          1,
+          2,
+          23,
+          59
+        ],
+        [
+          3,
+          1,
+          2,
+          23,
+          59
+        ],
+        [
+          4,
+          1,
+          2,
+          23,
+          59
+        ]
+      ],
+      "fast_ema": 20,
+      "slow_ema": 50,
+      "atr_period": 14,
+      "adx_period": 14,
+      "rsi_period": 14,
+      "pivot_window": 3,
+      "slope_lookback": 10,
+      "adx_trending": 10.0,
+      "adx_ranging": 8.0,
+      "min_ema_separation_atr": 0.06,
+      "support_tolerance_atr": 1.0,
+      "regime_lookback": 8,
+      "atr_baseline_bars": 100,
+      "atr_ratio_min": 0.6,
+      "atr_ratio_max": 2.5,
+      "min_impulse_atr": 0.8,
+      "min_retracement": 0.05,
+      "max_retracement": 0.95,
+      "zone_tolerance_atr": 0.9,
+      "max_bars_since_pullback_low": 16,
+      "rsi_overbought": 85,
+      "breakout_lookback": 8,
+      "breakout_buffer_atr": 0.0,
+      "breakout_retest_tolerance_atr": 0.5,
+      "breakout_max_retest_bars": 6,
+      "require_closed_flag": true,
+      "impulse_start_mode": "LOWEST_SINCE_PRIOR_HIGH"
+    }
+  },
+  "results": {
+    "current": {
+      "trades": 38,
+      "net_r": 7.442699534061765,
+      "expectancy_r": 0.19586051405425697,
+      "win_rate": 0.5263157894736842,
+      "max_closed_cumulative_r_drawdown": 4.845354943489351,
+      "outcomes": {
+        "STOP": 17,
+        "STOP_GAP": 0,
+        "TARGET": 19,
+        "TIME_EXIT": 2
+      }
+    },
+    "target_1_2R": {
+      "trades": 38,
+      "net_r": 6.407663414329472,
+      "expectancy_r": 0.16862272142972295,
+      "win_rate": 0.5263157894736842,
+      "max_closed_cumulative_r_drawdown": 4.895354943489311,
+      "outcomes": {
+        "STOP": 17,
+        "STOP_GAP": 0,
+        "TARGET": 20,
+        "TIME_EXIT": 1
+      }
+    },
+    "target_1R": {
+      "trades": 38,
+      "net_r": 6.407663414329401,
+      "expectancy_r": 0.1686227214297211,
+      "win_rate": 0.5789473684210527,
+      "max_closed_cumulative_r_drawdown": 5.095354943489336,
+      "outcomes": {
+        "STOP": 15,
+        "STOP_GAP": 0,
+        "TARGET": 22,
+        "TIME_EXIT": 1
+      }
+    },
+    "breakeven_1R": {
+      "trades": 38,
+      "net_r": 4.56558312038149,
+      "expectancy_r": 0.12014692422056553,
+      "win_rate": 0.4473684210526316,
+      "max_closed_cumulative_r_drawdown": 6.099999044979829,
+      "outcomes": {
+        "STOP": 19,
+        "STOP_GAP": 1,
+        "TARGET": 16,
+        "TIME_EXIT": 2
+      }
+    },
+    "trail_1R": {
+      "trades": 38,
+      "net_r": 4.1904291979028825,
+      "expectancy_r": 0.11027445257639164,
+      "win_rate": 0.5526315789473685,
+      "max_closed_cumulative_r_drawdown": 5.358474974921331,
+      "outcomes": {
+        "STOP": 18,
+        "STOP_GAP": 6,
+        "TARGET": 13,
+        "TIME_EXIT": 1
+      }
+    },
+    "partial_1R": {
+      "trades": 38,
+      "net_r": 6.9251814741955835,
+      "expectancy_r": 0.18224161774198905,
+      "win_rate": 0.5263157894736842,
+      "max_closed_cumulative_r_drawdown": 4.970354943489344,
+      "outcomes": {
+        "STOP": 17,
+        "STOP_GAP": 0,
+        "TARGET": 19,
+        "TIME_EXIT": 2
+      }
+    }
+  },
+  "wide_stop_groups": {
+    "above_2_ATR": {
+      "trades": 7,
+      "net_r": 0.5625465740618645,
+      "expectancy_r": 0.08036379629455206
+    },
+    "at_most_2_ATR": {
+      "trades": 31,
+      "net_r": 6.880152959999901,
+      "expectancy_r": 0.22194041806451292
+    }
+  },
+  "assumptions": {
+    "spread_points": 50,
+    "slippage_points_each_side": 5,
+    "commission_points": 0,
+    "holding_bars": 24,
+    "partial": "IDEAL_HALF_VOLUME_NO_BROKER_LOT_ROUNDING",
+    "protection": "NEXT_BAR_ACTIVATION_STOP_FIRST",
+    "exposure": "FROZEN_BASELINE_ENTRIES_NO_EXTRA_REENTRIES",
+    "drawdown": "CUMULATIVE_R_CLOSED_OUTCOMES_NOT_PERCENT_OR_INTRATRADE"
+  },
+  "git_commit": "f985debe4f21201af6ea8d28cd4cb9f0e010489d",
+  "working_tree": "DIRTY; existing session edits retained; deployed source differs from HEAD",
+  "source_sha256": {
+    "research/exits/compare.py": "e5130858ea2bf30b4483b197717e0761de063d5ea143618beb6fdda982e018b7",
+    "research/exits/export_snapshot.py": "878c361168f2fd812047a8c897719c66475a125c086d0446e11f5202eb6ddfe3",
+    "backend/django_bridge/ramon_pipeline/signalflow/replay.py": "250353a88d66c91e6b1db6d3822f27a4b7f32eafe020b97e03f20ed7ad1ed85e",
+    "backend/django_bridge/ramon_pipeline/signalflow/trade_planning.py": "e18e0b633b34aadcd252f41fb24bdeff73a5e7602bf09b92453011cc03e2799f"
+  }
+}
