@@ -1166,25 +1166,12 @@ class DashboardDataTests(TestCase):
         self.assertEqual(stale_checks["ea_heartbeat"]["status"], "BLOCKED")
 
 class DashboardTemplateTests(TestCase):
-    def test_decision_flow_template_uses_live_payload_instead_of_static_catalogue(self):
+    def test_main_dashboard_excludes_removed_strategy_and_research_panels(self):
         response = self.client.get("/api/ea/v1/dashboard")
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "decisionStageEntries")
-        self.assertContains(response, "flowMetricsMarkup")
-        self.assertNotContains(response, "renderDecisionVariableGuide")
-        self.assertContains(response, "Strategy diagnostics and shared settings")
-        self.assertNotContains(response, "DECISION_VARIABLE_GROUPS")
-        self.assertNotContains(response, "orderedEntryFlowChecks")
-        self.assertNotContains(response, "orderedRiskFlowChecks")
-
-    def test_dashboard_exposes_both_opportunity_detection_paths(self):
-        response = self.client.get("/api/ea/v1/dashboard")
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "opportunityDetectorMarkup")
-        self.assertContains(response, "Trend Pullback")
-        self.assertContains(response, "Breakout / Retest")
-        self.assertContains(response, "NOT EVALUATED")
-
+        self.assertContains(response, "Independent strategy containers")
+        for removed in ("scalpTitle", "trendTitle", "decisionDiagnostics", "loadDecisionThresholds", "refreshScalp", "refreshTrend"):
+            self.assertNotContains(response, removed)
 
 
 class MultiTimeframeMarketDataTests(TestCase):

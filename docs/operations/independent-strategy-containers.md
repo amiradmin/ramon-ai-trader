@@ -150,3 +150,13 @@ records remain available; existing legacy positions retain server-side protectio
 Removed the unused pre-worker Compose backup and three empty root artifacts.
 The authenticated MT5 compatibility endpoint remains to report retirement, and
 shared evaluation/compatibility code remains covered by regression tests.
+
+
+## Dashboard panel removal — November 10, 2026
+
+At the user's request, removed the M1/M5 scalper, H1/H4 paper candidate and shared
+strategy diagnostics/settings sections from the main dashboard, including their
+polling, threshold editor and flow styling. Their containers, APIs, records and
+research tools remain available. This is a dashboard-only change; no entry flag,
+risk setting or worker lifecycle is changed. The fleet API now supplies the main
+connection badge as well as the seven worker cards.
