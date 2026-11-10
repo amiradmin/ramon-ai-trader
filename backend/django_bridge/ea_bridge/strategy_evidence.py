@@ -13,7 +13,7 @@ def checksum(value):
 def code_checksums():
     root = Path(__file__).parent
     paths = [root / name for name in ('decision.py', 'strategy_worker.py', 'strategy_registry.py',
-                                    'strategy_evidence.py', 'thresholds.py', 'command_producer.py')]
+                                    'strategy_evidence.py', 'thresholds.py', 'command_producer.py', 'news_lock.py', 'calendar_feed.py', 'economic_calendar.py')]
     paths += sorted((root.parent / 'ramon_pipeline' / 'signalflow').rglob('*.py'))
     paths += sorted((root.parent / 'ramon_pipeline' / 'signalflow').glob('*.json'))
     return {str(p.relative_to(root.parent)): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}

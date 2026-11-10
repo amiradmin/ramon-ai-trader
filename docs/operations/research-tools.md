@@ -35,6 +35,8 @@ LONA percentage returns.
 
 ## Economic calendar
 
+The runtime news gate now uses the separate [automatic Forex Factory calendar worker](automatic-economic-calendar.md). The TipRanks connector below remains an optional manual research source; importing it replaces the active snapshot and will block new entries until the automatic worker restores a supported snapshot.
+
 The connected TipRanks tool can retrieve US High/Medium events. It runs in the
 assistant session; the Django container cannot call that connector automatically.
 The dashboard therefore consumes a validated, timestamped **imported snapshot**,
@@ -76,5 +78,4 @@ response has naive times, so the panel labels its timezone unverified and shows
 the original strings. Do not append `Z`, assume the host timezone, calculate a
 countdown, or feed these rows into the trading news gate. Future automatic runtime
 refresh requires a separately configured provider API and a verified timezone.
-This integration is display-only and does not write decisions, thresholds or
-broker commands.
+The calendar endpoint now also reports the separately enabled [news entry lock](news-entry-lock.md). The current naive-time manual snapshot cannot clear that lock; new entries remain blocked until verified timing and automatic refresh are configured. Imports do not directly create orders or alter thresholds.

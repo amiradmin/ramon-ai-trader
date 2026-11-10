@@ -108,6 +108,13 @@ def events(request):
 
 
 @require_GET
+def paper_results(request):
+    """Read-only paper research page; data is loaded from the existing journal API."""
+    from django.shortcuts import render
+    return render(request, "ea_bridge/paper_results.html")
+
+
+@require_GET
 def dashboard(request):
     """Render the original read-only Ramon opportunity dashboard."""
     from django.shortcuts import render

@@ -60,11 +60,12 @@ for attempt in $(seq 1 40); do
   worker_state="$(docker inspect -f '{{.State.Status}}' ramon-ingest-worker 2>/dev/null || true)"
   forecast_state="$(docker inspect -f '{{.State.Status}}' ramon-forecast-worker 2>/dev/null || true)"
   candidate_state="$(docker inspect -f '{{.State.Status}}' ramon-candidate-worker 2>/dev/null || true)"
+  calendar_state="$(docker inspect -f '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' ramon-news-worker 2>/dev/null || true)"
   strategies_ready=1
   for strategy in trend-pullback breakout-retest failed-breakout-sweep range-edge-fade session-opening-range-breakout volatility-compression-expansion exhaustion-reversal; do
     [[ "$(docker inspect -f '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' "ramon-$strategy" 2>/dev/null || true)" == "running healthy" ]] || strategies_ready=0
   done
-  if [[ "$strategies_ready" == 1 && "$django_state" == "running healthy" && "$redis_state" == "running healthy" && "$db_state" == "running healthy" && "$worker_state" == "running" && "$forecast_state" == "running" && "$candidate_state" == "running" ]] && curl --fail --silent --max-time 3 "$HEALTH_URL" >/dev/null 2>&1; then
+  if [[ "$calendar_state" == "running healthy" && "$strategies_ready" == 1 && "$django_state" == "running healthy" && "$redis_state" == "running healthy" && "$db_state" == "running healthy" && "$worker_state" == "running" && "$forecast_state" == "running" && "$candidate_state" == "running" ]] && curl --fail --silent --max-time 3 "$HEALTH_URL" >/dev/null 2>&1; then
     stack_ready=1
     break
   fi
@@ -72,8 +73,8 @@ for attempt in $(seq 1 40); do
 done
 if [[ "$stack_ready" != 1 ]]; then
   docker compose -f "$COMPOSE_FILE" ps
-  docker compose -f "$COMPOSE_FILE" logs --tail=100 django ingest-worker forecast-worker candidate-worker redis timescaledb
-  die "Compose stack did not reach healthy/running state (Django=$django_state Redis=$redis_state TimescaleDB=$db_state Worker=$worker_state Forecast=$forecast_state Candidate=$candidate_state)"
+  docker compose -f "$COMPOSE_FILE" logs --tail=100 django ingest-worker forecast-worker candidate-worker news-worker redis timescaledb
+  die "Compose stack did not reach healthy/running state (Django=$django_state Redis=$redis_state TimescaleDB=$db_state Worker=$worker_state Forecast=$forecast_state Candidate=$candidate_state Calendar=$calendar_state)"
 fi
 docker compose -f "$COMPOSE_FILE" exec -T redis redis-cli ping | grep -qx PONG || die "Redis ping failed"
 docker compose -f "$COMPOSE_FILE" exec -T timescaledb sh -lc 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' || die "TimescaleDB readiness check failed"

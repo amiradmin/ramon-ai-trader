@@ -13,8 +13,10 @@ from . import scalp_observer
 from . import scalper_views
 from . import trend_observer
 from . import strategy_views
+from . import time_status
 
 urlpatterns = [
+    path("time-status", time_status.time_status, name="ramon-time-status"),
     path("strategies", strategy_views.strategies_status, name="strategy-workers-status"),
     path("strategies/<slug:slug>", strategy_views.strategy_console, name="strategy-worker-console"),
     path("research/trend", trend_observer.trend_status, name="ramon-trend-shadow"),
@@ -34,6 +36,7 @@ urlpatterns = [
     path("dashboard-data", views.dashboard_data, name="ramon-dashboard-data"),
     path("forecast/arima", forecast_views.arima_status, name="ramon-arima-shadow-status"),
     path("research/economic-calendar", economic_calendar.calendar_status, name="ramon-economic-calendar"),
+    path("research/paper-results", views.paper_results, name="ramon-paper-results"),
     path("research/candidates", candidate_observer.candidate_status, name="ramon-candidate-observer"),
     path("research/execution", execution_observer.execution_status, name="ramon-execution-observer"),
     path("dashboard/pnl-summary", views.dashboard_pnl_summary, name="ramon-dashboard-pnl-summary"),

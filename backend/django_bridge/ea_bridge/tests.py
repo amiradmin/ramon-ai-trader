@@ -1170,8 +1170,18 @@ class DashboardTemplateTests(TestCase):
         response = self.client.get("/api/ea/v1/dashboard")
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Independent strategy containers")
-        for removed in ("scalpTitle", "trendTitle", "decisionDiagnostics", "loadDecisionThresholds", "refreshScalp", "refreshTrend"):
+        for removed in ("scalpTitle", "trendTitle", "decisionDiagnostics", "loadDecisionThresholds", "refreshScalp", "refreshTrend", "candidatesTitle", "refreshCandidateJournal"):
             self.assertNotContains(response, removed)
+
+    def test_paper_journal_has_separate_page_and_navigation(self):
+        dashboard=self.client.get('/api/ea/v1/dashboard')
+        self.assertContains(dashboard,'/api/ea/v1/research/paper-results')
+        response=self.client.get('/api/ea/v1/research/paper-results')
+        self.assertContains(response,'Paper outcome journal')
+        self.assertContains(response,'refreshCandidateJournal')
+        self.assertContains(response,'/api/ea/v1/research/candidates')
+        self.assertContains(response,'Main dashboard')
+        self.assertEqual(self.client.post('/api/ea/v1/research/paper-results').status_code,405)
 
 
 class MultiTimeframeMarketDataTests(TestCase):

@@ -21,4 +21,4 @@ class Command(BaseCommand):
             result = import_snapshot(json.loads(path.read_text(encoding="utf-8")))
         except (OSError, ValueError, KeyError, TypeError, OverflowError) as exc:
             raise CommandError(f"Calendar not imported: {exc}") from exc
-        self.stdout.write(f"Imported {len(result['events'])} events. Timezone verified: {result['timezone_verified']}. Context only; no orders changed.")
+        self.stdout.write(f"Imported {len(result['events'])} events. Timezone verified: {result['timezone_verified']}. Entry gate checks freshness, timezone verification and automatic-feed configuration separately.")

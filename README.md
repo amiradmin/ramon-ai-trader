@@ -14,6 +14,7 @@ The single `docker-compose.yaml` defines:
 - `scalper-worker`: existing independent M1/M5 scalper.
 - `trend-worker`: existing H1/H4 paper-only research candidate.
 - `forecast-worker`: forward ARIMA forecasts and automatic accuracy tracking; observation only.
+- `news-worker`: automatic verified-offset weekly economic-calendar refresh for news entry locks.
 - `candidate-worker`: candidate observation and paper outcome settlement.
 - `learning-worker`: user-triggered model training.
 - `redis`: event buffer.
@@ -21,13 +22,15 @@ The single `docker-compose.yaml` defines:
 
 Dashboard: `http://127.0.0.1:8017/api/ea/v1/dashboard` contains a link to each strategy’s controls, positions and history. See [independent strategy operations](docs/operations/independent-strategy-containers.md).
 
+Paper research results: `http://127.0.0.1:8017/api/ea/v1/research/paper-results` (linked from the main dashboard). Historical records and the existing journal API are preserved.
+
 Health check: `http://127.0.0.1:8017/healthz`
 
 The Compose pipeline ingestion switch is off by default. The named database and Redis volumes contain persistent state; **never use `docker compose down -v` as a troubleshooting step**.
 
 ## Start all containers
 
-From the repository directory, start all 16 services, including the seven independent strategy workers and their supporting services:
+From the repository directory, start all 17 services, including the seven independent strategy workers and their supporting services:
 
 ```bash
 cd ~/Documents/Presentation/ramon-ai-trader-bridge
@@ -102,6 +105,12 @@ docker compose exec django python manage.py prune_market_bars --symbol XAUUSD_o 
 6. Never delete Docker volumes to silence Compose warnings.
 
 Useful runbooks:
+
+- [Automatic economic calendar](docs/operations/automatic-economic-calendar.md)
+
+- [Laptop, broker, UTC and session timekeeping](docs/operations/timekeeping.md)
+
+- [News entry lock and calendar requirements](docs/operations/news-entry-lock.md)
 
 - [Strategy evidence, dataset export and log retention](docs/operations/strategy-data-journal.md)
 

@@ -104,6 +104,12 @@ def create_open_command(*, decision, verdict, instance_id, account_login, server
                 return None, False, 'STRATEGY_COMMAND_UNSETTLED'
         if own.filter(action='OPEN',state='EXECUTED',completed_at__gte=heartbeat.last_seen).exists():
             return None, False, 'STRATEGY_FILL_NOT_YET_OBSERVED'
+    from .news_lock import entry_status, audit_block
+    news = entry_status(strategy_setup or 'LEGACY', now=now, check_signal=True,
+                        signal_bar_time=decision.features.get('market_snapshot',{}).get('bar_time'))
+    if news['blocked']:
+        audit_block(heartbeat, news, phase='CREATION', now=now)
+        return None, False, news['reason']
     if not isinstance(positions, list) or (positions and not (
         verified_engine_positions(heartbeat) if strategy_setup else allow_main_alongside_scalps(heartbeat))):
         return None, False, "OPEN_POSITION_RISK_UNVERIFIED"

@@ -459,6 +459,8 @@ def evaluate_payload(p, *, strategy_setup=None, input_evidence=None):
             "open_risk_percent": market["open_risk_percent"],
           },
         }
+        from .news_lock import entry_status
+        features['news_lock'] = entry_status(strategy_setup or 'LEGACY')
         if strategy_setup and input_evidence is not None:
             from .strategy_evidence import policy_snapshot
             features["input_evidence"] = input_evidence

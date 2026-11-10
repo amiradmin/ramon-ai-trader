@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ramon | Research / Paper Results</title>
+{% include 'ea_bridge/dashboard_styles.html' %}
+</head>
+<body><main class="wrap">
+<header class="top"><div><div class="eyebrow">RAMON · RESEARCH</div><h1 class="title">Research / Paper Results</h1><p class="sub">Simulated outcomes and historical observations</p></div><a class="btn" style="text-decoration:none" href="{% url 'ramon-dashboard' %}">← Main dashboard</a></header>
+<div class="notice" style="margin-bottom:20px">Paper results are simulations, separate from actual broker profit and loss. Historical records are retained for research. This page does not place orders or train models.</div>
+<section class="card" aria-labelledby="candidatesTitle" style="margin-bottom:18px">
+  <div class="section-head" style="margin:0 0 12px"><div><h2 id="candidatesTitle">Paper outcome journal · includes legacy history</h2><p>Historical combined-engine candidates and independent strategy evaluations. Decision-group labels describe the recorded policy at that time; they are not a current selector between containers.</p></div><span class="pill">OBSERVATION ONLY</span></div>
+  <p class="small" id="candidatesStatus" role="status" aria-live="polite">Loading candidate journal…</p>
+  <p class="small" id="candidateContextStatus"></p>
+  <p class="small">Measures one hour from the next full M15 opening candle. Movement includes the recorded spread, but excludes slippage, commission and swap. It is not broker profit or an SL/TP backtest. Candidates without a direction are recorded and left unscored.</p>
+  <details style="margin-top:12px"><summary>Compare setups and decision groups</summary><div class="table-wrap"><table class="table" style="min-width:650px"><thead><tr><th>Setup</th><th>Decision group</th><th>Recorded</th><th>Scored</th><th>Positive movement</th><th>Mean movement (points)</th></tr></thead><tbody id="candidatesGroups"><tr><td colspan="6">Waiting for new decisions.</td></tr></tbody></table></div></details>
+  <details style="margin-top:12px"><summary>Stop and target results · up to six hours</summary>
+    <p class="small">Frozen plans only. Entry at the next full M15 open; recorded spread assumed throughout. Same-candle stop and target resolves stop-first. No invented stops or targets; no slippage, commission or swap included. Existing journal rows are not backfilled.</p>
+    <div class="table-wrap"><table class="table" style="min-width:650px"><thead><tr><th>Setup</th><th>Decision group</th><th>Targets</th><th>Stops / gaps</th><th>Time exits</th><th>Waiting / open</th><th>Unavailable / skipped</th><th>Mean simulated R</th></tr></thead><tbody id="candidatePlans"></tbody></table></div>
+  </details>
+</section>
+
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const esc = value => String(value ?? "Unavailable").replace(/[&<>"']/g, c => ({
+  "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+}[c]));
+let candidatesRequestInFlight = false;
+async function refreshCandidateJournal() {
+  if (candidatesRequestInFlight) return;
+  candidatesRequestInFlight = true;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch("/api/ea/v1/research/candidates", {cache:"no-store", signal:controller.signal});
+    if (!response.ok) throw new Error("Candidate journal unavailable");
+    const data = await response.json();
+    const counts = data.counts || {};
+    $("candidateContextStatus").textContent = ["H1", "M5"].map(tf => {
+      const context = data.current_context?.[tf] || {};
+      return tf + ": " + (context.status || "MISSING") + " · " + (context.bias || "UNKNOWN") +
+        (context.continuity === "OBSERVED_WEEKEND_BREAK" ? " · weekend-shaped break; broker calendar unverified" : "");
+    }).join(" | ");
+    $("candidatesStatus").textContent = data.state === "NO_DEMO_FEED" ? "No demo feed available." :
+      data.state === "WAITING_FOR_NEW_DECISION" ? "Waiting for the next new demo decision. Historical decisions are not counted as forward observations." :
+      (counts.WAITING || 0) + " awaiting outcomes · " + (counts.SCORED || 0) + " scored · " + (counts.SKIPPED || 0) + " unscored · latest " + data.sample_limit + " candidates maximum";
+    $("candidatesGroups").innerHTML = (data.groups || []).map(row => "<tr><td>" + esc(row.setup) + "</td><td>" + esc(row.disposition) +
+      "</td><td>" + row.observations + "</td><td>" + row.scored + "</td><td>" + (row.scored ? row.positive + " / " + row.scored : "—") +
+      "</td><td>" + (row.mean_points == null ? "—" : Number(row.mean_points).toFixed(1)) + "</td></tr>").join("") || '<tr><td colspan="6">Waiting for new decisions.</td></tr>';
+    $("candidatePlans").innerHTML = (data.groups || []).map(row => {
+      const c = row.plan_counts || {};
+      return "<tr><td>" + esc(row.setup) + "</td><td>" + esc(row.disposition) + "</td><td>" + (c.TARGET || 0) +
+        "</td><td>" + ((c.STOP || 0) + (c.STOP_GAP || 0)) + "</td><td>" + (c.TIME_EXIT || 0) +
+        "</td><td>" + ((c.WAITING || 0) + (c.OPEN || 0)) + "</td><td>" +
+        Object.entries(c).filter(([key]) => !["TARGET","STOP","STOP_GAP","TIME_EXIT","WAITING","OPEN"].includes(key)).reduce((sum,[key,n]) => sum+n,0) +
+        "</td><td>" + (row.plan_mean_r == null ? "—" : Number(row.plan_mean_r).toFixed(3)) + "</td></tr>";
+    }).join("") || '<tr><td colspan="8">Waiting for new plans with valid stop and target levels.</td></tr>';
+  } catch (error) {
+    $("candidatesStatus").textContent = "Candidate journal unavailable; any displayed results may be old.";
+  } finally {
+    clearTimeout(timeout);
+    candidatesRequestInFlight = false;
+  }
+}
+refreshCandidateJournal();
+setInterval(refreshCandidateJournal, 30000);
+</script>
+</body>
+</html>

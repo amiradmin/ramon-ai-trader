@@ -4,32 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ramon | Independent Strategy Dashboard</title>
-<style>
-:root{--bg:#0a0e14;--panel:#111823;--panel2:#151f2c;--line:#263244;--text:#edf3fb;--muted:#8c9bb0;--green:#42d6a0;--red:#ff7185;--amber:#f4c56a;--blue:#7eaaff}
-*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 15% -10%,#182941 0,transparent 40%),var(--bg);color:var(--text);font:14px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif}
-.wrap{max-width:1440px;margin:auto;padding:28px}.top{display:flex;justify-content:space-between;align-items:center;gap:18px;flex-wrap:wrap;margin-bottom:26px}.brand{display:flex;align-items:center;gap:12px}.logo{width:42px;height:42px;border-radius:13px;background:linear-gradient(135deg,#5b8cff,#52e0b2);display:grid;place-items:center;color:#07111b;font-weight:900;font-size:19px}.eyebrow{color:var(--green);font-size:11px;letter-spacing:2px;font-weight:800}.title{font-size:26px;line-height:1.2;font-weight:800;margin:3px 0}.sub{color:var(--muted);font-size:12px}.status{border:1px solid #315243;background:#10271f;color:var(--green);padding:8px 12px;border-radius:99px;font-size:12px;display:flex;align-items:center;gap:8px}.dot{width:7px;height:7px;border-radius:50%;background:currentColor;box-shadow:0 0 12px currentColor}
-.notice{border:1px solid #55492e;background:#211d14;color:#e8d6a7;padding:12px 15px;border-radius:12px;margin-bottom:18px;font-size:12px}
-.grid{display:grid;gap:15px}.stats{grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:18px}.card{background:linear-gradient(145deg,rgba(21,31,44,.96),rgba(15,22,32,.96));border:1px solid var(--line);border-radius:16px;padding:18px;min-width:0}.stat-label{font-size:12px;color:var(--muted)}.stat-value{font-size:27px;font-weight:800;letter-spacing:-.8px;margin:8px 0 3px}.stat-foot{font-size:11px;color:var(--muted)}.positive{color:var(--green)}.negative{color:var(--red)}.amber{color:var(--amber)}.blue{color:var(--blue)}
-.section-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:25px 0 12px}.section-head h2{font-size:16px;margin:0}.section-head p{margin:3px 0 0;color:var(--muted);font-size:12px}.filters{display:flex;gap:8px;flex-wrap:wrap}.filters select,.filters input,.btn{background:#0d141e;color:var(--text);border:1px solid var(--line);border-radius:9px;padding:9px 11px;font:inherit;font-size:12px}.btn{cursor:pointer}.btn:hover{border-color:var(--blue)}.table-wrap{overflow-x:auto}.table{width:100%;border-collapse:collapse;min-width:900px}.table th{text-align:left;color:var(--muted);font-weight:600;font-size:11px;letter-spacing:.5px;text-transform:uppercase;padding:12px 10px;border-bottom:1px solid var(--line)}.table td{padding:14px 10px;border-bottom:1px solid #202b39;vertical-align:middle}.table tr:last-child td{border-bottom:0}.pagination{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 4px 4px;color:var(--muted);font-size:11px}.pagination-controls{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.pagination select{background:#0d141e;color:var(--text);border:1px solid var(--line);border-radius:9px;padding:8px 10px;font:inherit;font-size:11px}.pagination .btn:disabled{opacity:.4;cursor:not-allowed}.symbol{font-weight:800}.small{font-size:11px;color:var(--muted)}.pill{display:inline-flex;align-items:center;gap:6px;border-radius:99px;padding:4px 8px;font-size:10px;font-weight:800;letter-spacing:.4px}.pill.buy{background:#123328;color:var(--green)}.pill.sell{background:#3a2028;color:var(--red)}.pill.watch{background:#382f1c;color:var(--amber)}.pill.ready{background:#18304b;color:#9bc5ff}.details{display:none;background:#0c131d}.details.open{display:table-row}.details td{padding:0 14px 16px}.detail-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;padding:15px 0}.detail-box{background:#121d2a;border:1px solid #243247;border-radius:10px;padding:11px}.detail-box label{display:block;color:var(--muted);font-size:10px;margin-bottom:4px}.detail-box strong{font-size:13px}.expand{border:1px solid var(--line);background:#121d2a;color:var(--blue);border-radius:8px;padding:5px 9px;cursor:pointer}.lower{grid-template-columns:1.2fr .8fr}.risk-list{display:grid;gap:14px}.risk-row{display:flex;justify-content:space-between;gap:15px;align-items:center}.risk-row span{color:var(--muted);font-size:12px}.risk-row strong{font-size:13px}
-.strategy-card{background:linear-gradient(145deg,#173653,#102238);border-color:#467bad;transition:border-color .15s,box-shadow .15s}
-.strategy-card h3{color:#a6d4ff}
-.strategy-card.strategy-on{border-color:#62adf0;box-shadow:inset 0 0 0 1px rgba(98,173,240,.12)}
-.strategy-card.strategy-position-open{background:#123c2b;border-color:#55edaa;animation:position-green-blink .8s ease-in-out infinite}
-.strategy-card.strategy-position-open h3{color:#b0ffda}
-@keyframes position-green-blink{0%,100%{background-color:#123c2b;border-color:#36bd80;box-shadow:inset 0 0 0 1px rgba(54,189,128,.2)}50%{background-color:#226d47;border-color:#95ffd0;box-shadow:inset 0 0 0 1px rgba(149,255,208,.4),0 0 14px rgba(66,214,160,.3)}}
-@media(prefers-reduced-motion:reduce){.strategy-card.strategy-position-open{animation:none;background:#185339;border-color:#7aefbf}}
-
-.footer{color:#69788c;font-size:11px;text-align:center;padding:24px 0 6px}
-@media(max-width:900px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.wrap{padding:17px}}
-@media(max-width:480px){.stats{grid-template-columns:1fr 1fr}.stat-value{font-size:22px}.card{padding:14px}.title{font-size:22px}}
-</style>
+{% include 'ea_bridge/dashboard_styles.html' %}
 </head>
 <body>
 <div class="wrap">
 <header class="top">
   <div class="brand"><div class="logo">R</div><div><div class="eyebrow">RAMON · SMART TRADER</div><div class="title">Independent Strategy Desk</div><div class="sub">XAUUSD · Seven independent M15 strategy containers</div></div></div>
-  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><button class="btn" id="copyMarketSnapshot" type="button">Copy Market Snapshot</button><span id="copySnapshotStatus" class="small" role="status" aria-live="polite"></span><div class="status"><span class="dot"></span><span id="connection">DJANGO · DECISION FEED</span></div></div>
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><a class="btn" style="text-decoration:none" href="{% url 'ramon-paper-results' %}">Research / Paper Results ↗</a><button class="btn" id="copyMarketSnapshot" type="button">Copy Market Snapshot</button><span id="copySnapshotStatus" class="small" role="status" aria-live="polite"></span><div class="status"><span class="dot"></span><span id="connection">DJANGO · DECISION FEED</span></div></div>
 </header>
+<p class="small" id="timeStatus" role="status" aria-live="polite">Checking UTC, laptop clock and quote timestamps…</p>
 <div class="notice"><strong>Fleet overview:</strong> blue boxes are the normal state; blinking green boxes have a verified open position. Open a strategy for its controls, positions and broker results. An enabled worker may still be waiting for its setup or risk checks.</div>
 <section aria-labelledby="strategyFleetTitle" style="margin-bottom:24px">
   <div class="section-head"><div><h2 id="strategyFleetTitle">Independent strategy containers</h2><p>Each container owns one setup, its decisions and its positions. No central best-setup selector. Shared account exposure limits still apply.</p></div></div>
@@ -64,26 +47,15 @@
 
 
 <section class="card" aria-labelledby="eventsTitle" style="margin-bottom:18px">
-  <div class="section-head" style="margin:0 0 12px"><div><h2 id="eventsTitle">US economic events · gold context</h2><p>TipRanks research snapshot · High and Medium impact · context only</p></div><span class="pill">EVENT CONTEXT</span></div>
-  <p class="small" id="eventsStatus" role="status" aria-live="polite">Loading the latest imported event snapshot…</p>
+  <div class="section-head" style="margin:0 0 12px"><div><h2 id="eventsTitle">US economic events · gold context</h2><p><span id="eventsProvider">Economic calendar</span> · US High and Medium impact · news entry lock</p></div><span class="pill">EVENT CONTEXT</span></div>
+  <p class="small" id="eventsStatus" role="status" aria-live="polite">Loading the latest economic calendar…</p>
   <div class="small" id="eventsScope"></div>
   <details style="margin-top:12px"><summary>View economic events</summary>
-    <div class="table-wrap"><table class="table" style="min-width:650px"><thead><tr><th scope="col">Provider time</th><th scope="col">Event</th><th scope="col">Impact</th><th scope="col">Estimate</th><th scope="col">Previous</th></tr></thead><tbody id="eventsRows"><tr><td colspan="5">No imported events.</td></tr></tbody></table></div>
+    <div class="table-wrap"><table class="table" style="min-width:650px"><thead><tr><th scope="col">Time (UTC when verified)</th><th scope="col">Event</th><th scope="col">Impact</th><th scope="col">Estimate</th><th scope="col">Previous</th></tr></thead><tbody id="eventsRows"><tr><td colspan="5">No imported events.</td></tr></tbody></table></div>
   </details>
-  <p class="small" style="margin:12px 0 0">This snapshot requires a new import to refresh. It does not change trade decisions or orders.</p>
+  <p class="small" style="margin:12px 0 0">The calendar container checks the weekly schedule every 15 minutes. Times are scheduled and may change; unexpected news is not covered. News locks leave position closing and stop management active.</p>
 </section>
 
-<section class="card" aria-labelledby="candidatesTitle" style="margin-bottom:18px">
-  <div class="section-head" style="margin:0 0 12px"><div><h2 id="candidatesTitle">Paper outcome journal · includes legacy history</h2><p>Historical combined-engine candidates and independent strategy evaluations. Decision-group labels describe the recorded policy at that time; they are not a current selector between containers.</p></div><span class="pill">OBSERVATION ONLY</span></div>
-  <p class="small" id="candidatesStatus" role="status" aria-live="polite">Loading candidate journal…</p>
-  <p class="small" id="candidateContextStatus"></p>
-  <p class="small">Measures one hour from the next full M15 opening candle. Movement includes the recorded spread, but excludes slippage, commission and swap. It is not broker profit or an SL/TP backtest. Candidates without a direction are recorded and left unscored.</p>
-  <details style="margin-top:12px"><summary>Compare setups and decision groups</summary><div class="table-wrap"><table class="table" style="min-width:650px"><thead><tr><th>Setup</th><th>Decision group</th><th>Recorded</th><th>Scored</th><th>Positive movement</th><th>Mean movement (points)</th></tr></thead><tbody id="candidatesGroups"><tr><td colspan="6">Waiting for new decisions.</td></tr></tbody></table></div></details>
-  <details style="margin-top:12px"><summary>Stop and target results · up to six hours</summary>
-    <p class="small">Frozen plans only. Entry at the next full M15 open; recorded spread assumed throughout. Same-candle stop and target resolves stop-first. No invented stops or targets; no slippage, commission or swap included. Existing journal rows are not backfilled.</p>
-    <div class="table-wrap"><table class="table" style="min-width:650px"><thead><tr><th>Setup</th><th>Decision group</th><th>Targets</th><th>Stops / gaps</th><th>Time exits</th><th>Waiting / open</th><th>Unavailable / skipped</th><th>Mean simulated R</th></tr></thead><tbody id="candidatePlans"></tbody></table></div>
-  </details>
-</section>
 
 <section class="card" aria-labelledby="reliabilityTitle" style="margin-bottom:18px">
   <h2 id="reliabilityTitle">Reliability · feed and broker verification</h2>
@@ -147,6 +119,32 @@ const utc = value => {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? String(value) : date.toISOString().replace("T", " ").replace(".000Z", " UTC");
 };
+let timeRequestInFlight = false;
+async function refreshTimeStatus() {
+  if (timeRequestInFlight) return;
+  timeRequestInFlight = true;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  const started = Date.now();
+  try {
+    const response = await fetch("/api/ea/v1/time-status", {cache:"no-store", signal:controller.signal});
+    if (!response.ok) throw new Error("Time check unavailable");
+    const data = await response.json();
+    const ended = Date.now();
+    const server = new Date(data.server_utc);
+    const offset = (server.getTime() - (started + ended) / 2) / 1000;
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const warning = Math.abs(offset) > 5 && ended - started < 2000;
+    $("timeStatus").textContent = `Server UTC: ${utc(data.server_utc)} · Laptop (${zone}): ${new Date().toLocaleString()} · ${data.state.replaceAll("_", " ")} · Quote age: ${data.quote_age_seconds == null ? "unavailable" : data.quote_age_seconds.toFixed(1) + "s"} · Internal records and P&L date filters use UTC.` + (warning ? ` Laptop/server clock difference ≈ ${Math.abs(offset).toFixed(1)}s; check automatic time synchronization.` : "");
+    $("timeStatus").className = warning || data.state !== "TIME_ALIGNED" ? "small amber" : "small";
+  } catch (error) {
+    $("timeStatus").textContent = "Time check unavailable. Internal records and P&L date filters use UTC.";
+    $("timeStatus").className = "small amber";
+  } finally { clearTimeout(timeout); timeRequestInFlight = false; }
+}
+refreshTimeStatus();
+setInterval(refreshTimeStatus, 30000);
+
 async function copyMarketSnapshot() {
   const button = $("copyMarketSnapshot");
   const status = $("copySnapshotStatus");
@@ -241,45 +239,6 @@ const pnlThirtyDaysAgo = new Date(pnlToday.getTime() - 29 * 86400000);
 $("pnlFrom").value = utcDateInputValue(pnlThirtyDaysAgo);
 $("pnlTo").value = utcDateInputValue(pnlToday);
 loadPnlSummary();
-let candidatesRequestInFlight = false;
-async function refreshCandidateJournal() {
-  if (candidatesRequestInFlight) return;
-  candidatesRequestInFlight = true;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 5000);
-  try {
-    const response = await fetch("/api/ea/v1/research/candidates", {cache:"no-store", signal:controller.signal});
-    if (!response.ok) throw new Error("Candidate journal unavailable");
-    const data = await response.json();
-    const counts = data.counts || {};
-    $("candidateContextStatus").textContent = ["H1", "M5"].map(tf => {
-      const context = data.current_context?.[tf] || {};
-      return tf + ": " + (context.status || "MISSING") + " · " + (context.bias || "UNKNOWN") +
-        (context.continuity === "OBSERVED_WEEKEND_BREAK" ? " · weekend-shaped break; broker calendar unverified" : "");
-    }).join(" | ");
-    $("candidatesStatus").textContent = data.state === "NO_DEMO_FEED" ? "No demo feed available." :
-      data.state === "WAITING_FOR_NEW_DECISION" ? "Waiting for the next new demo decision. Historical decisions are not counted as forward observations." :
-      (counts.WAITING || 0) + " awaiting outcomes · " + (counts.SCORED || 0) + " scored · " + (counts.SKIPPED || 0) + " unscored · latest " + data.sample_limit + " candidates maximum";
-    $("candidatesGroups").innerHTML = (data.groups || []).map(row => "<tr><td>" + esc(row.setup) + "</td><td>" + esc(row.disposition) +
-      "</td><td>" + row.observations + "</td><td>" + row.scored + "</td><td>" + (row.scored ? row.positive + " / " + row.scored : "—") +
-      "</td><td>" + (row.mean_points == null ? "—" : Number(row.mean_points).toFixed(1)) + "</td></tr>").join("") || '<tr><td colspan="6">Waiting for new decisions.</td></tr>';
-    $("candidatePlans").innerHTML = (data.groups || []).map(row => {
-      const c = row.plan_counts || {};
-      return "<tr><td>" + esc(row.setup) + "</td><td>" + esc(row.disposition) + "</td><td>" + (c.TARGET || 0) +
-        "</td><td>" + ((c.STOP || 0) + (c.STOP_GAP || 0)) + "</td><td>" + (c.TIME_EXIT || 0) +
-        "</td><td>" + ((c.WAITING || 0) + (c.OPEN || 0)) + "</td><td>" +
-        Object.entries(c).filter(([key]) => !["TARGET","STOP","STOP_GAP","TIME_EXIT","WAITING","OPEN"].includes(key)).reduce((sum,[key,n]) => sum+n,0) +
-        "</td><td>" + (row.plan_mean_r == null ? "—" : Number(row.plan_mean_r).toFixed(3)) + "</td></tr>";
-    }).join("") || '<tr><td colspan="8">Waiting for new plans with valid stop and target levels.</td></tr>';
-  } catch (error) {
-    $("candidatesStatus").textContent = "Candidate journal unavailable; any displayed results may be old.";
-  } finally {
-    clearTimeout(timeout);
-    candidatesRequestInFlight = false;
-  }
-}
-refreshCandidateJournal();
-setInterval(refreshCandidateJournal, 30000);
 let strategyFleetInFlight = false;
 async function refreshStrategyFleet() {
   if (strategyFleetInFlight) return;
@@ -300,6 +259,7 @@ async function refreshStrategyFleet() {
       }
       const el = $("strategy-" + worker.slug);
       if (el) el.textContent = `${worker.fresh ? "Running" : "Stopped or stale"} · Entries ${worker.automatic ? "On" : "Paused"} · ${worker.state} · ${worker.latest.action || "No decision yet"} · ${worker.position_status_known ? `${worker.open_positions} open position${worker.open_positions === 1 ? "" : "s"}` : "Position status unavailable"}`;
+      if (el && worker.news_lock && worker.news_lock.enabled) el.textContent += " · " + (worker.news_lock.blocked ? worker.news_lock.reason : "News clear");
     }
   } catch (error) {
     $("connection").textContent = "DJANGO · FLEET STATUS UNAVAILABLE";
@@ -395,16 +355,20 @@ async function refreshEconomicEvents() {
     const data = await response.json();
     const messages = {NOT_IMPORTED:"No event snapshot imported yet.",
       TIMEZONE_UNVERIFIED:"Provider timezone is unverified. Times below are shown exactly as supplied; no countdown is calculated.",
-      STALE:"This event snapshot is out of date. Import a fresh snapshot before relying on its schedule.",
-      UNAVAILABLE:"The event snapshot could not be read.", READY:"Imported schedule available. Times include their UTC offset."};
-    $("eventsStatus").textContent = messages[data.state] || "Event status unavailable.";
-    $("eventsStatus").className = data.state === "READY" ? "small" : "small negative";
+      STALE:"The event snapshot is out of date; new entries remain locked until a successful calendar refresh.",
+      UNAVAILABLE:"The event snapshot could not be read.", READY:"Schedule available. Event times below are converted to UTC."};
+    $("eventsProvider").textContent = (data.provider || "Economic calendar") + (data.automatic_refresh ? " · automatic updates" : " · manual snapshot");
+    const locks = Object.values(data.entry_locks || {}).filter(lock => lock.enabled);
+    const blocked = locks.filter(lock => lock.blocked);
+    const lockText = locks.length ? (blocked.length ? ` New entries locked for ${blocked.length}/${locks.length} engines: ${[...new Set(blocked.map(lock => lock.reason))].join(", ")}.` : " News entry locks clear.") : "";
+    $("eventsStatus").textContent = (messages[data.state] || "Event status unavailable.") + lockText;
+    $("eventsStatus").className = data.state === "READY" && !blocked.length ? "small" : "small negative";
     $("eventsScope").textContent = data.retrieved_at ? "Retrieved: " + data.retrieved_at + " · Coverage: " + data.from_date + " to " + data.to_date + " · US High/Medium only" : "";
     const rows = Array.isArray(data.events) ? data.events : [];
     const value = (v, unit) => v == null ? "—" : String(v) + (unit ? " " + unit : "");
-    $("eventsRows").innerHTML = rows.length ? rows.map(row => "<tr><td>" + esc(row.provider_time) +
-      "</td><td>" + esc(row.name) + "</td><td>" + esc(row.impact) + "</td><td>" + esc(value(row.estimate, row.unit)) +
-      "</td><td>" + esc(value(row.prev, row.unit)) + "</td></tr>").join("") : '<tr><td colspan="5">No events available in this snapshot.</td></tr>';
+    $("eventsRows").innerHTML = rows.length ? rows.map(row => "<tr><td>" + esc(row.time_utc ? utc(row.time_utc) : row.provider_time + " (timezone unverified)") +
+      "</td><td>" + esc(row.name) + "</td><td>" + esc(row.impact) + "</td><td>" + esc(row.estimate_text || value(row.estimate, row.unit)) +
+      "</td><td>" + esc(row.previous_text || value(row.prev, row.unit)) + "</td></tr>").join("") : '<tr><td colspan="5">No events available in this snapshot.</td></tr>';
   } catch (error) {
     $("eventsStatus").textContent = "Event panel unavailable. Any displayed schedule may be old.";
     $("eventsStatus").className = "small negative";

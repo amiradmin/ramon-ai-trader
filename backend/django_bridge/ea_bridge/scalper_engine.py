@@ -131,6 +131,12 @@ def _open_scalp(feed, control, observation, *, now=None, audit_context=None):
                 positions=feed.payload.get('positions'),symbol_info=feed.payload.get('symbol_info'),
                 meaning='Input snapshot inside the engine transaction; not future outcomes')
         if not control.automatic: return None,'AUTOMATIC_PAUSED'
+        from .news_lock import entry_status, audit_block
+        news = entry_status('SCALPER_M1_M5', now=now)
+        if audit_context is not None: audit_context['news_lock'] = news
+        if news['blocked']:
+            audit_block(feed, news, phase='CREATION', now=now)
+            return None, news['reason']
         ready = readiness(feed,now=now)
         if ready != 'READY': return None,ready
         if (control.source,control.account_login,control.server_name,control.symbol) != (

@@ -113,24 +113,41 @@ def next_command(request):
     create_protection_commands(instance_id, account_login)
 
     with transaction.atomic():
-        command = (
-            EACommand.objects.select_for_update()
-            .filter(
-                instance_id=instance_id,
-                account_login=account_login,
-                symbol=heartbeat.symbol,
-                state=EACommand.State.PENDING,
-                expires_at__gt=now,
-                execution_authorized=True,
+        from .news_lock import entry_status, audit_block
+        while True:
+            command = (
+                EACommand.objects.select_for_update()
+                .filter(
+                    instance_id=instance_id,
+                    account_login=account_login,
+                    symbol=heartbeat.symbol,
+                    state=EACommand.State.PENDING,
+                    expires_at__gt=now,
+                    execution_authorized=True,
+                )
+                .order_by("created_at")
+                .first()
             )
-            .order_by("created_at")
-            .first()
-        )
-        if command is None:
-            return JsonResponse({
-                "ok": True, "commands_enabled": True, "command": None,
-                "trading_authorization": False,
-            })
+            if command is None:
+                return JsonResponse({
+                    "ok": True, "commands_enabled": True, "command": None,
+                    "trading_authorization": False,
+                })
+            if command.action != EACommand.Action.OPEN:
+                break
+            setup = ('SCALPER_M1_M5' if command.payload.get('engine') == 'SCALPER'
+                     else command.payload.get('strategy_setup', 'LEGACY'))
+            features = command.evaluation.features if command.evaluation_id else {}
+            news = entry_status(setup, now=timezone.now(), check_signal=True,
+                                signal_bar_time=features.get('market_snapshot',{}).get('bar_time'))
+            if not news['blocked']:
+                break
+            command.state = EACommand.State.REJECTED
+            command.completed_at = timezone.now()
+            command.result = {'detail': news['reason'], 'news_lock': news}
+            command.save(update_fields=['state', 'completed_at', 'result'])
+            audit_block(heartbeat, news, phase='DELIVERY', command_id=command.command_id)
+            # Continue to exits/protection rather than letting blocked entries hide them.
 
         # Bind delivery to the broker server that approved the original decision.
         # Never substitute the latest heartbeat's server for a missing/mismatched
