@@ -14,6 +14,8 @@ The single `docker-compose.yaml` defines:
 - `scalper-worker`: existing independent M1/M5 scalper.
 - `trend-worker`: existing H1/H4 paper-only research candidate.
 - `forecast-worker`: forward ARIMA forecasts and automatic accuracy tracking; observation only.
+- `candidate-worker`: candidate observation and paper outcome settlement.
+- `learning-worker`: user-triggered model training.
 - `redis`: event buffer.
 - `timescaledb`: PostgreSQL/TimescaleDB durable store.
 
@@ -22,6 +24,18 @@ Dashboard: `http://127.0.0.1:8017/api/ea/v1/dashboard` contains a link to each s
 Health check: `http://127.0.0.1:8017/healthz`
 
 The Compose pipeline ingestion switch is off by default. The named database and Redis volumes contain persistent state; **never use `docker compose down -v` as a troubleshooting step**.
+
+## Start all containers
+
+From the repository directory, start all 16 services, including the seven independent strategy workers and their supporting services:
+
+```bash
+cd ~/Documents/Presentation/ramon-ai-trader-bridge
+docker compose up -d --build --wait --wait-timeout 180
+docker compose ps
+```
+
+No service names or profiles are needed. Compose starts the database and Redis first, waits for their health checks, then starts Django and the workers. Services without a health check are considered ready once running. Existing `.env` trading settings and persistent volumes are preserved. This command starts Docker services; MT5 and the command EA must also be running for broker execution.
 
 ## Setup and update
 
@@ -88,6 +102,8 @@ docker compose exec django python manage.py prune_market_bars --symbol XAUUSD_o 
 6. Never delete Docker volumes to silence Compose warnings.
 
 Useful runbooks:
+
+- [Strategy evidence, dataset export and log retention](docs/operations/strategy-data-journal.md)
 
 - [One-command update/build](docs/operations/one-command-update-build.md)
 - [EA heartbeat troubleshooting](docs/EA-HEARTBEAT-TROUBLESHOOTING.md)

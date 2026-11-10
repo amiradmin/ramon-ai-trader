@@ -1,15 +1,28 @@
 name: ramon
 
+# Start the complete stack (all services are enabled by default):
+# docker compose up -d --build --wait --wait-timeout 180
+# Each worker remains independently startable: docker compose up -d <service>
+# Console logs are operational; durable training evidence lives in PostgreSQL.
+x-container-logging: &container-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+x-python-service: &python-service
+  logging: *container-logging
+  build:
+    context: .
+    dockerfile: backend/django_bridge/Dockerfile
+  restart: unless-stopped
+  init: true
+  env_file: [.env]
+
 services:
   django:
-    build:
-      context: .
-      dockerfile: backend/django_bridge/Dockerfile
+    <<: *python-service
     container_name: ramon-django
-    restart: unless-stopped
-    init: true
-    env_file:
-      - .env
     environment:
       DJANGO_SETTINGS_MODULE: ramon_django.settings
       DJANGO_DEBUG: "0"
@@ -57,14 +70,8 @@ services:
       start_period: 45s
 
   ingest-worker:
-    build:
-      context: .
-      dockerfile: backend/django_bridge/Dockerfile
+    <<: *python-service
     container_name: ramon-ingest-worker
-    restart: unless-stopped
-    init: true
-    env_file:
-      - .env
     environment:
       DJANGO_SETTINGS_MODULE: ramon_django.settings
       DJANGO_DEBUG: "0"
@@ -97,13 +104,8 @@ services:
       - ramon_backend
 
   trend-pullback:
-    build:
-      context: .
-      dockerfile: backend/django_bridge/Dockerfile
+    <<: *python-service
     container_name: ramon-trend-pullback
-    restart: unless-stopped
-    init: true
-    env_file: [.env]
     environment:
       DJANGO_SETTINGS_MODULE: ramon_django.settings
       DJANGO_DEBUG: "0"
@@ -134,13 +136,8 @@ services:
     networks: [ramon_backend]
 
   breakout-retest:
-    build:
-      context: .
-      dockerfile: backend/django_bridge/Dockerfile
+    <<: *python-service
     container_name: ramon-breakout-retest
-    restart: unless-stopped
-    init: true
-    env_file: [.env]
     environment:
       DJANGO_SETTINGS_MODULE: ramon_django.settings
       DJANGO_DEBUG: "0"
@@ -171,13 +168,8 @@ services:
     networks: [ramon_backend]
 
   failed-breakout-sweep:
-    build:
-      context: .
-      dockerfile: backend/django_bridge/Dockerfile
+    <<: *python-service
     container_name: ramon-failed-breakout-sweep
-    restart: unless-stopped
-    init: true
-    env_file: [.env]
     environment:
       DJANGO_SETTINGS_MODULE: ramon_django.settings
       DJANGO_DEBUG: "0"
@@ -208,13 +200,8 @@ services:
     networks: [ramon_backend]
 
   range-edge-fade:
-    build:
-      context: .
-      dockerfile: backend/django_bridge/Dockerfile
+    <<: *python-service
     container_name: ramon-range-edge-fade
-    restart: unless-stopped
-    init: true
-    env_file: [.env]
     environment:
       DJANGO_SETTINGS_MODULE: ramon_django.settings
       DJANGO_DEBUG: "0"
@@ -245,13 +232,8 @@ services:
     networks: [ramon_backend]
 
   session-opening-range-breakout:
-    build:
-      context: .
-      dockerfile: backend/django_bridge/Dockerfile
+    <<: *python-service
     container_name: ramon-session-opening-range-breakout
-    restart: unless-stopped
-    init: true
-    env_file: [.env]
     environment:
       DJANGO_SETTINGS_MODULE: ramon_django.settings
       DJANGO_DEBUG: "0"
@@ -282,13 +264,8 @@ services:
     networks: [ramon_backend]
 
   volatility-compression-expansion:
-    build:
-      context: .
-      dockerfile: backend/django_bridge/Dockerfile
+    <<: *python-service
     container_name: ramon-volatility-compression-expansion
-    restart: unless-stopped
-    init: true
-    env_file: [.env]
     environment:
       DJANGO_SETTINGS_MODULE: ramon_django.settings
       DJANGO_DEBUG: "0"
@@ -319,13 +296,8 @@ services:
     networks: [ramon_backend]
 
   exhaustion-reversal:
-    build:
-      context: .
-      dockerfile: backend/django_bridge/Dockerfile
+    <<: *python-service
     container_name: ramon-exhaustion-reversal
-    restart: unless-stopped
-    init: true
-    env_file: [.env]
     environment:
       DJANGO_SETTINGS_MODULE: ramon_django.settings
       DJANGO_DEBUG: "0"
@@ -356,14 +328,8 @@ services:
     networks: [ramon_backend]
 
   learning-worker:
-    build:
-      context: .
-      dockerfile: backend/django_bridge/Dockerfile
+    <<: *python-service
     container_name: ramon-learning-worker
-    restart: unless-stopped
-    init: true
-    env_file:
-      - .env
     environment:
       DJANGO_SETTINGS_MODULE: ramon_django.settings
       DJANGO_DEBUG: "0"
@@ -387,14 +353,8 @@ services:
       - ramon_backend
 
   forecast-worker:
-    build:
-      context: .
-      dockerfile: backend/django_bridge/Dockerfile
+    <<: *python-service
     container_name: ramon-forecast-worker
-    restart: unless-stopped
-    init: true
-    env_file:
-      - .env
     environment:
       DJANGO_SETTINGS_MODULE: ramon_django.settings
       DJANGO_DEBUG: "0"
@@ -415,14 +375,8 @@ services:
 
 
   scalper-worker:
-    build:
-      context: .
-      dockerfile: backend/django_bridge/Dockerfile
+    <<: *python-service
     container_name: ramon-scalper-worker
-    restart: unless-stopped
-    init: true
-    env_file:
-      - .env
     environment:
       DJANGO_SETTINGS_MODULE: ramon_django.settings
       DJANGO_DEBUG: "0"
@@ -446,14 +400,8 @@ services:
       - ramon_backend
 
   trend-worker:
-    build:
-      context: .
-      dockerfile: backend/django_bridge/Dockerfile
+    <<: *python-service
     container_name: ramon-trend-worker
-    restart: unless-stopped
-    init: true
-    env_file:
-      - .env
     environment:
       DJANGO_SETTINGS_MODULE: ramon_django.settings
       DJANGO_DEBUG: "0"
@@ -483,14 +431,8 @@ services:
       - ramon_backend
 
   candidate-worker:
-    build:
-      context: .
-      dockerfile: backend/django_bridge/Dockerfile
+    <<: *python-service
     container_name: ramon-candidate-worker
-    restart: unless-stopped
-    init: true
-    env_file:
-      - .env
     environment:
       DJANGO_SETTINGS_MODULE: ramon_django.settings
       DJANGO_DEBUG: "0"
@@ -511,6 +453,7 @@ services:
 
 
   redis:
+    logging: *container-logging
     image: redis:7-alpine
     container_name: ramon-redis
     restart: unless-stopped
@@ -526,6 +469,7 @@ services:
       retries: 5
 
   timescaledb:
+    logging: *container-logging
     image: timescale/timescaledb:latest-pg17
     container_name: ramon-timescaledb
     restart: unless-stopped

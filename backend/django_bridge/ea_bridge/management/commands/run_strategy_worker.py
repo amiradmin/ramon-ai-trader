@@ -1,4 +1,5 @@
 import logging
+import json
 import os
 from pathlib import Path
 import time
@@ -28,7 +29,12 @@ class Command(BaseCommand):
                 state=worker_cycle(setup)
                 Path('/tmp/strategy-worker-heartbeat').write_text(setup)
                 if state!=previous:
-                    self.stdout.write(f'{setup}: {state}'); previous=state
+                    control=StrategyWorkerControl.objects.get(setup=setup)
+                    self.stdout.write(json.dumps(dict(event='strategy_state_changed',schema_version=1,
+                        timestamp=timezone.now().isoformat(),setup=setup,previous_state=previous,state=state,
+                        evaluation_id=control.latest.get('evaluation_id'),
+                        command_id=control.latest.get('command_id')),sort_keys=True))
+                    previous=state
             except Exception as exc:
                 logging.getLogger(__name__).exception('Strategy %s failed',setup)
                 StrategyWorkerControl.objects.filter(setup=setup).update(last_seen=timezone.now(),state='WORKER_ERROR_'+type(exc).__name__)

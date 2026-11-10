@@ -58,7 +58,7 @@ class StrategyWorkerTests(TestCase):
     def test_independent_evaluation_runs_only_its_setup_and_keys_are_scoped(self):
         from .tests_playbook import DemoPlaybookApiTests
         payload=DemoPlaybookApiTests().payload()
-        a=json.loads(evaluate_payload(payload,strategy_setup='TREND_PULLBACK').content)
+        a=json.loads(evaluate_payload(payload,strategy_setup='TREND_PULLBACK',input_evidence={'schema_version': 1}).content)
         b=json.loads(evaluate_payload(payload,strategy_setup='BREAKOUT_RETEST').content)
         self.assertEqual(len(a['selection']['candidates']),1)
         self.assertEqual(a['selection']['candidates'][0]['setup'],'TREND_PULLBACK')
@@ -67,6 +67,7 @@ class StrategyWorkerTests(TestCase):
         for result,setup in [(a,'TREND_PULLBACK'),(b,'BREAKOUT_RETEST')]:
             row=DecisionEvaluation.objects.get(pk=result['evaluation_id'])
             self.assertEqual(row.features['strategy_setup'],setup)
+        self.assertIn('effective_policy', DecisionEvaluation.objects.get(pk=a['evaluation_id']).features)
 
     def test_each_pipeline_enables_exactly_one_setup(self):
         for setup in STRATEGIES:
@@ -188,6 +189,26 @@ class StrategyWorkerTests(TestCase):
 @override_settings(**SETTINGS)
 @skipUnlessDBFeature('has_select_for_update')
 class StrategyConcurrencyTests(TransactionTestCase):
+    def test_all_seven_workers_can_queue_entries_concurrently_with_budget(self):
+        fixture()
+        setups=list(STRATEGIES)
+        for setup in setups: approved(setup)
+        barrier=Barrier(len(setups))
+        def run(setup):
+            try:
+                decision=StrategyDecisionRecord.objects.get(decision_id=setup)
+                verdict=RiskVerdictRecord.objects.get(decision_id=setup)
+                barrier.wait(timeout=10)
+                return create_open_command(decision=decision,verdict=verdict,
+                    instance_id='demo',account_login='123',server_name='Demo')[1:]
+            finally: connections.close_all()
+        with ThreadPoolExecutor(max_workers=len(setups)) as pool:
+            results=list(pool.map(run,setups))
+        self.assertTrue(all(created for created,_ in results),results)
+        commands=EACommand.objects.filter(action='OPEN')
+        self.assertEqual(commands.count(),7)
+        self.assertEqual(len({c.payload['magic'] for c in commands}),7)
+
     def test_two_workers_cannot_spend_same_account_headroom(self):
         fixture()
         DecisionThresholdConfig.objects.create(profile='demo',values={'risk_management':{'max_total_risk_percent':.06}})

@@ -207,7 +207,7 @@ def decision(request):
     return evaluate_payload(payload)
 
 
-def evaluate_payload(p, *, strategy_setup=None):
+def evaluate_payload(p, *, strategy_setup=None, input_evidence=None):
     """Shared entry/risk mechanics; each strategy worker supplies its own setup."""
     try:
         if not isinstance(p,dict): raise ValueError("JSON object required")
@@ -459,6 +459,10 @@ def evaluate_payload(p, *, strategy_setup=None):
             "open_risk_percent": market["open_risk_percent"],
           },
         }
+        if strategy_setup and input_evidence is not None:
+            from .strategy_evidence import policy_snapshot
+            features["input_evidence"] = input_evidence
+            features["effective_policy"] = policy_snapshot(pipeline)
         record, created = StrategyDecisionRecord.objects.update_or_create(
           decision_id=key,
           defaults={

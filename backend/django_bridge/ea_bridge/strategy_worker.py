@@ -68,7 +68,9 @@ def worker_cycle(setup, *, now=None):
             bars=[dict(time=int(r.timestamp.timestamp()),open=float(r.open),high=float(r.high),low=float(r.low),
                 close=float(r.close),closed=True) for r in rows])
         from .decision import evaluate_payload
-        response=evaluate_payload(payload,strategy_setup=setup)
+        from .strategy_evidence import capture_inputs
+        evidence=capture_inputs(rows,feed,payload,now)
+        response=evaluate_payload(payload,strategy_setup=setup,input_evidence=evidence)
         data=json.loads(response.content)
         control.latest=dict(evaluated_at=now.isoformat(),action=data.get('decision','WAIT'),
             reason=data.get('reason',data.get('error','EVALUATION_ERROR')),
