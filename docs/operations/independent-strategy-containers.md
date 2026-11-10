@@ -136,3 +136,17 @@ now reports current broker readiness, entry control and execution gates separate
 from its paper-only results. Default-off wording was removed from live status.
 Browser verification confirmed the TREND_PULLBACK scope and actual scalper state;
 493 PostgreSQL tests and dashboard JavaScript syntax checks passed.
+
+
+## Obsolete interface cleanup — November 10, 2026
+
+Removed the old combined-engine scanner, duplicate range summary, educational
+learning mode, conceptual-variable reference, generic risk/workflow panels and
+legacy protection/exit-research panel from the main dashboard, together with their
+JavaScript renderers and refresh work. Active strategy diagnostics and shared
+threshold controls remain. The diagnostic scope now includes only independent
+strategy evaluations. History and research APIs, model training tools and stored
+records remain available; existing legacy positions retain server-side protection.
+Removed the unused pre-worker Compose backup and three empty root artifacts.
+The authenticated MT5 compatibility endpoint remains to report retirement, and
+shared evaluation/compatibility code remains covered by regression tests.

@@ -157,55 +157,13 @@
 
 
 /* Decision-variable tooltips and reference guide */
-.variable-guide{margin-top:12px;border:1px solid #29384c;border-radius:10px;background:#0c131d;overflow:visible;position:relative;z-index:4}
-.variable-guide>summary{cursor:pointer;list-style:none;padding:11px 13px;color:#dce8f8;font-size:11px;font-weight:800;display:flex;justify-content:space-between;gap:10px}
-.variable-guide>summary::-webkit-details-marker{display:none}
-.variable-guide>summary:after{content:"＋";color:var(--blue);font-size:13px}
-.variable-guide[open]>summary:after{content:"−"}
-.variable-guide-intro{padding:0 13px 10px;color:var(--muted);font-size:10px}
-.variable-guide-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;padding:0 10px 12px}
-.variable-group{min-width:0;border:1px solid #26364a;border-radius:8px;padding:9px;background:#111a26}
-.variable-group h3{font-size:9px;letter-spacing:.45px;text-transform:uppercase;color:#b8c6d8;margin:0 0 8px}
-.variable-items{display:flex;flex-wrap:wrap;gap:6px}
-.variable-chip{position:relative;display:inline-flex;align-items:center;gap:5px;border:1px solid #34445a;border-radius:6px;padding:5px 7px;background:#0d1622;color:#dce8f8;font-size:9px;cursor:help;outline:none}
-.variable-chip .variable-info{color:var(--blue);font-weight:900}
-.variable-chip:hover,.variable-chip:focus-visible{border-color:var(--blue);background:#17263a}
-.variable-chip:focus-visible{box-shadow:0 0 0 2px rgba(126,170,255,.3)}
-.variable-chip:after{content:attr(data-tooltip);position:absolute;z-index:50;left:0;top:calc(100% + 7px);width:min(270px,75vw);padding:9px 10px;border:1px solid #526783;border-radius:8px;background:#050a11;color:#edf3fb;font-size:10px;font-weight:500;line-height:1.5;white-space:normal;text-align:left;box-shadow:0 10px 28px rgba(0,0,0,.45);opacity:0;visibility:hidden;pointer-events:none;transform:translateY(-3px);transition:opacity .12s ease,transform .12s ease}
-.variable-chip:hover:after,.variable-chip:focus-visible:after{opacity:1;visibility:visible;transform:translateY(0)}
-.flow-check strong.flow-tooltip{position:relative;cursor:help;text-decoration:underline dotted rgba(126,170,255,.55);text-underline-offset:3px}.flow-check strong.flow-tooltip:after,.flow-abbr:after{content:attr(data-tooltip);position:absolute;z-index:90;left:0;top:calc(100% + 7px);width:min(310px,78vw);padding:9px 10px;border:1px solid #526783;border-radius:8px;background:#050a11;color:#edf3fb;font-size:10px;font-weight:500;line-height:1.5;white-space:normal;text-align:left;box-shadow:0 10px 28px rgba(0,0,0,.5);opacity:0;visibility:hidden;pointer-events:none;transform:translateY(-3px);transition:opacity .12s ease,transform .12s ease}.flow-check strong.flow-tooltip:hover:after,.flow-check strong.flow-tooltip:focus-visible:after,.flow-abbr:hover:after,.flow-abbr:focus-visible:after{opacity:1;visibility:visible;transform:translateY(0)}.flow-abbr{position:relative;cursor:help;text-decoration:underline dotted rgba(126,170,255,.7);text-underline-offset:2px}.flow-abbr:after{font-style:normal;font-weight:500}.flow-abbr:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
-
-
-@media(max-width:1050px){.variable-guide-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:620px){.variable-guide-grid{grid-template-columns:1fr}.variable-chip:after{left:auto;right:0}}
-
-/* Trading lesson · saved evaluation */
-.learning-shell{margin:20px 0}
-.learning-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
-.learning-tab{border:1px solid var(--line);background:#0d141e;color:var(--muted);padding:9px 12px;border-radius:9px;cursor:pointer;font:inherit;font-size:11px}
-.learning-tab[aria-pressed="true"]{border-color:var(--blue);background:#17263a;color:#dce8f8}
-.learning-layout{display:grid;grid-template-columns:1.05fr .95fr;gap:14px}
-.learning-lesson{background:#0d141e;border:1px solid #29384c;border-radius:12px;padding:16px;min-width:0}
-.learning-lesson h3{font-size:15px;margin:0 0 8px}
-.learning-lesson p,.learning-lesson li{font-size:11px;color:#b8c6d8;line-height:1.65}
-.learning-lesson ul{padding-left:18px;margin:8px 0}
-.learning-live-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-.learning-live{padding:10px;background:#111a26;border:1px solid #26364a;border-radius:9px;min-width:0}
-.learning-live span{display:block;color:var(--muted);font-size:9px}
-.learning-live strong{display:block;font-size:12px;margin-top:4px;overflow-wrap:anywhere}
-.learning-live small{display:block;color:var(--muted);font-size:9px;margin-top:3px}
-.learning-status{display:inline-flex;border-radius:99px;padding:4px 8px;font-size:9px;font-weight:800;background:#202b39;color:var(--muted)}
-.learning-live strong.pass{color:var(--green)}.learning-live strong.blocked{color:var(--red)}.learning-live strong.wait{color:var(--amber)}.learning-status.pass{background:#123328;color:var(--green)}.learning-status.wait{background:#382f1c;color:var(--amber)}.learning-status.blocked{background:#3a2028;color:var(--red)}
-.learning-foot{font-size:10px;color:var(--muted);margin-top:10px}
-@media(max-width:800px){.learning-layout{grid-template-columns:1fr}}
-
 </style>
 </head>
 <body>
 <div class="wrap">
 <header class="top">
   <div class="brand"><div class="logo">R</div><div><div class="eyebrow">RAMON · SMART TRADER</div><div class="title">Independent Strategy Desk</div><div class="sub">XAUUSD · Seven independent M15 strategy containers</div></div></div>
-  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><a class="btn" href="/api/ea/v1/learning/dashboard">Legacy learning history ↗</a><button class="btn" id="copyMarketSnapshot" type="button">Copy Market Snapshot</button><span id="copySnapshotStatus" class="small" role="status" aria-live="polite"></span><div class="status"><span class="dot"></span><span id="connection">DJANGO · DECISION FEED</span></div></div>
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><button class="btn" id="copyMarketSnapshot" type="button">Copy Market Snapshot</button><span id="copySnapshotStatus" class="small" role="status" aria-live="polite"></span><div class="status"><span class="dot"></span><span id="connection">DJANGO · DECISION FEED</span></div></div>
 </header>
 <div class="notice"><strong>Fleet overview:</strong> green boxes indicate a running worker with automatic entries On. Open a strategy for its controls, positions and broker results. An enabled worker may still be waiting for its setup or risk checks.</div>
 <section aria-labelledby="strategyFleetTitle" style="margin-bottom:24px">
@@ -297,24 +255,6 @@
   <details style="margin-top:12px"><summary>Recent request prices and fills</summary><div class="table-wrap"><table class="table"><thead><tr><th>Reported (UTC)</th><th>Requested price</th><th>Broker fill</th><th>Signed slippage (points)</th></tr></thead><tbody id="executionFills"></tbody></table></div></details>
 </section>
 
-<details class="card" style="margin-bottom:18px"><summary>Legacy position protection and historical exit research</summary>
-<p class="small">This panel covers verified trades from the retired combined engine. Each new strategy manages its own positions; use its strategy page for current commands.</p>
-<section class="card" id="profitProtection" aria-labelledby="protectionTitle" style="margin-bottom:18px">
-  <div class="section-head" style="margin:0 0 12px"><div><h2 id="protectionTitle">Legacy trade protection</h2><p>Existing combined-engine positions and broker results.</p></div></div>
-  <p class="small">All calculations run in Django. MT5 only executes the authorized stop change and reports the broker result. At +1 original R, Django moves SL to entry and preserves TP. Price breakeven can still lose money after costs or gaps.</p>
-  <p id="protectionStatus" class="small" role="status">Loading protection status…</p>
-  <div class="table-wrap"><table class="table" style="min-width:650px"><thead><tr><th>Position</th><th>Status</th><th>Current R</th><th>Current SL</th><th>Proposed SL</th><th>TP</th></tr></thead><tbody id="protectionPositions"></tbody></table></div>
-  <h4>Broker protection results</h4>
-  <div class="table-wrap"><table class="table" style="min-width:650px"><thead><tr><th>Created (UTC)</th><th>Position</th><th>State</th><th>Requested SL</th><th>Broker result</th><th>Closed net P&amp;L</th></tr></thead><tbody id="protectionCommands"></tbody></table></div>
-  <h4>Historical exit comparison · 9 November 2026</h4>
-  <p id="exitComparisonStatus" class="small"></p>
-  <div class="table-wrap"><table class="table" style="min-width:650px"><thead><tr><th>Rule</th><th>Trades</th><th>Net R</th><th>Average R</th><th>Win rate</th><th>Closed R drawdown</th></tr></thead><tbody id="exitComparisonRows"></tbody></table></div>
-  <p class="small">Descriptive comparison of frozen entries, not a portfolio backtest or proof of future profit. 50-point spread, 5-point slippage each side, zero assumed commission. 24-bar research exit; protection starts on the next bar. Partial-profit results assume ideal half-volume without broker lot rounding. Drawdown uses closed cumulative R, not account percentage or intratrade equity. Live protection uses current executable quotes; it does not reconstruct past peaks. Broker acknowledgement confirms execution, not profitability. Closed net P&amp;L is in account currency for a linked protected trade; it does not measure profit caused by protection.</p>
-
-
-</section>
-</details>
-
 <section class="card" aria-labelledby="arimaTitle" style="margin-bottom:18px">
   <div class="section-head" style="margin:0 0 14px">
     <div><h2 id="arimaTitle">ARIMA · next 15-minute close</h2><p>A separate forecasting observer. It does not approve, block, or change orders.</p></div>
@@ -340,9 +280,9 @@
   <p class="small" style="margin:12px 0 0">Errors are measured in the symbol’s price units, not account profit or loss. The observer fits observed trading candles without filling market closures or data gaps. Early results are not proof of trading profitability.</p>
 </section>
 
-<details class="card" id="decisionDiagnostics" style="margin-bottom:18px"><summary>Decision diagnostics, history and educational reference</summary>
-<p class="small">These panels explain saved evaluations, including legacy history. They do not control the fleet or select between containers. Risk threshold edits below apply to every M15 strategy using the same profile.</p>
-<div class="filters" style="margin:14px 0"><label for="diagnosticStrategyFilter">Strategy scope</label><select id="diagnosticStrategyFilter"><option value="all">All strategies and legacy history</option>{% for worker in strategy_workers %}<option value="{{ worker.setup }}">{{ worker.setup }}</option>{% endfor %}<option value="LEGACY">Retired combined engine</option></select></div>
+<details class="card" id="decisionDiagnostics" style="margin-bottom:18px"><summary>Strategy diagnostics and shared settings</summary>
+<p class="small">Saved evaluations from the seven independent strategy workers. Shared threshold edits below apply to every M15 worker using the same profile; per-strategy Start/Pause remains on each worker’s page.</p>
+<div class="filters" style="margin:14px 0"><label for="diagnosticStrategyFilter">Strategy scope</label><select id="diagnosticStrategyFilter"><option value="all">All seven strategy workers</option>{% for worker in strategy_workers %}<option value="{{ worker.setup }}">{{ worker.setup }}</option>{% endfor %}</select></div>
 <div id="status" class="card" role="status" aria-live="polite" style="margin-bottom:18px">Loading saved evaluations…</div>
 <div class="grid stats">
   <div class="card"><div class="stat-label">Saved evaluations in scope</div><div class="stat-value" id="statDecisions">—</div><div class="stat-foot">Current filter within the latest 50 saved records</div></div>
@@ -350,31 +290,6 @@
   <div class="card"><div class="stat-label">Latest scoped entry quality</div><div class="stat-value" id="statEntryQuality">Unavailable</div><div class="stat-foot">Actual pipeline output</div></div>
   <div class="card"><div class="stat-label">Latest scoped risk stage</div><div class="stat-value blue" id="statRisk">Unavailable</div><div class="stat-foot">Does not indicate broker execution</div></div>
 </div>
-
-<section class="range-analysis-shell" aria-labelledby="rangeAnalysisTitle">
-  <div class="section-head"><div><h2 id="rangeAnalysisTitle">Range history · account overview</h2><p>Account-scoped range history, including legacy evaluations. This overview is independent of the strategy filter; open RANGE_EDGE_FADE for its current worker.</p></div><span class="small" id="rangeAnalysisScope">Waiting for Django data…</span></div>
-  <div class="grid stats">
-    <div class="card"><div class="stat-label">Range setups detected</div><div class="stat-value" id="rangeDetected">—</div><div class="stat-foot" id="rangeEvaluated">Detector evaluations: —</div></div>
-    <div class="card"><div class="stat-label">Approved / Deferred / Rejected</div><div class="stat-value" id="rangeDecisionCounts">—</div><div class="stat-foot">Saved RANGE_EDGE_FADE decision outcomes</div></div>
-    <div class="card"><div class="stat-label">Completed range trades</div><div class="stat-value" id="rangeClosedTrades">—</div><div class="stat-foot" id="rangeWinRate">Win rate: —</div></div>
-    <div class="card"><div class="stat-label">Range net P&amp;L</div><div class="stat-value" id="rangeNetPnl">—</div><div class="stat-foot" id="rangeAverageR">Average R: —</div></div>
-  </div>
-  <div class="card" style="margin-top:12px">
-    <div class="risk-list">
-      <div class="risk-row"><span>Market status</span><strong id="rangeMarketStatus">Unavailable</strong></div>
-      <div class="risk-row"><span>Last market data (UTC)</span><strong id="rangeLastMarketData">Unavailable</strong></div>
-      <div class="risk-row"><span>Last decision (UTC)</span><strong id="rangeLastDecision">Unavailable</strong></div>
-      <div class="risk-row"><span>Evaluations explicitly skipped for closed market</span><strong id="rangeClosedSkips">0</strong></div>
-      <div class="small" id="rangeMarketNote">Market-session status will appear when Django supplies market data.</div>
-      <div class="small" id="rangeRejectionReasons">No rejection-reason breakdown available.</div>
-      <div class="risk-row"><span>Latest range setup</span><strong id="rangeLatestSide">Unavailable</strong></div>
-      <div class="risk-row"><span>Range boundaries</span><strong id="rangeBoundaries">Unavailable</strong></div>
-      <div class="risk-row"><span>Range width / boundary touches</span><strong id="rangeStructure">Unavailable</strong></div>
-      <div class="small" id="rangeLatestReason">No saved RANGE_EDGE_FADE setup is available yet.</div>
-      <div class="small" id="rangePerformanceNote">Trade performance appears only when a closed broker outcome is linked to a range decision.</div>
-    </div>
-  </div>
-</section>
 
 <section class="flow-shell" aria-labelledby="flowTitle">
   <div class="flow-head"><div><h2 id="flowTitle">Latest scoped evaluation · diagnostic flow</h2><p>One saved strategy evaluation, not an account-wide trading decision.</p></div>
@@ -395,71 +310,10 @@
       <p class="small">Each strategy evaluates only its own setup. The score describes setup quality, entry location, H1 direction, M5 confirmation and target room; it is not a win probability or a selector between containers.</p>
     </section>
     <div class="flow-note">The diagram is read-only. A passed strategy pipeline is not broker authorization and does not mean an MT5 order was sent.</div>
-    <details class="variable-guide" id="decisionVariableGuide">
-      <summary>Legacy concept reference · educational, not active trading gates</summary>
-      <div class="variable-guide-intro">These are the proposed decision inputs and controls. A tooltip explains the meaning; it does not imply that a variable is currently calculated, enabled, or used as a mandatory gate. The live PASS / WAIT / BLOCKED states above come only from saved Django decisions.</div>
-      <div class="variable-guide-grid" id="decisionVariableGuideItems"></div>
-    </details>
   </div>
 </section>
 
 
-<section class="learning-shell" aria-labelledby="learningTitle">
-  <div class="section-head"><div><h2 id="learningTitle">Trading lesson · saved evaluation</h2><p>Educational explanation of the latest evaluation in the selected scope; this does not train or control strategy workers.</p></div>
-    <span id="learningFeedStatus" class="learning-status">WAITING FOR MARKET DATA</span>
-  </div>
-  <div class="card">
-    <div class="learning-tabs" role="group" aria-label="Trading lesson">
-      <button class="learning-tab" type="button" data-lesson="opportunity" aria-pressed="true">01 · Opportunity</button>
-      <button class="learning-tab" type="button" data-lesson="entry" aria-pressed="false">02 · Entry timing</button>
-      <button class="learning-tab" type="button" data-lesson="risk" aria-pressed="false">03 · Risk</button>
-      <button class="learning-tab" type="button" data-lesson="learning" aria-pressed="false">04 · Learn from outcomes</button>
-    </div>
-    <div class="learning-layout">
-      <article class="learning-lesson">
-        <div class="eyebrow">TRADING CONCEPT</div>
-        <h3 id="learningLessonTitle">Finding the right opportunity</h3>
-        <div id="learningLessonBody"></div>
-      </article>
-      <article class="learning-lesson">
-        <div class="eyebrow">LIVE XAUUSD EVIDENCE · DJANGO</div>
-        <h3>What the market decision currently tells us</h3>
-        <div id="learningLiveValues" class="learning-live-grid"><div class="small">Waiting for the latest decision…</div></div>
-        <div id="learningLiveNote" class="learning-foot">Live values will appear when Django has saved decision data.</div>
-      </article>
-    </div>
-  </div>
-</section>
-
-<div class="section-head"><div><h2>Saved strategy evaluations</h2><p>Historical snapshots in the selected scope; an old approved plan is not a current entry instruction.</p></div>
-<div class="filters"><select id="sideFilter" aria-label="Filter direction"><option value="all">All directions</option><option value="BUY">Buy</option><option value="SELL">Sell</option><option value="WATCH">Watch</option></select><select id="stateFilter" aria-label="Filter status"><option value="all">All statuses</option><option value="READY">Ready</option><option value="CONDITIONAL">Conditional</option><option value="WAIT">Wait</option></select><button class="btn" id="reset">Reset filters</button></div></div>
-
-<div class="card table-wrap" style="padding:8px 14px">
-<table class="table">
-<thead><tr><th>Market / setup</th><th>Direction</th><th>Entry time (UTC)</th><th>Market quote</th><th>Stop loss</th><th>Target</th><th>R:R</th><th>State</th><th>Details</th></tr></thead>
-<tbody id="opportunities"><tr><td colspan="9">Loading saved decisions…</td></tr></tbody>
-</table>
-<div id="scannerPagination" class="pagination" aria-label="Opportunity scanner pagination"></div>
-</div>
-
-<div class="section-head"><div><h2>Recorded risk checks</h2><p>Values below belong to the latest saved evaluation in scope; they are not a fleet-wide readiness verdict.</p></div></div>
-<div class="grid lower">
-  <div class="card"><h3 style="font-size:14px;margin:0 0 18px">Risk controls</h3><div class="risk-list">
-    <div><div class="risk-row"><span>Risk budget (latest decision)</span><strong id="riskBudget">Unavailable</strong></div><div class="bar"><i id="riskBar" style="width:0%"></i></div></div>
-    <div><div class="risk-row"><span>Daily loss limit</span><strong id="dailyLossLimit">Unavailable</strong></div><div class="bar"><i style="width:0%"></i></div></div>
-    <div class="risk-row"><span>Reward-to-risk gate</span><strong id="rrGate">Unavailable</strong></div>
-    <div class="risk-row"><span>Stop-loss check</span><strong id="stopRequired">Unavailable</strong></div>
-    <div class="risk-row"><span>Spread (latest decision)</span><strong id="spreadStatus">Unavailable</strong></div>
-    <div class="risk-row"><span>News guard</span><strong id="newsGuard">Unavailable</strong></div>
-    <div class="risk-row"><span>Duplicate-position check</span><strong id="duplicateCheck">Unavailable</strong></div>
-  </div><p class="small" style="margin:18px 0 0">Position size should be calculated from account equity, allowed risk, entry-to-stop distance, tick value and contract specifications. Never infer lot size from the risk percentage alone.</p></div>
-  <div class="card"><h3 style="font-size:14px;margin:0 0 18px">Entry-time workflow</h3><div class="timeline">
-    <div class="event"><time>On scan</time><div class="line"></div><div><strong>Detect opportunity</strong><p>Record symbol, timeframe, direction, model score and setup reasons.</p></div></div>
-    <div class="event"><time>Candle close</time><div class="line"></div><div><strong>Confirm entry trigger</strong><p>Use the closed candle; validate signal freshness and avoid look-ahead.</p></div></div>
-    <div class="event"><time>Pre-order</time><div class="line"></div><div><strong>Run risk gates</strong><p>Check SL/TP, reward/risk, spread, sizing, ownership and shared account exposure.</p></div></div>
-    <div class="event"><time>After fill</time><div class="line"></div><div><strong>Manage and log</strong><p>Track fill price, slippage, stop/target updates and outcome.</p></div></div>
-  </div></div>
-</div>
 </details>
 <div class="footer">Ramon · Independent strategy fleet · Account results and saved evaluations · UTC timestamps</div>
 </div>
@@ -488,78 +342,11 @@ const fmt = value => {
 const stage = (decision, name) =>
   ((decision.features || {}).stages || {})[name] || {};
 const market = decision => (decision.features || {}).market_snapshot || {};
-const direction = decision => {
-  const opportunity = stage(decision, "opportunities");
-  const timing = stage(decision, "entry_timing");
-  const side = val(opportunity, "side", "direction");
-  const candidate = side === "Unavailable" ? val(timing, "side") : side;
-  return ["BUY", "SELL"].includes(candidate) ? candidate : "WATCH";
-};
-const stateOf = decision =>
-  decision.features?.approved === true ? "READY" : "WAIT";
 const utc = value => {
   if (!value) return "Unavailable";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? String(value) : date.toISOString().replace("T", " ").replace(".000Z", " UTC");
 };
-const pill = (side, state) => {
-  const sideClass = side === "BUY" ? "buy" : side === "SELL" ? "sell" : "watch";
-  const stateClass = state === "READY" ? "ready" : "watch";
-  const arrow = side === "BUY" ? "▲ " : side === "SELL" ? "▼ " : "◉ ";
-  return `<span class="pill ${sideClass}">${arrow}${esc(side)}</span>
-    <span class="pill ${stateClass}">${esc(state)}</span>`;
-};
-const detailBox = (label, value, explanation) =>
-  `<div class="detail-box"><label>${esc(label)}</label><strong>${esc(fmt(value))}</strong><div class="small">${esc(explanation || "")}</div></div>`;
-
-function renderDecisionRow(decision, index) {
-  const features = decision.features || {};
-  const opportunity = stage(decision, "opportunities");
-  const timing = stage(decision, "entry_timing");
-  const risk = stage(decision, "risk_management");
-  const quote = market(decision);
-  const side = direction(decision);
-  const state = stateOf(decision);
-  const id = `decision-detail-${index}`;
-  const bid = val(quote, "bid");
-  const ask = val(quote, "ask");
-  const quoteText = bid === "Unavailable" && ask === "Unavailable"
-    ? "Unavailable" : `Bid ${fmt(bid)} / Ask ${fmt(ask)}`;
-  const setupName = val(opportunity, "reason", "status");
-  const stop = val(risk, "stop_price");
-  const target = val(risk, "take_profit_price", "target_price");
-  const rr = val(risk, "reward_risk");
-  const setupExplanation = val(opportunity, "explanation");
-  const entryExplanation = val(timing, "explanation");
-  const riskExplanation = val(risk, "explanation");
-
-  return `
-    <tr class="opportunity" data-side="${esc(side)}" data-state="${esc(state)}">
-      <td><div class="symbol">${esc(decision.symbol)}</div><div class="small">${esc(decision.features?.strategy_setup || "Retired combined engine")}</div>
-          <div class="small">${esc(val(quote, "timeframe"))} · ${esc(setupName)}</div></td>
-      <td>${pill(side, state)}</td>
-      <td>${esc(utc(decision.created_at))}<div class="small">${esc(val(timing, "timing"))}</div></td>
-      <td>${esc(quoteText)}</td>
-      <td>${esc(fmt(stop))}</td>
-      <td>${esc(fmt(target))}</td>
-      <td>${esc(fmt(rr))}</td>
-      <td><span class="pill ${state === "READY" ? "ready" : "watch"}">${esc(state)}</span></td>
-      <td><button class="expand" data-id="${id}" type="button">View</button></td>
-    </tr>
-    <tr class="details" id="${id}"><td colspan="9"><div class="detail-grid">
-      ${detailBox("Decision ID", decision.decision_id, `Model: ${val(decision, "model_version")}`)}
-      ${detailBox("Opportunity", val(opportunity, "status"), setupExplanation)}
-      ${detailBox("Entry timing", val(timing, "status"), entryExplanation)}
-      ${detailBox("Risk management", val(risk, "status"), riskExplanation)}
-      ${detailBox("Final decision", decision.action, val(decision, "rationale_code"))}
-      ${detailBox("Setup score", val(opportunity, "score", "setup_score"), "Model output; not a probability unless defined by the model")}
-      ${detailBox("Entry quality", val(timing, "quality"), `Spread: ${fmt(val(timing, "spread_points"))} points`)}
-      ${detailBox("Risk checks", val(risk, "checks"), "Only checks returned by the pipeline are shown")}
-    </div></td></tr>`;
-}
-
-
-
 const prettyCheck = name => String(name || "unnamed_check")
   .replace(/_/g, " ")
   .replace(/(^| )([a-z])/g, (_, space, letter) => space + letter.toUpperCase());
@@ -882,7 +669,7 @@ async function saveDecisionThresholds(reset = false) {
     thresholdConfig = data;
     thresholdDraft = JSON.parse(JSON.stringify(data.values));
     if (status) { status.className = "threshold-status success"; status.textContent = reset ? "Defaults restored. The next decision will use them." : "Saved in Django. The next decision cycle will use these values."; }
-    if (window.latestLearningDecision) renderDecisionFlow(window.latestLearningDecision, thresholdExecution);
+    if (window.latestStrategyDecision) renderDecisionFlow(window.latestStrategyDecision, thresholdExecution);
   } catch (error) {
     if (status) { status.className = "threshold-status error"; status.textContent = error.message; }
   } finally {
@@ -919,21 +706,6 @@ function flowStageMarkup(title, stageResult, checks, fallback, forcedState, deci
     (stageName === "opportunities" ? opportunityDetectorMarkup(stageResult) : "") +
     '<div class="flow-checks">' + checkMarkup + '</div>' + thresholdEditorMarkup(stageName) + '</section>';
 }
-function collectFlowVariables(source, prefix = "", depth = 0, output = []) {
-  if (!source || typeof source !== "object" || Array.isArray(source) || depth > 2) return output;
-  const ignored = new Set(["checks", "explanation", "reason", "status", "approved", "side",
-    "candidate_side", "signal_bar_time", "dedupe_key", "signal_id", "forecasting"]);
-  for (const [key, value] of Object.entries(source)) {
-    if (ignored.has(key)) continue;
-    const name = prefix ? prefix + "." + key : key;
-    if (value && typeof value === "object" && !Array.isArray(value) && depth < 2) {
-      collectFlowVariables(value, name, depth + 1, output);
-    } else if (value === null || ["string", "number", "boolean"].includes(typeof value)) {
-      output.push([name, flowValue(value)]);
-    }
-  }
-  return output;
-}
 function decisionStageEntries(decision) {
   const stages = decision?.features?.stages;
   if (!stages || typeof stages !== "object" || Array.isArray(stages)) return [];
@@ -954,57 +726,6 @@ function decisionStageEntries(decision) {
   });
 }
 
-
-function renderDecisionVariableGuide(decision, execution = {}) {
-  const target = $("decisionVariableGuideItems");
-  if (!target) return;
-  const groups = [];
-  for (const [stageName, stageResult] of decisionStageEntries(decision)) {
-    const items = [];
-    for (const check of stageChecks(stageResult)) {
-      const label = check.display_name || check.label || prettyCheck(check.name);
-      const description = check.description || check.help || check.tooltip || check.detail ||
-        "Live check supplied by the Django decision pipeline.";
-      items.push([label, description]);
-      for (const [key, value] of Object.entries(check.metrics || {})) {
-        items.push([label + " · " + prettyCheck(key), "Live value: " + flowValue(value) + "."]);
-      }
-    }
-    for (const [name, value] of collectFlowVariables(stageResult)) {
-      items.push([prettyCheck(name), "Live Django value: " + value + "."]);
-    }
-    if (items.length) groups.push({
-      title: stageResult.title || stageResult.display_name || prettyCheck(stageName),
-      items: items
-    });
-  }
-  const executionItems = [];
-  for (const check of Array.isArray(execution.checks) ? execution.checks : []) {
-    executionItems.push([
-      check.display_name || check.label || prettyCheck(check.name),
-      check.description || check.detail || "Live execution-gate status: " + flowValue(check.status || check.passed) + "."
-    ]);
-    for (const [key, value] of Object.entries(check.metrics || {})) {
-      executionItems.push([prettyCheck(check.name) + " · " + prettyCheck(key), "Live value: " + flowValue(value) + "."]);
-    }
-  }
-  for (const [name, value] of collectFlowVariables(execution)) {
-    executionItems.push([prettyCheck(name), "Live Django runtime value: " + value + "."]);
-  }
-  if (executionItems.length) groups.push({title: execution.title || "Execution boundary", items: executionItems});
-  if (!groups.length) {
-    target.innerHTML = '<div class="small">Waiting for live Django decision variables.</div>';
-    return;
-  }
-  target.innerHTML = groups.map(group =>
-    '<section class="variable-group"><h3>' + esc(group.title) + '</h3><div class="variable-items">' +
-    group.items.map(([name, description]) =>
-      '<span class="variable-chip" tabindex="0" role="note" title="' + esc(description) +
-      '" aria-label="' + esc(name + ". " + description) + '" data-tooltip="' + esc(description) +
-      '"><span>' + esc(name) + '</span></span>'
-    ).join("") + '</div></section>'
-  ).join("");
-}
 
 const FLOW_ABBREVIATION_TOOLTIPS = {
   ATR:"Average True Range — a volatility measure based on true candle ranges. Used to normalize distances and compare volatility.",
@@ -1042,7 +763,7 @@ function decorateDecisionFlowTooltips(markup) {
     });
   }).join("");
 }
-renderDecisionVariableGuide(null);
+
 
 function renderPlaybookSelection(decision) {
   const selection = decision?.features?.selection;
@@ -1141,179 +862,8 @@ function renderDecisionFlow(decision, execution = {}) {
     summaryText = "The Django pipeline has not approved every stage.";
   }
   $("flowSummary").className = "flow-summary " + summaryState;
-  $("flowSummary").innerHTML = '<strong>ACTIVE PROCESS STATUS:</strong> ' + esc(summaryText);
+  $("flowSummary").innerHTML = '<strong>SAVED EVALUATION STATUS:</strong> ' + esc(summaryText);
 }
-
-const learningLessons = {
-  opportunity: {
-    title: "Finding the right opportunity · M15",
-    body: '<p>Start with the market context. A trend-following pullback setup needs a directional regime, a meaningful impulse, acceptable volatility, and evidence that price has begun to pull back—not merely continued extending.</p><ul><li><b>Regime:</b> classify bullish, bearish, ranging, or uncertain conditions.</li><li><b>Volatility:</b> compare current ATR(14) with its recent median.</li><li><b>Structure:</b> inspect confirmed swing highs and lows.</li><li><b>Impulse:</b> measure the directional leg in ATR units.</li><li><b>Stability:</b> check that the recent regime is not opposite to the current one.</li></ul><p><b>Lesson:</b> a strong trend alone is not an entry. Wait for the pullback and the entry trigger.</p>'
-  },
-  entry: {
-    title: "Entering at the right time · M5 confirmation",
-    body: '<p>After M15 identifies a valid opportunity, entry timing asks whether price has confirmed a tradable trigger. It is a separate question from whether the market direction is bullish or bearish.</p><ul><li>Use completed candles for confirmation.</li><li>Check signal freshness; do not chase an expired setup.</li><li>Compare trigger direction with the approved M15 opportunity.</li><li>Account for spread and current market conditions.</li></ul><p><b>Lesson:</b> opportunity approval does not mean enter immediately. If timing is WAIT, wait.</p>'
-  },
-  risk: {
-    title: "Managing risk precisely · Before any order",
-    body: '<p>Risk is calculated before execution. A valid setup can still be rejected because its stop, reward-to-risk, spread, exposure, news, or daily-loss conditions are unacceptable.</p><ul><li>Risk amount = account equity × permitted risk fraction.</li><li>Stop distance must use the actual planned entry and stop prices.</li><li>Position size also requires tick value and contract specifications.</li><li>Reward-to-risk = expected reward ÷ planned risk.</li><li>Include spread, commission, and likely slippage in evaluation.</li></ul><p><b>Lesson:</b> never infer lot size from risk percentage alone.</p>'
-  },
-  learning: {
-    title: "Learning from outcomes · Evidence, not hindsight",
-    body: '<p>Save the decision as it was known at the time, then compare it with the eventual trade outcome. Keep predictions and features causal: never use future candles or future-return columns as model inputs.</p><ul><li>Log the decision, timestamp, regime, features, and model version.</li><li>After closure, record fill, slippage, exit reason, costs, and realized R.</li><li>Compare simple baselines with candidate models on unseen time periods.</li><li>Use walk-forward and regime-specific evaluation; monitor drawdown and overtrading.</li><li>Keep experimental models in shadow mode until out-of-sample evidence supports promotion.</li></ul><p><b>Lesson:</b> a profitable example is not proof of an edge. Evaluate many trades after costs.</p>'
-  }
-};
-let activeLearningLesson = "opportunity";
-function learningCheck(decision, stageName, checkName) {
-  const checks = stage(decision, stageName).checks;
-  return Array.isArray(checks) ? checks.find(item => String(item?.name || "").toLowerCase() === checkName) : null;
-}
-function learningCheckText(check) {
-  if (!check) return "Not supplied";
-  const m = check.metrics || {};
-  const value = m.value !== undefined ? fmt(m.value) : val(check, "detail", "reason");
-  const status = check.passed === true ? "PASS" : check.passed === false ? "BLOCKED" : "WAIT";
-  return status + " · " + value;
-}
-function renderLearning(decision) {
-  const lesson = learningLessons[activeLearningLesson];
-  $("learningLessonTitle").textContent = lesson.title;
-  $("learningLessonBody").innerHTML = lesson.body;
-  document.querySelectorAll(".learning-tab").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.lesson === activeLearningLesson)));
-  const opportunity = stage(decision, "opportunities");
-  const timing = stage(decision, "entry_timing");
-  const risk = stage(decision, "risk_management");
-  const items = activeLearningLesson === "opportunity" ? [
-    ["Market regime", learningCheckText(learningCheck(decision,"opportunities","regime")),"Direction and structure"],
-    ["Volatility", learningCheckText(learningCheck(decision,"opportunities","volatility")),"ATR relative to recent median"],
-    ["Impulse", learningCheckText(learningCheck(decision,"opportunities","impulse")),"Directional leg ÷ ATR"],
-    ["Regime stability", learningCheckText(learningCheck(decision,"opportunities","regime_stability")),"Recent regime consistency"]
-  ] : activeLearningLesson === "entry" ? [
-    ["M15 opportunity", opportunity.approved === true ? "APPROVED" : opportunity.approved === false ? "NOT APPROVED" : "Not supplied","Upstream opportunity gate"],
-    ["Entry timing", learningCheckText(learningCheck(decision,"entry_timing","confirmation")),"Actual Django check, if supplied"],
-    ["Entry quality", fmt(val(timing,"quality")),"Django timing-stage output"],
-    ["Spread", fmt(val(timing,"spread_points")),"Broker points; unavailable if not supplied"]
-  ] : activeLearningLesson === "risk" ? [
-    ["Risk stage", fmt(val(risk,"status")),"Actual Django risk verdict"],
-    ["Stop check", learningCheckText(learningCheck(decision,"risk_management","stop")),"Stop-loss validation"],
-    ["Reward / risk", learningCheckText(learningCheck(decision,"risk_management","reward_risk")),"Configured R:R gate"],
-    ["Daily loss", learningCheckText(learningCheck(decision,"risk_management","daily_loss")),"Daily loss protection"]
-  ] : [
-    ["Decision ID", fmt(val(decision,"decision_id")),"Immutable decision reference"],
-    ["Model version", fmt(val(decision,"model_version")),"Model provenance"],
-    ["Decision time (UTC)", utc(decision.created_at),"Saved Django timestamp"],
-    ["Outcome record", "Not linked in this feed","No realized R/P&L inferred"]
-  ];
-  $("learningLiveValues").innerHTML = items.map(([label,value,note]) => { const valueText = String(value); const valueClass = valueText.startsWith("PASS") ? "pass" : valueText.startsWith("BLOCKED") ? "blocked" : valueText.startsWith("WAIT") ? "wait" : ""; return '<div class="learning-live"><span>'+esc(label)+'</span><strong class="'+valueClass+'">'+esc(valueText)+'</strong><small>'+esc(note)+'</small></div>'; }).join("");
-  const created = decision.created_at ? new Date(decision.created_at) : null;
-  const ageSeconds = created && Number.isFinite(created.getTime()) ? Math.max(0,Math.floor((Date.now()-created.getTime())/1000)) : null;
-  const feed = $("learningFeedStatus");
-  feed.className = "learning-status " + (ageSeconds !== null && ageSeconds <= 90 ? "pass" : "wait");
-  feed.textContent = ageSeconds === null ? "TIMESTAMP UNAVAILABLE" : ageSeconds <= 90 ? "RECENT DJANGO DECISION" : "LAST SAVED DECISION · " + Math.floor(ageSeconds/60) + " MIN AGO";
-  $("learningLiveNote").textContent = "Decision timestamp: " + (created ? utc(decision.created_at) : "unavailable") + ". Dashboard refreshes every 10 seconds. A saved decision is not a tick-by-tick candle feed.";
-}
-document.querySelectorAll(".learning-tab").forEach(button => button.addEventListener("click", () => {
-  activeLearningLesson = button.dataset.lesson;
-  if (window.latestLearningDecision) renderLearning(window.latestLearningDecision);
-}));
-
-function renderRisk(decision) {
-  const risk = stage(decision, "risk_management");
-  const timing = stage(decision, "entry_timing");
-  const checks = Array.isArray(risk.checks) ? risk.checks : [];
-  const check = name => checks.find(item => item && item.name === name);
-  const stopCheck = check("stop");
-  const rrCheck = check("reward_risk");
-  const dailyCheck = check("daily_loss");
-  const newsCheck = check("news_guard");
-  const duplicateCheck = check("duplicate_position");
-  $("riskBudget").textContent = fmt(val(risk, "risk_budget"));
-  $("dailyLossLimit").textContent = dailyCheck ? dailyCheck.detail : "No daily-loss gate recorded";
-  $("rrGate").textContent = rrCheck ? rrCheck.detail : "Unavailable";
-  $("stopRequired").textContent = stopCheck
-    ? `${stopCheck.passed === true ? "Passed" : "Failed"} · ${fmt(stopCheck.detail)}`
-    : "Unavailable";
-  $("spreadStatus").textContent = fmt(val(timing, "spread_points")) === "Unavailable"
-    ? "Unavailable" : `${fmt(timing.spread_points)} points`;
-  $("newsGuard").textContent = newsCheck ? newsCheck.detail : "No news gate recorded";
-  $("duplicateCheck").textContent = duplicateCheck ? duplicateCheck.detail : "Unavailable";
-  $("riskBar").style.width = "0%";
-}
-
-let scannerDecisions = [];
-let scannerPage = 1;
-let scannerPageSize = 10;
-
-function renderOpportunityTable() {
-  const sideFilter = $("sideFilter").value;
-  const stateFilter = $("stateFilter").value;
-  const filtered = scannerDecisions
-    .map((decision, index) => ({decision, index}))
-    .filter(({decision}) => {
-      const sideMatch = sideFilter === "all" || direction(decision) === sideFilter;
-      const stateMatch = stateFilter === "all" || stateOf(decision) === stateFilter;
-      return sideMatch && stateMatch;
-    });
-
-  const pageCount = Math.max(1, Math.ceil(filtered.length / scannerPageSize));
-  scannerPage = Math.min(Math.max(1, scannerPage), pageCount);
-  const start = (scannerPage - 1) * scannerPageSize;
-  const pageItems = filtered.slice(start, start + scannerPageSize);
-
-  $("opportunities").innerHTML = !scannerDecisions.length
-    ? '<tr><td colspan="9">No saved decisions available.</td></tr>'
-    : pageItems.length
-      ? pageItems.map(({decision, index}) => renderDecisionRow(decision, index)).join("")
-      : '<tr><td colspan="9">No opportunities match the selected filters.</td></tr>';
-
-  $("scannerPagination").innerHTML = `
-    <span>Showing ${filtered.length ? start + 1 : 0}–${Math.min(start + scannerPageSize, filtered.length)} of ${filtered.length} matching decisions</span>
-    <div class="pagination-controls">
-      <label for="scannerPageSize">Rows per page</label>
-      <select id="scannerPageSize" aria-label="Rows per page">
-        <option value="10" ${scannerPageSize === 10 ? "selected" : ""}>10</option>
-        <option value="25" ${scannerPageSize === 25 ? "selected" : ""}>25</option>
-        <option value="50" ${scannerPageSize === 50 ? "selected" : ""}>50</option>
-      </select>
-      <span>Page ${scannerPage} of ${pageCount}</span>
-      <button class="btn" id="scannerPrev" type="button" ${scannerPage <= 1 ? "disabled" : ""}>Previous</button>
-      <button class="btn" id="scannerNext" type="button" ${scannerPage >= pageCount ? "disabled" : ""}>Next</button>
-    </div>`;
-}
-
-function filterRows(resetPage = false) {
-  if (resetPage) scannerPage = 1;
-  renderOpportunityTable();
-}
-$("sideFilter").addEventListener("change", () => filterRows(true));
-$("stateFilter").addEventListener("change", () => filterRows(true));
-$("reset").addEventListener("click", () => {
-  $("sideFilter").value = "all";
-  $("stateFilter").value = "all";
-  filterRows(true);
-});
-$("scannerPagination").addEventListener("click", event => {
-  if (event.target.id === "scannerPrev" && scannerPage > 1) {
-    scannerPage -= 1;
-    renderOpportunityTable();
-  } else if (event.target.id === "scannerNext") {
-    scannerPage += 1;
-    renderOpportunityTable();
-  }
-});
-$("scannerPagination").addEventListener("change", event => {
-  if (event.target.id !== "scannerPageSize") return;
-  scannerPageSize = Number(event.target.value) || 10;
-  scannerPage = 1;
-  renderOpportunityTable();
-});
-$("opportunities").addEventListener("click", event => {
-  const button = event.target.closest(".expand");
-  if (!button) return;
-  const detail = $(button.dataset.id);
-  detail.classList.toggle("open");
-  button.textContent = detail.classList.contains("open") ? "Hide" : "View";
-});
-
 
 async function copyMarketSnapshot() {
   const button = $("copyMarketSnapshot");
@@ -1404,120 +954,34 @@ async function loadPnlSummary() {
   }
 }
 $("applyPnlRange").addEventListener("click", loadPnlSummary);
-function renderRangeAnalysis(data) {
-  const range = data && typeof data === "object" ? data : {};
-  const market = range.market || {};
-  $("rangeMarketStatus").textContent = market.status || "UNKNOWN";
-  $("rangeLastMarketData").textContent = market.last_market_data_at ? utc(market.last_market_data_at) : "Unavailable";
-  $("rangeLastDecision").textContent = market.last_decision_at ? utc(market.last_decision_at) : "Unavailable";
-  $("rangeClosedSkips").textContent = fmt(market.closed_market_skips ?? 0);
-  $("rangeMarketNote").textContent = market.status_note || "Market-session status unavailable.";
-  const rejectionReasons = Array.isArray(range.rejection_reasons) ? range.rejection_reasons : [];
-  $("rangeRejectionReasons").textContent = rejectionReasons.length
-    ? "Most common evaluation reasons: " + rejectionReasons.map(item => item.reason + " (" + item.count + ")").join(" · ")
-    : "No range evaluation rejection reasons recorded.";
-  $("rangeDetected").textContent = fmt(range.detected ?? 0);
-  $("rangeEvaluated").textContent = "Detector evaluations: " + fmt(range.evaluated ?? 0) + " · latest " + fmt(range.lookback_decisions ?? 0) + " decisions";
-  $("rangeDecisionCounts").textContent = [range.approved ?? 0, range.deferred ?? 0, range.rejected ?? 0].join(" / ");
-  $("rangeClosedTrades").textContent = fmt(range.closed_trades ?? 0);
-  $("rangeWinRate").textContent = "Win rate: " + (range.win_rate_percent == null ? "Not available" : fmt(range.win_rate_percent) + "%") +
-    " · Wins " + fmt(range.winning_trades ?? 0) + " / Losses " + fmt(range.losing_trades ?? 0);
-  $("rangeNetPnl").textContent = fmt(Number(range.net_pnl ?? 0));
-  $("rangeAverageR").textContent = "Average R: " + (range.average_r_multiple == null ? "Not available" : fmt(range.average_r_multiple) + "R");
-  const latest = range.latest_setup;
-  $("rangeLatestSide").textContent = latest ? [latest.side || "Side unavailable", latest.status || "Status unavailable"].join(" · ") : "No RANGE_EDGE_FADE candidate emitted";
-  $("rangeBoundaries").textContent = latest ? fmt(latest.range_low) + " – " + fmt(latest.range_high) : "Unavailable";
-  const touches = latest?.boundary_touches;
-  $("rangeStructure").textContent = latest
-    ? (latest.range_width_atr == null ? "Width unavailable" : fmt(latest.range_width_atr) + " ATR") +
-      " · Upper " + fmt(touches?.upper) + " / Lower " + fmt(touches?.lower)
-    : "Unavailable";
-  $("rangeLatestReason").textContent = latest
-    ? (latest.explanation || latest.reason || "Latest saved RANGE_EDGE_FADE candidate; inspect the decision flow for downstream timing and risk verdicts.")
-    : (range.latest_evaluation
-        ? "Latest range-context evaluation: " + (range.latest_evaluation.reason || range.latest_evaluation.rationale_code || "No explicit reason supplied") +
-          ". " + fmt(range.rejected) + " range-context evaluations were rejected without emitting a RANGE_EDGE_FADE candidate in this lookback."
-        : "No range-context evaluation or RANGE_EDGE_FADE candidate is available in the latest decision window.");
-  $("rangePerformanceNote").textContent = range.performance_note || "Closed-trade results are sourced from linked broker outcomes.";
-  $("rangeAnalysisScope").textContent = range.symbol
-    ? range.symbol + " · latest " + fmt(range.lookback_decisions) + " decisions"
-    : "No decision symbol available";
-}
 async function refresh() {
   const connection = $("connection");
   try {
-    const response = await fetch("/api/ea/v1/dashboard-data", {cache: "no-store"});
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const response = await fetch("/api/ea/v1/dashboard-data", {cache:"no-store"});
+    if (!response.ok) throw new Error("Saved evaluations unavailable");
     const data = await response.json();
-    if (!data.ok || !Array.isArray(data.decisions)) {
-      throw new Error("Unexpected dashboard data format");
-    }
     const scope = $("diagnosticStrategyFilter").value;
-    const decisions = data.decisions.filter(d => scope === "all" || (d.features?.strategy_setup || "LEGACY") === scope);
-    renderRangeAnalysis(data.range_analysis);
-    connection.textContent = "DJANGO · FEED CONNECTED";
-
+    const decisions = (data.decisions || []).filter(d => d.features?.strategy_setup &&
+      (scope === "all" || d.features.strategy_setup === scope));
+    connection.textContent = "DJANGO · FLEET CONNECTED";
     $("statDecisions").textContent = fmt(decisions.length);
-    $("statSetups").textContent = fmt(decisions.filter(d =>
-      stage(d, "opportunities").approved === true).length);
-
-    if (!decisions.length) {
-      renderRangeAnalysis(data.range_analysis);
-      $("status").innerHTML = "<strong>No saved decisions yet.</strong> Waiting for a decision record from Django.";
-      $("opportunities").innerHTML = '<tr><td colspan="9">No saved decisions available.</td></tr>';
-      scannerDecisions = [];
-      scannerPage = 1;
-      renderOpportunityTable();
-      window.latestLearningDecision = null;
-      $("learningFeedStatus").className = "learning-status wait";
-      $("learningFeedStatus").textContent = "WAITING FOR DECISION";
-      $("learningLiveValues").innerHTML = '<div class="small">No saved Django decision is available.</div>';
-      $("learningLiveNote").textContent = "No live lesson evidence is available until Django saves a decision.";
-      $("decisionFlow").innerHTML = '<div class="small">No saved decision stages are available yet.</div>';
-      $("flowSummary").className = "flow-summary";
-      $("flowSummary").textContent = "Waiting for the first Django decision.";
-      renderDecisionFlow(null, data.execution || {});
-      renderDecisionVariableGuide(null, data.execution || {});
-      $("statEntryQuality").textContent = "Unavailable";
-      $("statRisk").textContent = "Unavailable";
-      ["riskBudget", "dailyLossLimit", "rrGate", "stopRequired", "spreadStatus", "newsGuard", "duplicateCheck"]
-        .forEach(id => $(id).textContent = "Unavailable");
-      return;
-    }
-
-    const latest = decisions[0];
-    window.latestLearningDecision = latest;
-    renderLearning(latest);
+    $("statSetups").textContent = fmt(decisions.filter(d => stage(d,"opportunities").approved === true).length);
+    const latest = decisions[0] || null;
+    window.latestStrategyDecision = latest;
     renderDecisionFlow(latest, data.execution || {});
-    renderDecisionVariableGuide(latest, data.execution || {});
-    const latestFeatures = latest.features || {};
-    const strategyName = latestFeatures.strategy_setup || "Retired combined engine";
-    const latestTiming = stage(latest, "entry_timing");
-    const latestRisk = stage(latest, "risk_management");
-    const approved = latestFeatures.approved === true;
-    const action = val(latest, "action");
-    $("status").innerHTML = `
-      <div class="brand">
-        <span class="pill ${approved ? "ready" : "watch"}">${esc(action)}</span>
-        <strong>${esc(strategyName)} · ${esc(latest.symbol)}</strong>
-        <span class="small">Confidence: ${esc(fmt(latest.confidence))}</span>
-      </div>
-      <p><strong>This saved evaluation:</strong> ${approved ? "Approved by pipeline" : "Not approved"}
-      · <strong>Reason:</strong> ${esc(val(latest, "rationale_code"))}</p>
-      <div class="small">Decision ${esc(latest.decision_id)} · Saved ${esc(utc(latest.created_at))}
-      · This snapshot is not a fleet-wide decision or confirmation of broker execution.</div>`;
-
-    $("statEntryQuality").textContent = fmt(val(latestTiming, "quality"));
-    $("statRisk").textContent = fmt(val(latestRisk, "status"));
-    scannerDecisions = decisions;
-    renderOpportunityTable();
-    renderRisk(latest);
+    $("statEntryQuality").textContent = latest ? fmt(stage(latest,"entry_timing").quality) : "Unavailable";
+    $("statRisk").textContent = latest ? fmt(stage(latest,"risk_management").status) : "Unavailable";
+    $("status").innerHTML = latest
+      ? `<strong>${esc(latest.features.strategy_setup)} · ${esc(latest.symbol)}</strong>
+         <p>${esc(latest.action)} · ${esc(latest.rationale_code)}</p>
+         <div class="small">Saved ${esc(utc(latest.created_at))} · One recorded evaluation, not a fleet-wide decision or proof of a broker fill.</div>`
+      : "No evaluation for this strategy in the latest 50 records. Open its strategy page for its own history.";
   } catch (error) {
     connection.textContent = "DJANGO · FEED ERROR";
-    $("status").innerHTML = `<span class="negative">Could not load decision data: ${esc(error.message)}</span>`;
+    $("status").textContent = "Saved strategy evaluations unavailable; previous values may be stale.";
   }
 }
-$("diagnosticStrategyFilter").addEventListener("change", () => { scannerPage = 1; refresh(); });
+$("diagnosticStrategyFilter").addEventListener("change", refresh);
 const pnlToday = new Date();
 const pnlThirtyDaysAgo = new Date(pnlToday.getTime() - 29 * 86400000);
 $("pnlFrom").value = utcDateInputValue(pnlThirtyDaysAgo);
@@ -1674,15 +1138,6 @@ async function refreshExecutionCosts() {
     const response = await fetch("/api/ea/v1/research/execution", {cache:"no-store",signal:controller.signal});
     if (!response.ok) throw new Error("Execution data unavailable");
     const data = await response.json();
-    const pp = data.profit_protection || {};
-    $("protectionStatus").textContent = (pp.mode || "Unavailable") + " · " + (pp.state || "Waiting for demo feed") + " · Calculations: Django";
-    const fmtProtection = v => v == null ? "—" : Number(v).toFixed(3);
-    $("protectionPositions").innerHTML = (pp.positions || []).map(row => "<tr><td>" + esc(row.ticket) + "</td><td>" + esc(row.state) + "</td><td>" + fmtProtection(row.current_r) + "</td><td>" + fmtProtection(row.current_stop) + "</td><td>" + fmtProtection(row.proposed_stop) + "</td><td>" + fmtProtection(row.take_profit) + "</td></tr>").join("") || '<tr><td colspan="6">No open positions in the current telemetry.</td></tr>';
-    $("protectionCommands").innerHTML = (pp.recent_commands || []).map(row => "<tr><td>" + esc(row.created_at) + "</td><td>" + esc(row.payload.position_ticket) + "</td><td>" + esc(row.state) + "</td><td>" + fmtProtection(row.payload.stop_loss) + "</td><td>" + esc(row.result.detail || "Awaiting broker acknowledgement") + "</td><td>" + (row.closed_result ? fmtProtection(row.closed_result.net_pnl) : "Awaiting linked closed outcome") + "</td></tr>").join("") || '<tr><td colspan="6">No protection commands yet. A live +1R trigger and a verified Ramon position are required.</td></tr>';
-    const comparison = data.exit_comparison || {};
-    const names = {current:"Current target",target_1_2R:"Target capped at 1.2R",target_1R:"Target at 1R",breakeven_1R:"Breakeven at +1R",trail_1R:"Trail 0.5R after +1R",partial_1R:"Half profit at +1R (ideal volume)"};
-    $("exitComparisonStatus").textContent = (comparison.baseline_trades || 0) + " baseline trades · " + (comparison.excluded_incomplete_or_gapped_windows || 0) + " incomplete/gapped windows excluded · period " + (comparison.first_bar ? new Date(comparison.first_bar*1000).toISOString().slice(0,10) : "—") + " to " + (comparison.last_bar ? new Date(comparison.last_bar*1000).toISOString().slice(0,10) : "—");
-    $("exitComparisonRows").innerHTML = Object.entries(comparison.results || {}).map(([key,row]) => "<tr><td>" + esc(names[key] || key) + "</td><td>" + row.trades + "</td><td>" + fmtProtection(row.net_r) + "</td><td>" + fmtProtection(row.expectancy_r) + "</td><td>" + (row.win_rate == null ? "—" : (row.win_rate*100).toFixed(1)+"%") + "</td><td>" + fmtProtection(row.max_closed_cumulative_r_drawdown) + "</td></tr>").join("");
     $("executionStatus").textContent = data.state === "NO_DEMO_FEED" ? "No demo feed available." :
       (data.closed_trades || 0) + " closed trades · " + (data.executed_open_commands || 0) + " executed OPEN commands · latest 200 of each for this account/source/symbol";
     const labels={request_slippage_points:"Request-to-fill slippage (points)",submission_spread_points:"Submission spread (points)",
@@ -1698,11 +1153,11 @@ async function refreshExecutionCosts() {
       "</td><td>" + showNumber(row.metrics.request_price) + "</td><td>" + showNumber(row.metrics.request_fill_price) +
       "</td><td>" + showNumber(row.metrics.request_slippage_points) + "</td></tr>").join("") || '<tr><td colspan="4">No request-price observations received yet.</td></tr>';
     $("executionUpgrade").textContent = (data.metrics?.request_slippage_points?.observations || 0) ? "Request-to-fill measurements are arriving from broker acknowledgements." : data.ea_version === "1.08" ?
-      "EA v1.08 is reporting. Waiting for a completed OPEN acknowledgement with usable request and fill prices." :
-      "Precise request-to-fill measurement requires RamonCommandEA v1.08. Existing EA versions can continue reporting closed-trade commission, swap and entry fills.";
+      "Waiting for a completed OPEN acknowledgement with usable request and fill prices." :
+      "Request-to-fill measurements require a compatible command EA and a completed broker acknowledgement. Closed-trade commission, swap and entry fills remain separate measurements.";
   } catch (error) {
     $("executionStatus").textContent = "Broker cost panel unavailable; any displayed values may be old.";
-    $("protectionStatus").textContent = "Protection data unavailable; displayed values may be stale.";
+
   } finally {
     clearTimeout(timeout);
     executionRequestInFlight = false;
