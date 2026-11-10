@@ -160,3 +160,11 @@ polling, threshold editor and flow styling. Their containers, APIs, records and
 research tools remain available. This is a dashboard-only change; no entry flag,
 risk setting or worker lifecycle is changed. The fleet API now supplies the main
 connection badge as well as the seven worker cards.
+
+
+Strategy cards pulse when fresh configured-feed telemetry contains an exact
+verified owned position. Magic alone cannot activate the indicator. Open position
+counts remain visible when entries are paused; stale/missing telemetry reports
+position status unavailable and disables the pulse. Reduced-motion preferences
+use a static highlighted border instead. Position and entry states refresh every
+15 seconds; this indicator never creates or modifies orders.

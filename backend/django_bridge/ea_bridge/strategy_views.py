@@ -18,11 +18,21 @@ from .strategy_worker import configured_feed, strategy_readiness, close_strategy
 def worker_rows():
     now=timezone.now()
     controls={c.setup:c for c in StrategyWorkerControl.objects.all()}
+    feed=configured_feed()
+    position_feed_fresh=bool(feed and feed.status=='TELEMETRY_OK' and feed.terminal_connected
+        and 0<=(now-feed.last_seen).total_seconds()<=60
+        and feed.payload.get('server_name')==feed.server_name
+        and isinstance(feed.payload.get('positions'),list))
     result=[]
     for setup,(slug,description,magic) in STRATEGIES.items():
         c=controls.get(setup)
         fresh=bool(c and c.last_seen and 0<=(now-c.last_seen).total_seconds()<90)
-        result.append(dict(setup=setup,slug=slug,description=description,container='ramon-'+slug,
+        position_status_known=bool(position_feed_fresh and c and
+            (c.source,c.account_login,c.server_name,c.symbol)==
+            (feed.instance_id,feed.account_login,feed.server_name,feed.symbol))
+        open_positions=sum(owned_strategy_position(feed,p,setup=setup) is not None
+            for p in feed.payload['positions']) if position_status_known else 0
+        result.append(dict(open_positions=open_positions,position_status_known=position_status_known,setup=setup,slug=slug,description=description,container='ramon-'+slug,
             url='/api/ea/v1/strategies/'+slug,fresh=fresh,automatic=bool(c and c.automatic),
             state=c.state if c else 'NOT_STARTED',last_seen=c.last_seen if c else None,
             latest=c.latest if c else {},magic=magic))

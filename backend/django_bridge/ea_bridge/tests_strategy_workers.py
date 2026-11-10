@@ -99,6 +99,26 @@ class StrategyWorkerTests(TestCase):
         closed,reason=close_strategy_position('TREND_PULLBACK','42')
         self.assertEqual(reason,'QUEUED');self.assertEqual(closed.payload['position_ticket'],42)
 
+    def test_fleet_highlights_only_verified_positions_from_fresh_telemetry(self):
+        from .strategy_views import worker_rows
+        command,_,_=open_for('TREND_PULLBACK')
+        command.state='EXECUTED';command.result={'broker_ticket':'42'};command.save()
+        self.feed.payload['positions']=[dict(ticket='42',symbol='XAUUSD_o',magic=STRATEGIES['TREND_PULLBACK'][2])]
+        self.feed.save()
+        rows={r['setup']:r for r in worker_rows()}
+        self.assertEqual(rows['TREND_PULLBACK']['open_positions'],1)
+        self.assertEqual(rows['BREAKOUT_RETEST']['open_positions'],0)
+        self.assertTrue(rows['TREND_PULLBACK']['position_status_known'])
+        # The open-position indicator remains meaningful when new entries are paused.
+        StrategyWorkerControl.objects.filter(setup='TREND_PULLBACK').update(automatic=False)
+        self.assertEqual(worker_rows()[0]['open_positions'],1)
+        self.feed.payload['positions'][0]['magic']=0;self.feed.save()
+        self.assertEqual(worker_rows()[0]['open_positions'],0)
+        self.feed.payload['positions'][0]['magic']=STRATEGIES['TREND_PULLBACK'][2];self.feed.save()
+        EAHeartbeat.objects.filter(pk=self.feed.pk).update(last_seen=timezone.now()-timedelta(seconds=61))
+        row=worker_rows()[0]
+        self.assertFalse(row['position_status_known']);self.assertEqual(row['open_positions'],0)
+
     def test_pause_and_missing_worker_do_not_affect_other_strategies(self):
         StrategyWorkerControl.objects.filter(setup='TREND_PULLBACK').update(automatic=False)
         self.assertEqual(open_for('TREND_PULLBACK')[2],'STRATEGY_PAUSED_OR_SCOPE_MISMATCH')

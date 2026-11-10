@@ -14,6 +14,9 @@
 .strategy-card{transition:background .2s,border-color .2s,box-shadow .2s}
 .strategy-card.strategy-on{background:linear-gradient(145deg,#153b2d,#10271f);border-color:#42d6a0;box-shadow:inset 0 0 0 1px rgba(66,214,160,.12)}
 .strategy-card.strategy-on h3{color:#7aefbf}
+.strategy-card.strategy-position-open{border-color:#7aefbf;animation:open-position-pulse 1.8s ease-in-out infinite}
+@keyframes open-position-pulse{0%,100%{box-shadow:0 0 0 1px rgba(66,214,160,.15),0 0 7px rgba(66,214,160,.12)}50%{box-shadow:0 0 0 3px rgba(66,214,160,.55),0 0 24px rgba(66,214,160,.4)}}
+@media(prefers-reduced-motion:reduce){.strategy-card.strategy-position-open{animation:none;box-shadow:0 0 0 3px rgba(66,214,160,.55)}}
 .footer{color:#69788c;font-size:11px;text-align:center;padding:24px 0 6px}
 @media(max-width:900px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.wrap{padding:17px}}
 @media(max-width:480px){.stats{grid-template-columns:1fr 1fr}.stat-value{font-size:22px}.card{padding:14px}.title{font-size:22px}}
@@ -25,14 +28,14 @@
   <div class="brand"><div class="logo">R</div><div><div class="eyebrow">RAMON · SMART TRADER</div><div class="title">Independent Strategy Desk</div><div class="sub">XAUUSD · Seven independent M15 strategy containers</div></div></div>
   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><button class="btn" id="copyMarketSnapshot" type="button">Copy Market Snapshot</button><span id="copySnapshotStatus" class="small" role="status" aria-live="polite"></span><div class="status"><span class="dot"></span><span id="connection">DJANGO · DECISION FEED</span></div></div>
 </header>
-<div class="notice"><strong>Fleet overview:</strong> green boxes indicate a running worker with automatic entries On. Open a strategy for its controls, positions and broker results. An enabled worker may still be waiting for its setup or risk checks.</div>
+<div class="notice"><strong>Fleet overview:</strong> green boxes indicate a running worker with automatic entries On. Open a strategy for its controls, positions and broker results. A pulsing border indicates a verified open position. An enabled worker may still be waiting for its setup or risk checks.</div>
 <section aria-labelledby="strategyFleetTitle" style="margin-bottom:24px">
   <div class="section-head"><div><h2 id="strategyFleetTitle">Independent strategy containers</h2><p>Each container owns one setup, its decisions and its positions. No central best-setup selector. Shared account exposure limits still apply.</p></div></div>
   <p class="small" id="strategyFleetStatus" role="status" aria-live="polite">Loading container status…</p>
   <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(min(100%,290px),1fr))">
     {% for worker in strategy_workers %}
-    <article id="strategy-card-{{ worker.slug }}" class="card strategy-card{% if worker.fresh and worker.automatic %} strategy-on{% endif %}"><h3 style="font-size:14px;overflow-wrap:anywhere;margin-top:0">{{ worker.setup }}</h3><p class="small">{{ worker.description }}</p>
-      <p class="small" id="strategy-{{ worker.slug }}">{% if worker.fresh %}Running{% else %}Stopped or stale{% endif %} · {{ worker.state }}</p>
+    <article id="strategy-card-{{ worker.slug }}" class="card strategy-card{% if worker.fresh and worker.automatic %} strategy-on{% endif %}{% if worker.open_positions %} strategy-position-open{% endif %}"><h3 style="font-size:14px;overflow-wrap:anywhere;margin-top:0">{{ worker.setup }}</h3><p class="small">{{ worker.description }}</p>
+      <p class="small" id="strategy-{{ worker.slug }}">{% if worker.fresh %}Running{% else %}Stopped or stale{% endif %} · {{ worker.state }} · {% if worker.position_status_known %}{{ worker.open_positions }} open position{{ worker.open_positions|pluralize }}{% else %}Position status unavailable{% endif %}</p>
       <a class="btn" style="display:inline-block;text-decoration:none" href="{{ worker.url }}">Open strategy ↗</a>
     </article>
     {% endfor %}
@@ -289,13 +292,16 @@ async function refreshStrategyFleet() {
     $("strategyFleetStatus").textContent = data.monolith_retired ? "Independent mode active · old combined entry engine retired. Open a strategy page for controls and broker results." : "Independent mode disabled.";
     for (const worker of data.workers || []) {
       const card = $("strategy-card-" + worker.slug);
-      if (card) card.classList.toggle("strategy-on", Boolean(worker.fresh && worker.automatic));
+      if (card) {
+        card.classList.toggle("strategy-on", Boolean(worker.fresh && worker.automatic));
+        card.classList.toggle("strategy-position-open", Boolean(worker.position_status_known && worker.open_positions > 0));
+      }
       const el = $("strategy-" + worker.slug);
-      if (el) el.textContent = `${worker.fresh ? "Running" : "Stopped or stale"} · Entries ${worker.automatic ? "On" : "Paused"} · ${worker.state} · ${worker.latest.action || "No decision yet"}`;
+      if (el) el.textContent = `${worker.fresh ? "Running" : "Stopped or stale"} · Entries ${worker.automatic ? "On" : "Paused"} · ${worker.state} · ${worker.latest.action || "No decision yet"} · ${worker.position_status_known ? `${worker.open_positions} open position${worker.open_positions === 1 ? "" : "s"}` : "Position status unavailable"}`;
     }
   } catch (error) {
     $("connection").textContent = "DJANGO · FLEET STATUS UNAVAILABLE";
-    document.querySelectorAll(".strategy-card.strategy-on").forEach(card => card.classList.remove("strategy-on"));
+    document.querySelectorAll(".strategy-card").forEach(card => card.classList.remove("strategy-on", "strategy-position-open"));
     $("strategyFleetStatus").textContent = "Container status unavailable; previous values may be stale.";
   } finally { clearTimeout(timeout); strategyFleetInFlight = false; }
 }
