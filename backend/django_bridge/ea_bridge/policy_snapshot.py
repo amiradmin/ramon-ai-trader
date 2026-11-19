@@ -11,6 +11,8 @@ def effective_profiles():
         pipeline = _build_pipeline(demo_mode=demo_mode)
         risk = pipeline.risk_manager
         profiles[name] = {
+            "detector_demo_mode": bool(demo_mode),
+            "compare_candidates": bool(pipeline.compare_candidates),
             "maximum_risk_percent": float(risk.maximum_risk_percent),
             "strict_structural": bool(risk.config.strict_structural),
             "short_stop_spread_adjust": bool(risk.config.short_stop_spread_adjust),
