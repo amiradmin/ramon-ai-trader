@@ -137,10 +137,16 @@ class ReadOnlyReplayCommandTests(TestCase):
         counts = (MarketBar.objects.count(), StrategyDecisionRecord.objects.count(),
                   RiskVerdictRecord.objects.count(), EACommand.objects.count())
         output = StringIO()
-        call_command("evaluate_demo_playbook", source="replay-demo", symbol="XAUUSD_o", spread_points=50,
-                     slippage_points=5, commission_points=0, stdout=output)
+        from django.core.management.base import CommandError
+        with self.assertRaises(CommandError):
+            call_command("evaluate_demo_playbook", source="replay-demo", symbol="XAUUSD_o",
+                         spread_points=50, slippage_points=5, commission_points=0,
+                         stdout=StringIO())
+        call_command("evaluate_demo_playbook", source="replay-demo", symbol="XAUUSD_o",
+                     spread_points=50, slippage_points=5, commission_points=0,
+                     allow_off_grid=True, stdout=output)
         report = json.loads(output.getvalue())
-        self.assertEqual(report["data_quality"]["off_grid_rows_excluded"], 1)
+        self.assertEqual(report["data_quality"]["timeframes"]["M15"]["off_grid_rows_excluded"], 1)
         self.assertEqual(report["m15_bars"], 130)
         self.assertEqual(report["baseline"]["trade_count"], 0)
         self.assertEqual(report["playbook"]["trade_count"], 0)
