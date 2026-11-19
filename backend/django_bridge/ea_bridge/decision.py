@@ -101,7 +101,10 @@ def _build_pipeline(*, demo_mode=False, strategy_setup=None):
     # constructor defaults; explicitly pin the Django-persisted values afterwards.
     timer.minimum_quality = minimum_quality
     timer.maximum_spread_points = maximum_spread_points
-    maximum_risk_percent = float(risk_values.pop("maximum_risk_percent"))
+    # Safety cap applies to both standard and expanded demo profiles, even when
+    # older database overrides specify a higher value. Never round lots upward.
+    configured_risk_percent = float(risk_values.pop("maximum_risk_percent"))
+    maximum_risk_percent = min(configured_risk_percent, 0.5)
     risk = RiskManager(
         maximum_risk_percent=maximum_risk_percent,
         config=RiskConfig(
