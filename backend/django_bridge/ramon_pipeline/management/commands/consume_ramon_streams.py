@@ -61,6 +61,28 @@ class Command(BaseCommand):
             if bar_time is None or bar_time.tzinfo is None or bar_time.utcoffset() is None:
                 raise ValueError("market bar timestamp must include a timezone")
             bar_time = bar_time.astimezone(dt_timezone.utc)
+            timeframe = str(payload["timeframe"]).upper()
+            periods = {"M1": 60, "M5": 300, "M15": 900, "M30": 1800,
+                       "H1": 3600, "H4": 14400}
+            period = periods.get(timeframe)
+            # A malformed source clock used to create plausible but unusable rows.
+            # Keep the original payload durably for investigation, ACK after commit,
+            # and never silently round or merge prices from distinct bar opens.
+            if period is not None and (bar_time.microsecond or int(bar_time.timestamp()) % period):
+                with transaction.atomic():
+                    EAEvent.objects.get_or_create(
+                        event_id=event_id,
+                        defaults={
+                            "instance_id": instance_id,
+                            "event_type": "MARKET_BAR_REJECTED",
+                            "occurred_at": occurred_at,
+                            "payload": {"reason": "OFF_GRID_TIMESTAMP", "timeframe": timeframe,
+                                        "original_event": payload},
+                        },
+                    )
+                log.warning("Rejected off-grid candle source=%s timeframe=%s timestamp=%s event=%s",
+                            instance_id, timeframe, bar_time.isoformat(), event_id)
+                return
 
             def finite_decimal(value, field):
                 try:
