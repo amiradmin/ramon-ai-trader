@@ -32,7 +32,7 @@ class TradeForensicsTests(TestCase):
             rationale_code="SIGNALFLOW", confidence=.72, model_version="test",
             features={"stages": {"opportunities": {
                 "regime": {"label": "BEARISH", "adx": 21, "ema_bias": "BEAR"},
-                "setup": {"type": "TREND_PULLBACK"}}}}, verdict=verdict)
+                "setup": {"type": "TREND_PULLBACK"}}, "entry_timing": {"chase_atr": 0.42, "quality": 0.7, "signal_age_bars": 1}}}, verdict=verdict)
         return EACommand.objects.create(
             command_id="open-test-1", instance_id="ea-1", account_login="demo-1",
             symbol="XAUUSD_o", action="OPEN", state="EXECUTED",
@@ -58,6 +58,11 @@ class TradeForensicsTests(TestCase):
         self.assertEqual(data["summary"]["linked_evaluations"],2)
         self.assertEqual(data["by_strategy"][0]["name"],"TREND_PULLBACK")
         self.assertEqual(data["trades"][0]["adx"],21)
+        self.assertEqual(data["trades"][0]["chase_atr"],0.42)
+        self.assertEqual(data["trades"][0]["entry_quality"],0.7)
+        self.assertEqual(data["sell_research"]["summary"]["all_sell"]["trades"],2)
+        self.assertEqual(data["sell_research"]["summary"]["sell_winners"]["trades"],1)
+        self.assertEqual(data["sell_research"]["summary"]["sell_losers"]["trades"],1)
 
     def test_unverified_account_never_receives_other_accounts_evidence(self):
         self.command()
