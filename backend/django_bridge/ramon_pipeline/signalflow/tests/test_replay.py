@@ -10,7 +10,7 @@ class ReplayTests(TestCase):
                       "low": 99.5, "close": 100.0} for i in range(132)]
         self.account = {"point": 0.01, "point_value_per_lot": 1.0, "account_balance": 10000.0}
 
-    def run_replay(self, *, side="BUY", spread=0, slip=0, commission=0, context=None):
+    def run_replay(self, *, side="BUY", spread=0, slip=0, commission=0, context=None, **replay_options):
         calls = []
 
         class Pipeline:
@@ -27,7 +27,8 @@ class ReplayTests(TestCase):
                                         "target_price": 102 if side == "BUY" else 98, "volume": 1.0}}}
 
         result = replay_strategy(Pipeline, self.bars, context_bars=context or {}, account=self.account,
-                                 spread_points=spread, slippage_points=slip, commission_points=commission)
+                                 spread_points=spread, slippage_points=slip, commission_points=commission,
+                                 **replay_options)
         return result, calls
 
     def test_both_levels_in_one_candle_use_stop_first_with_costs(self):
@@ -71,3 +72,21 @@ class ReplayTests(TestCase):
         self.bars[129]["time"] = self.bars[128]["time"]
         with self.assertRaises(ValueError):
             self.run_replay()
+
+    def test_holdout_never_evaluates_prior_year_entries(self):
+        start = self.bars[130]["time"]
+        result, calls = self.run_replay(evaluation_start_time=start)
+        self.assertEqual(len(result["trades"]), 1)
+        self.assertEqual(result["trades"][0]["entry_time"], start)
+        self.assertTrue(all(market["decision_time"] >= start for market in calls))
+
+    def test_exclusive_year_end_prevents_next_year_trade(self):
+        end = self.bars[128]["time"]
+        result, calls = self.run_replay(evaluation_end_time=end)
+        self.assertEqual(result["trade_count"], 0)
+        self.assertEqual(len(calls), 0)
+
+    def test_invalid_evaluation_bounds_are_rejected(self):
+        with self.assertRaises(ValueError):
+            self.run_replay(evaluation_start_time=self.bars[130]["time"],
+                            evaluation_end_time=self.bars[129]["time"])
