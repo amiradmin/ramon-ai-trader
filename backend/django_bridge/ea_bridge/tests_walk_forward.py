@@ -9,7 +9,8 @@ from django.core.management.base import CommandError
 from django.test import TestCase as DatabaseTestCase
 
 from ea_bridge.walk_forward_stats import expectancy_summary, grouped_summary, trading_session
-from ea_bridge.models import EAHeartbeat
+from ea_bridge.models import EAHeartbeat, MarketBar
+from ea_bridge.management.commands.evaluate_walk_forward_years import read_bars
 
 
 class PerformanceSummaryTests(TestCase):
@@ -66,3 +67,39 @@ class YearlyWalkForwardSafetyTests(DatabaseTestCase):
         report = json.loads(output.getvalue())
         self.assertEqual(report["folds"][0]["status"], "INSUFFICIENT_HISTORY")
         self.assertEqual(report["execution"], "READ_ONLY_NO_COMMANDS")
+
+    def test_off_grid_history_requires_explicit_diagnostic_override(self):
+        from datetime import timedelta
+        start = datetime(2026, 10, 26, tzinfo=timezone.utc)
+        MarketBar.objects.create(
+            source="historical-test", symbol="XAUUSD_o", timeframe="M15",
+            timestamp=start + timedelta(hours=2, minutes=15, seconds=1),
+            open=2300, high=2301, low=2299, close=2300)
+        with self.assertRaisesMessage(CommandError, "OFF_GRID_M15"):
+            read_bars(source="historical-test", symbol="XAUUSD_o",
+                      timeframe="M15", start=start, end=start+timedelta(days=1),
+                      maximum=100)
+        bars, digest, quality = read_bars(
+            source="historical-test", symbol="XAUUSD_o",
+            timeframe="M15", start=start, end=start+timedelta(days=1),
+            maximum=100, allow_off_grid=True)
+        self.assertEqual(bars, [])
+        self.assertEqual(quality["input_rows"], 1)
+        self.assertEqual(quality["off_grid_excluded"], 1)
+        self.assertEqual(quality["offset_seconds_counts"], {"1.0": 1})
+        self.assertEqual(MarketBar.objects.count(), 1)
+
+    def test_aligned_history_is_preserved_with_diagnostic_override(self):
+        from datetime import timedelta
+        start = datetime(2026, 10, 26, tzinfo=timezone.utc)
+        MarketBar.objects.create(
+            source="historical-test", symbol="XAUUSD_o", timeframe="M15",
+            timestamp=start + timedelta(hours=2, minutes=15),
+            open=2300, high=2301, low=2299, close=2300)
+        bars, digest, quality = read_bars(
+            source="historical-test", symbol="XAUUSD_o",
+            timeframe="M15", start=start, end=start+timedelta(days=1),
+            maximum=100, allow_off_grid=True)
+        self.assertEqual(len(bars), 1)
+        self.assertEqual(quality["off_grid_excluded"], 0)
+        self.assertEqual(quality["accepted_rows"], 1)
