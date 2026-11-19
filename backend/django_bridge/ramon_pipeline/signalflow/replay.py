@@ -15,7 +15,9 @@ from .pipeline import SignalFlowPipeline
 def replay_strategy(pipeline_factory: Callable[[], SignalFlowPipeline], bars: Sequence[dict], *,
                     context_bars: Mapping[str, Sequence[dict]], account: Mapping[str, Any],
                     spread_points: float, slippage_points: float, commission_points: float,
-                    max_holding_bars: int = 24, warmup_bars: int = 128) -> dict[str, Any]:
+                    max_holding_bars: int = 24, warmup_bars: int = 128,
+                    evaluation_start_time: float | None = None,
+                    evaluation_end_time: float | None = None) -> dict[str, Any]:
     """Compare fixed policies on the same data and costs, without fitting to outcomes."""
     costs = (spread_points, slippage_points, commission_points)
     if not all(math.isfinite(value) and value >= 0 for value in costs):
@@ -36,6 +38,12 @@ def replay_strategy(pipeline_factory: Callable[[], SignalFlowPipeline], bars: Se
             raise ValueError("inconsistent replay OHLC")
         if i and bar["time"] <= bars[i-1]["time"]:
             raise ValueError("replay candles must be strictly chronological")
+    if evaluation_start_time is not None and (not math.isfinite(evaluation_start_time) or evaluation_start_time <= 0):
+        raise ValueError("evaluation_start_time must be a positive finite epoch")
+    if evaluation_end_time is not None and (not math.isfinite(evaluation_end_time) or evaluation_end_time <= 0):
+        raise ValueError("evaluation_end_time must be a positive finite epoch")
+    if evaluation_start_time is not None and evaluation_end_time is not None and evaluation_end_time <= evaluation_start_time:
+        raise ValueError("evaluation_end_time must be after evaluation_start_time")
     context_times = {tf: [bar["time"] for bar in rows] for tf, rows in context_bars.items()}
     if any(any(b <= a for a, b in zip(times, times[1:])) for times in context_times.values()):
         raise ValueError("context candles must be strictly chronological")
@@ -48,6 +56,11 @@ def replay_strategy(pipeline_factory: Callable[[], SignalFlowPipeline], bars: Se
     while i < len(bars)-1 and balance > 0:
         current, next_bar = bars[i], bars[i+1]
         cutoff = current["time"] + 900
+        if evaluation_start_time is not None and next_bar["time"] < evaluation_start_time:
+            i += 1
+            continue
+        if evaluation_end_time is not None and next_bar["time"] >= evaluation_end_time:
+            break
         if next_bar["time"] != cutoff:
             reasons["NEXT_OPEN_GAP"] += 1
             i += 1
@@ -96,7 +109,11 @@ def replay_strategy(pipeline_factory: Callable[[], SignalFlowPipeline], bars: Se
             reasons["SLIPPAGE_INVALIDATES_PLAN"] += 1
             i += 1
             continue
+        # Never resolve a yearly evaluation position using next year's bars.
         exit_index = min(i+max_holding_bars, len(bars)-1)
+        if evaluation_end_time is not None:
+            while exit_index > i and bars[exit_index]["time"] >= evaluation_end_time:
+                exit_index -= 1
         exit_reason = "TIME_EXIT"
         for j in range(i+1, exit_index+1):
             bar = bars[j]
