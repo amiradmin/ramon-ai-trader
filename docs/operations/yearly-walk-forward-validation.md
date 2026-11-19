@@ -85,3 +85,35 @@ If a local checkout has uncommitted changes, **preserve and review them before
 pulling**; do not discard or reset a production deployment. `--keepdb`
 reuses the Django test database (not the production database). Run tests only
 when no other test runner is using that test database.
+
+## Legacy off-grid records: safe diagnostic mode
+
+If strict evaluation stops with an error like `OFF_GRID_M15:
+2026-10-26T02:15:01+00:00`, **do not round timestamps in the DB** or
+delete the TimescaleDB volume. The historical bar was ingested using an
+earlier clock-conversion algorithm. Verify its origin against original
+broker candle exports before replacing it.
+
+You can run an explicitly **descriptive**, read-only diagnostic:
+
+```bash
+docker compose exec -T django python manage.py evaluate_walk_forward_years \
+  --source ramon-command-ea-1 --symbol XAUUSD_o \
+  --first-year 2022 --last-year 2026 \
+  --spread-points 22 --slippage-points 5 --commission-points 5 \
+  --allow-off-grid > ramon-yearly-diagnostic.json
+```
+
+The report shows `data_quality` for each timeframe/fold, including total
+raw rows, excluded off-grid rows, the first rejected timestamp and
+`offset_seconds_counts`. It labels evaluations that excluded bad candles
+`DESCRIPTIVE_FILTERED_OFF_GRID_NOT_VALIDATED`. Exclusions may cause missing
+context, gaps, and sampling bias; **these results are not evidence to approve
+a strategy**. Counts in the top-level summary can double-count identical
+warm-up records appearing in adjacent folds.
+
+For real validation, reimport clean, completed UTC M1/M5/M15/H1 candles
+from a trusted source into a separate provenance-tracked import. First
+compare timestamps, OHLC, source and broker timezone/DST; resolve
+potential same-time duplicates explicitly, and retain raw records for
+audit. Then re-run the strict command **without** `--allow-off-grid`.
