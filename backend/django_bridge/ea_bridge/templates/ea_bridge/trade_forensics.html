@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ramon — Trade Forensic Analyzer</title>
+<style>
+:root{color-scheme:dark;--bg:#0a111d;--panel:#111d2d;--line:#293b52;--text:#e8eff8;--muted:#94a7bd;--green:#39c995;--red:#f07878;--blue:#76a9ee}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 Inter,system-ui,sans-serif}
+main{max-width:1500px;margin:auto;padding:24px}a{color:var(--blue)}h1{margin:5px 0;font-size:26px}h2{font-size:16px;margin:0 0 12px}header{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:20px}
+.muted{color:var(--muted)}.eyebrow{font-size:11px;font-weight:700;letter-spacing:.13em;color:var(--blue)}
+.panel{border:1px solid var(--line);background:var(--panel);padding:17px;border-radius:12px;margin-bottom:12px}
+.filters{display:flex;gap:12px;align-items:end;flex-wrap:wrap}.filters label{display:flex;flex-direction:column;gap:5px;color:var(--muted);font-size:12px}
+input,select,button{background:#162438;border:1px solid #38577e;border-radius:7px;color:var(--text);padding:9px;font:inherit}
+button{cursor:pointer;background:#204368}button:hover{background:#2c507b}
+.cards{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:15px}.card small{display:block;color:var(--muted)}.card strong{display:block;font-size:24px;margin-top:3px}
+.tables{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.scroll{overflow:auto}table{border-collapse:collapse;width:100%;white-space:nowrap}th,td{padding:9px 10px;text-align:left;border-bottom:1px solid var(--line);font-size:12px}th{color:var(--muted)}.good{color:var(--green)}.bad{color:var(--red)}
+.note{padding:10px 0;color:var(--muted);font-size:12px}.status{min-height:22px;color:var(--muted);margin-bottom:12px}.tag{border:1px solid var(--line);border-radius:20px;padding:3px 10px;font-size:11px;color:var(--green)}
+details{max-width:390px;white-space:normal}summary{cursor:pointer;color:var(--blue)}dl{display:grid;grid-template-columns:140px auto;gap:4px;margin:8px 0}dt{color:var(--muted)}dd{margin:0;overflow-wrap:anywhere}
+@media(max-width:1100px){.tables{grid-template-columns:1fr}.cards{grid-template-columns:repeat(3,1fr)}}@media(max-width:600px){main{padding:12px}.cards{grid-template-columns:repeat(2,1fr)}}
+</style></head>
+<body><main>
+<header><div><div class="eyebrow">RAMON / LEARNING INTELLIGENCE</div><h1>Trade Forensic Analyzer</h1><div class="muted">Broker outcomes · verified decisions · descriptive strategy research</div></div>
+<div><span class="tag">READ-ONLY · AUTO-APPLY OFF</span> &nbsp; <a href="/api/ea/v1/learning/dashboard">← Learning Engine</a></div></header>
+<section class="panel"><form id="filters" class="filters">
+<label>Start (UTC)<input type="date" name="start" id="start" required></label>
+<label>End (UTC, exclusive display day +1)<input type="date" name="end" id="end" required></label>
+<label>Symbol<input name="symbol" value="XAUUSD_o" maxlength="32"></label>
+<label>Account login (optional)<input name="account_login" maxlength="32" placeholder="All accounts"></label>
+<label>Max trades<select name="limit"><option>100</option><option selected>250</option><option>500</option></select></label>
+<button type="submit">Analyze outcomes</button></form>
+<div class="note">Only closed trades are counted. If no account is selected, comparisons may include multiple accounts; use an account filter for meaningful results. Date bounds are in UTC.</div></section>
+<div class="status" id="status" role="status">Loading…</div>
+<div class="cards" id="cards" aria-label="Forensic KPIs"></div>
+<section class="tables" style="margin-top:12px"><div class="panel"><h2>By strategy</h2><div class="scroll" id="strategies"></div></div>
+<div class="panel"><h2>By direction</h2><div class="scroll" id="directions"></div></div>
+<div class="panel"><h2>By recorded market regime</h2><div class="scroll" id="regimes"></div></div></section>
+<section class="panel"><h2>Individual trade evidence</h2><div class="scroll"><table><thead><tr><th>Closed UTC</th><th>Trade</th><th>Side</th><th>Strategy</th><th>Regime</th><th>Net P/L</th><th>R</th><th>Evidence</th><th>Details</th></tr></thead><tbody id="trades"></tbody></table></div></section>
+<div class="note" id="note"></div>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const esc=v=>String(v??"—").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmt=(v,d=2)=>v===null||v===undefined||!Number.isFinite(Number(v))?"—":Number(v).toFixed(d);
+const day=d=>d.toISOString().slice(0,10);
+const now=new Date();$("end").value=day(now);$("start").value=day(new Date(now.getTime()-7*86400000));
+function groupTable(rows){return '<table><thead><tr><th>Group</th><th>Trades</th><th>Win %</th><th>Net P/L</th><th>PF</th></tr></thead><tbody>'+(rows||[]).map(r=>'<tr><td>'+esc(r.name)+'</td><td>'+r.trades+'</td><td>'+fmt(r.win_rate,1)+'</td><td class="'+(r.net_pnl>=0?'good':'bad')+'">'+fmt(r.net_pnl)+'</td><td>'+fmt(r.profit_factor)+'</td></tr>').join('')+'</tbody></table>'}
+function kv(label,value){return '<dt>'+esc(label)+'</dt><dd>'+esc(value)+'</dd>'}
+function card(label,value){return '<div class="card"><small>'+esc(label)+'</small><strong>'+esc(value)+'</strong></div>'}
+function draw(d){
+ const s=d.summary;
+ $("cards").innerHTML=card("Closed trades",s.trades)+card("Win rate",s.win_rate===null?"—":fmt(s.win_rate,1)+"%")+card("Net P/L",fmt(s.net_pnl))+card("Wins / losses",s.wins+" / "+s.losses)+card("Verified evaluations",s.linked_evaluations+" / "+s.trades);
+ $("strategies").innerHTML=groupTable(d.by_strategy);$("directions").innerHTML=groupTable(d.by_direction);$("regimes").innerHTML=groupTable(d.by_regime);
+ $("trades").innerHTML=(d.trades||[]).map(r=>{
+  const details=kv("Decision reason",r.decision_reason)+kv("Risk reason",r.risk_reason)+kv("Setup",r.setup)+kv("ADX",r.adx)+kv("EMA bias",r.ema_bias)+kv("Efficiency",r.directional_efficiency)+kv("Confidence",r.confidence)+kv("Spread points",r.spread_points)+kv("Slippage points",r.slippage_points)+kv("MAE / MFE",fmt(r.mae)+" / "+fmt(r.mfe))+kv("Exit reason",r.exit_reason)+kv("Missing evidence",(r.missing_evidence||[]).join(", ")||"None");
+  return '<tr><td>'+esc(r.closed_at)+'</td><td>'+esc(r.trade_id)+'</td><td>'+esc(r.side)+'</td><td>'+esc(r.strategy)+'</td><td>'+esc(r.regime)+'</td><td class="'+(r.pnl>=0?"good":"bad")+'">'+fmt(r.pnl)+'</td><td>'+fmt(r.r_multiple,3)+'</td><td>'+esc(r.evidence_status)+'</td><td><details><summary>Inspect</summary><dl>'+details+'</dl></details></td></tr>'
+ }).join('')||'<tr><td colspan="9">No closed trades in this interval.</td></tr>';
+ $("status").textContent="Showing "+d.sample.returned+" of "+d.sample.total_matching+" matching outcomes"+(d.sample.truncated?" · TRUNCATED: narrow your filters":"");
+ $("note").textContent=d.note;
+}
+async function load(){
+ $("status").textContent="Loading forensic evidence…";
+ try{
+  const params=new URLSearchParams(new FormData($("filters")));
+  // The selected end date is inclusive: use end of that UTC day.
+  params.set("start",params.get("start")+"T00:00:00Z");
+  params.set("end",params.get("end")+"T23:59:59.999Z");
+  const response=await fetch("/api/ea/v1/learning/forensics/data?"+params,{credentials:"same-origin"});
+  const data=await response.json();
+  if(!response.ok)throw Error(data.error||"Forensic request failed");
+  draw(data);
+ }catch(error){$("status").textContent="Unable to load: "+error.message;}
+}
+$("filters").addEventListener("submit",event=>{event.preventDefault();load()});
+load();
+</script></body></html>
