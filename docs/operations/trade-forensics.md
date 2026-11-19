@@ -35,3 +35,32 @@ out-of-sample datasets, and compare the same trades between strategies.
 
 No automatic entry restrictions have been introduced. This module has no
 write endpoints and does not change MT5 order permissions or pipeline training.
+
+## SELL strategy-research extension
+
+The forensic API additionally returns `sell_research` and the same dashboard
+renders evidence-backed comparisons of winning/losing SELL trades. A fixed set
+of candidate *filters* replays **historically executed SELL outcomes only**:
+
+1. Baseline: all verified SELL outcomes.
+2. Bearish regime: retain trades whose recorded evaluated regime was BEARISH.
+3. Bearish regime and BEAR EMA bias.
+4. Same plus recorded entry-time chase <= 0.35 ATR.
+
+The hypotheses are predeclared in `ea_bridge/forensic_research.py`; no optimizer
+searches over the test partition. The retained-outcome comparison uses the
+earlier 70% and later 30% by `closed_at`, counts skipped observations, and
+reports observed realized account-currency net P/L only for retained fills.
+This is **not** an executable strategy backtest, as hypothetical skipped
+positions, replacement fills, overlapping trades, transaction-cost changes
+and alternative exits are not simulated. A later formal backtest must replay
+closed market candles with an execution model, spread/slippage, fees, risk
+constraints, and time-purged out-of-sample evaluation.
+
+Flags such as `SELL_AGAINST_BULLISH_REGIME`,
+`SELL_AGAINST_BULLISH_EMA`, or `EXTENDED_ENTRY_OVER_035_ATR` are conditional
+research descriptors, **not** verified causes of losses. Values absent from
+the immutable evaluation are unavailable, not inferred. A small or truncated
+sample will explicitly report `research_ready=false`. The active trading
+engine remains untouched; no auto-filters, position restrictions, or strategy
+parameter changes are applied.
