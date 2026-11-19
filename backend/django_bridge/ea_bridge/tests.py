@@ -61,7 +61,8 @@ class DecisionThresholdConfigurationTests(TestCase):
         self.assertEqual(pipeline.entry_timer.maximum_spread_points, 90)
         self.assertEqual(pipeline.risk_manager.config.min_reward_risk, 1.2)
         self.assertEqual(pipeline.risk_manager.config.target_reward_risk, 1.5)
-        self.assertEqual(pipeline.risk_manager.maximum_risk_percent, 0.75)
+        # A persisted dashboard value may be higher, but execution risk is hard capped.
+        self.assertEqual(pipeline.risk_manager.maximum_risk_percent, 0.5)
         self.assertEqual(pipeline.risk_manager.config.max_total_risk_percent, 2.5)
 
     def test_rejects_invalid_or_non_strategy_thresholds(self):
