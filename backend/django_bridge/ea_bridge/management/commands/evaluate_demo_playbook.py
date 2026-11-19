@@ -17,6 +17,8 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--source", required=True)
+        parser.add_argument("--allow-off-grid", action="store_true",
+                            help="Explicitly exclude misaligned historical rows (descriptive studies only).")
         parser.add_argument("--profile", choices=("standard", "expanded"), default="standard",
                             help="Use standard thresholds by default; expanded is a separate research policy.")
         parser.add_argument("--symbol", default="XAUUSD_o")
@@ -51,19 +53,32 @@ class Command(BaseCommand):
         except (KeyError, TypeError, ValueError, ZeroDivisionError) as exc:
             raise CommandError(f"Complete valid demo symbol metadata is required: {exc}") from exc
 
+        quality = {}
+        periods = {"M15": 900, "M5": 300, "H1": 3600}
+
         def candles(timeframe, limit):
             rows = list(MarketBar.objects.filter(source=options["source"], symbol=options["symbol"],
                                                 timeframe=timeframe).order_by("-timestamp")[:limit])
-            return [{"time": row.timestamp.timestamp(), "open": float(row.open), "high": float(row.high),
-                     "low": float(row.low), "close": float(row.close), "closed": True} for row in reversed(rows)]
+            period = periods[timeframe]
+            accepted = [row for row in rows if row.timestamp.microsecond == 0
+                        and int(row.timestamp.timestamp()) % period == 0]
+            quality[timeframe] = {"input_rows": len(rows),
+                                  "off_grid_rows_excluded": len(rows) - len(accepted)}
+            return [{"time": row.timestamp.timestamp(), "open": float(row.open),
+                     "high": float(row.high), "low": float(row.low),
+                     "close": float(row.close), "closed": True} for row in reversed(accepted)]
 
-        raw_bars = candles("M15", options["limit"])
-        bars = [bar for bar in raw_bars if bar["time"] % 900 == 0]
+        bars = candles("M15", options["limit"])
         if len(bars) < 129:
-            raise CommandError("At least 129 persisted completed M15 candles are required.")
+            raise CommandError("At least 129 valid completed M15 candles are required.")
         # Load the same historical span for each timeframe; never mix series or sources.
         context = {"H1": candles("H1", options["limit"]//4+120),
                    "M5": candles("M5", options["limit"]*3+120)}
+        off_grid_total = sum(item["off_grid_rows_excluded"] for item in quality.values())
+        if off_grid_total and not options["allow_off_grid"]:
+            raise CommandError(f"{off_grid_total} off-grid candles detected in M15/M5/H1; "
+                               "repair/reimport source data first, or pass --allow-off-grid "
+                               "for an explicitly labeled descriptive comparison.")
 
         def factory(compare):
             def build():
@@ -93,8 +108,8 @@ class Command(BaseCommand):
                       "m15_bars": len(bars),
                       "first_bar": bars[0]["time"], "last_bar": bars[-1]["time"],
                       "context_bar_counts": {tf: len(rows) for tf, rows in context.items()},
-                      "data_quality": {"input_m15_rows": len(raw_bars), "off_grid_rows_excluded": len(raw_bars)-len(bars),
-                                       "policy": "EXCLUDE_OFF_GRID_NO_DATABASE_CHANGES"},
+                      "data_quality": {"timeframes": quality, "total_off_grid_rows_excluded": off_grid_total,
+                                       "policy": "EXPLICIT_EXCLUSION_NO_DATABASE_CHANGES" if off_grid_total else "CLEAN_ALIGNED_INPUT"},
                       "validation": "DESCRIPTIVE_REPLAY_NOT_OUT_OF_SAMPLE_PROOF",
                       "baseline": replay_strategy(factory(False), bars, **kwargs),
                       "playbook": replay_strategy(factory(True), bars, **kwargs)}
