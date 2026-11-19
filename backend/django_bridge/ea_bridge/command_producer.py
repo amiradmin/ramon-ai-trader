@@ -81,6 +81,14 @@ def create_open_command(*, decision, verdict, instance_id, account_login, server
     snapshot = heartbeat.payload if isinstance(heartbeat.payload, dict) else {}
     if not _is_demo_account(snapshot):
         return None, False, "DEMO_ACCOUNT_REQUIRED"
+    # Check account-wide realized outcomes after identity validation and before
+    # granting any new OPEN execution authority. CLOSE/MODIFY remain unaffected.
+    from .trading_loss_guard import open_loss_guard_reason
+    loss_block = open_loss_guard_reason(
+        instance_id=instance_id, account_login=account_login, symbol=decision.symbol, now=now
+    )
+    if loss_block:
+        return None, False, loss_block
     positions = snapshot.get("positions")
     account = snapshot.get("account")
     quote = snapshot.get("quote")
