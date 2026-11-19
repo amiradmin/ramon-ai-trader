@@ -18,7 +18,7 @@ from ramon_pipeline.signalflow.replay import replay_strategy
 PERIODS = {"M15": 900, "M5": 300, "H1": 3600}
 
 
-def read_bars(*, source, symbol, timeframe, start, end, maximum):
+def read_bars(*, source, symbol, timeframe, start, end, maximum, allow_off_grid=False):
     rows = MarketBar.objects.filter(
         source=source, symbol=symbol, timeframe=timeframe,
         timestamp__gte=start, timestamp__lt=end,
@@ -26,11 +26,26 @@ def read_bars(*, source, symbol, timeframe, start, end, maximum):
     candles = []
     digest = hashlib.sha256()
     previous = None
+    quality = {"input_rows": 0, "accepted_rows": 0, "off_grid_excluded": 0,
+               "first_off_grid": None, "offset_seconds_counts": {}}
     for row in rows.iterator(chunk_size=5000):
         ts = row.timestamp
         stamp = ts.timestamp()
+        quality["input_rows"] += 1
         if ts.microsecond or int(stamp) % PERIODS[timeframe] or stamp <= 0:
-            raise CommandError(f"OFF_GRID_{timeframe}: {ts.isoformat()} - repair/reimport source, do not round")
+            if not allow_off_grid:
+                raise CommandError(
+                    f"OFF_GRID_{timeframe}: {ts.isoformat()} - repair/reimport source, "
+                    "do not round. For a descriptive-only report pass --allow-off-grid "
+                    "to exclude and count invalid candles without changing the database.")
+            quality["off_grid_excluded"] += 1
+            if quality["first_off_grid"] is None:
+                quality["first_off_grid"] = ts.isoformat()
+            offset = round(stamp % PERIODS[timeframe], 6)
+            offset_label = str(offset)
+            quality["offset_seconds_counts"][offset_label] = (
+                quality["offset_seconds_counts"].get(offset_label, 0) + 1)
+            continue
         if previous is not None and stamp <= previous:
             raise CommandError(f"NON_MONOTONIC_{timeframe}: {ts.isoformat()}")
         previous = stamp
@@ -43,9 +58,10 @@ def read_bars(*, source, symbol, timeframe, start, end, maximum):
             raise CommandError(f"{timeframe} exceeds --max-bars-per-timeframe ({maximum})")
         bar = {"time": stamp, "open": o, "high": h, "low": l, "close": c, "closed": True}
         candles.append(bar)
+        quality["accepted_rows"] += 1
         digest.update(json.dumps([ts.isoformat(), *map(str, (row.open, row.high, row.low, row.close))],
                                  separators=(",", ":")).encode("utf-8") + b"\n")
-    return candles, digest.hexdigest()
+    return candles, digest.hexdigest(), quality
 
 
 def broker_contract(source, symbol, balance):
@@ -80,6 +96,8 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--source", required=True)
+        parser.add_argument("--allow-off-grid", action="store_true",
+                            help="Descriptive only: skip/count legacy off-grid history; never repair timestamps.")
         parser.add_argument("--symbol", default="XAUUSD_o")
         parser.add_argument("--first-year", type=int, default=2022)
         parser.add_argument("--last-year", type=int, default=2026)
@@ -116,27 +134,33 @@ class Command(BaseCommand):
                 return _build_pipeline(demo_mode=False)
 
         folds = []
+        total_excluded = 0
         for year in range(first, last + 1):
             beginning = datetime(year, 1, 1, tzinfo=timezone.utc)
             end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
             # Include preceding M15 completed bars; never include future bars.
             from datetime import timedelta
             warmup_start = beginning - timedelta(seconds=opts["warmup_bars"] * 900 * 4)
-            bars, m15_sha = read_bars(
+            bars, m15_sha, m15_quality = read_bars(
                 source=opts["source"], symbol=opts["symbol"], timeframe="M15",
-                start=warmup_start, end=end, maximum=opts["max_bars_per_timeframe"])
+                start=warmup_start, end=end, maximum=opts["max_bars_per_timeframe"],
+                allow_off_grid=opts["allow_off_grid"])
             context = {}
             hashes = {"M15": m15_sha}
+            quality = {"M15": m15_quality}
             for tf in ("M5", "H1"):
-                context[tf], hashes[tf] = read_bars(
+                context[tf], hashes[tf], quality[tf] = read_bars(
                     source=opts["source"], symbol=opts["symbol"], timeframe=tf,
-                    start=warmup_start, end=end, maximum=opts["max_bars_per_timeframe"])
+                    start=warmup_start, end=end, maximum=opts["max_bars_per_timeframe"],
+                    allow_off_grid=opts["allow_off_grid"])
+            fold_excluded = sum(q["off_grid_excluded"] for q in quality.values())
+            total_excluded += fold_excluded
             train_count = sum(bar["time"] < beginning.timestamp() for bar in bars)
             evaluated_count = sum(beginning.timestamp() <= bar["time"] < end.timestamp() for bar in bars)
             if train_count < 128 or evaluated_count < 2:
                 folds.append({"year": year, "status": "INSUFFICIENT_HISTORY",
                               "prior_warmup_m15": train_count, "holdout_m15": evaluated_count,
-                              "input_sha256": hashes})
+                              "input_sha256": hashes, "data_quality": quality})
                 continue
             try:
                 result = replay_strategy(
@@ -151,13 +175,18 @@ class Command(BaseCommand):
             except (KeyError, TypeError, ValueError) as exc:
                 raise CommandError(f"Year {year}: {exc}") from exc
             folds.append({
-                "year": year, "status": "DESCRIPTIVE_HOLDOUT_NO_FITTING",
+                "year": year, "status": ("DESCRIPTIVE_FILTERED_OFF_GRID_NOT_VALIDATED" if fold_excluded
+                                          else "DESCRIPTIVE_HOLDOUT_NO_FITTING"),
                 "prior_warmup_m15": train_count, "holdout_m15": evaluated_count,
                 "context_counts": {tf: len(v) for tf, v in context.items()},
-                "input_sha256": hashes, "result": result,
+                "input_sha256": hashes, "data_quality": quality, "result": result,
                 "descriptive_performance": grouped_summary(result["trades"])})
         result = {
-            "validation": "CALENDAR_YEAR_HOLDOUT_FIXED_POLICY_NOT_PROOF_OF_OUT_OF_SAMPLE_EDGE",
+            "validation": ("DESCRIPTIVE_FILTERED_HISTORY_NOT_FOR_STRATEGY_VALIDATION"
+                           if total_excluded else "CALENDAR_YEAR_HOLDOUT_FIXED_POLICY_NOT_PROOF_OF_OUT_OF_SAMPLE_EDGE"),
+            "data_quality": {"off_grid_excluded_across_folds": total_excluded,
+                             "includes_overlapping_warmup_rows": True,
+                             "allow_off_grid": opts["allow_off_grid"]},
             "execution": "READ_ONLY_NO_COMMANDS", "profile": "standard",
             "source": opts["source"], "symbol": opts["symbol"],
             "policy_sha256": policy_hash, "profiles": profiles,
@@ -170,6 +199,7 @@ class Command(BaseCommand):
                 "Yearly starting balance resets; results cannot be concatenated into a real equity curve.",
                 "Previous-year candles only warm up indicators; year-end exits are bounded to holdout candles.",
                 "Session and per-setup inference requires further independent validation.",
+                "Filtered off-grid rows can break candle continuity; filtered results are only diagnostic and cannot validate strategy eligibility.",
             ],
         }
         self.stdout.write(json.dumps(result, indent=2, allow_nan=False))
