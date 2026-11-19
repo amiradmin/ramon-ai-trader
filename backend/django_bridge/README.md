@@ -77,3 +77,22 @@ Daily account baselines may be retained for reporting and reconciliation, but th
 The EA decision URL is `http://127.0.0.1:8017/api/ea/v1/decision`. Configure the same private `RAMON_EA_BEARER_TOKEN` in Compose `.env` and the EA's `DjangoBearerToken` input; never commit the token. The endpoint accepts completed M15 bars and quote/account metadata, evaluates SignalFlow and records a durable decision audit row. `mt5/RamonCommandEA.mq5` now requests this endpoint on a 30-second cadence by default (`DecisionIntervalSeconds`, minimum 30 seconds), independently of its telemetry/command timer. Attach it to an M15 chart and make sure `http://127.0.0.1:8017` is in MT5's WebRequest allowlist. Decision results are logged only; the EA does not translate a BUY/SELL response into an order. Broker execution remains command-only, and `EnableCommandExecution` stays false by default. Bar timestamps are sent as Unix UTC seconds using the current server/GMT offset; Django's future/stale-bar validation remains authoritative.
 
 The initial engine is a deterministic EMA/ATR technical baseline, **not a trained Chronos or other ML model**. It returns explicit BUY/SELL/WAIT decisions using the legacy EA response schema. It intentionally does not assert news readiness, AI confirmation or trading authorization. Existing EA news, account, margin, stop-loss, spread, execution and risk safeguards remain mandatory. Keep live trading disabled during validation. Set `RAMON_DJANGO_DECISION_ENABLED=0` to disable this endpoint.
+
+
+### Automatic OPEN loss-streak guard
+
+Every approved new OPEN command is subject to an additional account-and-symbol
+realized-loss circuit breaker, based on `LearningTradeOutcome` rows. By default
+three consecutive negative closed trades in a rolling 24-hour window block new
+entries with `OPEN_LOSS_STREAK_LIMIT_REACHED`. A non-negative closed outcome breaks
+the streak; the oldest losses aging out of the window also clear it. The guard
+does not issue trades, close positions, or interfere with existing position
+protection commands. It only works for broker outcomes already ingested into the
+Django database, so verify outcome ingestion and broker-history completeness.
+
+Server-only Django settings (not editable through strategy thresholds):
+`RAMON_OPEN_LOSS_GUARD_ENABLED` (default `True`),
+`RAMON_OPEN_LOSS_GUARD_STREAK` (default `3`), and
+`RAMON_OPEN_LOSS_GUARD_HOURS` (default `24`). Invalid enabled configurations
+block new entries with `OPEN_LOSS_GUARD_INVALID_CONFIG`. Reassess these
+provisional defaults against historical backtests before relying on the guard.
