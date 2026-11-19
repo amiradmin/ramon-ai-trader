@@ -12,6 +12,7 @@ from django.test import override_settings
 from ea_bridge.decision import _build_pipeline
 from ea_bridge.models import EAHeartbeat, MarketBar
 from ea_bridge.policy_snapshot import effective_profiles, fingerprint
+from ea_bridge.walk_forward_stats import grouped_summary
 from ramon_pipeline.signalflow.replay import replay_strategy
 
 PERIODS = {"M15": 900, "M5": 300, "H1": 3600}
@@ -153,7 +154,8 @@ class Command(BaseCommand):
                 "year": year, "status": "DESCRIPTIVE_HOLDOUT_NO_FITTING",
                 "prior_warmup_m15": train_count, "holdout_m15": evaluated_count,
                 "context_counts": {tf: len(v) for tf, v in context.items()},
-                "input_sha256": hashes, "result": result})
+                "input_sha256": hashes, "result": result,
+                "descriptive_performance": grouped_summary(result["trades"])})
         result = {
             "validation": "CALENDAR_YEAR_HOLDOUT_FIXED_POLICY_NOT_PROOF_OF_OUT_OF_SAMPLE_EDGE",
             "execution": "READ_ONLY_NO_COMMANDS", "profile": "standard",
