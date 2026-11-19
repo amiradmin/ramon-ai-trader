@@ -48,3 +48,48 @@ class MarketBarIngestionTests(TestCase):
         model_admin = admin.site._registry[MarketBar]
         self.assertIn("timestamp", model_admin.list_display)
         self.assertIn("close", model_admin.list_display)
+
+
+class MarketBarWorkerIntegrityTests(TestCase):
+    """An off-grid broker clock must not contaminate stored study candles."""
+
+    def event(self, event_id, stamp, timeframe="M15"):
+        return {
+            "source": "integrity-test-ea",
+            "event_id": event_id,
+            "kind": "market_bar",
+            "event_type": "MARKET_BAR",
+            "occurred_at": "2026-11-19T09:30:00Z",
+            "payload": json.dumps({
+                "symbol": "XAUUSD_o", "timeframe": timeframe,
+                "timestamp": stamp, "open": "2300",
+                "high": "2302", "low": "2299", "close": "2301",
+                "volume": "7", "closed": True,
+            }),
+        }
+
+    def test_completed_aligned_bar_is_persisted_idempotently(self):
+        from ramon_pipeline.management.commands.consume_ramon_streams import Command
+        data = self.event("bar-aligned-1", "2026-11-19T09:15:00Z")
+        Command._persist(data)
+        Command._persist(data)
+        self.assertEqual(MarketBar.objects.count(), 1)
+
+    def test_off_grid_bar_is_quarantined_and_raw_timestamp_preserved(self):
+        from ea_bridge.models import EAEvent
+        from ramon_pipeline.management.commands.consume_ramon_streams import Command
+        data = self.event("bar-offset-1", "2026-11-19T09:15:04Z")
+        Command._persist(data)
+        Command._persist(data)
+        self.assertEqual(MarketBar.objects.count(), 0)
+        row = EAEvent.objects.get(event_id="bar-offset-1")
+        self.assertEqual(row.event_type, "MARKET_BAR_REJECTED")
+        self.assertEqual(row.payload["reason"], "OFF_GRID_TIMESTAMP")
+        self.assertEqual(row.payload["original_event"]["timestamp"], "2026-11-19T09:15:04Z")
+
+    def test_m5_fractional_timestamp_is_quarantined(self):
+        from ea_bridge.models import EAEvent
+        from ramon_pipeline.management.commands.consume_ramon_streams import Command
+        Command._persist(self.event("bar-subsecond-1", "2026-11-19T09:15:00.100000Z", "M5"))
+        self.assertFalse(MarketBar.objects.exists())
+        self.assertTrue(EAEvent.objects.filter(event_id="bar-subsecond-1", event_type="MARKET_BAR_REJECTED").exists())
