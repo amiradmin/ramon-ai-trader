@@ -34,6 +34,16 @@ details{max-width:390px;white-space:normal}summary{cursor:pointer;color:var(--bl
 <section class="tables" style="margin-top:12px"><div class="panel"><h2>By strategy</h2><div class="scroll" id="strategies"></div></div>
 <div class="panel"><h2>By direction</h2><div class="scroll" id="directions"></div></div>
 <div class="panel"><h2>By recorded market regime</h2><div class="scroll" id="regimes"></div></div></section>
+<section class="panel" id="sell-research">
+ <h2>SELL entry research — wins vs losses</h2>
+ <div class="note">Flags describe evidence and are not proof that an entry was incorrect. Fixed filters below show the results of retaining selected historical fills, not simulated alternative orders.</div>
+ <div class="cards" id="sell-cards" style="margin-bottom:12px"></div>
+ <h2>Observed entry evidence flags</h2>
+ <div class="scroll" id="sell-flags"></div>
+ <h2 style="margin-top:16px">Historical filter replay · chronological earlier/later split</h2>
+ <div class="scroll" id="sell-variants"></div>
+ <div class="note" id="sell-limitations"></div>
+</section>
 <section class="panel"><h2>Individual trade evidence</h2><div class="scroll"><table><thead><tr><th>Closed UTC</th><th>Trade</th><th>Side</th><th>Strategy</th><th>Regime</th><th>Net P/L</th><th>R</th><th>Evidence</th><th>Details</th></tr></thead><tbody id="trades"></tbody></table></div></section>
 <div class="note" id="note"></div>
 </main>
@@ -50,8 +60,20 @@ function draw(d){
  const s=d.summary;
  $("cards").innerHTML=card("Closed trades",s.trades)+card("Win rate",s.win_rate===null?"—":fmt(s.win_rate,1)+"%")+card("Net P/L",fmt(s.net_pnl))+card("Wins / losses",s.wins+" / "+s.losses)+card("Verified evaluations",s.linked_evaluations+" / "+s.trades);
  $("strategies").innerHTML=groupTable(d.by_strategy);$("directions").innerHTML=groupTable(d.by_direction);$("regimes").innerHTML=groupTable(d.by_regime);
- $("trades").innerHTML=(d.trades||[]).map(r=>{
-  const details=kv("Decision reason",r.decision_reason)+kv("Risk reason",r.risk_reason)+kv("Setup",r.setup)+kv("ADX",r.adx)+kv("EMA bias",r.ema_bias)+kv("Efficiency",r.directional_efficiency)+kv("Confidence",r.confidence)+kv("Spread points",r.spread_points)+kv("Slippage points",r.slippage_points)+kv("MAE / MFE",fmt(r.mae)+" / "+fmt(r.mfe))+kv("Exit reason",r.exit_reason)+kv("Missing evidence",(r.missing_evidence||[]).join(", ")||"None");
+ const research=d.sell_research||{};
+ const sums=research.summary||{};
+ $("sell-cards").innerHTML=card("SELL trades",sums.all_sell?.trades??"—")+
+ card("Winning SELL trades",sums.sell_winners?.trades??"—")+
+ card("Losing SELL trades",sums.sell_losers?.trades??"—")+
+ card("Verified SELL evidence",research.verified_sample_size??"—")+
+ card("Unlinked SELL trades",sums.unverified_sell_count??"—");
+ $("sell-flags").innerHTML='<table><thead><tr><th>Observed flag</th><th>Trades</th><th>Wins</th><th>Losses</th><th>Net P/L</th></tr></thead><tbody>'+
+ (research.evidence_flags||[]).map(r=>'<tr><td>'+esc(r.flag)+'</td><td>'+r.trades+'</td><td>'+r.wins+'</td><td>'+r.losses+'</td><td>'+fmt(r.net_pnl)+'</td></tr>').join('')+'</tbody></table>';
+ $("sell-variants").innerHTML='<table><thead><tr><th>Filter</th><th>Period</th><th>Original</th><th>Retained</th><th>Skipped</th><th>Retained win %</th><th>Retained P/L</th></tr></thead><tbody>'+
+ (research.variants||[]).map(v=>(v.splits||[]).map(s=>'<tr><td>'+esc(v.description)+'</td><td>'+esc(s.period)+'</td><td>'+s.eligible+'</td><td>'+s.retained+'</td><td>'+s.skipped+'</td><td>'+fmt(s.results.win_rate,1)+'</td><td>'+fmt(s.results.net_pnl)+'</td></tr>').join('')).join('')+'</tbody></table>';
+ $("sell-limitations").textContent=(research.research_ready?"Exploratory evidence available. ":"Small/truncated sample: not research-ready. ")+(research.limitations||[]).join(" ");
+  $("trades").innerHTML=(d.trades||[]).map(r=>{
+  const details=kv("Decision reason",r.decision_reason)+kv("Risk reason",r.risk_reason)+kv("Setup",r.setup)+kv("ADX",r.adx)+kv("EMA bias",r.ema_bias)+kv("Efficiency",r.directional_efficiency)+kv("Confidence",r.confidence)+kv("Chase ATR",r.chase_atr)+kv("Entry quality",r.entry_quality)+kv("Signal age (bars)",r.signal_age_bars)+kv("Spread points",r.spread_points)+kv("Slippage points",r.slippage_points)+kv("MAE / MFE",fmt(r.mae)+" / "+fmt(r.mfe))+kv("Exit reason",r.exit_reason)+kv("Missing evidence",(r.missing_evidence||[]).join(", ")||"None");
   return '<tr><td>'+esc(r.closed_at)+'</td><td>'+esc(r.trade_id)+'</td><td>'+esc(r.side)+'</td><td>'+esc(r.strategy)+'</td><td>'+esc(r.regime)+'</td><td class="'+(r.pnl>=0?"good":"bad")+'">'+fmt(r.pnl)+'</td><td>'+fmt(r.r_multiple,3)+'</td><td>'+esc(r.evidence_status)+'</td><td><details><summary>Inspect</summary><dl>'+details+'</dl></details></td></tr>'
  }).join('')||'<tr><td colspan="9">No closed trades in this interval.</td></tr>';
  $("status").textContent="Showing "+d.sample.returned+" of "+d.sample.total_matching+" matching outcomes"+(d.sample.truncated?" · TRUNCATED: narrow your filters":"");
