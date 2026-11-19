@@ -4,6 +4,7 @@ from . import decision as decision_views
 from . import commands as command_views
 from . import telemetry as telemetry_views
 from . import learning_views
+from . import forensic_views
 from . import forecast_views
 from . import economic_calendar
 from . import candidate_observer
@@ -43,6 +44,8 @@ urlpatterns = [
     path("dashboard-snapshot", views.dashboard_snapshot, name="ramon-dashboard-snapshot"),
     path("decision-thresholds", views.decision_thresholds, name="ramon-decision-thresholds"),
     path("learning/dashboard", learning_views.learning_dashboard, name="ramon-learning-dashboard"),
+    path("learning/forensics", forensic_views.forensic_dashboard, name="ramon-trade-forensics"),
+    path("learning/forensics/data", forensic_views.forensic_data, name="ramon-trade-forensics-data"),
     path("learning/training/status", learning_views.training_status, name="ramon-learning-training-status"),
     path("learning/training/start", learning_views.start_training, name="ramon-learning-training-start"),
     path("learning/outcomes/recent", learning_views.recent_learning_outcomes, name="ramon-learning-recent-outcomes"),
