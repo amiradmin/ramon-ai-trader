@@ -26,8 +26,9 @@ class DemoRiskPolicyTests(TestCase):
 
         policy = _apply_demo_risk_policy(market, pipeline, demo_mode=True)
 
-        self.assertEqual(market["risk_percent"], 0.75)
-        self.assertEqual(policy["effective_risk_percent"], 0.75)
+        self.assertEqual(market["risk_percent"], 0.5)
+        self.assertEqual(policy["effective_risk_percent"], 0.5)
+        self.assertEqual(policy["maximum_risk_percent"], 0.5)
 
     def test_live_account_does_not_accept_client_risk_percent(self):
         pipeline = _build_pipeline(demo_mode=False)
@@ -58,3 +59,16 @@ class DemoRiskPolicyTests(TestCase):
         self.assertEqual(verdict["volume"], 0.02)
         self.assertLessEqual(verdict["estimated_risk"], verdict["risk_budget"])
         self.assertAlmostEqual(verdict["risk_budget"], 11.97195, places=5)
+
+    def test_standard_profile_persisted_risk_cannot_exceed_safety_cap(self):
+        DecisionThresholdConfig.objects.create(
+            profile="standard", values={"risk_management": {"maximum_risk_percent": 1.6}}
+        )
+        pipeline = _build_pipeline(demo_mode=False)
+        self.assertEqual(pipeline.risk_manager.maximum_risk_percent, 0.5)
+
+    def test_standard_demo_account_uses_same_safety_cap(self):
+        from django.test import override_settings
+        with override_settings(RAMON_DEMO_PROFILE="standard"):
+            pipeline = _build_pipeline(demo_mode=True)
+            self.assertEqual(pipeline.risk_manager.maximum_risk_percent, 0.5)
