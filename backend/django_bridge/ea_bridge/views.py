@@ -116,10 +116,26 @@ def paper_results(request):
 
 @require_GET
 def dashboard(request):
-    """Render the original read-only Ramon opportunity dashboard."""
+    """Render the dashboard even when worker/telemetry status is temporarily down.
+
+    The browser refreshes actual worker state via /strategies; the initial page
+    must not depend on database/telemetry/calendar lookups. Unavailable states
+    are explicitly displayed instead of pretending workers are healthy.
+    """
     from django.shortcuts import render
-    from .strategy_views import worker_rows
-    return render(request, "ea_bridge/ramon_opportunity_risk_dashboard.html", {"strategy_workers": worker_rows()})
+    from .strategy_registry import STRATEGIES
+
+    workers = [
+        {
+            "setup": setup, "slug": slug, "description": description,
+            "url": "/api/ea/v1/strategies/" + slug,
+            "fresh": False, "automatic": False, "open_positions": 0,
+            "position_status_known": False, "state": "STATUS_LOADING",
+        }
+        for setup, (slug, description, _magic) in STRATEGIES.items()
+    ]
+    return render(request, "ea_bridge/ramon_opportunity_risk_dashboard.html",
+                  {"strategy_workers": workers})
 
 
 
