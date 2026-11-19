@@ -243,6 +243,24 @@ bool PostJson(const string path,const string body,string &response)
    return true;
 }
 
+// TimeTradeServer() and TimeGMT() are read separately; round only tiny
+// sampling drift to a real quarter-hour broker timezone offset.
+bool BrokerUtcOffset(long &offset)
+{
+   datetime server_now=TimeTradeServer();
+   datetime utc_now=TimeGMT();
+   if(server_now<=0 || utc_now<=0) return false;
+   long raw=(long)server_now-(long)utc_now;
+   long nearest=(raw>=0) ? ((raw+450)/900)*900 : ((raw-450)/900)*900;
+   if(MathAbs((double)(raw-nearest))>120.0)
+   {
+      Print("RAMON TIME ERROR: broker/GMT offset not near 15-minute boundary raw=",raw);
+      return false;
+   }
+   offset=nearest;
+   return true;
+}
+
 string BuildBarsJson()
 {
    MqlRates rates[];
@@ -250,10 +268,8 @@ string BuildBarsJson()
    int count=MathMax(1,MathMin(BarsToSend,512));
    int copied=CopyRates(_Symbol,_Period,1,count,rates); // start at 1: omit the still-forming candle
    if(copied<=0) return "[]";
-   datetime server_now=TimeTradeServer();
-   datetime utc_now=TimeGMT();
-   if(server_now<=0 || utc_now<=0) return "[]";
-   long server_utc_offset=(long)(server_now-utc_now);
+   long server_utc_offset=0;
+   if(!BrokerUtcOffset(server_utc_offset)) return "[]";
    string out="[";
    for(int i=copied-1;i>=0;i--)
    {
@@ -281,12 +297,10 @@ string BuildDecisionBarsJson()
 
    // MqlRates timestamps use broker-server time. Use the estimated current
    // server/GMT offset, not TimeCurrent(), which can freeze at the last quote.
-   datetime server_now=TimeTradeServer();
-   datetime utc_now=TimeGMT();
-   if(server_now<=0 || utc_now<=0) return "[]";
-   long server_utc_offset=(long)(server_now-utc_now);
-   Print("RAMON TIME DEBUG: server_now=",TimeToString(server_now,TIME_DATE|TIME_SECONDS),
-         " utc_now=",TimeToString(utc_now,TIME_DATE|TIME_SECONDS),
+   long server_utc_offset=0;
+   if(!BrokerUtcOffset(server_utc_offset)) return "[]";
+   Print("RAMON TIME DEBUG: server_now=",TimeToString(TimeTradeServer(),TIME_DATE|TIME_SECONDS),
+         " utc_now=",TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS),
          " offset_seconds=",server_utc_offset,
          " newest_raw_bar=",TimeToString(rates[0].time,TIME_DATE|TIME_SECONDS),
          " newest_converted_bar=",
@@ -487,7 +501,8 @@ string BuildTelemetry()
    datetime server_now=TimeTradeServer();
    datetime utc_now=TimeGMT();
    if(server_now<=0 || utc_now<=0) return "";
-   long server_utc_offset=(long)(server_now-utc_now);
+   long server_utc_offset=0;
+   if(!BrokerUtcOffset(server_utc_offset)) return "";
    MqlDateTime broker_date;
    if(!TimeToStruct(server_now,broker_date)) return "";
    string broker_day=StringFormat("%04d-%02d-%02d",broker_date.year,broker_date.mon,broker_date.day);
