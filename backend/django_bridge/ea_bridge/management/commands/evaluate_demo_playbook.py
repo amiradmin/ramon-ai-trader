@@ -68,7 +68,7 @@ class Command(BaseCommand):
         def factory(compare):
             def build():
                 with override_settings(RAMON_DEMO_PROFILE=options["profile"]):
-                    pipeline = _build_pipeline(demo_mode=True)
+                    pipeline = _build_pipeline(demo_mode=options["profile"] == "expanded")
                 pipeline.compare_candidates = compare
                 pipeline.entry_timer.config = replace(pipeline.entry_timer.config, ignore_supplied_quality=compare)
                 return pipeline
