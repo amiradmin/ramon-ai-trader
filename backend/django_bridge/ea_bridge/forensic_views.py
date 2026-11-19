@@ -143,6 +143,7 @@ def forensic_data(request):
         regime = opportunity.get("regime") if isinstance(opportunity.get("regime"), dict) else {}
         setup = opportunity.get("setup") if isinstance(opportunity.get("setup"), dict) else {}
         market = features.get("market_snapshot") if isinstance(features.get("market_snapshot"), dict) else {}
+        timing = stages.get("entry_timing") if isinstance(stages.get("entry_timing"), dict) else {}
         command_payload = command.payload if command and isinstance(command.payload, dict) else {}
         strategy = _text(command_payload.get("strategy_setup"), _text(tags.get("strategy_setup"),
                          _text(tags.get("setup_type"), "UNKNOWN")))
@@ -180,6 +181,9 @@ def forensic_data(request):
             "risk_approved": risk.approved if risk else None,
             "setup": _text(setup.get("type"), _text(tags.get("setup_type"))),
             "adx": _number(regime.get("adx")),
+            "chase_atr": _number(timing.get("chase_atr")),
+            "entry_quality": _number(timing.get("quality")),
+            "signal_age_bars": _number(timing.get("signal_age_bars")),
             "ema_bias": _text(regime.get("ema_bias"), "UNAVAILABLE"),
             "directional_efficiency": _number(regime.get("directional_efficiency")),
             "bid": _number(market.get("bid")), "ask": _number(market.get("ask")),
@@ -191,6 +195,8 @@ def forensic_data(request):
             "missing_evidence": reasons,
         })
 
+    from .forensic_research import analyze_sell_research
+    sell_research = analyze_sell_research(rows, truncated=total > len(rows))
     wins = sum(row["pnl"] > 0 for row in rows)
     losses = sum(row["pnl"] < 0 for row in rows)
     net = sum(row["pnl"] for row in rows)
@@ -204,6 +210,7 @@ def forensic_data(request):
                     "win_rate": round(wins / len(rows) * 100, 2) if rows else None,
                     "net_pnl": round(net, 2),
                     "linked_evaluations": sum(r["evaluation_id"] is not None for r in rows)},
+        "sell_research": sell_research,
         "by_direction": _group(rows, "side"),
         "by_strategy": _group(rows, "strategy"),
         "by_regime": _group(rows, "regime"),
