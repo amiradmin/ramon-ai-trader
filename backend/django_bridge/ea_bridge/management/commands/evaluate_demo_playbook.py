@@ -4,6 +4,8 @@ import json
 import math
 
 from django.core.management.base import BaseCommand, CommandError
+from django.test import override_settings
+from ea_bridge.policy_snapshot import effective_profiles, fingerprint
 
 from ea_bridge.decision import _build_pipeline
 from ea_bridge.models import EAHeartbeat, MarketBar
@@ -15,6 +17,8 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--source", required=True)
+        parser.add_argument("--profile", choices=("standard", "expanded"), default="standard",
+                            help="Use standard thresholds by default; expanded is a separate research policy.")
         parser.add_argument("--symbol", default="XAUUSD_o")
         parser.add_argument("--limit", type=int, default=2000)
         parser.add_argument("--spread-points", type=float, required=True)
@@ -63,17 +67,30 @@ class Command(BaseCommand):
 
         def factory(compare):
             def build():
-                pipeline = _build_pipeline(demo_mode=True)
+                with override_settings(RAMON_DEMO_PROFILE=options["profile"]):
+                    pipeline = _build_pipeline(demo_mode=True)
                 pipeline.compare_candidates = compare
                 pipeline.entry_timer.config = replace(pipeline.entry_timer.config, ignore_supplied_quality=compare)
                 return pipeline
             return build
 
+        with override_settings(RAMON_DEMO_PROFILE=options["profile"]):
+            profiles = effective_profiles()
+        policy_sha256 = fingerprint(profiles)
+
         kwargs = {"context_bars": context, "account": account,
                   "spread_points": options["spread_points"], "slippage_points": options["slippage_points"],
                   "commission_points": options["commission_points"], "max_holding_bars": options["holding_bars"]}
         try:
-            report = {"symbol": options["symbol"], "source": options["source"], "m15_bars": len(bars),
+            report = {"symbol": options["symbol"], "source": options["source"], "profile": options["profile"],
+                      "profiles": profiles, "policy_sha256": policy_sha256,
+                      "replay_execution": {"spread_points": options["spread_points"],
+                                           "slippage_points": options["slippage_points"],
+                                           "commission_points": options["commission_points"],
+                                           "holding_bars": options["holding_bars"],
+                                           "balance": options["balance"],
+                                           "candidate_comparison": "BASELINE_VS_COMPARATIVE_CANDIDATES"},
+                      "m15_bars": len(bars),
                       "first_bar": bars[0]["time"], "last_bar": bars[-1]["time"],
                       "context_bar_counts": {tf: len(rows) for tf, rows in context.items()},
                       "data_quality": {"input_m15_rows": len(raw_bars), "off_grid_rows_excluded": len(raw_bars)-len(bars),
