@@ -52,3 +52,5 @@ docker compose exec -T django python manage.py audit_trading_readiness \
 The example costs are **illustrative**, not verified historical broker costs. `--expected-config` must be accessible **inside** the container; a redirected host file isn't automatically visible there. For example, copy the report into the container using `docker compose cp replay-standard-policy.json django:/tmp/replay-standard-policy.json` and pass that path. Keep the frozen report unchanged for later deployment checks. Compare `profiles` and the detected mismatches, not merely a saved hash.
 
 Do **not** enable command creation/execution on the basis of this check. The standard replay is still descriptive/in-sample, and the fixed-cost candle simulation is not an executable-tick reconstruction.
+
+Replay now **fails closed** when any M15, M5 or H1 input is off-grid. After diagnosing legacy data, use `--allow-off-grid` only for an explicitly labeled descriptive diagnostic; that override excludes invalid rows without altering the database. Do not treat an overridden replay as clean walk-forward evidence. The frozen report includes per-timeframe exclusion counts.
