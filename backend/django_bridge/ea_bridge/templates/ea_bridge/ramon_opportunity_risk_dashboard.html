@@ -20,7 +20,7 @@
   <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(min(100%,290px),1fr))">
     {% for worker in strategy_workers %}
     <article id="strategy-card-{{ worker.slug }}" class="card strategy-card{% if worker.fresh and worker.automatic %} strategy-on{% endif %}{% if worker.open_positions %} strategy-position-open{% endif %}"><h3 style="font-size:14px;overflow-wrap:anywhere;margin-top:0">{{ worker.setup }}</h3><p class="small">{{ worker.description }}</p>
-      <p class="small" id="strategy-{{ worker.slug }}">{% if worker.fresh %}Running{% else %}Stopped or stale{% endif %} · {{ worker.state }} · {% if worker.position_status_known %}{{ worker.open_positions }} open position{{ worker.open_positions|pluralize }}{% else %}Position status unavailable{% endif %}</p>
+      <p class="small" id="strategy-{{ worker.slug }}">{% if worker.state == "STATUS_LOADING" %}Checking status{% elif worker.fresh %}Running{% else %}Stopped or stale{% endif %} · {{ worker.state }} · {% if worker.position_status_known %}{{ worker.open_positions }} open position{{ worker.open_positions|pluralize }}{% else %}Position status unavailable{% endif %}</p>
       <a class="btn" style="display:inline-block;text-decoration:none" href="{{ worker.url }}">Open strategy ↗</a>
     </article>
     {% endfor %}
