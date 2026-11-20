@@ -113,6 +113,10 @@ def _build_pipeline(*, demo_mode=False, strategy_setup=None):
             short_stop_spread_adjust=bool(opt("RAMON_SHORT_STOP_SPREAD_ADJUST", False)),
         )
     )
+    # RiskManager treats 0.5 as its legacy sentinel and may reload a larger
+    # file-based value. Pin the server ceiling after construction, as with the
+    # entry timer above, so both standard and demo paths remain capped.
+    risk.maximum_risk_percent = maximum_risk_percent
     return SignalFlowPipeline(opportunities=detector, entry_timer=timer, risk_manager=risk,
                               compare_candidates=bool(strategy_setup) or (relaxed and bool(opt("RAMON_DEMO_COMPARE_CANDIDATES", True))))
 

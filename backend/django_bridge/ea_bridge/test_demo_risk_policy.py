@@ -5,6 +5,14 @@ from .models import DecisionThresholdConfig
 
 
 class DemoRiskPolicyTests(TestCase):
+    def test_legacy_file_default_cannot_override_django_safety_cap(self):
+        from unittest.mock import patch
+        with patch('ramon_pipeline.signalflow.risk_management.load_trading_config',
+                   return_value={'risk_management': {'maximum_risk_percent': 1.6}}):
+            for demo in (False, True):
+                with self.subTest(demo=demo):
+                    self.assertEqual(_build_pipeline(demo_mode=demo).risk_manager.maximum_risk_percent, 0.5)
+
     def test_demo_uses_dashboard_owned_per_trade_risk_budget(self):
         pipeline = _build_pipeline(demo_mode=True)
         market = {"risk_percent": 0.20882145}
