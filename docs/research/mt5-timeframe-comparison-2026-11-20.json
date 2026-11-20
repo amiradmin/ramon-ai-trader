@@ -1,0 +1,31 @@
+{
+  "m15_sha256": "d4589c2b2d46ce1faf4e6512155a3baeabb5e2f6af7be17a40040353bb4e72f1",
+  "h1_sha256": "89914ca73d857d242ef2da34858ae7db66814dd166c2f158c3527a3238164e46",
+  "h1_rows": 4935,
+  "counts": {
+    "incomplete_or_missing_m15": 7,
+    "matching_ohlc": 4927,
+    "mismatched_ohlc": 1
+  },
+  "mismatches": [
+    {
+      "broker_timestamp": "2026-11-02T06:00:00",
+      "h1": [
+        "3902.19000",
+        "3906.24000",
+        "3902.00000",
+        "3904.25000"
+      ],
+      "derived_from_m15": [
+        "3902.19000",
+        "3909.01000",
+        "3898.18000",
+        "3901.11000"
+      ]
+    }
+  ],
+  "limitations": [
+    "Raw timestamps are unconverted; matches do not prove UTC correctness or independent origin.",
+    "Incomplete H1 or M15 bars require separate investigation; no candles are changed."
+  ]
+}
