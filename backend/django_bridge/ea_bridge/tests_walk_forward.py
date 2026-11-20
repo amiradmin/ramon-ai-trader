@@ -32,6 +32,15 @@ class PerformanceSummaryTests(TestCase):
         self.assertEqual(result["ci95_r"], None)
         self.assertEqual(result["ci_method"], "INSUFFICIENT_TRADES_LT_30")
 
+    def test_closed_trade_drawdown_streak_and_holding_time(self):
+        trades = [{"net_r": r, "entry_time": 0, "exit_time": 900} for r in (2, -1, -2, 1)]
+        result = expectancy_summary(trades)
+        self.assertEqual(result['max_closed_trade_drawdown_r'], 3)
+        self.assertEqual(result['max_consecutive_losses'], 2)
+        self.assertEqual(result['average_win_r'], 1.5)
+        self.assertEqual(result['average_loss_r'], -1.5)
+        self.assertEqual(result['average_holding_seconds'], 900)
+
     def test_bootstrap_is_reproducible_and_descriptive(self):
         trades = [{"net_r": 1.25 if i % 3 == 0 else -1.0} for i in range(60)]
         one = expectancy_summary(trades)
