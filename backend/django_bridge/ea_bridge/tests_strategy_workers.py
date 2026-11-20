@@ -55,6 +55,21 @@ def open_for(setup,suffix=''):
 class StrategyWorkerTests(TestCase):
     def setUp(self): self.feed=fixture()
 
+    def test_absolute_per_trade_ceiling_rechecked_for_strategy_and_legacy(self):
+        for setup in ('TREND_PULLBACK', None):
+            with self.subTest(setup=setup):
+                decision, verdict = approved('TREND_PULLBACK', suffix='-legacy' if setup is None else '-strategy')
+                if setup is None:
+                    decision.features.pop('strategy_setup')
+                    decision.save(update_fields=['features'])
+                verdict.approved_volume = Decimal('.11')
+                verdict.save(update_fields=['approved_volume'])
+                command, created, reason = create_open_command(decision=decision, verdict=verdict,
+                    instance_id='demo', account_login='123', server_name='Demo')
+                self.assertIsNone(command)
+                self.assertFalse(created)
+                self.assertEqual(reason, 'PER_TRADE_RISK_LIMIT_REACHED')
+
     def test_independent_evaluation_runs_only_its_setup_and_keys_are_scoped(self):
         from .tests_playbook import DemoPlaybookApiTests
         payload=DemoPlaybookApiTests().payload()

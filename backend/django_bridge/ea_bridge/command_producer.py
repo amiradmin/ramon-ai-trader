@@ -162,6 +162,10 @@ def create_open_command(*, decision, verdict, instance_id, account_login, server
         tick_value = _decimal(snapshot.get("symbol_info", {}).get("tick_value"), "tick value")
         if min(tick_size,tick_value)<=0: raise ValueError("contract")
         reserved_risk = risk_distance/tick_size*tick_value*volume
+        # Recheck the absolute ceiling against the current executable quote,
+        # including legacy decisions without a strategy-specific risk policy.
+        if reserved_risk > current_balance * Decimal('0.5') / 100:
+            return None, False, 'PER_TRADE_RISK_LIMIT_REACHED'
         if strategy_setup:
             per_trade_cap = _decimal(decision.features.get('risk_policy',{}).get('maximum_risk_percent'), 'per-trade cap')
             if per_trade_cap<=0 or reserved_risk>current_balance*per_trade_cap/100:

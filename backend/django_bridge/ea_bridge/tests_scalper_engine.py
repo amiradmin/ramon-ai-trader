@@ -120,7 +120,7 @@ class IndependentScalperTests(TestCase):
         decision=StrategyDecisionRecord.objects.create(decision_id='main-parallel',symbol='GOLD',action='BUY',
             confidence=.8,model_version='main',features={'account_snapshot':{'balance':10000,'equity':10000}})
         verdict=RiskVerdictRecord.objects.create(decision_id=decision.decision_id,approved=True,reason_code='TEST',
-            approved_volume='.1',stop_loss='95',take_profit='107')
+            approved_volume='.09',stop_loss='95',take_profit='107')
         command,created,reason=create_open_command(decision=decision,verdict=verdict,instance_id='demo',
             account_login='123',server_name='Demo')
         self.assertTrue(created,reason)
