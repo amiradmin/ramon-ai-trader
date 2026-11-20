@@ -15,6 +15,7 @@ from . import scalper_views
 from . import trend_observer
 from . import strategy_views
 from . import time_status
+from . import validation_views
 
 urlpatterns = [
     path("time-status", time_status.time_status, name="ramon-time-status"),
@@ -34,6 +35,7 @@ urlpatterns = [
     path("commands/ack", command_views.acknowledge_command, name="ea-command-ack"),
     path("status", views.status, name="ea-status"),
     path("dashboard", views.dashboard, name="ramon-dashboard"),
+    path("strategy-validation/", validation_views.strategy_validation, name="ramon-strategy-validation"),
     path("dashboard-data", views.dashboard_data, name="ramon-dashboard-data"),
     path("forecast/arima", forecast_views.arima_status, name="ramon-arima-shadow-status"),
     path("research/economic-calendar", economic_calendar.calendar_status, name="ramon-economic-calendar"),
