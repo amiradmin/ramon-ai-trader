@@ -6,7 +6,7 @@ an independent holdout fold with preceding completed candles for warm-up.
 import hashlib
 import json
 import math
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from django.core.management.base import BaseCommand, CommandError
 from django.test import override_settings
 from ea_bridge.decision import _build_pipeline
@@ -16,6 +16,23 @@ from ea_bridge.walk_forward_stats import grouped_summary
 from ramon_pipeline.signalflow.replay import replay_strategy
 
 PERIODS = {"M15": 900, "M5": 300, "H1": 3600}
+
+
+def yearly_coverage_issues(series, beginning, end):
+    """Identify obvious truncation; never certify coverage without a market calendar."""
+    issues = []
+    tolerance = timedelta(days=7).total_seconds()
+    start, stop = beginning.timestamp(), end.timestamp()
+    for timeframe in ("M15", "M5", "H1"):
+        timestamps = [bar["time"] for bar in series[timeframe] if start <= bar["time"] < stop]
+        if not timestamps:
+            issues.append(f"{timeframe}:NO_YEAR_DATA")
+        else:
+            if timestamps[0] - start > tolerance:
+                issues.append(f"{timeframe}:LATE_START")
+            if stop - timestamps[-1] > tolerance:
+                issues.append(f"{timeframe}:EARLY_END")
+    return issues
 
 
 def read_bars(*, source, symbol, timeframe, start, end, maximum, allow_off_grid=False):
@@ -139,7 +156,6 @@ class Command(BaseCommand):
             beginning = datetime(year, 1, 1, tzinfo=timezone.utc)
             end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
             # Include preceding M15 completed bars; never include future bars.
-            from datetime import timedelta
             warmup_start = beginning - timedelta(seconds=opts["warmup_bars"] * 900 * 4)
             bars, m15_sha, m15_quality = read_bars(
                 source=opts["source"], symbol=opts["symbol"], timeframe="M15",
@@ -157,9 +173,11 @@ class Command(BaseCommand):
             total_excluded += fold_excluded
             train_count = sum(bar["time"] < beginning.timestamp() for bar in bars)
             evaluated_count = sum(beginning.timestamp() <= bar["time"] < end.timestamp() for bar in bars)
-            if train_count < 128 or evaluated_count < 2:
+            coverage_issues = yearly_coverage_issues({"M15": bars, **context}, beginning, end)
+            if train_count < 128 or evaluated_count < 2 or coverage_issues:
                 folds.append({"year": year, "status": "INSUFFICIENT_HISTORY",
                               "prior_warmup_m15": train_count, "holdout_m15": evaluated_count,
+                              "coverage_issues": coverage_issues,
                               "input_sha256": hashes, "data_quality": quality})
                 continue
             try:
@@ -186,6 +204,7 @@ class Command(BaseCommand):
                            if total_excluded else "CALENDAR_YEAR_HOLDOUT_FIXED_POLICY_NOT_PROOF_OF_OUT_OF_SAMPLE_EDGE"),
             "data_quality": {"off_grid_excluded_across_folds": total_excluded,
                              "includes_overlapping_warmup_rows": True,
+                             "session_calendar_coverage_verified": False,
                              "allow_off_grid": opts["allow_off_grid"]},
             "execution": "READ_ONLY_NO_COMMANDS", "profile": "standard",
             "source": opts["source"], "symbol": opts["symbol"],
@@ -200,6 +219,7 @@ class Command(BaseCommand):
                 "Previous-year candles only warm up indicators; year-end exits are bounded to holdout candles.",
                 "Session and per-setup inference requires further independent validation.",
                 "Filtered off-grid rows can break candle continuity; filtered results are only diagnostic and cannot validate strategy eligibility.",
+                "A seven-day year-boundary check detects obvious truncation only; internal gaps, broker sessions, source provenance and completeness remain unverified.",
             ],
         }
         self.stdout.write(json.dumps(result, indent=2, allow_nan=False))

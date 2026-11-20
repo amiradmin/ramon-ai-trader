@@ -10,10 +10,21 @@ from django.test import TestCase as DatabaseTestCase
 
 from ea_bridge.walk_forward_stats import expectancy_summary, grouped_summary, trading_session
 from ea_bridge.models import EAHeartbeat, MarketBar
-from ea_bridge.management.commands.evaluate_walk_forward_years import read_bars
+from ea_bridge.management.commands.evaluate_walk_forward_years import read_bars, yearly_coverage_issues
 
 
 class PerformanceSummaryTests(TestCase):
+    def test_yearly_coverage_rejects_truncated_and_missing_series(self):
+        start = datetime(2025, 1, 1, tzinfo=timezone.utc)
+        end = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        series = {"M15": [{"time": datetime(2025, 2, 1, tzinfo=timezone.utc).timestamp()}],
+                  "M5": [], "H1": [{"time": start.timestamp()}, {"time": (end.timestamp() - 3600)}]}
+        issues = yearly_coverage_issues(series, start, end)
+        self.assertIn("M15:LATE_START", issues)
+        self.assertIn("M15:EARLY_END", issues)
+        self.assertIn("M5:NO_YEAR_DATA", issues)
+        self.assertFalse(any(item.startswith("H1:") for item in issues))
+
     def test_small_samples_do_not_claim_significance(self):
         trades = [{"net_r": 1.25}, {"net_r": -1}]
         result = expectancy_summary(trades)
