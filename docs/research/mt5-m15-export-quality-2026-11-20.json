@@ -1,0 +1,23 @@
+{
+  "file": "/home/amir/.mt5/drive_c/Program Files/MetaTrader 5/new_XAUUSD_oM15.csv",
+  "sha256": "d4589c2b2d46ce1faf4e6512155a3baeabb5e2f6af7be17a40040353bb4e72f1",
+  "timeframe_minutes": 15,
+  "timestamp_timezone": "UNVERIFIED_BROKER_SERVER_TIME",
+  "rows": 100068,
+  "years": {
+    "2022": 8972,
+    "2023": 23539,
+    "2024": 23656,
+    "2025": 23602,
+    "2026": 20299
+  },
+  "first": "2022.08.15 23:30",
+  "last": "2026.11.10 12:15",
+  "off_grid": 0,
+  "duplicate_timestamps": 0,
+  "non_increasing": 0,
+  "invalid_rows": 0,
+  "gap_intervals": 1100,
+  "elapsed_slots_without_bar": 48496,
+  "note": "Elapsed gaps include market closures. This report does not establish timezone, origin or completeness."
+}
