@@ -5,6 +5,7 @@ from statistics import mean
 from zoneinfo import ZoneInfo
 import math
 import random
+from .research_evidence import assess_evidence
 
 LONDON = ZoneInfo("Europe/London")
 NEW_YORK = ZoneInfo("America/New_York")
@@ -59,8 +60,11 @@ def grouped_summary(trades):
     for trade in trades:
         setups[trade["setup"]].append(trade)
         sessions[trading_session(trade["entry_time"])].append(trade)
+    setup_summaries = {name: expectancy_summary(rows) for name, rows in sorted(setups.items())}
     return {
         "all": expectancy_summary(trades),
-        "setups": {name: expectancy_summary(rows) for name, rows in sorted(setups.items())},
+        "setups": setup_summaries,
+        "setup_evidence": {name: assess_evidence(trades=summary["trades"], interval=summary["ci95_r"])
+                           for name, summary in setup_summaries.items()},
         "sessions": {name: expectancy_summary(rows) for name, rows in sorted(sessions.items())},
     }
