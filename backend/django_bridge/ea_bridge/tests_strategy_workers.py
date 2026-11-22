@@ -226,7 +226,7 @@ class StrategyConcurrencyTests(TransactionTestCase):
 
     def test_two_workers_cannot_spend_same_account_headroom(self):
         fixture()
-        DecisionThresholdConfig.objects.create(profile='demo',values={'risk_management':{'max_total_risk_percent':.06}})
+        DecisionThresholdConfig.objects.create(profile='standard',values={'risk_management':{'max_total_risk_percent':.06}})
         for setup in ['TREND_PULLBACK','BREAKOUT_RETEST']: approved(setup)
         barrier=Barrier(2)
         def run(setup):
