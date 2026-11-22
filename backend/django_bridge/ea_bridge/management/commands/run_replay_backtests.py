@@ -13,6 +13,18 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         ROOT.mkdir(parents=True, exist_ok=True)
         self.stdout.write("Historical research worker running; live trade execution is not used.")
+        # A prior worker may have exited mid-run. Recompute from the beginning;
+        # no broker commands, positions, or mutable live state are involved.
+        for file in ROOT.glob("*.json"):
+            try:
+                orphan = read(file.stem)
+                if orphan.get("status") == "RUNNING":
+                    orphan["status"] = "QUEUED"
+                    orphan["progress_pct"] = 0
+                    orphan["updated_at"] = time.time()
+                    store(orphan["id"], orphan)
+            except (OSError, ValueError, KeyError):
+                continue
         while True:
             close_old_connections()
             pending = []
