@@ -153,6 +153,34 @@ class HistoricalStrategyBacktestTests(TestCase):
             MarketBar.objects.create(source="historical-test",symbol="XAUUSD_o",timeframe="M15",
                 timestamp=stamp,open="2600",high="2602",low="2598",close="2600",volume="1")
 
+    def test_historical_candle_quality_never_resamples_or_invents_prices(self):
+        from .replay_backtest import _clean_m15_rows
+        rows=[
+            {"time":900,"close":1},
+            {"time":901,"close":99},
+            {"time":1800,"close":2},
+            {"time":1800,"close":88},
+            {"time":3600,"close":3},
+        ]
+        accepted, quality=_clean_m15_rows(rows)
+        self.assertEqual([row["close"] for row in accepted],[1,2,3])
+        self.assertEqual(quality["excluded"]["off_grid"],1)
+        self.assertEqual(quality["excluded"]["duplicate_slot"],1)
+        self.assertEqual(quality["gap_count"],1)
+
+    def test_every_strategy_has_explicit_research_setup_only(self):
+        from .replay_backtest import _research_pipeline
+        from .strategy_registry import STRATEGIES
+        for setup in STRATEGIES:
+            with self.subTest(setup=setup):
+                pipeline=_research_pipeline(setup)
+                configs=pipeline.opportunities.trading_settings["opportunity_finder"]["setups"]
+                self.assertEqual(
+                    [name for name,policy in configs.items() if policy["enabled"]],
+                    [setup.lower()],
+                )
+                self.assertLessEqual(pipeline.risk_manager.maximum_risk_percent,0.5)
+
     def test_requires_explicit_symbol_economics(self):
         self.params.pop("tick_value")
         response=self.client.get(self.path,self.params)
@@ -176,7 +204,7 @@ class HistoricalStrategyBacktestTests(TestCase):
                 return {"approved":False,"action":"HOLD","rejected_by":"risk_management",
                         "stages":{"risk_management":{"approved":False,
                             "reason":"RISK_BUDGET_BELOW_MINIMUM_VOLUME"}}}
-        with patch("ea_bridge.replay_backtest._build_pipeline",return_value=Pipeline()):
+        with patch("ea_bridge.replay_backtest._research_pipeline",return_value=Pipeline()):
             response=self.client.get(self.path,self.params)
         self.assertEqual(response.status_code,200,response.content)
         for strategy in response.json()["strategies"]:
