@@ -1,0 +1,108 @@
+<section class="card" id="liveConfig" style="margin:16px 0;padding:20px">
+  <h2 style="margin:0 0 8px;font-size:19px">Live real-account strategy configuration</h2>
+  <p class="small">These controls affect the seven real M15 strategy workers on their next evaluation. Existing positions are unchanged. No trade is submitted when saving. Starting balance and date range belong to the historical simulator, not this live account.</p>
+  <p class="small" id="liveConfigState" role="status" aria-live="polite">Loading current broker configuration…</p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:15px 0">
+    <label>Strategy<select id="liveStrategy" style="width:100%;padding:10px;background:var(--surface,#101d31);color:inherit;border:1px solid #62718a;border-radius:8px"></select></label>
+    <label>Account balance (MT5)<input id="liveBalance" readonly></label>
+    <label>Equity (MT5)<input id="liveEquity" readonly></label>
+    <label>Free margin (MT5)<input id="liveFreeMargin" readonly></label>
+    <label>Broker symbol<input id="liveSymbol" readonly></label>
+    <label>Point (MT5)<input id="livePoint" readonly></label>
+    <label>Tick size (MT5)<input id="liveTickSize" readonly></label>
+    <label>Tick value (MT5)<input id="liveTickValue" readonly></label>
+    <label>Minimum lot (MT5)<input id="liveMinLot" readonly></label>
+    <label>Maximum lot (MT5)<input id="liveMaxLot" readonly></label>
+    <label>Lot step (MT5)<input id="liveLotStep" readonly></label>
+  </div>
+  <form id="liveSettingsForm">
+    <div id="liveEditableFields" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px"></div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-top:15px">
+      <button class="btn" id="liveSave" type="submit">Save for real strategy</button>
+      <span class="small" id="liveSettingsSaved" role="status" aria-live="polite"></span>
+    </div>
+  </form>
+  <p class="small">Account identity, spread at execution, lot rules and execution authorization remain broker/server-owned. Risk cannot exceed the existing shared limit. A separate Fast Scalp configuration requires its own validated worker integration.</p>
+</section>
+<style>
+#liveConfig input,#liveConfig select {box-sizing:border-box;display:block;width:100%;min-width:0;margin-top:6px;padding:10px;border:1px solid #62718a;border-radius:8px;background:#111e32;color:#edf3ff;font:inherit}
+#liveConfig input[readonly] {opacity:.72;cursor:not-allowed}
+#liveConfig label{font-size:13px;color:inherit}
+#liveConfig input:focus-visible,#liveConfig select:focus-visible {outline:2px solid #e3ae47;outline-offset:2px}
+@media(prefers-color-scheme:light){#liveConfig input,#liveConfig select{background:#f8fafc;color:#1c2839;border-color:#9aabc0}}
+</style>
+<script>
+(function(){
+  const root=document.getElementById('liveConfig');
+  const byId=id=>document.getElementById(id);
+  const endpoint='/api/ea/v1/dashboard/live-strategy-settings';
+  let data=null;
+  function fill(id,v){byId(id).value=v==null?'Not supplied by MT5':String(v);}
+  function broker(){
+    const b=data.broker||{}, a=b.account||{}, spec=b.symbol_spec||{};
+    fill('liveBalance',a.balance);fill('liveEquity',a.equity);fill('liveFreeMargin',a.free_margin);
+    fill('liveSymbol',b.symbol);fill('livePoint',spec.point);
+    fill('liveTickSize',spec.tick_size);fill('liveTickValue',spec.tick_value);
+    fill('liveMinLot',spec.volume_min);fill('liveMaxLot',spec.volume_max);
+    fill('liveLotStep',spec.volume_step);
+    byId('liveConfigState').textContent=b.fresh?'Broker telemetry current. Scope must match before saving.':'Broker telemetry missing/stale: changes disabled.';
+  }
+  function chosen(){return data.strategies.find(s=>s.setup===byId('liveStrategy').value);}
+  function render(){
+    const selected=chosen();if(!selected)return;
+    const host=byId('liveEditableFields');host.replaceChildren();
+    for(const field of data.fields){
+      const label=document.createElement('label');label.textContent=field.label;
+      const inp=document.createElement('input');
+      inp.type='number';inp.name=field.key;inp.min=field.min;inp.max=field.max;
+      inp.step=field.step;inp.required=true;inp.value=selected.overrides[field.key];
+      label.appendChild(inp);host.appendChild(label);
+    }
+    byId('liveSave').disabled=!selected.ready;
+    byId('liveSettingsSaved').textContent=selected.updated_at?
+      'Last saved: '+selected.updated_at+' (UTC)':'Using existing shared threshold defaults.';
+  }
+  async function load(){
+    try{
+      const response=await fetch(endpoint,{credentials:'same-origin',cache:'no-store'});
+      if(!response.ok)throw new Error('Configuration endpoint returned HTTP '+response.status);
+      data=await response.json();
+      const select=byId('liveStrategy'),prev=select.value;
+      select.replaceChildren();
+      for(const s of data.strategies){
+        const option=document.createElement('option');option.value=s.setup;option.textContent=s.setup.replaceAll('_',' ');
+        select.appendChild(option);
+      }
+      if(data.strategies.some(s=>s.setup===prev))select.value=prev;
+      broker();render();
+    }catch(error){
+      byId('liveConfigState').textContent='Cannot load configuration: '+error.message;
+      byId('liveSave').disabled=true;
+    }
+  }
+  byId('liveStrategy').addEventListener('change',render);
+  byId('liveSettingsForm').addEventListener('submit',async event=>{
+    event.preventDefault();
+    const selected=chosen();if(!selected||!selected.ready)return;
+    if(!window.confirm('Apply these changes to future REAL trades for '+selected.setup+'?'))return;
+    const overrides={};
+    for(const f of data.fields)overrides[f.key]=Number(root.querySelector('[name="'+f.key+'"]').value);
+    const token=(document.cookie.match(/(?:^|; )csrftoken=([^;]+)/)||[])[1];
+    if(!token){byId('liveSettingsSaved').textContent='CSRF cookie missing; sign in as staff and reload.';return;}
+    byId('liveSave').disabled=true;
+    try{
+      const response=await fetch(endpoint,{method:'POST',credentials:'same-origin',
+        headers:{'Content-Type':'application/json','X-CSRFToken':decodeURIComponent(token)},
+        body:JSON.stringify({setup:selected.setup,scope:selected.scope,overrides})});
+      const result=await response.json();
+      if(!response.ok||!result.ok)throw new Error(result.error||'Save rejected');
+      byId('liveSettingsSaved').textContent='Saved for future live evaluations at '+result.updated_at;
+      await load();
+    }catch(error){
+      byId('liveSettingsSaved').textContent='Not saved: '+error.message;
+      byId('liveSave').disabled=false;
+    }
+  });
+  load();
+})();
+</script>
