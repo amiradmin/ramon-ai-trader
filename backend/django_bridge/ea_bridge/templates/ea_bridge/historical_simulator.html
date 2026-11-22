@@ -88,7 +88,7 @@ button.primary{background:var(--gold);color:#161b23;border:0;font-weight:700}lab
 <button class="primary" id="toggle" disabled>▶ Play</button>
 <button id="step" disabled>⏭ Step Forward</button>
 <button id="reset" disabled>↺ Reset</button>
-<label>Speed <select id="speed"><option value="1">1×</option><option value="5">5×</option><option value="10">10×</option><option value="50">50×</option><option value="100">100×</option><option value="200">200×</option><option value="300">300×</option><option value="500">500×</option></select></label>
+<label>Speed <select id="speed"><option value="1">1×</option><option value="5">5×</option><option value="10">10×</option><option value="50">50×</option><option value="100">100×</option></select></label>
 <span class="status" id="state">No data</span>
 </div>
 <input type="range" id="timeline" min="0" max="0" value="0" disabled aria-label="Replay candle position">
@@ -133,7 +133,6 @@ function exportBacktest(){
 let historyParams=null,hasMore=false,fetchingMore=false,loadVersion=0;
 const message=txt=>el("message").textContent=txt;
 function setPlaying(value){
- if(!value)playbackCarry=0;
  playing=value && bars.length>0 && (cursor<bars.length-1||hasMore);
  if(timer!==null){clearTimeout(timer);timer=null}
  el("toggle").textContent=playing?"⏸ Pause":"▶ Play";
@@ -356,40 +355,15 @@ async function loadMore(){
   return false;
  }finally{fetchingMore=false}
 }
-async function advance(count=1){
- let remaining=count;
- const version=loadVersion;
- while(remaining>0){
-  if(version!==loadVersion)return;
-  if(cursor>=bars.length-1&&hasMore){
-   const loaded=await loadMore();
-   if(version!==loadVersion||!loaded)return;
-  }
-  const available=bars.length-1-cursor;
-  if(available<=0)break;
-  const step=Math.min(remaining,available);
-  cursor+=step;remaining-=step;
- }
- if(version!==loadVersion)return;
- render();
+async function advance(){
+ if(cursor>=bars.length-1&&hasMore)await loadMore();
+ if(cursor>=bars.length-1){setPlaying(false);return}
+ cursor++;render();
  if(cursor>=bars.length-1&&!hasMore)setPlaying(false);
 }
-// Batch candle advancement at fast speeds: 500x needs roughly 27 candles
-// per 40 ms frame rather than a 40 ms delay for each individual candle.
-let playbackCarry=0;
 function tick(){
  if(!playing)return;
- const speed=Number(el("speed").value);
- const delay=Math.max(40,750/speed);
- timer=setTimeout(async()=>{
-  timer=null;
-  if(!playing)return;
-  playbackCarry+=speed*delay/750;
-  const count=Math.floor(playbackCarry);
-  playbackCarry-=count;
-  if(count>0)await advance(count);
-  if(playing&&timer===null)tick();
- },delay);
+ timer=setTimeout(async()=>{timer=null;await advance();if(playing)tick()},Math.max(40,750/Number(el("speed").value)));
 }
 function ensureChart(){
  if(chart)return true;
@@ -486,7 +460,7 @@ el("toggle").addEventListener("click",()=>setPlaying(!playing));
 el("step").addEventListener("click",async()=>{setPlaying(false);await advance()});
 el("reset").addEventListener("click",()=>{setPlaying(false);cursor=Math.min(DEFAULT_VISIBLE_BARS-1,Math.max(0,bars.length-1));render()});
 el("timeline").addEventListener("input",event=>{setPlaying(false);cursor=Number(event.target.value);render()});
-el("speed").addEventListener("change",()=>{playbackCarry=0;if(playing){clearTimeout(timer);timer=null;tick()}});
+el("speed").addEventListener("change",()=>{if(playing){clearTimeout(timer);timer=null;tick()}});
 ensureChart();load();
 })();
 </script></body></html>
