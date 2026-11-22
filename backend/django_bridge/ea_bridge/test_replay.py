@@ -101,3 +101,49 @@ class ReplayRecordedPerformanceTests(TestCase):
     def test_invalid_dates_are_rejected(self):
         self.assertEqual(self.stats("not-a-date").status_code, 400)
         self.assertEqual(self.stats("2026-01-02T11:00:00Z").status_code, 400)
+
+class HistoricalStrategyBacktestTests(TestCase):
+    def setUp(self):
+        self.path="/api/ea/v1/simulator/backtest"
+        self.params=dict(symbol="XAUUSD_o",source="historical-test",
+            start="2026-01-01",end="2026-01-04",
+            balance="10000",spread_points="20",point="0.01",
+            tick_size="0.01",tick_value="1",volume_min="0.01",
+            volume_max="10",volume_step="0.01")
+        base=datetime(2025,12,30,0,0,tzinfo=timezone.utc)
+        for i in range(140):
+            stamp=base+timedelta(minutes=15*i)
+            MarketBar.objects.create(source="historical-test",symbol="XAUUSD_o",timeframe="M15",
+                timestamp=stamp,open="2600",high="2602",low="2598",close="2600",volume="1")
+
+    def test_requires_explicit_symbol_economics(self):
+        self.params.pop("tick_value")
+        response=self.client.get(self.path,self.params)
+        self.assertEqual(response.status_code,400)
+        self.assertIn("tick value",response.json()["error"])
+
+    def test_rejects_reverse_dates(self):
+        self.params["start"]="2026-01-08"
+        response=self.client.get(self.path,self.params)
+        self.assertEqual(response.status_code,400)
+
+    def test_evaluates_all_seven_read_only_without_commands(self):
+        from unittest.mock import patch
+        from .strategy_registry import STRATEGIES
+        class Pipeline:
+            class Risk:
+                class Config:
+                    target_reward_risk=1.5
+                config=Config()
+            risk_manager=Risk()
+            def run(self,market):
+                return {"approved":False,"action":"HOLD"}
+        with patch("ea_bridge.replay_backtest._build_pipeline",return_value=Pipeline()):
+            response=self.client.get(self.path,self.params)
+        self.assertEqual(response.status_code,200,response.content)
+        report=response.json()
+        self.assertEqual(report["mode"],"ISOLATED_STRATEGY_RESEARCH_ESTIMATE")
+        self.assertEqual(len(report["strategies"]),len(STRATEGIES))
+        self.assertEqual(sum(s["closed_trades"] for s in report["strategies"]),0)
+        from .models import EACommand
+        self.assertEqual(EACommand.objects.count(),0)
