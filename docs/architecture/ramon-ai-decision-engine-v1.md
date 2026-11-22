@@ -46,3 +46,30 @@ The trainer automatically chooses the newest **completed** saved job with that s
 A passing model is recorded as `replay_expected_r`, *separate* from the live-trade outcome `trade_performance` model. The M15 worker's `latest.ai_replay_shadow` displays its simulated expected-R estimate; `latest.ai_shadow` continues to represent the broker-trade model. **Neither score changes orders, signal selection, risk budgets, permissions, or EA configuration.** No model estimates calibrated win probabilities in this milestone.
 
 If the exported JSON is only on the laptop rather than stored as a completed replay job, rerun the simulator using its original source, range and assumptions first. Simply having candles in PostgreSQL does not mean the prior trade-result file is present for training.
+
+## Phase 1: three distinct models (November 2026)
+
+The `train_replay_shadow` command now attempts **three separately validated models**, each stored under its own `LearningModelRun.model_key`:
+
+| Model key | Source label | Output | Validation baseline |
+| --- | --- | --- | --- |
+| `replay_market_regime` | Next four continuous M15 closes relative to current ATR | Probabilities for UP / DOWN / RANGE | Constant class-prior multiclass log loss |
+| `replay_trade_success` | Simulated TARGET before STOP, using only completed replay trades | Uncalibrated TP-before-SL fraction | Constant prior Brier score |
+| `replay_expected_r` | Stop-to-entry-normalized simulated trade outcome | Expected R-multiple | Median R MAE and RMSE |
+
+These are three **research candidate models**, not production AI trading models. The future four-bar regime classification is a *forward direction label*, not interchangeable with an existing contemporaneous ADX/structure regime. Trade success is conditional on the replay's fixed spread, fill assumptions and trade-selection policy and is **not** a calibrated live-broker win probability. Samples failing the input fingerprint or market-data quality guard are rejected. Missing trade labels reject only the relevant trade models, not the forward-regime learner.
+
+The independent M15 worker snapshot includes `latest.ai_market_regime`, `latest.ai_trade_success`, and `latest.ai_replay_shadow` (expected R). Older `latest.ai_shadow` continues to show the distinct broker-trade research model, if available. These fields are written only **after** the command path and are never used to create or veto orders.
+
+After pulling, run:
+
+```bash
+docker compose exec django python manage.py test \
+  ea_bridge.tests_replay_ml ea_bridge.tests_replay_three_models ea_bridge.tests_ai_shadow
+
+docker compose exec django python manage.py train_replay_shadow --symbol XAUUSD_l
+```
+
+Inspect the output for PASSED versus REJECTED **per model**. A failed research model must remain unavailable in the shadow observer. The models require a completed simulator job in the existing shared media volume and exact history fingerprint; a backtest JSON imported only as candles in PostgreSQL is not automatically a completed simulator job.
+
+Before eventual live influence, require stronger walk-forward validation over multiple market regimes and dates, a genuine broker execution dataset, appropriate probability calibration, comparison against deterministic strategy baselines, and explicit operational review.
