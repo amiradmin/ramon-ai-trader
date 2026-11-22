@@ -72,13 +72,62 @@ def worker_cycle(setup, *, now=None):
         from .decision import evaluate_payload
         from .strategy_evidence import capture_inputs
         evidence=capture_inputs(rows,feed,payload,now)
-        response=evaluate_payload(payload,strategy_setup=setup,input_evidence=evidence,live_worker=True)
+        response=evaluate_payload(
+            payload,
+            strategy_setup=setup,
+            input_evidence=evidence,
+            live_worker=True,
+        )
         data=json.loads(response.content)
-        # Advisory ML observation happens strictly after the decision/command path.\n        # It cannot veto, authorize, resize or enqueue an order.\n        from .ai_shadow import observe_shadow\n        shadow = observe_shadow(data, symbol=feed.symbol, setup=setup)\n        replay_classifiers = observe_replay_classifiers(\n            data, symbol=feed.symbol, setup=setup, market_bars=payload['bars'],\n            spread_points=((data.get('stages') or {}).get('entry_timing') or {}).get('spread_points') or 0,\n        )\n        control.latest=dict(evaluated_at=now.isoformat(),action=data.get('decision','WAIT'),
-            reason=data.get('reason',data.get('error','EVALUATION_ERROR')),
-            evaluation_id=data.get('evaluation_id'),command_id=data.get('command_id'),\n            ai_shadow=shadow, ai_replay_shadow=replay_shadow,\n            ai_trade_success=replay_classifiers['replay_trade_success'],\n            ai_market_regime=replay_classifiers['replay_market_regime'],
-            command_reason=data.get('command_reason'),command_created=data.get('command_created',False))
-        return finish(data.get('command_reason') if data.get('command_created') else control.latest['reason'])
+
+        from .ai_shadow import (
+            observe_shadow,
+            observe_replay_shadow,
+            observe_replay_classifiers,
+        )
+
+        spread_points = (
+            ((data.get('stages') or {}).get('entry_timing') or {})
+            .get('spread_points') or 0
+        )
+
+        shadow = observe_shadow(data, symbol=feed.symbol, setup=setup)
+
+        replay_shadow = observe_replay_shadow(
+            data,
+            symbol=feed.symbol,
+            setup=setup,
+            market_bars=payload['bars'],
+            spread_points=spread_points,
+        )
+
+        replay_classifiers = observe_replay_classifiers(
+            data,
+            symbol=feed.symbol,
+            setup=setup,
+            market_bars=payload['bars'],
+            spread_points=spread_points,
+        )
+
+        control.latest = dict(
+            evaluated_at=now.isoformat(),
+            action=data.get('decision', 'WAIT'),
+            reason=data.get('reason', data.get('error', 'EVALUATION_ERROR')),
+            evaluation_id=data.get('evaluation_id'),
+            command_id=data.get('command_id'),
+            command_reason=data.get('command_reason'),
+            command_created=data.get('command_created', False),
+            ai_shadow=shadow,
+            ai_replay_shadow=replay_shadow,
+            ai_trade_success=replay_classifiers['replay_trade_success'],
+            ai_market_regime=replay_classifiers['replay_market_regime'],
+        )
+
+        return finish(
+            data.get('command_reason')
+            if data.get('command_created')
+            else control.latest['reason']
+        )
 
 
 @transaction.atomic
