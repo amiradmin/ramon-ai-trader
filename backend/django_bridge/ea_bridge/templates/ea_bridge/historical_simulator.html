@@ -193,7 +193,7 @@ function renderBacktest(){
 }
 function focusReplayWindow(){
  if(!chart||!bars.length)return;
- // Logical indexes permit a fixed-width viewport even before 15 real candles
+ // Logical indexes permit a fixed-width viewport even before 30 real candles
  // exist; never load or reveal future candles to fill the empty space.
  chart.timeScale().setVisibleLogicalRange({
   from:cursor-DEFAULT_VISIBLE_BARS+1,
@@ -207,7 +207,7 @@ function render(){
  el("timeline").value=cursor;
  el("position").textContent=bars.length?(cursor+1)+" / "+bars.length+" candles":"0 / 0 candles";
  el("date").textContent=bars.length?new Date(bars[cursor].time*1000).toISOString().replace("T"," ").slice(0,19)+" UTC":"—";
- el("step").disabled=!bars.length||cursor>=bars.length-1;
+ el("step").disabled=!bars.length||(cursor>=bars.length-1&&!hasMore);
  el("toggle").disabled=!bars.length||(cursor>=bars.length-1&&!hasMore&&!playing);
  queueStats();renderBacktest();
 }
