@@ -159,3 +159,43 @@ class HistoricalStrategyBacktestTests(TestCase):
         self.assertEqual(sum(s["closed_trades"] for s in report["strategies"]),0)
         from .models import EACommand
         self.assertEqual(EACommand.objects.count(),0)
+
+class HistoricalBacktestQueueTests(TestCase):
+    def test_job_queue_is_durable_and_does_not_create_ea_commands(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from .models import EACommand
+        from . import replay_jobs
+        params = dict(
+            symbol="XAUUSD_o", source="ramon-command-ea-1",
+            start="2026-07-22", end="2026-11-22",
+            balance="1000", spread_points="20", point="0.01",
+            tick_size="0.01", tick_value="1",
+            volume_min="0.01", volume_max="100", volume_step="0.01",
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch.object(replay_jobs, "ROOT", Path(temporary)):
+                response=self.client.post("/api/ea/v1/simulator/backtest/jobs", params)
+                self.assertEqual(response.status_code, 202, response.content)
+                identifier=response.json()["job_id"]
+                job=self.client.get("/api/ea/v1/simulator/backtest/jobs/"+identifier)
+                self.assertEqual(job.status_code, 200)
+                self.assertEqual(job.json()["status"], "QUEUED")
+                self.assertIsNone(job.json()["result"])
+                self.assertEqual(self.client.post("/api/ea/v1/simulator/backtest/jobs",params).status_code,409)
+                self.assertEqual(EACommand.objects.count(),0)
+
+    def test_job_api_rejects_invalid_dates(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from . import replay_jobs
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch.object(replay_jobs,"ROOT",Path(temporary)):
+                response=self.client.post("/api/ea/v1/simulator/backtest/jobs",{
+                    "symbol":"XAUUSD_o", "source":"historical-test",
+                    "start":"bad", "end":"2026-11-22",
+                })
+                self.assertEqual(response.status_code,400)
+                self.assertEqual(self.client.get("/api/ea/v1/simulator/backtest/jobs/not-a-uuid").status_code,404)
