@@ -34,6 +34,9 @@ def simulator_bars(request):
     before = request.GET.get("before")
     start = request.GET.get("start")
     after = request.GET.get("after")
+    validated = request.GET.get("validated") == "1"
+    if validated and timeframe != "M15":
+        return JsonResponse({"error": "Validated backtest chart is M15 only"}, status=400)
     qs = MarketBar.objects.filter(symbol=symbol, timeframe=timeframe)
     if source:
         qs = qs.filter(source=source)
@@ -75,7 +78,27 @@ def simulator_bars(request):
     # In a selected date range, start at the first candle so replay starts at
     # the chosen date. Outside that mode, show the latest candles as before.
     fields = ("timestamp", "open", "high", "low", "close", "volume")
-    if start:
+    if validated:
+        if not start:
+            return JsonResponse({"error": "Validated M15 replay requires a start date"}, status=400)
+        # On-grid time filtering matches _clean_m15_rows without resampling.
+        # Limit database scans to protect Gunicorn against unbounded queries.
+        ordered = qs.order_by("timestamp", "id").values(*fields)
+        rows = []
+        scanned = 0
+        for row in ordered.iterator(chunk_size=2000):
+            scanned += 1
+            if scanned > 40000:
+                return JsonResponse({"error": "Validated replay scan limit reached; shorten the date range"}, status=422)
+            timestamp = int(row["timestamp"].timestamp())
+            if timestamp % 900:
+                continue
+            rows.append(row)
+            if len(rows) > limit:
+                break
+        truncated = len(rows) > limit
+        rows = rows[:limit]
+    elif start:
         sampled = list(qs.order_by("timestamp").values(*fields)[:limit + 1])
         truncated = len(sampled) > limit
         rows = sampled[:limit]
@@ -87,6 +110,8 @@ def simulator_bars(request):
     return JsonResponse({
         "symbol": symbol, "timeframe": timeframe, "source": source,
         "truncated": truncated,
+        "validated": validated,
+        "validation_policy": "M15_ON_GRID_EXCLUDE_NO_RESAMPLE" if validated else "RAW_SOURCE",
         "has_next": bool(truncated and start),
         "window": "earliest_in_range" if start else "latest",
         "bars": [
