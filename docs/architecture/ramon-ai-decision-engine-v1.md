@@ -29,3 +29,20 @@ Inspect an M15 strategy's `latest.ai_shadow` in its control data. If no validate
 5. Retain deterministic risk caps and fail-closed execution in all future variants.
 
 A shadow prediction is not evidence of profitability or broker parity.
+
+## Training from the stored 2026-09-22 to 2026-11-22 XAUUSD_l backtest
+
+The backtest export's trade ledger describes **simulated stop/target fills**, not confirmed broker orders. Replay results live in the shared `historical-replay-jobs` media directory, while the underlying M15 OHLC candles live in the `MarketBar` PostgreSQL table. The research trainer reconstructs 60-candle features strictly up to each signal-time candle and verifies the replay's exact candle fingerprint against the current database. This prevents using post-trade prices as predictors.
+
+Run on the local checkout after pulling main:
+
+```bash
+docker compose exec django python manage.py test ea_bridge.tests_replay_ml ea_bridge.tests_ai_shadow
+docker compose exec django python manage.py train_replay_shadow --symbol XAUUSD_l
+```
+
+The trainer automatically chooses the newest **completed** saved job with that symbol. For an exact saved job use `--job-id <32-character-job-id>`. It requires at least 48 closed simulated trades, at least 20 distinct signal timestamps, at least 40 training trades and 8 held-out trades, a matching OHLC fingerprint, and at most 5% rejected/off-grid M15 rows. A chronological time-grouped holdout must beat the training median baseline on both MAE and RMSE. On rejection, the tool reports the reason and does **not** generate a tradable model. Weekend gaps are not filled with invented candles.
+
+A passing model is recorded as `replay_expected_r`, *separate* from the live-trade outcome `trade_performance` model. The M15 worker's `latest.ai_replay_shadow` displays its simulated expected-R estimate; `latest.ai_shadow` continues to represent the broker-trade model. **Neither score changes orders, signal selection, risk budgets, permissions, or EA configuration.** No model estimates calibrated win probabilities in this milestone.
+
+If the exported JSON is only on the laptop rather than stored as a completed replay job, rerun the simulator using its original source, range and assumptions first. Simply having candles in PostgreSQL does not mean the prior trade-result file is present for training.
