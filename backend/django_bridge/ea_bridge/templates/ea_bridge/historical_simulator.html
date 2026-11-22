@@ -85,10 +85,10 @@ function queueStats(){
    const count=data.trade_count||0;
    el("tradeCount").textContent=String(count);
    el("winRate").textContent=count?data.win_rate_percent.toFixed(2)+"%":"N/A";
-   el("netGain").textContent=count?Number(data.total_gain).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}):"N/A";
-   el("netGain").className="value"+(count?(Number(data.total_gain)>=0?" positive":" negative"):"");
+   el("netGain").textContent=count&&!data.mixed_accounts?Number(data.total_gain).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}):"N/A";
+   el("netGain").className="value"+(count&&!data.mixed_accounts?(Number(data.total_gain)>=0?" positive":" negative"):"");
    el("statsDetail").textContent=count
-    ? data.wins+" wins · "+data.losses+" losses · Net realized P&L in original account denomination (currency may vary). This is recorded history, NOT Ramon replay performance."
+    ? data.wins+" wins · "+data.losses+" losses · "+(data.mixed_accounts?"Multiple broker accounts found: total gain is hidden to avoid mixing account currencies.":"Account: "+(data.account_login||"unspecified")+" · Gain shown in recorded account units (currency not verified).")+" NOT Ramon replay performance."
     : "No recorded closed trades found in the loaded chart range through this candle. Win rate and gain are unavailable until trades exist.";
   }catch(error){if(requestId===statsRequest)clearStats("Recorded trade metrics unavailable: "+error.message)}
  },playing?450:100);
