@@ -15,7 +15,7 @@ from .scalper_audit import health_skip,command_event,checksum
 from .scalper_engine import open_scalp
 
 
-@override_settings(RAMON_SCALP_SHADOW_ENABLED=True)
+@override_settings(RAMON_SCALP_SHADOW_ENABLED=True,RAMON_REAL_CENT_INSTANCE='demo',RAMON_REAL_CENT_LOGIN='123',RAMON_REAL_CENT_SERVER='Demo',RAMON_REAL_CENT_CURRENCY='USC',RAMON_REAL_CENT_SYMBOL='GOLD')
 class ScalpAuditTests(TestCase):
     def setUp(self):
         fixtures.ScalpObserverTests.setUp(self)

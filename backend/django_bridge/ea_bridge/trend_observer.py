@@ -1,4 +1,6 @@
 """Paper-only hourly observer. Deliberately has no command/learning producer."""
+from .account_scope import real_cent_scope
+
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone as utc_timezone
 import hashlib
@@ -33,10 +35,10 @@ def record_trend(feed, *, now=None):
     with transaction.atomic():
         feed=EAHeartbeat.objects.select_for_update().get(pk=feed.pk)
         p=feed.payload
-        if (type(p.get('account_trade_mode')) is not int or p['account_trade_mode']!=0
+        if (not real_cent_scope(feed)[0]
                 or p.get('server_name')!=feed.server_name or feed.status!='TELEMETRY_OK'
                 or not feed.terminal_connected or not 0<=(now-feed.last_seen).total_seconds()<=60):
-            health('DEMO_FEED_NOT_READY',now); return 0
+            health('ACCOUNT_FEED_NOT_READY',now); return 0
         try:
             stamp=parse_datetime(str(p.get('quote_time','')))
             if not stamp or not timezone.is_aware(stamp) or not -5<=(now-stamp).total_seconds()<=30:

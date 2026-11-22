@@ -18,7 +18,7 @@ from .strategy_registry import STRATEGIES, owned_strategy_position
 from .strategy_worker import close_strategy_position, worker_cycle
 
 
-SETTINGS=dict(RAMON_STRATEGY_CONTAINERS_ENABLED=True,RAMON_STRATEGY_INSTANCE='demo',
+SETTINGS=dict(RAMON_REAL_CENT_INSTANCE='demo',RAMON_REAL_CENT_LOGIN='123',RAMON_REAL_CENT_SERVER='Demo',RAMON_REAL_CENT_CURRENCY='USC',RAMON_REAL_CENT_SYMBOL='XAUUSD_o',RAMON_STRATEGY_CONTAINERS_ENABLED=True,RAMON_STRATEGY_INSTANCE='demo',
     RAMON_STRATEGY_LOGIN='123',RAMON_STRATEGY_SERVER='Demo',RAMON_EA_COMMAND_CREATION_ENABLED=True,
     RAMON_EA_COMMAND_EXECUTION_ENABLED=True,RAMON_MARKET_SESSION_HOURS=None,
     RAMON_MARKET_SESSION_TIMEZONE=None,EA_BEARER_TOKEN='test-token')
@@ -28,8 +28,8 @@ def fixture():
     now=timezone.now()
     feed=EAHeartbeat.objects.create(instance_id='demo',account_login='123',server_name='Demo',symbol='XAUUSD_o',
         status='TELEMETRY_OK',terminal_connected=True,trade_allowed=True,payload=dict(server_name='Demo',
-            account_trade_mode=0,account_margin_mode=2,execution_profile='ticket-magic-v1',quote_time=now.isoformat(),
-            quote=dict(bid=100,ask=100.2,point=.01),account=dict(balance=10000,equity=10000),positions=[],
+            account_trade_mode=2,account_margin_mode=2,execution_profile='ticket-magic-v1',quote_time=now.isoformat(),
+            quote=dict(bid=100,ask=100.2,point=.01),account=dict(currency='USC',balance=10000,equity=10000),positions=[],
             symbol_info=dict(tick_size=.01,tick_value=1,volume_min=.01,volume_max=100,volume_step=.01,stops_level_points=0)))
     for setup in STRATEGIES:
         StrategyWorkerControl.objects.create(setup=setup,source='demo',account_login='123',server_name='Demo',
@@ -148,7 +148,7 @@ class StrategyWorkerTests(TestCase):
         self.assertEqual(open_for('BREAKOUT_RETEST')[2],'STRATEGY_HEDGING_OWNERSHIP_REQUIRED')
 
     def test_account_risk_reservations_limit_other_workers(self):
-        DecisionThresholdConfig.objects.create(profile='demo',values={'risk_management':{'max_total_risk_percent':.06}})
+        DecisionThresholdConfig.objects.create(profile='standard',values={'risk_management':{'max_total_risk_percent':.06}})
         self.assertIsNotNone(open_for('TREND_PULLBACK')[0])
         self.assertEqual(open_for('BREAKOUT_RETEST')[2],'PORTFOLIO_RISK_LIMIT_REACHED')
 
@@ -197,8 +197,8 @@ class StrategyWorkerTests(TestCase):
         StrategyWorkerControl.objects.filter(setup='TREND_PULLBACK').update(automatic=False)
         with patch('ea_bridge.decision.evaluate_payload') as evaluate:
             self.assertEqual(worker_cycle('TREND_PULLBACK'),'PAUSED');evaluate.assert_not_called()
-        self.feed.payload['account_trade_mode']=2;self.feed.save()
-        self.assertEqual(worker_cycle('BREAKOUT_RETEST'),'DEMO_REQUIRED')
+        self.feed.payload['account_trade_mode']=0;self.feed.save()
+        self.assertEqual(worker_cycle('BREAKOUT_RETEST'),'REAL_ACCOUNT_REQUIRED')
 
 
 @override_settings(**SETTINGS)
@@ -226,7 +226,7 @@ class StrategyConcurrencyTests(TransactionTestCase):
 
     def test_two_workers_cannot_spend_same_account_headroom(self):
         fixture()
-        DecisionThresholdConfig.objects.create(profile='demo',values={'risk_management':{'max_total_risk_percent':.06}})
+        DecisionThresholdConfig.objects.create(profile='standard',values={'risk_management':{'max_total_risk_percent':.06}})
         for setup in ['TREND_PULLBACK','BREAKOUT_RETEST']: approved(setup)
         barrier=Barrier(2)
         def run(setup):

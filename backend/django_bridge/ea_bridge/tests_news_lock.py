@@ -67,6 +67,7 @@ class NewsWindowTests(SimpleTestCase):
         self.assertFalse(entry_status('SCALPER_M1_M5',now=NOW)['blocked'])
 
 
+@override_settings(RAMON_REAL_CENT_INSTANCE='demo',RAMON_REAL_CENT_LOGIN='123',RAMON_REAL_CENT_SERVER='Demo',RAMON_REAL_CENT_CURRENCY='USC',RAMON_REAL_CENT_SYMBOL='XAUUSD_o')
 class NewsExecutionTests(TestCase):
     def setUp(self):
         from .tests_strategy_workers import fixture

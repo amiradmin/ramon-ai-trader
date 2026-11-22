@@ -1,4 +1,4 @@
-"""Django-owned demo breakeven planning and auditable, once-only commands.
+"""Django-owned real cent breakeven planning and auditable, once-only commands.
 
 MT5 supplies quotes/positions and executes commands. All policy calculations live
 here. No historical maximum is reconstructed when this feature is first enabled.
@@ -13,25 +13,27 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from .command_producer import _decimal, _is_demo_account
+from .command_producer import _decimal
+from .account_scope import real_cent_scope
 from .models import EACommand, EAHeartbeat, LearningTradeOutcome
 
 
 def protection_status(feed, *, strategy_setup=None):
-    enabled = bool(getattr(settings, 'RAMON_DEMO_PROFIT_PROTECTION_ENABLED', False))
-    result = dict(mode='DEMO_ENABLED' if enabled else 'OBSERVE_ONLY', calculation_owner='DJANGO',
+    enabled = bool(getattr(settings, 'RAMON_REAL_CENT_PROFIT_PROTECTION_ENABLED', False))
+    result = dict(mode='REAL_CENT_ENABLED' if enabled else 'OBSERVE_ONLY', calculation_owner='DJANGO',
         rule='At +1 original R, move SL to entry; preserve TP. Price breakeven excludes costs.',
         positions=[], recent_commands=[])
     scope=(getattr(settings,'RAMON_PROFIT_PROTECTION_INSTANCE',''),
         getattr(settings,'RAMON_PROFIT_PROTECTION_LOGIN',''),getattr(settings,'RAMON_PROFIT_PROTECTION_SERVER',''))
     if scope != (feed.instance_id,feed.account_login,feed.server_name):
-        result['state']='OUTSIDE_CONFIGURED_DEMO_SCOPE'
+        result['state']='OUTSIDE_CONFIGURED_ACCOUNT_SCOPE'
         return result
     now = timezone.now()
     p = feed.payload if isinstance(feed.payload, dict) else {}
     age = (now-feed.last_seen).total_seconds()
     stamp = parse_datetime(str(p.get('quote_time','')))
-    if (not _is_demo_account(p) or age < 0 or age > 60 or not stamp or not stamp.tzinfo
+    allowed, _ = real_cent_scope(feed)
+    if (not allowed or age < 0 or age > 60 or not stamp or not stamp.tzinfo
         or not -5 <= (now-stamp).total_seconds() <= 30 or feed.status!='TELEMETRY_OK'
         or not feed.terminal_connected or not feed.trade_allowed
         or p.get('server_name') != feed.server_name or not feed.server_name):
@@ -130,7 +132,7 @@ def protection_status(feed, *, strategy_setup=None):
 
 
 def create_protection_commands(instance_id, account_login, *, strategy_setup=None):
-    if not all(getattr(settings,k,False) for k in ['RAMON_DEMO_PROFIT_PROTECTION_ENABLED',
+    if not all(getattr(settings,k,False) for k in ['RAMON_REAL_CENT_PROFIT_PROTECTION_ENABLED',
         'RAMON_EA_COMMAND_CREATION_ENABLED','RAMON_EA_COMMAND_EXECUTION_ENABLED']): return
     with transaction.atomic():
         feed=EAHeartbeat.objects.select_for_update().filter(instance_id=instance_id,account_login=account_login).first()

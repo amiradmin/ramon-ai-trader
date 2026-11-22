@@ -1,7 +1,6 @@
 import json
 from datetime import timedelta
 
-from .command_producer import _is_demo_account
 
 from django.test import TestCase, override_settings
 from django.utils import timezone
@@ -9,16 +8,7 @@ from django.utils import timezone
 from .models import EACommand, EAHeartbeat
 
 
-class DemoAccountGateTests(TestCase):
-    def test_only_explicit_integer_demo_mode_is_accepted(self):
-        self.assertTrue(_is_demo_account({"account_trade_mode": 0}))
-        self.assertFalse(_is_demo_account({}))
-        self.assertFalse(_is_demo_account({"account_trade_mode": None}))
-        self.assertFalse(_is_demo_account({"account_trade_mode": 2}))
-        self.assertFalse(_is_demo_account({"account_trade_mode": False}))
-        self.assertFalse(_is_demo_account(None))
-
-
+@override_settings(RAMON_REAL_CENT_INSTANCE="ea-test-1", RAMON_REAL_CENT_LOGIN="12345", RAMON_REAL_CENT_SERVER="LiteFinance-MT5-Demo", RAMON_REAL_CENT_CURRENCY="USC", RAMON_REAL_CENT_SYMBOL="XAUUSD_o")
 class EACommandEndpointTests(TestCase):
     headers = {"HTTP_AUTHORIZATION": "Bearer test-token"}
     next_url = "/api/ea/v1/commands/next"
@@ -29,7 +19,7 @@ class EACommandEndpointTests(TestCase):
             instance_id="ea-test-1", account_login="12345",
             server_name="LiteFinance-MT5-Demo", symbol="XAUUSD_o",
             status="TELEMETRY_OK", terminal_connected=True, trade_allowed=True,
-            payload={"server_name": "LiteFinance-MT5-Demo", "account_trade_mode": 0},
+            payload={"server_name": "LiteFinance-MT5-Demo", "account_trade_mode": 2, "account": {"currency": "USC"}},
         )
         self.payload = {
             "command_id": "cmd-test-1",

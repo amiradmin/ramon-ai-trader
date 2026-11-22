@@ -9,6 +9,7 @@ from .auth import BearerTokenRequired
 from django.utils import timezone
 from .models import AccountDailyBaseline, StrategyDecisionRecord, EAHeartbeat, RiskVerdictRecord, DecisionThresholdConfig
 from .thresholds import defaults_for
+from .account_scope import real_cent_scope
 
 logger = logging.getLogger(__name__)
 import threading
@@ -132,11 +133,14 @@ def _apply_demo_risk_policy(market, pipeline, *, demo_mode):
     if maximum <= 0:
         raise ValueError("maximum_risk_percent must be positive")
     if not demo_mode:
-        market["risk_percent"] = 0.0
+        # Only the already verified account scope gets an explicit server budget.
+        # The caller blocks decisions on all other accounts.
+        effective = maximum if market.get("real_cent_scope_confirmed") else 0.0
+        market["risk_percent"] = effective
         return {
             "source": "SERVER_POLICY",
             "requested_risk_percent": requested,
-            "effective_risk_percent": requested,
+            "effective_risk_percent": effective,
             "maximum_risk_percent": maximum,
         }
 
@@ -295,6 +299,8 @@ def evaluate_payload(p, *, strategy_setup=None, input_evidence=None):
                 account_state_reason = "ACCOUNT_SYMBOL_MISMATCH"
             elif heartbeat.status != "TELEMETRY_OK" or not heartbeat.terminal_connected:
                 account_state_reason = "ACCOUNT_TELEMETRY_NOT_READY"
+            elif not real_cent_scope(heartbeat)[0]:
+                account_state_reason = real_cent_scope(heartbeat)[1]
             elif not isinstance(account_snapshot, dict) or not isinstance(positions_snapshot, list):
                 account_state_reason = "ACCOUNT_SNAPSHOT_INVALID"
             else:
@@ -374,6 +380,7 @@ def evaluate_payload(p, *, strategy_setup=None, input_evidence=None):
           "stop_level_points":stop_level_points,"take_profit_points":take_profit_points_server,
           "target_reward_risk":pipeline.risk_manager.config.target_reward_risk,
           "open_risk_percent":open_risk_percent_server}
+        market["real_cent_scope_confirmed"] = heartbeat is not None and real_cent_scope(heartbeat)[0]
         configured_demo_profile = str(
             getattr(settings, "RAMON_DEMO_PROFILE", "expanded")
         ).strip().lower()

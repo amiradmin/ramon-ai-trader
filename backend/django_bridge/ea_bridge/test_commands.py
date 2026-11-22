@@ -7,6 +7,7 @@ from django.utils import timezone
 from .models import EACommand, EAHeartbeat
 
 
+@override_settings(RAMON_REAL_CENT_INSTANCE="ramon-test-instance", RAMON_REAL_CENT_LOGIN="123456", RAMON_REAL_CENT_SERVER="LiteFinance-MT5-Demo", RAMON_REAL_CENT_CURRENCY="USC", RAMON_REAL_CENT_SYMBOL="XAUUSD_o")
 class EACommandApiTests(TestCase):
     next_url = "/api/ea/v1/commands/next"
     ack_url = "/api/ea/v1/commands/ack"
@@ -18,7 +19,7 @@ class EACommandApiTests(TestCase):
             instance_id=self.scope["instance_id"], account_login=self.scope["account_login"],
             server_name="LiteFinance-MT5-Demo", symbol="XAUUSD_o", status="TELEMETRY_OK",
             terminal_connected=True, trade_allowed=True,
-            payload={"server_name": "LiteFinance-MT5-Demo", "account_trade_mode": 0},
+            payload={"server_name": "LiteFinance-MT5-Demo", "account_trade_mode": 2, "account": {"currency": "USC"}},
         )
 
     def post_json(self, url, payload, headers=None):

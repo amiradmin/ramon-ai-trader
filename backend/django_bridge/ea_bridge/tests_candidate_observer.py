@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone as tz
 from copy import deepcopy
 from unittest.mock import patch
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from .candidate_observer import record_candidates, settle_candidates
 from .models import CandidateObservation, EACommand, EAHeartbeat, MarketBar, StrategyDecisionRecord
@@ -10,6 +10,7 @@ from .models import CandidateObservation, EACommand, EAHeartbeat, MarketBar, Str
 NOW = datetime(2026, 11, 9, 9, 0, 5, tzinfo=tz.utc)
 
 
+@override_settings(RAMON_REAL_CENT_INSTANCE='demo',RAMON_REAL_CENT_LOGIN='123',RAMON_REAL_CENT_SERVER='Broker-Live',RAMON_REAL_CENT_CURRENCY='USC',RAMON_REAL_CENT_SYMBOL='XAUUSD_o')
 class CandidateObserverTests(TestCase):
     def setUp(self):
         self.decision = StrategyDecisionRecord.objects.create(decision_id="candidate-test", symbol="XAUUSD_o",
@@ -20,7 +21,7 @@ class CandidateObserverTests(TestCase):
                 {"setup":"RANGE_EDGE_FADE","side":"HOLD","approved":False,"opportunity_reason":"NO_SETUP"}]}})
         self.market = {"source":"demo","bar_time":(NOW-timedelta(minutes=15,seconds=5)).timestamp(),
                        "bid":100,"ask":100.2,"point":.01}
-        EAHeartbeat.objects.create(instance_id="demo",symbol="XAUUSD_o",payload={"account_trade_mode":0})
+        EAHeartbeat.objects.create(instance_id="demo",account_login="123",server_name="Broker-Live",symbol="XAUUSD_o",payload={"account_trade_mode":2,"server_name":"Broker-Live","account":{"currency":"USC"}})
 
     def record(self):
         record_candidates(self.decision,self.market,now=NOW)

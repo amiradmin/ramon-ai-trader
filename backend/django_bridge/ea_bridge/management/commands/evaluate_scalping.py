@@ -1,4 +1,6 @@
 """Read-only descriptive M1/M5 scalper replay; no optimizer or order writes."""
+from ea_bridge.account_scope import real_cent_scope
+
 from dataclasses import asdict
 import hashlib
 import json
@@ -17,7 +19,7 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument('--source', required=True)
-        parser.add_argument('--symbol', default='XAUUSD_o')
+        parser.add_argument('--symbol', default='XAUUSD_i')
         parser.add_argument('--limit', type=int, default=10000)
         parser.add_argument('--snapshot-output', help='Optional local research snapshot; no database writes.')
         parser.add_argument('--spread-points', type=float, required=True)
@@ -28,8 +30,8 @@ class Command(BaseCommand):
         if not 65 <= options['limit'] <= 20000:
             raise CommandError('limit must be 65–20000')
         feed = EAHeartbeat.objects.filter(instance_id=options['source'], symbol=options['symbol']).first()
-        if not feed or type(feed.payload.get('account_trade_mode')) is not int or feed.payload['account_trade_mode'] != 0:
-            raise CommandError('Matching explicit demo feed required')
+        if not real_cent_scope(feed)[0]:
+            raise CommandError('Matching configured real cent feed required')
         now = timezone.now()
         try:
             costs = ScalpCosts(float(feed.payload['quote']['point']), options['spread_points'],

@@ -9,6 +9,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from .models import EAHeartbeat, MarketBar, StrategyWorkerControl, EACommand
+from .account_scope import real_cent_scope
 from .strategy_registry import STRATEGIES, strategy_commands, owned_strategy_position
 
 
@@ -21,7 +22,8 @@ def strategy_readiness(feed, *, now=None):
     now=now or timezone.now()
     if feed is None: return 'CONFIGURED_FEED_MISSING'
     p=feed.payload
-    if type(p.get('account_trade_mode')) is not int or p['account_trade_mode']!=0: return 'DEMO_REQUIRED'
+    allowed, reason = real_cent_scope(feed)
+    if not allowed: return reason
     if type(p.get('account_margin_mode')) is not int or p['account_margin_mode']!=2: return 'HEDGING_REQUIRED'
     if p.get('execution_profile')!='ticket-magic-v1': return 'EA_109_REQUIRED'
     if p.get('server_name')!=feed.server_name: return 'SERVER_MISMATCH'

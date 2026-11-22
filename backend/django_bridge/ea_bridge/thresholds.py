@@ -37,7 +37,7 @@ THRESHOLDS = {
         "stop_buffer_atr": {"label":"Structural stop buffer","unit":"ATR","min":0,"max":2,"step":0.01,"description":"Additional stop distance beyond the structural invalidation level."},
         "min_stop_atr": {"label":"Minimum stop distance","unit":"ATR","min":0.1,"max":5,"step":0.05,"description":"Reject stops that are too close to market noise."},
         "max_stop_atr": {"label":"Maximum stop distance","unit":"ATR","min":0.5,"max":10,"step":0.05,"description":"Reject setups whose structural stop is too far away."},
-        "maximum_risk_percent": {"label":"Maximum risk per trade","unit":"% of balance","min":0.1,"max":2.0,"step":0.05,"description":"Demo risk budget and hard per-trade ceiling. Position size is always rounded down; the broker minimum is never forced."},
+        "maximum_risk_percent": {"label":"Maximum risk per trade","unit":"% of balance","min":0.1,"max":2.0,"step":0.05,"description":"Account risk budget capped by the server at 0.5% per trade. Position size is rounded down; the broker minimum is never forced."},
         "max_total_risk_percent": {"label":"Maximum total portfolio risk","unit":"% of balance","min":0.25,"max":5.0,"step":0.05,"description":"Maximum combined open-position risk plus the proposed trade."},
         "target_reward_risk": {"label":"Target reward / risk","unit":"R:R","min":1.2,"max":5.0,"step":0.05,"description":"Take-profit distance as a multiple of the structural stop distance."},
         "min_reward_risk": {"label":"Minimum reward / risk","unit":"R:R","min":1.2,"max":3.0,"step":0.1,"description":"Reject trades whose planned target is below this reward/risk ratio. Cannot be lower than 1.2R."}

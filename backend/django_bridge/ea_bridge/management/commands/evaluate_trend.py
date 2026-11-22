@@ -1,4 +1,6 @@
 """Reproducible descriptive replay. No order or observation writes."""
+from ea_bridge.account_scope import real_cent_scope
+
 from dataclasses import asdict, replace
 from datetime import timedelta
 import hashlib
@@ -20,7 +22,7 @@ class Command(BaseCommand):
 
     def add_arguments(self,parser):
         parser.add_argument('--source',required=True)
-        parser.add_argument('--symbol',default='XAUUSD_o')
+        parser.add_argument('--symbol',default='XAUUSD_i')
         parser.add_argument('--limit',type=int,default=5000)
         for cost in ['spread','slippage','commission','overnight']:
             parser.add_argument(f'--{cost}-points',type=float,required=True)
@@ -30,8 +32,8 @@ class Command(BaseCommand):
     def handle(self,*args,**options):
         if not 256<=options['limit']<=20000: raise CommandError('limit must be 256–20000')
         feed=EAHeartbeat.objects.filter(instance_id=options['source'],symbol=options['symbol']).first()
-        if not feed or type(feed.payload.get('account_trade_mode')) is not int or feed.payload['account_trade_mode']!=0:
-            raise CommandError('Explicit matching demo feed required')
+        if not real_cent_scope(feed)[0]:
+            raise CommandError('Explicit matching real cent feed required')
         now=timezone.now()
         try:
             costs=TrendCosts(float(feed.payload['quote']['point']),options['spread_points'],options['slippage_points'],

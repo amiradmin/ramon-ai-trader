@@ -1,3 +1,5 @@
+> Historical demo runbook. The current real cent account procedure is [real-cent-activation.md](real-cent-activation.md). Do not use the demo-only activation steps below for the current account.
+
 # Demo-only trading activation
 
 This runbook covers the guarded Django-to-MT5 command path. A trade is expected only when fresh market/account telemetry produces a directional setup that passes Opportunity Finder, Entry Timing, Risk Management, daily-loss, account, and broker checks.

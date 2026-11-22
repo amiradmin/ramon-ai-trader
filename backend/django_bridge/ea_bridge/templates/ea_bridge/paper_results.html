@@ -43,8 +43,8 @@ async function refreshCandidateJournal() {
       return tf + ": " + (context.status || "MISSING") + " · " + (context.bias || "UNKNOWN") +
         (context.continuity === "OBSERVED_WEEKEND_BREAK" ? " · weekend-shaped break; broker calendar unverified" : "");
     }).join(" | ");
-    $("candidatesStatus").textContent = data.state === "NO_DEMO_FEED" ? "No demo feed available." :
-      data.state === "WAITING_FOR_NEW_DECISION" ? "Waiting for the next new demo decision. Historical decisions are not counted as forward observations." :
+    $("candidatesStatus").textContent = data.state === "NO_ACCOUNT_FEED" ? "No configured real cent account feed available." :
+      data.state === "WAITING_FOR_NEW_DECISION" ? "Waiting for the next new account decision. Historical decisions are not counted as forward observations." :
       (counts.WAITING || 0) + " awaiting outcomes · " + (counts.SCORED || 0) + " scored · " + (counts.SKIPPED || 0) + " unscored · latest " + data.sample_limit + " candidates maximum";
     $("candidatesGroups").innerHTML = (data.groups || []).map(row => "<tr><td>" + esc(row.setup) + "</td><td>" + esc(row.disposition) +
       "</td><td>" + row.observations + "</td><td>" + row.scored + "</td><td>" + (row.scored ? row.positive + " / " + row.scored : "—") +

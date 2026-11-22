@@ -3,6 +3,8 @@
 The metric is one hypothetical hour of price movement after the next full M15
 boundary, less the decision-time spread. It is not an SL/TP trade backtest or P&L.
 """
+from .account_scope import real_cent_scope
+
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone as dt_timezone
 import math
@@ -122,12 +124,11 @@ def settle_candidates(*, now=None):
 @require_GET
 def candidate_status(request):
     feed = next((h for h in EAHeartbeat.objects.order_by("-last_seen")[:100]
-                 if isinstance(h.payload,dict) and type(h.payload.get("account_trade_mode")) is int
-                 and h.payload["account_trade_mode"] == 0), None)
+                 if real_cent_scope(h)[0]), None)
     result = {"mode": "OBSERVATION_ONLY", "affects_orders": False, "groups": [], "recent": [],
               "metric": "One-hour hypothetical movement, less frozen spread; excludes slippage, commission and swap."}
     if feed is None:
-        return JsonResponse({**result, "state": "NO_DEMO_FEED"})
+        return JsonResponse({**result, "state": "NO_ACCOUNT_FEED"})
     from .market_context import load_decision_context
     from ramon_pipeline.signalflow.trade_planning import market_context
     now=timezone.now()

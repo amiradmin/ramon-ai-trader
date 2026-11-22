@@ -149,7 +149,9 @@ def _dashboard_execution_state(latest_symbol=""):
     telemetry_ready = None
     terminal_connected = None
     trade_allowed = None
-    demo_account = None
+    from .account_scope import real_cent_scope
+    real_cent_account = None
+    account_reason = "HEARTBEAT_MISSING"
     symbol_matches = None
 
     if heartbeat is not None:
@@ -162,11 +164,7 @@ def _dashboard_execution_state(latest_symbol=""):
         terminal_connected = bool(heartbeat.terminal_connected)
         trade_allowed = bool(heartbeat.trade_allowed)
         payload = heartbeat.payload if isinstance(heartbeat.payload, dict) else {}
-        trade_mode = payload.get("account_trade_mode")
-        if isinstance(trade_mode, str):
-            demo_account = trade_mode.strip().upper() == "DEMO"
-        elif isinstance(trade_mode, int) and not isinstance(trade_mode, bool):
-            demo_account = trade_mode == 0
+        real_cent_account, account_reason = real_cent_scope(heartbeat)
         if latest_symbol and heartbeat.symbol:
             symbol_matches = heartbeat.symbol.strip().upper() == latest_symbol.strip().upper()
 
@@ -196,7 +194,7 @@ def _dashboard_execution_state(latest_symbol=""):
         telemetry_ready is True,
         terminal_connected is True,
         trade_allowed is True,
-        demo_account is True,
+        real_cent_account is True,
         symbol_matches is True,
     ))
 
@@ -211,7 +209,7 @@ def _dashboard_execution_state(latest_symbol=""):
                 "account validation; dashboard and decision responses do not execute trades."
                 if authorization_ready else
                 "Command authorization is not ready. Both server command gates, a fresh "
-                "connected demo-account heartbeat, terminal trading permission, and a matching "
+                "connected real cent account heartbeat with the configured login, server, currency, instance and symbol, terminal trading permission, and a matching "
                 "EA/decision symbol are required."
             ),
         ),
@@ -257,11 +255,11 @@ def _dashboard_execution_state(latest_symbol=""):
             ("Terminal reports trading permission enabled." if trade_allowed else "Terminal reports trading permission disabled."),
         ),
         check(
-            "demo_account",
-            "Demo-account mode",
-            demo_account,
-            "Account trade mode was not supplied by the latest heartbeat." if demo_account is None else
-            ("Heartbeat confirms demo-account mode." if demo_account else "Heartbeat does not identify a demo account."),
+            "real_cent_account",
+            "Real cent account scope",
+            real_cent_account,
+            "No EA heartbeat is available." if real_cent_account is None else
+            ("Heartbeat matches the configured real cent account scope." if real_cent_account else account_reason),
         ),
         check(
             "symbol_match",
@@ -287,7 +285,7 @@ def _dashboard_execution_state(latest_symbol=""):
         "telemetry_ready": telemetry_ready,
         "terminal_connected": terminal_connected,
         "terminal_trade_allowed": trade_allowed,
-        "demo_account_confirmed": demo_account,
+        "real_cent_account_confirmed": real_cent_account,
         "symbol_matches": symbol_matches,
         "checks": checks,
     }
@@ -499,10 +497,7 @@ def dashboard_snapshot(request):
     bars.reverse()
 
     trade_mode = payload.get("account_trade_mode")
-    is_demo = (
-        isinstance(trade_mode, str) and trade_mode.strip().upper() == "DEMO"
-    ) or (isinstance(trade_mode, int) and not isinstance(trade_mode, bool) and trade_mode == 0)
-    profile = "demo" if is_demo else "standard"
+    profile = "standard"
     from .thresholds import defaults_for
     threshold_values = defaults_for(profile)
     saved_thresholds = DecisionThresholdConfig.objects.filter(profile=profile).first()
@@ -553,7 +548,7 @@ def dashboard_snapshot(request):
         key: execution.get(key)
         for key in ("trading_authorization", "authorization_detail", "command_creation_enabled",
                     "command_execution_enabled", "heartbeat_fresh", "telemetry_ready",
-                    "terminal_connected", "terminal_trade_allowed", "demo_account_confirmed",
+                    "terminal_connected", "terminal_trade_allowed", "real_cent_account_confirmed",
                     "symbol_matches")
         if key in execution
     }
@@ -615,14 +610,8 @@ def dashboard_snapshot(request):
     })
 
 def _active_threshold_profile():
-    """Use broker telemetry to select demo vs standard thresholds; never trust the browser."""
-    heartbeat = EAHeartbeat.objects.order_by("-last_seen").first()
-    payload = heartbeat.payload if heartbeat and isinstance(heartbeat.payload, dict) else {}
-    trade_mode = payload.get("account_trade_mode")
-    is_demo = (
-        isinstance(trade_mode, str) and trade_mode.strip().upper() == "DEMO"
-    ) or (isinstance(trade_mode, int) and not isinstance(trade_mode, bool) and trade_mode == 0)
-    return "demo" if is_demo else "standard"
+    """The configured real cent execution path uses standard thresholds."""
+    return "standard"
 
 
 @require_http_methods(["GET", "POST"])

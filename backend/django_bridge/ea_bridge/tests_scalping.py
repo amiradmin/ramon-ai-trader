@@ -85,6 +85,7 @@ class ScalpRulesTests(SimpleTestCase):
 
 
 @override_settings(RAMON_SCALP_SHADOW_ENABLED=True)
+@override_settings(RAMON_REAL_CENT_INSTANCE='demo',RAMON_REAL_CENT_LOGIN='123',RAMON_REAL_CENT_SERVER='Demo',RAMON_REAL_CENT_CURRENCY='USC',RAMON_REAL_CENT_SYMBOL='GOLD')
 class ScalpObserverTests(TestCase):
     def setUp(self):
         # First 15 seconds after an M1 completion: issuance precedes next full minute.
@@ -98,7 +99,7 @@ class ScalpObserverTests(TestCase):
                 MarketBar.objects.filter(pk=row.pk).update(received_at=self.now-timedelta(seconds=1))
         self.feed = EAHeartbeat.objects.create(instance_id='demo',account_login='123',server_name='Demo',
             symbol='GOLD',status='TELEMETRY_OK',terminal_connected=True,
-            payload=dict(account_trade_mode=0,server_name='Demo',quote_time=self.now.isoformat(),
+            payload=dict(account_trade_mode=2,account=dict(currency='USC'),server_name='Demo',quote_time=self.now.isoformat(),
                 quote=dict(point=.01,bid=107,ask=107.01),symbol_info=dict(tick_size=.01,stops_level_points=0)))
         EAHeartbeat.objects.filter(pk=self.feed.pk).update(last_seen=self.now-timedelta(seconds=1))
 
@@ -121,9 +122,9 @@ class ScalpObserverTests(TestCase):
         self.assertEqual(ScalpObservation.objects.get().reason,'M5_WARMUP')
 
     def test_stale_and_real_account_do_not_record(self):
-        self.feed.payload['account_trade_mode'] = 2; self.feed.save()
+        self.feed.payload['account_trade_mode'] = 0; self.feed.save()
         self.assertEqual(record_scalp(self.feed,now=self.now),0)
-        self.feed.payload['account_trade_mode'] = 0
+        self.feed.payload['account_trade_mode'] = 2
         self.feed.payload['quote_time'] = (self.now-timedelta(minutes=2)).isoformat();self.feed.save()
         EAHeartbeat.objects.filter(pk=self.feed.pk).update(last_seen=self.now)
         self.assertEqual(record_scalp(self.feed,now=self.now),0)

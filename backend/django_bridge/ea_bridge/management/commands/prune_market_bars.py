@@ -23,7 +23,7 @@ class Command(BaseCommand):
     help = "Report or explicitly prune old MarketBar candles by timeframe."
 
     def add_arguments(self, parser):
-        parser.add_argument("--symbol", default="XAUUSD_o")
+        parser.add_argument("--symbol", default="XAUUSD_i")
         parser.add_argument("--source", default="")
         parser.add_argument("--apply", action="store_true", help="Actually delete expired candles; default is dry-run.")
         parser.add_argument("--m1-days", type=int, default=DEFAULT_RETENTION_DAYS["M1"])

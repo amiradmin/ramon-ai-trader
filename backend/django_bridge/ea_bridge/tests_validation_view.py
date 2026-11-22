@@ -10,7 +10,7 @@ class ValidationViewTests(TestCase):
             MarketBar.objects.create(source=source, symbol='XAUUSD_o', timeframe='M15',
                 timestamp=datetime(2026, 1, 1, 0, 0, 1, tzinfo=timezone.utc),
                 open=2, high=3, low=1, close=2, volume=1)
-        response = self.client.get(reverse('ramon-strategy-validation'), {'source': 'chosen', 'year': '2026'})
+        response = self.client.get(reverse('ramon-strategy-validation'), {'source': 'chosen', 'year': '2026', 'symbol': 'XAUUSD_o'})
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'INVALID')
         self.assertContains(response, 'NO_DATA')

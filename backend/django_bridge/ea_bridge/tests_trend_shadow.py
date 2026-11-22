@@ -86,6 +86,7 @@ class TrendRulesTests(SimpleTestCase):
 
 @override_settings(RAMON_TREND_SHADOW_ENABLED=True,RAMON_TREND_INSTANCE='demo',
                    RAMON_TREND_LOGIN='123',RAMON_TREND_SERVER='Demo')
+@override_settings(RAMON_REAL_CENT_INSTANCE='demo',RAMON_REAL_CENT_LOGIN='123',RAMON_REAL_CENT_SERVER='Demo',RAMON_REAL_CENT_CURRENCY='USC',RAMON_REAL_CENT_SYMBOL='GOLD')
 class TrendObserverTests(TestCase):
     def setUp(self):
         now=timezone.now()
@@ -101,7 +102,7 @@ class TrendObserverTests(TestCase):
             MarketBar.objects.filter(pk=row.pk).update(received_at=self.now-timedelta(seconds=1))
         self.feed=EAHeartbeat.objects.create(instance_id='demo',account_login='123',server_name='Demo',
             symbol='GOLD',status='TELEMETRY_OK',terminal_connected=True,
-            payload=dict(account_trade_mode=0,server_name='Demo',quote_time=self.now.isoformat(),
+            payload=dict(account_trade_mode=2,account=dict(currency='USC'),server_name='Demo',quote_time=self.now.isoformat(),
                 quote=dict(point=.01,bid=165,ask=165.01),symbol_info=dict(tick_size=.01)))
         EAHeartbeat.objects.filter(pk=self.feed.pk).update(last_seen=self.now)
 
@@ -126,7 +127,7 @@ class TrendObserverTests(TestCase):
         self.assertEqual(record_trend(self.feed,now=self.now),0)
 
     def test_real_or_stale_feed_blocks(self):
-        self.feed.payload['account_trade_mode']=2;self.feed.save()
+        self.feed.payload['account_trade_mode']=0;self.feed.save()
         self.assertEqual(record_trend(self.feed,now=self.now),0)
         self.assertFalse(TrendObservation.objects.exists())
 

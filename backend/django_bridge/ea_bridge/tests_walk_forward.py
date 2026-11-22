@@ -6,7 +6,7 @@ from unittest import TestCase
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.test import TestCase as DatabaseTestCase
+from django.test import TestCase as DatabaseTestCase, override_settings
 
 from ea_bridge.walk_forward_stats import expectancy_summary, grouped_summary, trading_session
 from ea_bridge.models import EAHeartbeat, MarketBar
@@ -64,9 +64,10 @@ class PerformanceSummaryTests(TestCase):
         self.assertEqual(sum(item["trades"] for item in report["sessions"].values()), 2)
 
 
+@override_settings(RAMON_REAL_CENT_INSTANCE='historical-test',RAMON_REAL_CENT_LOGIN='123',RAMON_REAL_CENT_SERVER='Broker-Live',RAMON_REAL_CENT_CURRENCY='USC',RAMON_REAL_CENT_SYMBOL='XAUUSD_o')
 class YearlyWalkForwardSafetyTests(DatabaseTestCase):
     def test_requires_explicit_demo_contract(self):
-        with self.assertRaisesMessage(CommandError, "explicitly demo"):
+        with self.assertRaisesMessage(CommandError, "configured real cent"):
             call_command("evaluate_walk_forward_years", source="unknown",
                          first_year=2022, last_year=2022,
                          spread_points=22, slippage_points=5, commission_points=5,
@@ -74,14 +75,14 @@ class YearlyWalkForwardSafetyTests(DatabaseTestCase):
 
     def test_missing_history_remains_insufficient_not_a_fake_zero_trade_success(self):
         EAHeartbeat.objects.create(
-            instance_id="historical-test", symbol="XAUUSD_o",
-            payload={"account_trade_mode": 0, "quote": {"point": "0.01"},
+            instance_id="historical-test", account_login="123", server_name="Broker-Live", symbol="XAUUSD_o",
+            payload={"account_trade_mode": 2,"server_name":"Broker-Live","account":{"currency":"USC"}, "quote": {"point": "0.01"},
                      "symbol_info": {"tick_size": "0.01", "tick_value": "1",
                                      "volume_step": "0.01", "volume_min": "0.01",
                                      "volume_max": "100", "stops_level_points": "0"}},
         )
         output = io.StringIO()
-        call_command("evaluate_walk_forward_years", source="historical-test",
+        call_command("evaluate_walk_forward_years", source="historical-test", symbol="XAUUSD_o",
                      first_year=2022, last_year=2022, spread_points=22,
                      slippage_points=5, commission_points=5, stdout=output)
         report = json.loads(output.getvalue())

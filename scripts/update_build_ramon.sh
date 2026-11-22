@@ -123,5 +123,5 @@ compile_install() {
 
 for source in "${EA_SOURCES[@]}"; do compile_install "$source"; done
 printf '\nDEPLOYMENT CHECKS PASSED\nDjango: %s\nExperts: %s\nBackups: %s\n' "$HEALTH_URL" "$EXPERTS_DIR" "$BACKUP_DIR"
-printf 'Installed binary: RamonCommandEA_v1.08.ex5\n'
+printf 'Installed binary: RamonCommandEA_v1.09.ex5\n'
 printf 'MT5 was not launched, no EA was attached, and no trades were placed. Server command flags are not changed.\n'

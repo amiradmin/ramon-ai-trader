@@ -17,7 +17,7 @@ class Command(BaseCommand):
     help = "Read MarketBar candles and print research-only forecast diagnostics; never writes data."
 
     def add_arguments(self, parser):
-        parser.add_argument("--symbol", default="XAUUSD_o")
+        parser.add_argument("--symbol", default="XAUUSD_i")
         parser.add_argument("--timeframe", default="M15")
         parser.add_argument("--source", default=None)
         parser.add_argument("--limit", type=int, default=500)

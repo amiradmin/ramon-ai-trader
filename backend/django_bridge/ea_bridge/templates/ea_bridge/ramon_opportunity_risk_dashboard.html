@@ -316,7 +316,7 @@ async function refreshExecutionCosts() {
     const response = await fetch("/api/ea/v1/research/execution", {cache:"no-store",signal:controller.signal});
     if (!response.ok) throw new Error("Execution data unavailable");
     const data = await response.json();
-    $("executionStatus").textContent = data.state === "NO_DEMO_FEED" ? "No demo feed available." :
+    $("executionStatus").textContent = data.state === "NO_ACCOUNT_FEED" ? "No configured real cent account feed available." :
       (data.closed_trades || 0) + " closed trades · " + (data.executed_open_commands || 0) + " executed OPEN commands · latest 200 of each for this account/source/symbol";
     const labels={request_slippage_points:"Request-to-fill slippage (points)",submission_spread_points:"Submission spread (points)",
       decision_to_fill_points:"Decision-to-fill movement (points)",decision_spread_points:"Decision spread (points)",
@@ -397,7 +397,7 @@ async function refreshArimaForecast() {
     const percent = value => Number.isFinite(value) ? (value*100).toFixed(1) + "%" : "—";
     const messages = {
       DISABLED:"The ARIMA observer is switched off.",
-      NO_DEMO_FEED:"Waiting for an MT5 demo feed.",
+      NO_ACCOUNT_FEED:"Waiting for the configured real cent MT5 feed.",
       WAITING_FOR_FIRST_FORECAST:"Waiting for the worker and the next completed 15-minute candle.",
       FORECAST_ACTIVE:"A forward forecast is active. Its accuracy will be checked after the target candle closes.",
       WAITING_FOR_ACTUAL_CLOSE:"The target time has passed; waiting for its completed candle and the next worker poll.",

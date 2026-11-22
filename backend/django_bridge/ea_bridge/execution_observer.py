@@ -1,4 +1,6 @@
 """Observed broker costs, distinct from hypothetical candidate outcomes."""
+from .account_scope import real_cent_scope
+
 import math
 import json
 from pathlib import Path
@@ -79,11 +81,10 @@ def enrich_outcome(outcome, decision, command):
 @require_GET
 def execution_status(request):
     feed=next((h for h in EAHeartbeat.objects.order_by("-last_seen")[:100]
-        if isinstance(h.payload,dict) and type(h.payload.get("account_trade_mode")) is int
-        and h.payload["account_trade_mode"]==0),None)
+        if real_cent_scope(h)[0]),None)
     result={"mode":"BROKER_OBSERVATIONS","affects_orders":False,"recent":[],"sample_limit":200}
     if feed is None:
-        return JsonResponse({**result,"state":"NO_DEMO_FEED"})
+        return JsonResponse({**result,"state":"NO_ACCOUNT_FEED"})
     from .profit_protection import protection_status
     result["profit_protection"] = protection_status(feed)
     comparison_path = Path(__file__).with_name("research_results") / "exit_comparison_2026_11_09.json"

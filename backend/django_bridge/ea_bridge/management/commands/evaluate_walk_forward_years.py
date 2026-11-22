@@ -3,6 +3,8 @@
 No model fitting, parameter search, DB writes or trading commands. Each year is
 an independent holdout fold with preceding completed candles for warm-up.
 """
+from ea_bridge.account_scope import real_cent_scope
+
 import hashlib
 import json
 import math
@@ -84,8 +86,8 @@ def read_bars(*, source, symbol, timeframe, start, end, maximum, allow_off_grid=
 def broker_contract(source, symbol, balance):
     heartbeat = EAHeartbeat.objects.filter(instance_id=source, symbol=symbol).first()
     payload = heartbeat.payload if heartbeat and isinstance(heartbeat.payload, dict) else {}
-    if type(payload.get("account_trade_mode")) is not int or payload["account_trade_mode"] != 0:
-        raise CommandError("A matching explicitly demo EA heartbeat is required for symbol metadata.")
+    if not real_cent_scope(heartbeat)[0]:
+        raise CommandError("A matching configured real cent EA heartbeat is required for symbol metadata.")
     try:
         quote, info = payload["quote"], payload["symbol_info"]
         point = float(quote["point"])
@@ -104,7 +106,7 @@ def broker_contract(source, symbol, balance):
         if not math.isfinite(contract["stop_level_points"]) or contract["stop_level_points"] < 0:
             raise ValueError("invalid broker stop distance")
     except (KeyError, TypeError, ValueError, ZeroDivisionError) as exc:
-        raise CommandError(f"Invalid demo broker symbol metadata: {exc}") from exc
+        raise CommandError(f"Invalid real cent broker symbol metadata: {exc}") from exc
     return contract
 
 
@@ -115,7 +117,7 @@ class Command(BaseCommand):
         parser.add_argument("--source", required=True)
         parser.add_argument("--allow-off-grid", action="store_true",
                             help="Descriptive only: skip/count legacy off-grid history; never repair timestamps.")
-        parser.add_argument("--symbol", default="XAUUSD_o")
+        parser.add_argument("--symbol", default="XAUUSD_i")
         parser.add_argument("--first-year", type=int, default=2022)
         parser.add_argument("--last-year", type=int, default=2026)
         parser.add_argument("--spread-points", type=float, required=True)
