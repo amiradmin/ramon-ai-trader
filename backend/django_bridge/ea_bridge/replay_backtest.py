@@ -64,6 +64,45 @@ def _indicators(history):
     slow=_ema(closes[-150:],50)
     return atr,fast,slow
 
+def _clean_m15_rows(rows):
+    """Keep original on-grid bars only: never shift timestamps or invent candles."""
+    clean=[]
+    excluded={"off_grid":0,"duplicate_slot":0,"short_interval":0}
+    examples=[]
+    for row in rows:
+        ts=row["time"]
+        if ts % 900 != 0:
+            excluded["off_grid"]+=1
+            if len(examples)<5:examples.append({"reason":"OFF_GRID","time":ts})
+            continue
+        if clean and ts==clean[-1]["time"]:
+            excluded["duplicate_slot"]+=1
+            if len(examples)<5:examples.append({"reason":"DUPLICATE_SLOT","time":ts})
+            continue
+        if clean and ts-clean[-1]["time"]<900:
+            excluded["short_interval"]+=1
+            if len(examples)<5:examples.append({"reason":"SHORT_INTERVAL","time":ts})
+            continue
+        clean.append(row)
+    gaps=sum(b["time"]-a["time"]>900 for a,b in zip(clean,clean[1:]))
+    return clean,{"input_candles":len(rows),"accepted_candles":len(clean),
+                  "excluded":excluded,"examples":examples,"gap_count":gaps,
+                  "method":"EXCLUDE_OFF_GRID_OR_DUPLICATE_ONLY_NO_SYNTHETIC_CANDLES"}
+
+def _research_pipeline(setup):
+    """Use standard risk policy, enabling exactly one config-approved research setup."""
+    pipeline=_build_pipeline(demo_mode=False,strategy_setup=setup)
+    configs=pipeline.opportunities.trading_settings["opportunity_finder"]["setups"]
+    name=setup.lower()
+    if name not in configs:
+        raise ValueError("Unknown strategy setup config: "+name)
+    policy=configs[name]
+    if not (policy.get("enabled") or policy.get("demo_enabled")):
+        raise ValueError("Strategy disabled in both standard and research configuration: "+name)
+    for key,settings in configs.items():
+        settings["enabled"]=(key==name)
+    return pipeline
+
 def _simulate(data, rows, progress=None):
     spread = data["spread_points"]*data["point"]
     value_per_price=data["tick_value"]/data["tick_size"]
@@ -71,11 +110,11 @@ def _simulate(data, rows, progress=None):
     # Research pipelines use exactly the worker's detector and risk implementation,
     # but never the live decision API or its persistent command boundary.
     with override_settings(RAMON_DEDUPE_SIGNALS=False):
-        pipelines={setup:_build_pipeline(demo_mode=False,strategy_setup=setup) for setup in setups}
+        pipelines={setup:_research_pipeline(setup) for setup in setups}
     book={name:{"open":None,"trades":[],"equity":data["balance"],"peak":data["balance"],"drawdown":0,"signals":0,
-                "evaluations":0,"rejections":{},"rejection_examples":{}}
+                "evaluations":0,"rejections":{},"rejection_examples":{},"rejection_details":{}}
           for name in setups}
-    def rejected(state, stage, reason, bar_time):
+    def rejected(state, stage, reason, bar_time, detail=None):
         # Aggregate actual returned stage reasons, not guesses about why a trade
         # did not execute. Keep a bounded sample for inspection without huge jobs.
         code=str(reason or "UNSPECIFIED")[:128]
@@ -84,6 +123,8 @@ def _simulate(data, rows, progress=None):
         examples=state["rejection_examples"].setdefault(key,[])
         if len(examples)<3:
             examples.append(bar_time)
+        if detail and key not in state["rejection_details"]:
+            state["rejection_details"][key]=str(detail)[:400]
     first_ts=int(datetime.combine(data["start"],time.min,tzinfo=timezone.utc).timestamp())
     end_ts=int(datetime.combine(data["end"]+timedelta(days=1),time.min,tzinfo=timezone.utc).timestamp())
     for idx in range(WARMUP,len(rows)):
@@ -162,7 +203,8 @@ def _simulate(data, rows, progress=None):
                 if rejection_stage:
                     rejected(state,rejection_stage.upper(),
                         (stages.get(rejection_stage) or {}).get("reason") or result.get("reason"),
-                        bar["time"])
+                        bar["time"],
+                        (stages.get(rejection_stage) or {}).get("explanation"))
                 else:
                     rejected(state,"EVALUATION",result.get("reason") or "NO_APPROVED_SIGNAL",bar["time"])
                 continue
@@ -195,7 +237,8 @@ def _simulate(data, rows, progress=None):
            open_position=state["open"] is not None,trades=trades,
            evaluations=state["evaluations"],
            rejections=[dict(stage=key.split(":",1)[0],reason=key.split(":",1)[1],
-                count=count,sample_bar_times=state["rejection_examples"][key])
+                count=count,sample_bar_times=state["rejection_examples"][key],
+                detail=state["rejection_details"].get(key))
               for key,count in sorted(state["rejections"].items(),key=lambda item:(-item[1],item[0]))[:25]],
            rejection_total=sum(state["rejections"].values())))
     return report
@@ -216,13 +259,19 @@ def run_backtest_data(data, *, max_candles=MAX_TEST_CANDLES, progress=None):
               low=float(r.low),close=float(r.close)) for r in all_rows]
         if not selected_rows or len(rows)<WARMUP+2:
             return JsonResponse({"error":"Insufficient historical M15 data: need at least 130 candles including warmup."},status=422)
+        rows, quality = _clean_m15_rows(rows)
+        if len(rows)<WARMUP+2 or not any(start_dt.timestamp()<=row["time"]<end_dt.timestamp() for row in rows):
+            return JsonResponse({"error":"Insufficient valid grid-aligned M15 history after excluding invalid candles.",
+                "data_quality":quality},status=422)
         report=_simulate(data,rows,progress=progress)
         return JsonResponse(dict(mode="ISOLATED_STRATEGY_RESEARCH_ESTIMATE",
              timeframe="M15",symbol=data["symbol"],source=data["source"],
              start=data["start"].isoformat(),end=data["end"].isoformat(),
              first_bar=datetime.fromtimestamp(rows[0]["time"],tz=timezone.utc).isoformat(),
              last_bar=datetime.fromtimestamp(rows[-1]["time"],tz=timezone.utc).isoformat(),
-             candles=len(rows),assumptions={k:data[k] for k in (
+             candles=len(rows),data_quality=quality,
+             research_profile="STANDARD_RISK_EXPLICIT_SETUP_RESEARCH",
+             assumptions={k:data[k] for k in (
                "balance","spread_points","point","tick_size","tick_value","volume_min","volume_max","volume_step")},
              limitations="Model-priced fixed spread, no historical spread/slippage/fees; OHLC intrabar order assumed stop first; no news/account state history; not broker validation, not full live-worker parity.",
              strategies=report))
