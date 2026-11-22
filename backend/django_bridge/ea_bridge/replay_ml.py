@@ -66,8 +66,8 @@ def replay_training_rows(report, market_bars):
     data_quality = report["data_quality"]
     if not data_quality.get("history_fingerprint"):
         raise ValueError("Historical replay fingerprint missing")
-    if data_quality.get("gap_count", 0) or any((data_quality.get("excluded") or {}).values()):
-        raise ValueError("Replay has M15 gaps or excluded timestamps; fix source before ML training")
+    if data_quality.get("validation_status") == "DESCRIPTIVE_ONLY_HISTORY_QUALITY_WARNING":
+        raise ValueError("Replay data quality is descriptive-only; not suitable for ML training")
     spread = float(assumptions["spread_points"])
     if not math.isfinite(spread) or spread < 0:
         raise ValueError("Invalid spread assumption")
