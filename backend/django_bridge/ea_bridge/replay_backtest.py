@@ -278,6 +278,14 @@ def run_backtest_data(data, *, max_candles=MAX_TEST_CANDLES, progress=None):
         if len(rows)<WARMUP+2 or not any(start_dt.timestamp()<=row["time"]<end_dt.timestamp() for row in rows):
             return JsonResponse({"error":"Insufficient valid grid-aligned M15 history after excluding invalid candles.",
                 "data_quality":quality},status=422)
+        excluded_count=sum(quality["excluded"].values())
+        excluded_fraction=excluded_count/max(1,quality["input_candles"])
+        quality["excluded_fraction"]=round(excluded_fraction,5)
+        quality["validation_status"]=(
+            "DESCRIPTIVE_ONLY_HISTORY_QUALITY_WARNING"
+            if excluded_fraction>0.05 or quality["gap_count"]>0
+            else "HISTORY_FILTERED_CHECK_BROKER_FILLS"
+        )
         report=_simulate(data,rows,progress=progress)
         return JsonResponse(dict(mode="ISOLATED_STRATEGY_RESEARCH_ESTIMATE",
              timeframe="M15",symbol=data["symbol"],source=data["source"],
