@@ -12,6 +12,7 @@
   <div class="brand"><div class="logo">R</div><div><div class="eyebrow">RAMON · SMART TRADER</div><div class="title">Independent Strategy Desk</div><div class="sub">XAUUSD · Seven independent M15 strategy containers</div></div></div>
   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><a class="btn" style="text-decoration:none" href="{% url 'ramon-simulator' %}">Historical Simulator ↗</a><a class="btn" style="text-decoration:none" href="{% url 'ramon-strategy-validation' %}">Strategy Validation ↗</a><a class="btn" style="text-decoration:none" href="{% url 'ramon-paper-results' %}">Research / Paper Results ↗</a><a class="btn" style="text-decoration:none" href="{% url 'ramon-trade-forensics' %}">Trade Analysis ↗</a><button class="btn" id="copyMarketSnapshot" type="button">Copy Market Snapshot</button><span id="copySnapshotStatus" class="small" role="status" aria-live="polite"></span><div class="status"><span class="dot"></span><span id="connection">DJANGO · DECISION FEED</span></div></div>
 </header>
+{% include 'ea_bridge/live_strategy_settings.html' %}
 <p class="small" id="timeStatus" role="status" aria-live="polite">Checking UTC, laptop clock and quote timestamps…</p>
 <div class="notice"><strong>Fleet overview:</strong> blue boxes are the normal state; blinking green boxes have a verified open position. Open a strategy for its controls, positions and broker results. An enabled worker may still be waiting for its setup or risk checks.</div>
 <section aria-labelledby="strategyFleetTitle" style="margin-bottom:24px">
