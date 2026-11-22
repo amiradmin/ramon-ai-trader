@@ -75,7 +75,7 @@ button.primary{background:var(--gold);color:#161b23;border:0;font-weight:700}lab
 <input type="range" id="timeline" min="0" max="0" value="0" disabled aria-label="Replay candle position">
 <div class="row"><span class="muted" id="position">0 / 0 candles</span><span class="muted" id="date">—</span></div>
 </section>
-<section class="panel"><strong>Replay behavior</strong><p class="muted">The chart opens with approximately 15 visible historical candles. Click Play to reveal more candles automatically, Pause to stop, or Step Forward to reveal one completed candle. Drag the timeline to seek. Drag the chart to pan and use the mouse wheel to zoom. Future candles remain hidden from the chart until replay advances. The performance cards show broker trades previously recorded in Ramon's learning journal, restricted to the loaded chart time range and replay cursor. They are not strategy backtest performance. The separate Strategy Backtest form runs isolated estimated trades over a bounded period. The chart displays only its loaded candle window.</p></section>
+<section class="panel"><strong>Replay behavior</strong><p class="muted">The chart opens with approximately 30 visible historical candles. Click Play to reveal more candles automatically, Pause to stop, or Step Forward to reveal one completed candle. Drag the timeline to seek. Drag the chart to pan and use the mouse wheel to zoom. Future candles remain hidden from the chart until replay advances. The performance cards show broker trades previously recorded in Ramon's learning journal, restricted to the loaded chart time range and replay cursor. They are not strategy backtest performance. The separate Strategy Backtest form runs isolated estimated trades over a bounded period. The chart displays only its loaded candle window.</p></section>
 </main>
 <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
 <script>
@@ -83,7 +83,7 @@ button.primary{background:var(--gold);color:#161b23;border:0;font-weight:700}lab
 "use strict";
 const el=id=>document.getElementById(id);
 const controls=["toggle","step","reset","timeline"];
-const DEFAULT_VISIBLE_BARS=15;
+const DEFAULT_VISIBLE_BARS=30;
 let bars=[],cursor=0,playing=false,timer=null,chart=null,series=null,loading=false,statsTimer=null,statsRequest=0,backtest=null;
 const message=txt=>el("message").textContent=txt;
 function setPlaying(value){
