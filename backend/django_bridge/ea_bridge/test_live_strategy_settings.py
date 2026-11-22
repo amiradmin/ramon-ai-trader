@@ -39,6 +39,7 @@ class LiveStrategySettingsTests(TestCase):
         }
 
     def test_read_does_not_change_live_risk_or_start_positions(self):
+        self.client.force_login(self.user)
         with patch("ea_bridge.live_strategy_settings.configured_feed", return_value=self.feed), \
              patch("ea_bridge.live_strategy_settings.real_cent_scope", return_value=(True, "OK")):
             response = self.client.get(self.endpoint)
