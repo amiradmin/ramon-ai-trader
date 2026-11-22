@@ -72,7 +72,7 @@ def worker_cycle(setup, *, now=None):
         from .decision import evaluate_payload
         from .strategy_evidence import capture_inputs
         evidence=capture_inputs(rows,feed,payload,now)
-        response=evaluate_payload(payload,strategy_setup=setup,input_evidence=evidence)
+        response=evaluate_payload(payload,strategy_setup=setup,input_evidence=evidence,live_worker=True)
         data=json.loads(response.content)
         control.latest=dict(evaluated_at=now.isoformat(),action=data.get('decision','WAIT'),
             reason=data.get('reason',data.get('error','EVALUATION_ERROR')),
