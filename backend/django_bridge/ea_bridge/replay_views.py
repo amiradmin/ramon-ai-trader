@@ -58,12 +58,23 @@ def simulator_bars(request):
         except ValueError:
             return JsonResponse({"error": "start must be timezone-aware ISO 8601"}, status=400)
         qs = qs.filter(timestamp__gte=start_dt)
-    if start and before and qs.count() > MAX_BARS:
-        return JsonResponse({"error": "Chart range exceeds 2000 candles; choose a shorter range"}, status=422)
-    rows = list(qs.order_by("-timestamp").values("timestamp", "open", "high", "low", "close", "volume")[:limit])
-    rows.reverse()
+    # The chart is a bounded window, NOT the full history used by backtesting.
+    # In a selected date range, start at the first candle so replay starts at
+    # the chosen date. Outside that mode, show the latest candles as before.
+    fields = ("timestamp", "open", "high", "low", "close", "volume")
+    if start:
+        sampled = list(qs.order_by("timestamp").values(*fields)[:limit + 1])
+        truncated = len(sampled) > limit
+        rows = sampled[:limit]
+    else:
+        sampled = list(qs.order_by("-timestamp").values(*fields)[:limit + 1])
+        truncated = len(sampled) > limit
+        rows = sampled[:limit]
+        rows.reverse()
     return JsonResponse({
         "symbol": symbol, "timeframe": timeframe, "source": source,
+        "truncated": truncated,
+        "window": "earliest_in_range" if start else "latest",
         "bars": [
             {"time": int(row["timestamp"].timestamp()), "open": float(row["open"]),
              "high": float(row["high"]), "low": float(row["low"]),
