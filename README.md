@@ -31,6 +31,14 @@ service and store job progress/results in the existing `learning_models` volume
 and polls progress. A selected range of up to 15,744 M15 candles (plus 256
 warm-up) is supported for this first worker iteration; 20-year testing still
 requires a segmented engine and substantially more imported historical data.
+Historical data-quality validation excludes off-grid M15 candles and duplicate
+slots without rewriting source rows or inventing replacement prices, and reports
+accepted/excluded counts and remaining gaps. The isolated research path now
+enables one configured supplemental setup per evaluation even when the normal
+production configuration enables it only for demo research; standard risk caps
+remain unchanged. Rejection diagnostics include actual risk-sizing explanations
+where available. Historical conclusions from different cleaning policies or
+setup profiles are not directly comparable.
 The chart loads 2,000 candles per page and automatically fetches further pages
 when Play/Step reaches the current end, while retaining a 30-candle viewport.
 The full-period research result is displayed separately. A Trade Rejection
