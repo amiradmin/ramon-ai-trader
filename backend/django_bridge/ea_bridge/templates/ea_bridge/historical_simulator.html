@@ -36,7 +36,7 @@ button.primary{background:var(--gold);color:#161b23;border:0;font-weight:700}lab
 <label>Lot step<input type="number" id="testLotStep" min="0.000001" step="any" placeholder="Broker volume step" required value="0.01"></label>
 </div>
 <div class="controls"><label><input id="compareBalances" type="checkbox" checked> Compare 1,000 and 10,000 virtual account units</label></div>
-<div class="controls"><button class="primary" id="runBacktest">Run strategy backtest</button><span id="backtestStatus" class="muted" role="status" aria-live="polite">Set dates and broker assumptions to begin.</span></div>
+<div class="controls"><button class="primary" id="runBacktest">Run strategy backtest</button><button id="exportBacktest" type="button" disabled>Download backtest result (JSON)</button><span id="backtestStatus" class="muted" role="status" aria-live="polite">Set dates and broker assumptions to begin.</span></div>
 <div id="backtestResults" class="researchResults">
 <h3>Full selected period · estimated research results</h3>
 <div class="panel" style="padding:12px;margin:10px 0"><strong>Historical M15 data quality</strong>
@@ -119,7 +119,17 @@ el("marketFeed").addEventListener("change",()=>{
 });
 
 const DEFAULT_VISIBLE_BARS=30;
-let bars=[],cursor=0,playing=false,timer=null,chart=null,series=null,loading=false,statsTimer=null,statsRequest=0,backtest=null;
+let bars=[],cursor=0,playing=false,timer=null,chart=null,series=null,loading=false,statsTimer=null,statsRequest=0,backtest=null,backtestInputs=null;
+function clearBacktest(){backtest=null;backtestInputs=null;el("exportBacktest").disabled=true;el("backtestResults").style.display="none"}
+function exportBacktest(){
+ if(!backtest||!backtestInputs)return;
+ const report={format:"ramon-simulator-backtest-v1",exported_at_utc:new Date().toISOString(),inputs:backtestInputs,
+  caveats:["Estimated research fills, not broker executions.","Seven independent strategy accounts; aggregate is not a shared portfolio.","Spread and symbol specifications are user supplied; historical slippage, commissions, news locks, and broker fills are not verified.","When stop and target both occur within one candle, stop wins."],result:backtest};
+ const blob=new Blob([JSON.stringify(report,null,2)+"\n"],{type:"application/json"});
+ const url=URL.createObjectURL(blob),link=document.createElement("a");
+ link.href=url;link.download="ramon-backtest-"+backtestInputs.symbol.replace(/[^a-zA-Z0-9_-]/g,"_")+"-"+backtestInputs.start+"-"+backtestInputs.end+".json";
+ document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
+}
 let historyParams=null,hasMore=false,fetchingMore=false,loadVersion=0;
 const message=txt=>el("message").textContent=txt;
 function setPlaying(value){
@@ -374,7 +384,7 @@ async function load(){
  if(loading)return;
  setPlaying(false);loading=true;el("load").disabled=true;
  loadVersion++;historyParams=null;hasMore=false;fetchingMore=false;
- backtest=null;el("backtestResults").style.display="none";
+ clearBacktest();
  if(statsTimer!==null)clearTimeout(statsTimer);++statsRequest;clearStats("Loading historical trade metrics…");
  controls.forEach(id=>el(id).disabled=true);message("Loading saved historical candles…");
  try{
@@ -415,7 +425,7 @@ async function runBacktest(){
  const source=el("source").textContent.replace(/^Source:\s*/,"").trim();
  if(!source||source==="none"||!bars.length){el("backtestStatus").textContent="No historical M15 candles in this date range. Check source and dates.";return}
  params.set("source",source);
- el("runBacktest").disabled=true;el("backtestStatus").textContent="Queueing isolated historical backtest…";backtest=null;el("backtestResults").style.display="none";
+ el("runBacktest").disabled=true;el("backtestStatus").textContent="Queueing isolated historical backtest…";clearBacktest();
  try{
   const csrf=document.cookie.split("; ").find(item=>item.startsWith("csrftoken="))?.split("=")[1]||"";
   if(!csrf)throw Error("CSRF cookie missing. Reload the simulator page and retry.");
@@ -437,13 +447,14 @@ async function runBacktest(){
    if(status.status==="COMPLETED"||status.status==="FAILED")break;
   }
   if(status.status!=="COMPLETED")throw Error(status.error||"Historical backtest failed");
-  backtest=status.result;el("backtestResults").style.display="block";
+  backtest=status.result;backtestInputs=Object.fromEntries(params.entries());el("backtestResults").style.display="block";el("exportBacktest").disabled=false;
   el("backtestStatus").textContent=backtest.candles+" M15 candles analyzed. Estimated execution, not historical broker fills. Chart statistics cover only visible candle window.";
   renderFullBacktest();renderBacktest();renderRejections();renderQuality();renderTradeHistory();renderComparison();render();
  }catch(error){el("backtestStatus").textContent="Backtest unavailable: "+error.message}
  finally{el("runBacktest").disabled=false}
 }
 el("runBacktest").addEventListener("click",runBacktest);
+el("exportBacktest").addEventListener("click",exportBacktest);
 el("load").addEventListener("click",load);
 el("toggle").addEventListener("click",()=>setPlaying(!playing));
 el("step").addEventListener("click",async()=>{setPlaying(false);await advance()});
