@@ -228,7 +228,7 @@ def decision(request):
     return evaluate_payload(payload)
 
 
-def evaluate_payload(p, *, strategy_setup=None, input_evidence=None):
+def evaluate_payload(p, *, strategy_setup=None, input_evidence=None, live_worker=False):
     """Shared entry/risk mechanics; each strategy worker supplies its own setup."""
     try:
         if not isinstance(p,dict): raise ValueError("JSON object required")
@@ -381,7 +381,7 @@ def evaluate_payload(p, *, strategy_setup=None, input_evidence=None):
         missing_risk_inputs = [] if risk_guards_complete else ["server_symbol_metadata", "server_position_risk", "server_account_state"]
         # Build the profile-specific Django pipeline before constructing its risk inputs.
         pipeline = _build_pipeline(demo_mode=is_demo_account, strategy_setup=strategy_setup,
-                live_scope=(instance_id, account_login, server_name, symbol) if strategy_setup and not is_demo_account else None)
+                live_scope=(instance_id, account_login, server_name, symbol) if live_worker and strategy_setup and not is_demo_account else None)
         market={"symbol":symbol,"timeframe":"M15","bars":bars,"last_bar_closed":True,
           "latest_bar_time":bar_time,"bid":bid,"ask":ask,"point":point,
           "trend":direction,"setup_score":setup,"entry_quality":quality,"spread_points":spread,
