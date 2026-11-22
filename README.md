@@ -186,3 +186,39 @@ The repository also contains SignalFlow, forecasting, learning, and historical r
 ## What counts as verified
 
 A healthy Django container verifies the API process is responsive; it does **not** verify MT5 compilation, live telemetry, strategy quality, safe broker execution, or profitability. EA build acceptance requires a fresh MetaEditor log with `0 errors, 0 warnings`, a new nonempty EX5, and local Experts-log validation. Trading acceptance requires broker-side validation on the configured account and must not be inferred from compilation or CI alone.
+
+
+### Import external Dukascopy XAUUSD history (research only)
+
+The historical simulator now supports **Dukascopy XAUUSD BID M15**, stored
+separately as `source=dukascopy-xauusd-bid-m15` and `symbol=XAUUSD`. It does
+not modify `ramon-command-ea-1` broker candles. The importer downloads
+official-style compressed daily BID **M1** candle files, validates the UTC
+timestamps and OHLC, and aggregates only complete 15-minute groups. Missing
+M1 minutes are never interpolated, and missing days are not fabricated.
+
+To import roughly the period used for recent Raman historical tests:
+
+```bash
+docker compose exec django python manage.py import_dukascopy_xauusd \
+  --start 2026-09-22 --end 2026-11-22
+```
+
+A dry run downloads and validates without inserting rows:
+
+```bash
+docker compose exec django python manage.py import_dukascopy_xauusd \
+  --start 2026-10-26 --end 2026-10-30 --dry-run
+```
+
+The command is idempotent for identical OHLC values and refuses conflicting
+existing bars. It accepts up to 100 UTC calendar days per invocation. Run
+successive smaller ranges to obtain longer history. A real internet connection
+from the `django` container and Dukascopy feed access are required. HTTP 403
+or network errors are reported; no fake prices are inserted.
+
+In the simulator, select **Dukascopy XAUUSD BID · imported history** from the
+Market data dropdown, then click Load history or Run Strategy Backtest.
+This imports BID prices, *not historical bid/ask spread or LiteFinance's own
+execution terms*. Enter and verify the broker-specific contract/fee assumptions.
+Never interpret the results as realized or broker-validated profit.
