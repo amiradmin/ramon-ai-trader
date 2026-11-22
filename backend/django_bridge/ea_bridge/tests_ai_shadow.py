@@ -26,8 +26,8 @@ class ShadowScoringTests(SimpleTestCase):
     def test_checksum_mismatch_rejects_artifact_without_unpickling(self):
         run = SimpleNamespace(artifact_format="joblib", artifact_path="learning_models/a.pkl",
                               artifact_sha256="0" * 64, artifact_size_bytes=4)
-        with patch("ea_bridge.ai_shadow.LearningModelRun.objects") as models, \\
-             patch("ea_bridge.ai_shadow.default_storage.open", return_value=io.BytesIO(b"data")), \\
+        with patch("ea_bridge.ai_shadow.LearningModelRun.objects") as models, \
+             patch("ea_bridge.ai_shadow.default_storage.open", return_value=io.BytesIO(b"data")), \
              patch("joblib.load") as load:
             models.select_related.return_value.filter.return_value.exclude.return_value.order_by.return_value.first.return_value = run
             result = observe_shadow({"decision": "SELL"}, symbol="XAUUSD_l", setup="RANGE_EDGE_FADE")
@@ -48,8 +48,8 @@ class ShadowScoringTests(SimpleTestCase):
         candidate = {"decision": "BUY", "stages": {
             "opportunities": {"score": 0.8, "setup": {"type": "TREND_PULLBACK"}},
             "entry_timing": {"spread_points": 20}}}
-        with patch("ea_bridge.ai_shadow.LearningModelRun.objects") as models, \\
-             patch("ea_bridge.ai_shadow.default_storage.open", return_value=io.BytesIO(raw)), \\
+        with patch("ea_bridge.ai_shadow.LearningModelRun.objects") as models, \
+             patch("ea_bridge.ai_shadow.default_storage.open", return_value=io.BytesIO(raw)), \
              patch("joblib.load", return_value=bundle):
             models.select_related.return_value.filter.return_value.exclude.return_value.order_by.return_value.first.return_value = run
             result = observe_shadow(candidate, symbol="XAUUSD_l", setup="TREND_PULLBACK")
