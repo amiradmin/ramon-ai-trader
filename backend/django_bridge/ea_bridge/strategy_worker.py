@@ -76,7 +76,7 @@ def worker_cycle(setup, *, now=None):
         data=json.loads(response.content)
         # Advisory ML observation happens strictly after the decision/command path.\n        # It cannot veto, authorize, resize or enqueue an order.\n        from .ai_shadow import observe_shadow\n        shadow = observe_shadow(data, symbol=feed.symbol, setup=setup)\n        control.latest=dict(evaluated_at=now.isoformat(),action=data.get('decision','WAIT'),
             reason=data.get('reason',data.get('error','EVALUATION_ERROR')),
-            evaluation_id=data.get('evaluation_id'),command_id=data.get('command_id'),\n            ai_shadow=shadow,
+            evaluation_id=data.get('evaluation_id'),command_id=data.get('command_id'),\n            ai_shadow=shadow, ai_replay_shadow=replay_shadow,
             command_reason=data.get('command_reason'),command_created=data.get('command_created',False))
         return finish(data.get('command_reason') if data.get('command_created') else control.latest['reason'])
 
