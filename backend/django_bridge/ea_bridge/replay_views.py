@@ -30,6 +30,7 @@ def simulator_bars(request):
     except (ValueError, TypeError):
         return JsonResponse({"error": "limit must be between 1 and 2000"}, status=400)
     before = request.GET.get("before")
+    start = request.GET.get("start")
     qs = MarketBar.objects.filter(symbol=symbol, timeframe=timeframe)
     if source:
         qs = qs.filter(source=source)
@@ -49,6 +50,16 @@ def simulator_bars(request):
         except ValueError:
             return JsonResponse({"error": "before must be a timezone-aware ISO 8601 timestamp"}, status=400)
         qs = qs.filter(timestamp__lte=parsed)
+    if start:
+        try:
+            start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+            if start_dt.tzinfo is None:
+                raise ValueError()
+        except ValueError:
+            return JsonResponse({"error": "start must be timezone-aware ISO 8601"}, status=400)
+        qs = qs.filter(timestamp__gte=start_dt)
+    if start and before and qs.count() > MAX_BARS:
+        return JsonResponse({"error": "Chart range exceeds 2000 candles; choose a shorter range"}, status=422)
     rows = list(qs.order_by("-timestamp").values("timestamp", "open", "high", "low", "close", "volume")[:limit])
     rows.reverse()
     return JsonResponse({
