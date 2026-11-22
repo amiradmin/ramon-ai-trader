@@ -1,7 +1,7 @@
 """Historical replay endpoints stay read-only and use a single candle source."""
 from datetime import datetime, timedelta, timezone
 from django.test import TestCase
-from .models import MarketBar
+from .models import MarketBar, LearningTradeOutcome
 
 class HistoricalReplayTests(TestCase):
     def setUp(self):
@@ -53,3 +53,51 @@ class HistoricalReplayTests(TestCase):
         response = self.client.get("/api/ea/v1/simulator/bars", {"symbol": "UNKNOWN"})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["bars"], [])
+
+class ReplayRecordedPerformanceTests(TestCase):
+    def setUp(self):
+        for trade_id, minute, pnl, account in [
+            ("trade-a", 5, "12.5", "one"),
+            ("trade-b", 10, "-4.0", "one"),
+            ("trade-c", 15, "100.0", "one"),
+        ]:
+            LearningTradeOutcome.objects.create(
+                trade_id=trade_id, symbol="XAUUSD_o", account_login=account,
+                realized_pnl=pnl,
+                closed_at=datetime(2026, 1, 2, 12, minute, tzinfo=timezone.utc),
+            )
+
+    def stats(self, through, start="2026-01-02T12:00:00Z"):
+        return self.client.get("/api/ea/v1/simulator/recorded-stats", {
+            "symbol": "XAUUSD_o", "start": start, "through": through,
+        })
+
+    def test_cursor_only_counts_closed_trades_up_to_position(self):
+        first = self.stats("2026-01-02T12:05:00Z").json()
+        self.assertEqual(first["trade_count"], 1)
+        self.assertEqual(first["win_rate_percent"], 100.0)
+        self.assertEqual(first["total_gain"], "12.50000000")
+        second = self.stats("2026-01-02T12:10:00Z").json()
+        self.assertEqual(second["trade_count"], 2)
+        self.assertEqual(second["win_rate_percent"], 50.0)
+        self.assertEqual(second["total_gain"], "8.50000000")
+
+    def test_no_trade_is_not_zero_win_rate(self):
+        result = self.stats("2026-01-02T12:04:00Z").json()
+        self.assertEqual(result["trade_count"], 0)
+        self.assertIsNone(result["win_rate_percent"])
+        self.assertIsNone(result["total_gain"])
+
+    def test_mixed_accounts_hide_net_gain(self):
+        LearningTradeOutcome.objects.create(
+            trade_id="other-account", symbol="XAUUSD_o",
+            account_login="two", realized_pnl="20",
+            closed_at=datetime(2026, 1, 2, 12, 8, tzinfo=timezone.utc),
+        )
+        result = self.stats("2026-01-02T12:10:00Z").json()
+        self.assertTrue(result["mixed_accounts"])
+        self.assertIsNone(result["total_gain"])
+
+    def test_invalid_dates_are_rejected(self):
+        self.assertEqual(self.stats("not-a-date").status_code, 400)
+        self.assertEqual(self.stats("2026-01-02T11:00:00Z").status_code, 400)
