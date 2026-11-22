@@ -167,16 +167,20 @@ def _simulate(data, rows):
 def backtest(request):
     try:
         data=_inputs(request)
-        beginning=datetime.combine(data["start"]-timedelta(days=45),time.min,tzinfo=timezone.utc)
-        ending=datetime.combine(data["end"]+timedelta(days=1),time.min,tzinfo=timezone.utc)
-        qs=MarketBar.objects.filter(source=data["source"],symbol=data["symbol"],timeframe="M15",
-             timestamp__gte=beginning,timestamp__lt=ending).order_by("timestamp")
-        count=qs.count()
-        if count>MAX_TEST_CANDLES:
-            return JsonResponse({"error":f"Selected history has {count} M15 candles including warmup; current research limit is {MAX_TEST_CANDLES}. Choose a shorter range. Multi-year backtests require an async runner."},status=422)
+        start_dt=datetime.combine(data["start"],time.min,tzinfo=timezone.utc)
+        end_dt=datetime.combine(data["end"]+timedelta(days=1),time.min,tzinfo=timezone.utc)
+        scope=dict(source=data["source"],symbol=data["symbol"],timeframe="M15")
+        selected=MarketBar.objects.filter(**scope,timestamp__gte=start_dt,timestamp__lt=end_dt).order_by("timestamp")
+        count=selected.count()
+        if count+256>MAX_TEST_CANDLES:
+            return JsonResponse({"error":f"Selected range contains {count} M15 candles; this interactive research runner allows at most {MAX_TEST_CANDLES-256} plus warmup. Choose a shorter range. Multi-year backtests need a background job."},status=422)
+        prior=list(MarketBar.objects.filter(**scope,timestamp__lt=start_dt).order_by("-timestamp")[:256])
+        prior.reverse()
+        selected_rows=list(selected)
+        all_rows=prior+selected_rows
         rows=[dict(time=int(r.timestamp.timestamp()),open=float(r.open),high=float(r.high),
-              low=float(r.low),close=float(r.close)) for r in qs]
-        if len(rows)<WARMUP+2:
+              low=float(r.low),close=float(r.close)) for r in all_rows]
+        if not selected_rows or len(rows)<WARMUP+2:
             return JsonResponse({"error":"Insufficient historical M15 data: need at least 130 candles including warmup."},status=422)
         report=_simulate(data,rows)
         return JsonResponse(dict(mode="ISOLATED_STRATEGY_RESEARCH_ESTIMATE",
