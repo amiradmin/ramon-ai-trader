@@ -31,6 +31,24 @@ service and store job progress/results in the existing `learning_models` volume
 and polls progress. A selected range of up to 15,744 M15 candles (plus 256
 warm-up) is supported for this first worker iteration; 20-year testing still
 requires a segmented engine and substantially more imported historical data.
+The simulator now supports isolated $1,000 versus $10,000 runs on matching
+historical OHLC fingerprints, a complete virtual trade ledger (signal time,
+entry, SL, TP, exit, volume, realized estimate), and replay chart entry/exit
+markers. During date-bounded M15 research, the chart requests
+`validated=1` so it displays the same grid-aligned candle subset as the
+strategy backtest; other timeframes remain raw. This does **not** fix or
+reconstruct the source records.
+
+Audit off-grid historical source records without changing the database:
+```bash
+docker compose exec django python manage.py audit_replay_m15 \\
+  --source ramon-command-ea-1 --symbol XAUUSD_o \\
+  --start 2026-09-22 --end 2026-11-22
+```
+Inspect offsets grouped by the date the candles were ingested before
+re-importing from verified MT5 open timestamps. The current telemetry
+endpoint already validates exact UTC candle-open alignment; this audit
+does not establish which older import path created the malformed records.
 Historical data-quality validation excludes off-grid M15 candles and duplicate
 slots without rewriting source rows or inventing replacement prices, and reports
 accepted/excluded counts and remaining gaps. The isolated research path now
