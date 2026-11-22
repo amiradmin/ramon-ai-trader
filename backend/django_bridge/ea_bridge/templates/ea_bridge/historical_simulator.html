@@ -35,7 +35,7 @@ button.primary{background:var(--gold);color:#161b23;border:0;font-weight:700}lab
 <label>Maximum lot<input type="number" id="testMaxLot" min="0.000001" step="any" placeholder="Broker volume max" required value="100"></label>
 <label>Lot step<input type="number" id="testLotStep" min="0.000001" step="any" placeholder="Broker volume step" required value="0.01"></label>
 </div>
-<div class="controls"><label><input id="compareBalances" type="checkbox" checked> Compare $1,000 and $10,000 virtual balances</label></div>
+<div class="controls"><label><input id="compareBalances" type="checkbox" checked> Compare 1,000 and 10,000 virtual account units</label></div>
 <div class="controls"><button class="primary" id="runBacktest">Run strategy backtest</button><span id="backtestStatus" class="muted" role="status" aria-live="polite">Set dates and broker assumptions to begin.</span></div>
 <div id="backtestResults" class="researchResults">
 <h3>Full selected period · estimated research results</h3>
@@ -55,7 +55,7 @@ button.primary{background:var(--gold);color:#161b23;border:0;font-weight:700}lab
 <p class="smallhelp">Full selected period, seven independent virtual accounts. Table contains hypothetical fills, not actual MT5 executions.</p>
 <div class="trades-scroll"><table class="trades-table"><thead><tr><th>Strategy</th><th>Side</th><th>Signal (UTC)</th><th>Entry (UTC)</th><th>Exit (UTC)</th><th>Entry</th><th>SL</th><th>TP</th><th>Exit</th><th>Lots</th><th>Reason</th><th>Net P&amp;L</th></tr></thead><tbody id="tradesBody"></tbody></table></div>
 </details>
-<details open><summary><strong>$1,000 vs $10,000 · identical historical dataset</strong></summary>
+<details open><summary><strong>1,000 vs 10,000 account units · identical historical dataset</strong></summary>
 <p class="smallhelp">Two independent research accounts, with the same validated candles, broker assumptions and standard 0.5% risk cap. No pooled portfolio returns.</p>
 <div id="comparisonSummary" class="muted">Run a backtest with the comparison checkbox selected.</div>
 </details>
