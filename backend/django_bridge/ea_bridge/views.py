@@ -115,6 +115,7 @@ def paper_results(request):
 
 
 @require_GET
+@__import__("django.views.decorators.csrf", fromlist=["ensure_csrf_cookie"]).ensure_csrf_cookie
 def dashboard(request):
     """Render the dashboard even when worker/telemetry status is temporarily down.
 
