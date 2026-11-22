@@ -13,6 +13,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
 from .models import DecisionThresholdConfig, StrategyWorkerControl, ScalperControl, EAHeartbeat, EAEvent
+from .account_scope import real_cent_scope
 from .strategy_registry import STRATEGIES
 from .strategy_worker import configured_feed
 from .thresholds import THRESHOLDS, defaults_for
@@ -72,7 +73,7 @@ def _effective_base():
 def live_strategy_settings(request):
     feed = configured_feed()
     controls = {c.setup: c for c in StrategyWorkerControl.objects.all()}
-    scope_valid = bool(feed and feed.status == "TELEMETRY_OK"
+    scope_valid = bool(feed and real_cent_scope(feed)[0] and feed.status == "TELEMETRY_OK"
         and feed.terminal_connected and 0 <= (timezone.now() - feed.last_seen).total_seconds() <= 60)
     base = _effective_base()
 
@@ -179,7 +180,7 @@ def live_scalper_risk(request):
         server_name=feed.server_name, symbol=feed.symbol).first() if feed else None)
     scope = ([control.source, control.account_login, control.server_name, control.symbol]
              if control else None)
-    fresh = bool(feed and control and feed.terminal_connected and
+    fresh = bool(feed and control and real_cent_scope(feed)[0] and feed.terminal_connected and
                  feed.status == "TELEMETRY_OK" and
                  0 <= (timezone.now() - feed.last_seen).total_seconds() <= 60)
     if request.method == "POST":
