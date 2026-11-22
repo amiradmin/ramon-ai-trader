@@ -16,8 +16,11 @@ from . import trend_observer
 from . import strategy_views
 from . import time_status
 from . import validation_views
+from . import replay_views
 
 urlpatterns = [
+    path("simulator", replay_views.simulator, name="ramon-simulator"),
+    path("simulator/bars", replay_views.simulator_bars, name="ramon-simulator-bars"),
     path("time-status", time_status.time_status, name="ramon-time-status"),
     path("strategies", strategy_views.strategies_status, name="strategy-workers-status"),
     path("strategies/<slug:slug>", strategy_views.strategy_console, name="strategy-worker-console"),
