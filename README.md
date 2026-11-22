@@ -20,7 +20,34 @@ The single `docker-compose.yaml` defines:
 - `redis`: event buffer.
 - `timescaledb`: PostgreSQL/TimescaleDB durable store.
 
-Dashboard: `http://127.0.0.1:8017/api/ea/v1/dashboard` contains a link to each strategy’s controls, positions and history. See [independent strategy operations](docs/operations/independent-strategy-containers.md).
+Dashboard: `http://127.0.0.1:8017/api/ea/v1/dashboard` contains a link to each strategy’s controls, positions and history.
+
+Live real-account settings on the same dashboard are staff-login and CSRF protected:
+- GET/POST `/api/ea/v1/dashboard/live-strategy-settings` controls minimum
+  opportunity score, minimum entry quality, maximum spread, and per-trade risk
+  for each of the **seven independent M15 workers**. Values are stored in
+  account-scoped PostgreSQL `DecisionThresholdConfig` records and read at the
+  next live worker evaluation. A separate `live_worker` flag prevents simulator
+  and other research calls from inheriting real-account overrides.
+- GET/POST `/api/ea/v1/dashboard/live-scalper-risk` adjusts the existing
+  independent M1/M5 `ScalperControl.risk_percent`, never above its 0.150% hard cap.
+- The broker balance, equity, margin, symbol, point/tick and lot specifications
+  are read-only MT5 telemetry; historical starting balance, date range, and
+  assumed spreads remain simulator-only. Both save endpoints verify the
+  configured real-cent account identity and require fresh telemetry, exact
+  account scope and staff login. Saving does not create orders, change current
+  positions, enable entries or override execution gates. The seven-strategy
+  risk control cannot raise the currently configured shared limit or 0.5%.
+  Changes are logged to `EAEvent`.
+
+After pulling changes, deploy with `docker compose up -d --build django
+trend-pullback breakout-retest failed-breakout-sweep range-edge-fade
+session-opening-range-breakout volatility-compression-expansion
+exhaustion-reversal scalper-worker`. Do not delete volumes or edit .env
+trading authorization as part of this dashboard update. Run
+`docker compose exec django python manage.py test
+ea_bridge.test_live_strategy_settings` before any real-account settings change.
+ See [independent strategy operations](docs/operations/independent-strategy-containers.md).
 
 Paper research results: `http://127.0.0.1:8017/api/ea/v1/research/paper-results` (linked from the main dashboard). Historical records and the existing journal API are preserved.
 
