@@ -22,7 +22,7 @@ button.primary{background:var(--gold);color:#161b23;border:0;font-weight:700}lab
 <header><div><small>RAMON · SMART TRADER</small><h1>Historical Market Replay</h1><div class="muted">Real stored OHLC candles · Read-only · No MT5 orders</div></div><a href="{% url 'ramon-dashboard' %}">← Back to dashboard</a></header>
 <section class="panel">
 <h2>Strategy backtest · selected date range</h2>
-<p class="muted researchNote">Runs the existing seven M15 SignalFlow strategy evaluators with an isolated virtual account. Historical spreads and broker specifications are not stored with OHLC, so fill in explicit test assumptions. Results are estimates; no live trades are placed. <strong>Prefilled numbers are illustrative, not verified broker specifications.</strong> Longer tests run in a separate research worker (up to 15,744 selected M15 candles including 256 warm-up bars). The interactive chart still displays at most 2,000 candles.</p>
+<p class="muted researchNote">Runs the existing seven M15 SignalFlow strategy evaluators with an isolated virtual account. Historical spreads and broker specifications are not stored with OHLC, so fill in explicit test assumptions. External BID prices are not identical to LiteFinance XAUUSD_o prices. Results are estimates; no live trades are placed. <strong>Prefilled numbers are illustrative, not verified broker specifications.</strong> Longer tests run in a separate research worker (up to 15,744 selected M15 candles including 256 warm-up bars). The interactive chart still displays at most 2,000 candles.</p>
 <div class="research">
 <label>From date (UTC)<input type="date" id="testStart" required value="2026-09-22"></label>
 <label>To date (UTC)<input type="date" id="testEnd" required value="2026-11-22"></label>
@@ -69,13 +69,14 @@ button.primary{background:var(--gold);color:#161b23;border:0;font-weight:700}lab
 </section>
 <section class="panel">
 <div class="controls">
+<label>Market data <select id="marketFeed"><option value="broker">Broker telemetry (current)</option><option value="dukascopy">Dukascopy XAUUSD BID · imported history</option></select></label>
 <label>Symbol <input id="symbol" maxlength="32" value="XAUUSD_o" size="13" autocomplete="off"></label>
 <label>Timeframe <select id="timeframe"><option>M1</option><option selected>M5</option><option>M15</option><option>H1</option></select></label>
 <label>Before (UTC) <input type="datetime-local" id="before"></label>
 <label>Bars <select id="limit"><option>300</option><option selected>700</option><option>1500</option><option>2000</option></select></label>
 <button id="load">Load history</button><span class="tag" id="source">Source: —</span>
 </div>
-<p class="muted" id="message" role="status" aria-live="polite">Select a symbol and load historical candles. The chart uses saved broker telemetry, not synthetic prices.</p>
+<p class="muted" id="message" role="status" aria-live="polite">Select a symbol and load historical candles. Select either broker telemetry or imported Dukascopy XAUUSD BID history; both use actual stored OHLC candles.</p>
 <div id="chart"><div id="fallback">Loading chart library…</div></div>
 <div class="metrics" aria-label="Recorded historical trade performance">
  <div class="metric"><div class="label">Win rate · recorded closed trades</div><div class="value" id="winRate">—</div></div>
@@ -101,6 +102,18 @@ button.primary{background:var(--gold);color:#161b23;border:0;font-weight:700}lab
 "use strict";
 const el=id=>document.getElementById(id);
 const controls=["toggle","step","reset","timeline"];
+const EXTERNAL_SOURCE="dukascopy-xauusd-bid-m15";
+el("marketFeed").addEventListener("change",()=>{
+ setPlaying(false);
+ if(el("marketFeed").value==="dukascopy"){
+  el("symbol").value="XAUUSD";el("timeframe").value="M15";
+  el("backtestStatus").textContent="External Dukascopy BID candles selected. Import the history first using the Docker management command.";
+ }else{
+  el("symbol").value="XAUUSD_o";
+ }
+ load();
+});
+
 const DEFAULT_VISIBLE_BARS=30;
 let bars=[],cursor=0,playing=false,timer=null,chart=null,series=null,loading=false,statsTimer=null,statsRequest=0,backtest=null;
 let historyParams=null,hasMore=false,fetchingMore=false,loadVersion=0;
@@ -364,6 +377,7 @@ async function load(){
   const symbol=el("symbol").value.trim(),tf=el("timeframe").value;
   if(!symbol)throw Error("Enter a broker symbol (for example XAUUSD_l).");
   const params=new URLSearchParams({symbol,timeframe:tf,limit:el("limit").value});
+  if(el("marketFeed").value==="dukascopy")params.set("source",EXTERNAL_SOURCE);
   if(tf==="M15"&&el("testStart").value&&el("testEnd").value){
    params.set("validated","1");
    params.set("start",el("testStart").value+"T00:00:00Z");
