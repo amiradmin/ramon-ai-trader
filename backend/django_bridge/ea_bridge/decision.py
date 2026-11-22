@@ -26,7 +26,7 @@ _SIGNAL_MEMORY = OrderedDict()
 _SIGNAL_MEMORY_LOCK = threading.Lock()
 
 
-def _build_pipeline(*, demo_mode=False, strategy_setup=None):
+def _build_pipeline(*, demo_mode=False, strategy_setup=None, live_scope=None):
     """Build the Django-owned pipeline from persisted profile-specific thresholds.
 
     Only strategy tuning values are editable. Per-trade and portfolio risk ceilings,
@@ -51,6 +51,16 @@ def _build_pipeline(*, demo_mode=False, strategy_setup=None):
                     key: value for key, value in updates.items()
                     if key in threshold_values[group]
                 })
+
+    # Apply only an exact real-account, independent-worker overlay. The replay
+    # simulator and demo research never inherit live configuration.
+    if strategy_setup and live_scope and not demo_mode:
+        from .live_strategy_settings import active_settings, EDITABLE
+        for key, value in active_settings(strategy_setup, live_scope).items():
+            group, field = EDITABLE[key]
+            if key == "maximum_risk_percent":
+                value = min(float(value), float(threshold_values[group][field]), 0.5)
+            threshold_values[group][field] = value
 
     opportunity_values = dict(threshold_values["opportunities"])
     minimum_score = float(opportunity_values.pop("minimum_score"))
@@ -370,7 +380,7 @@ def evaluate_payload(p, *, strategy_setup=None, input_evidence=None):
         )
         missing_risk_inputs = [] if risk_guards_complete else ["server_symbol_metadata", "server_position_risk", "server_account_state"]
         # Build the profile-specific Django pipeline before constructing its risk inputs.
-        pipeline = _build_pipeline(demo_mode=is_demo_account, strategy_setup=strategy_setup)
+        pipeline = _build_pipeline(demo_mode=is_demo_account, strategy_setup=strategy_setup,\n                live_scope=(instance_id, account_login, server_name, symbol) if strategy_setup and not is_demo_account else None)
         market={"symbol":symbol,"timeframe":"M15","bars":bars,"last_bar_closed":True,
           "latest_bar_time":bar_time,"bid":bid,"ask":ask,"point":point,
           "trend":direction,"setup_score":setup,"entry_quality":quality,"spread_points":spread,
