@@ -3,11 +3,11 @@ import json
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from .decision import _build_pipeline
 from .live_strategy_settings import active_settings, profile_key
-from .models import DecisionThresholdConfig, EAHeartbeat, StrategyWorkerControl
+from .models import DecisionThresholdConfig, EAHeartbeat, StrategyWorkerControl, ScalperControl
 
 
 class LiveStrategySettingsTests(TestCase):
@@ -82,3 +82,25 @@ class LiveStrategySettingsTests(TestCase):
                                         content_type="application/json")
         self.assertEqual(response.status_code, 400)
         self.assertFalse(DecisionThresholdConfig.objects.filter(profile=profile_key(self.setup)).exists())
+
+    @override_settings(RAMON_SCALP_INSTANCE="real-feed", RAMON_SCALP_LOGIN="556677",
+                       RAMON_SCALP_SERVER="CentServer")
+    def test_fast_scalp_uses_existing_worker_control_and_hard_cap(self):
+        scalp = ScalperControl.objects.create(
+            source="real-feed", account_login="556677", server_name="CentServer",
+            symbol="XAUUSD_l", automatic=False
+        )
+        self.client.force_login(self.user)
+        endpoint = "/api/ea/v1/dashboard/live-scalper-risk"
+        with patch("ea_bridge.live_strategy_settings.real_cent_scope", return_value=(True, "OK")):
+            over = self.client.post(endpoint, json.dumps({
+                "scope": self.scope, "risk_percent": "0.200"
+            }), content_type="application/json")
+            self.assertEqual(over.status_code, 400)
+            good = self.client.post(endpoint, json.dumps({
+                "scope": self.scope, "risk_percent": "0.075"
+            }), content_type="application/json")
+        self.assertEqual(good.status_code, 200, good.content)
+        scalp.refresh_from_db()
+        self.assertEqual(str(scalp.risk_percent), "0.075")
+        self.assertFalse(scalp.automatic)
