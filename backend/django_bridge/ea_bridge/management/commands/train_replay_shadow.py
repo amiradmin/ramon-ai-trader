@@ -143,14 +143,20 @@ class Command(BaseCommand):
             job_data = _find_job(options["job_id"], symbol)
             report = job_data["result"]
             self.stdout.write(f"Replay source={report['source']} symbol={symbol}, period={report['start']}..{report['end']}")
-            trained = train_report(report)
         except (KeyError, TypeError, ValueError) as exc:
             raise CommandError(str(exc)) from exc
-        # Three independent research models; one failure never prevents the
-        # other artifacts from being validated and recorded.
+        # Market regime labels use M15 candles; trade models additionally
+        # require simulated completed fills. Train each independently.
         from ea_bridge.replay_ml_models import train_classifier, MODEL_SPECS
-        results = {MODEL_KEY: trained}
-        bars = _historical_bars(report)
+        results = {}
+        try:
+            bars = _historical_bars(report)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise CommandError(str(exc)) from exc
+        try:
+            results[MODEL_KEY] = train_report(report)
+        except (KeyError, TypeError, ValueError) as exc:
+            results[MODEL_KEY] = {"error": str(exc)}
         for key in CLASSIFIER_KEYS:
             try:
                 results[key] = train_classifier(key, report, bars)
