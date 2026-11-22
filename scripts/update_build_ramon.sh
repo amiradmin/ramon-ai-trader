@@ -80,8 +80,13 @@ docker compose -f "$COMPOSE_FILE" exec -T redis redis-cli ping | grep -qx PONG |
 docker compose -f "$COMPOSE_FILE" exec -T timescaledb sh -lc 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' || die "TimescaleDB readiness check failed"
 # Retire only the old persistence container after its replacement is ready.
 if [[ "$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}/{{index .Config.Labels "com.docker.compose.service"}}' ramon-worker 2>/dev/null || true)" == "ramon/worker" ]]; then
-  docker stop ramon-worker
-  docker rm ramon-worker
+  # Compose may remove the orphan between inspection and retirement. A missing
+  # container is fine; a still-present one that cannot be removed is not.
+  if ! docker rm -f ramon-worker 2>/dev/null; then
+    if docker inspect ramon-worker >/dev/null 2>&1; then
+      die "Could not retire the legacy ramon-worker container"
+    fi
+  fi
 fi
 docker compose -f "$COMPOSE_FILE" ps
 
