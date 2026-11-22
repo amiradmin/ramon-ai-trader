@@ -90,3 +90,47 @@ def observe_shadow(decision, *, symbol, setup):
     except Exception:
         # Fail isolated: do not expose artifact paths, account data or traceback.
         return {**result, "status": "OBSERVER_ERROR"}
+
+
+def observe_replay_shadow(decision, *, symbol, setup, market_bars, spread_points):
+    """Isolated research replay score. Never a broker-validated probability."""
+    status = {"mode": "SHADOW_ONLY", "training_source": "SIMULATED_REPLAY",
+              "model": "replay_expected_r", "status": "UNAVAILABLE"}
+    if decision.get("decision") not in ("BUY", "SELL"):
+        return {**status, "status": "NO_CANDIDATE"}
+    try:
+        from .replay_ml import make_features
+        if not market_bars:
+            return {**status, "status": "NO_MARKET_BARS"}
+        signal_at = int(market_bars[-1]["time"])
+        features = make_features(market_bars, signal_at=signal_at, setup=setup,
+                                 side=decision["decision"], spread_points=spread_points)
+        run = (LearningModelRun.objects.select_related("job")
+               .filter(model_key="replay_expected_r", job__symbol=symbol,
+                       status=LearningModelRun.Status.PASSED, validation__passed=True)
+               .exclude(artifact_path="").order_by("-training_finished_at", "-id").first())
+        if run is None:
+            return {**status, "status": "NO_VALIDATED_REPLAY_MODEL"}
+        if (run.artifact_format != "joblib" or not run.artifact_sha256 or
+                not run.artifact_size_bytes or run.artifact_size_bytes > 20_000_000):
+            return {**status, "status": "ARTIFACT_INVALID"}
+        with default_storage.open(run.artifact_path, "rb") as handle:
+            raw = handle.read(run.artifact_size_bytes + 1)
+        if len(raw) != run.artifact_size_bytes or hashlib.sha256(raw).hexdigest() != run.artifact_sha256:
+            return {**status, "status": "ARTIFACT_MISMATCH"}
+        import joblib
+        bundle = joblib.load(io.BytesIO(raw))
+        if bundle.get("model_key") != "replay_expected_r" or bundle.get("target") != "r_multiple":
+            return {**status, "status": "MODEL_CONTRACT_MISMATCH"}
+        trained = set(bundle.get("feature_names") or ())
+        # All numeric features must be present for a meaningful replay score.
+        if not trained.issubset(features):
+            return {**status, "status": "FEATURE_COVERAGE_INSUFFICIENT"}
+        prediction = float(bundle["estimator"].predict(bundle["vectorizer"].transform([features]))[0])
+        if not math.isfinite(prediction):
+            return {**status, "status": "PREDICTION_INVALID"}
+        return {**status, "status": "SCORED_REPLAY", "expected_r": round(prediction, 4),
+                "model_version": run.version,
+                "note": "Simulated fixed-spread replay estimate; not a live-trade win probability."}
+    except Exception:
+        return {**status, "status": "OBSERVER_ERROR"}
