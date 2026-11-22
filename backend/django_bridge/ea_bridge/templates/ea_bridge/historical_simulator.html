@@ -47,7 +47,7 @@ button.primary{background:var(--gold);color:#161b23;border:0;font-weight:700}lab
 </section>
 <section class="panel">
 <div class="controls">
-<label>Symbol <input id="symbol" maxlength="32" value="XAUUSD_l" size="13" autocomplete="off"></label>
+<label>Symbol <input id="symbol" maxlength="32" value="XAUUSD_o" size="13" autocomplete="off"></label>
 <label>Timeframe <select id="timeframe"><option>M1</option><option selected>M5</option><option>M15</option><option>H1</option></select></label>
 <label>Before (UTC) <input type="datetime-local" id="before"></label>
 <label>Bars <select id="limit"><option>300</option><option selected>700</option><option>1500</option><option>2000</option></select></label>
@@ -127,11 +127,14 @@ function renderBacktest(){
   const completed=strategy.trades.filter(trade=>trade.closed_at<=cutoff);
   const win=completed.filter(trade=>trade.pnl>0).length;
   const pnl=completed.reduce((sum,trade)=>sum+trade.pnl,0);
+  const grossProfit=completed.filter(t=>t.pnl>0).reduce((sum,t)=>sum+t.pnl,0);
+  const grossLoss=-completed.filter(t=>t.pnl<0).reduce((sum,t)=>sum+t.pnl,0);
+  const profitFactor=grossLoss>0?(grossProfit/grossLoss).toFixed(2):"N/A";
   wins+=win;number+=completed.length;gain+=pnl;
   const card=document.createElement("div");card.className="metric";
   const title=document.createElement("div");title.className="label";title.textContent=strategy.setup.replaceAll("_"," ");
   const result=document.createElement("strong");result.textContent=completed.length+" trades · "+(completed.length?(100*win/completed.length).toFixed(1)+"%":"N/A")+" win";
-  const gainText=document.createElement("div");gainText.className="muted";gainText.textContent="Net "+pnl.toFixed(2);
+  const gainText=document.createElement("div");gainText.className="muted";gainText.textContent="Net "+pnl.toFixed(2)+" · Gross +"+grossProfit.toFixed(2)+" / -"+grossLoss.toFixed(2)+" · PF "+profitFactor;
   card.append(title,result,gainText);grid.appendChild(card);
  }
  el("simCount").textContent=number;
