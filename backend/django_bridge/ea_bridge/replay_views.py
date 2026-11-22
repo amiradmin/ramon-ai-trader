@@ -89,12 +89,16 @@ def simulator_recorded_stats(request):
         net_pnl=Sum("realized_pnl"),
     )
     total = totals["total"] or 0
+    accounts = list(records.values_list("account_login", flat=True).distinct()[:2])
+    mixed_accounts = len(accounts) > 1
     return JsonResponse({
         "scope": "recorded_closed_trades_not_replay_backtest",
         "symbol": symbol, "trade_count": total,
         "wins": totals["wins"], "losses": totals["losses"],
         "win_rate_percent": round(100 * totals["wins"] / total, 2) if total else None,
-        "total_gain": str(totals["net_pnl"]) if total else None,
+        "total_gain": str(totals["net_pnl"]) if total and not mixed_accounts else None,
+        "mixed_accounts": mixed_accounts,
+        "account_login": accounts[0] if len(accounts) == 1 else None,
         "currency": None,
         "start": start.isoformat(), "through": through.isoformat(),
     })
