@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ramon | Historical Market Replay</title>
+<style>
+:root{color-scheme:dark;--bg:#0b1525;--panel:#14233a;--text:#e9edf6;--muted:#a8b5ca;--line:#314159;--gold:#d4aa55;--green:#30be9b;--red:#e56a75}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);font:14px system-ui,sans-serif;color:var(--text)}
+main{max-width:1500px;padding:24px;margin:auto}header,.controls,.row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+header{justify-content:space-between;margin-bottom:18px}a{color:var(--gold)}h1{margin:4px 0;font-size:25px}.muted,small{color:var(--muted)}.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px}
+input,select,button{font:inherit;color:var(--text);background:#0d1b30;border:1px solid #42516a;border-radius:8px;padding:9px 12px}
+button{cursor:pointer}button:disabled{cursor:not-allowed;opacity:.4}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--gold)}
+button.primary{background:var(--gold);color:#161b23;border:0;font-weight:700}label{display:flex;align-items:center;gap:7px}.controls{margin-top:16px}#chart{height:510px;width:100%;position:relative}
+#fallback{position:absolute;inset:0;display:none;align-items:center;justify-content:center;text-align:center;padding:25px;color:var(--muted)}
+#timeline{width:100%;accent-color:var(--gold)}.row{justify-content:space-between}.status{color:var(--gold)}.tag{background:#23364e;border-radius:8px;padding:5px 9px}
+@media(max-width:700px){main{padding:10px}.panel{padding:12px}#chart{height:350px}h1{font-size:20px}}
+</style>
+</head>
+<body>
+<main>
+<header><div><small>RAMON · SMART TRADER</small><h1>Historical Market Replay</h1><div class="muted">Real stored OHLC candles · Read-only · No MT5 orders</div></div><a href="{% url 'ramon-dashboard' %}">← Back to dashboard</a></header>
+<section class="panel">
+<div class="controls">
+<label>Symbol <input id="symbol" maxlength="32" value="XAUUSD_l" size="13" autocomplete="off"></label>
+<label>Timeframe <select id="timeframe"><option>M1</option><option selected>M5</option><option>M15</option><option>H1</option></select></label>
+<label>Before (UTC) <input type="datetime-local" id="before"></label>
+<label>Bars <select id="limit"><option>300</option><option selected>700</option><option>1500</option><option>2000</option></select></label>
+<button id="load">Load history</button><span class="tag" id="source">Source: —</span>
+</div>
+<p class="muted" id="message" role="status" aria-live="polite">Select a symbol and load historical candles. The chart uses saved broker telemetry, not synthetic prices.</p>
+<div id="chart"><div id="fallback">Loading chart library…</div></div>
+<div class="controls" aria-label="Historical replay controls">
+<button class="primary" id="toggle" disabled>▶ Play</button>
+<button id="step" disabled>⏭ Step Forward</button>
+<button id="reset" disabled>↺ Reset</button>
+<label>Speed <select id="speed"><option value="1">1×</option><option value="5">5×</option><option value="10">10×</option><option value="50">50×</option><option value="100">100×</option></select></label>
+<span class="status" id="state">No data</span>
+</div>
+<input type="range" id="timeline" min="0" max="0" value="0" disabled aria-label="Replay candle position">
+<div class="row"><span class="muted" id="position">0 / 0 candles</span><span class="muted" id="date">—</span></div>
+</section>
+<section class="panel"><strong>Replay behavior</strong><p class="muted">Click Play to reveal candles automatically, Pause to stop, or Step Forward to reveal one completed candle. Drag the timeline to seek. Drag the chart to pan and use the mouse wheel to zoom. Future candles remain hidden from the chart until replay advances. This first phase is visual inspection only; it does not execute trading strategies or calculate backtest performance.</p></section>
+</main>
+<script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
+<script>
+(()=>{
+"use strict";
+const el=id=>document.getElementById(id);
+const controls=["toggle","step","reset","timeline"];
+let bars=[],cursor=0,playing=false,timer=null,chart=null,series=null,loading=false;
+const message=txt=>el("message").textContent=txt;
+function setPlaying(value){
+ playing=value && bars.length>0 && cursor<bars.length-1;
+ if(timer!==null){clearTimeout(timer);timer=null}
+ el("toggle").textContent=playing?"⏸ Pause":"▶ Play";
+ el("state").textContent=playing?"Playing":"Paused · visual replay only";
+ if(playing)tick();
+}
+function render(){
+ if(!series)return;
+ series.setData(bars.slice(0,cursor+1).map(({time,open,high,low,close})=>({time,open,high,low,close})));
+ el("timeline").value=cursor;
+ el("position").textContent=bars.length?(cursor+1)+" / "+bars.length+" candles":"0 / 0 candles";
+ el("date").textContent=bars.length?new Date(bars[cursor].time*1000).toISOString().replace("T"," ").slice(0,19)+" UTC":"—";
+ el("step").disabled=!bars.length||cursor>=bars.length-1;
+ el("toggle").disabled=!bars.length||cursor>=bars.length-1&&!playing;
+}
+function advance(){if(cursor>=bars.length-1){setPlaying(false);return}cursor++;render();if(cursor>=bars.length-1)setPlaying(false)}
+function tick(){
+ if(!playing)return;
+ timer=setTimeout(()=>{timer=null;advance();if(playing)tick()},Math.max(40,750/Number(el("speed").value)));
+}
+function ensureChart(){
+ if(chart)return true;
+ if(!window.LightweightCharts){el("fallback").style.display="flex";el("fallback").textContent="Chart library unavailable. Check internet access to the chart CDN.";return false}
+ chart=LightweightCharts.createChart(el("chart"),{
+ layout:{background:{type:"solid",color:"#14233a"},textColor:"#a8b5ca"},
+ grid:{vertLines:{color:"#24364b"},horzLines:{color:"#24364b"}},
+ width:el("chart").clientWidth,height:el("chart").clientHeight,
+ timeScale:{timeVisible:true,secondsVisible:false,borderColor:"#435068"},
+ rightPriceScale:{borderColor:"#435068"},
+ handleScroll:{mouseWheel:true,pressedMouseMove:true},handleScale:{mouseWheel:true}
+ });
+ series=chart.addCandlestickSeries({upColor:"#30be9b",downColor:"#e56a75",borderVisible:false,wickUpColor:"#30be9b",wickDownColor:"#e56a75"});
+ new ResizeObserver(()=>chart.applyOptions({width:el("chart").clientWidth,height:el("chart").clientHeight})).observe(el("chart"));
+ return true;
+}
+async function load(){
+ if(loading)return;
+ setPlaying(false);loading=true;el("load").disabled=true;
+ controls.forEach(id=>el(id).disabled=true);message("Loading saved historical candles…");
+ try{
+  const symbol=el("symbol").value.trim(),tf=el("timeframe").value;
+  if(!symbol)throw Error("Enter a broker symbol (for example XAUUSD_l).");
+  const params=new URLSearchParams({symbol,timeframe:tf,limit:el("limit").value});
+  if(el("before").value)params.set("before",new Date(el("before").value+"Z").toISOString());
+  const response=await fetch("{% url 'ramon-simulator-bars' %}?"+params.toString(),{credentials:"same-origin"});
+  const payload=await response.json();
+  if(!response.ok)throw Error(payload.error||"History request failed");
+  bars=payload.bars||[];cursor=0;el("source").textContent="Source: "+(payload.source||"none");
+  if(ensureChart()){render();chart.timeScale().fitContent()}
+  el("timeline").max=Math.max(0,bars.length-1);el("timeline").disabled=!bars.length;
+  el("reset").disabled=!bars.length;el("toggle").disabled=bars.length<2;el("step").disabled=bars.length<2;
+  message(bars.length?bars.length+" stored candles loaded. Start replay or move the timeline.":"No candles found for this symbol/timeframe. Try another broker symbol or date.");
+ }catch(err){bars=[];cursor=0;if(series)series.setData([]);render();message("Unable to load history: "+err.message)}
+ finally{loading=false;el("load").disabled=false}
+}
+el("load").addEventListener("click",load);
+el("toggle").addEventListener("click",()=>setPlaying(!playing));
+el("step").addEventListener("click",()=>{setPlaying(false);advance()});
+el("reset").addEventListener("click",()=>{setPlaying(false);cursor=0;render();chart?.timeScale().fitContent()});
+el("timeline").addEventListener("input",event=>{setPlaying(false);cursor=Number(event.target.value);render()});
+el("speed").addEventListener("change",()=>{if(playing){clearTimeout(timer);timer=null;tick()}});
+ensureChart();load();
+})();
+</script></body></html>
