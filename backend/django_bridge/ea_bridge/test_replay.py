@@ -51,6 +51,31 @@ class HistoricalReplayTests(TestCase):
         self.assertEqual(body["window"], "earliest_in_range")
         self.assertEqual([b["close"] for b in body["bars"]], [2600., 2601.])
 
+    def test_next_page_uses_exclusive_cursor_and_does_not_repeat_bar(self):
+        first=self.client.get("/api/ea/v1/simulator/bars",{
+            "symbol":"XAUUSD_l","timeframe":"M5","source":"broker-a",
+            "start":"2026-01-02T12:00:00Z","before":"2026-01-03T00:00:00Z",
+            "limit":2,
+        }).json()
+        self.assertTrue(first["has_next"])
+        self.assertEqual(len(first["bars"]),2)
+        cursor=datetime.fromtimestamp(first["bars"][-1]["time"], tz=timezone.utc).isoformat()
+        second=self.client.get("/api/ea/v1/simulator/bars",{
+            "symbol":"XAUUSD_l","timeframe":"M5","source":"broker-a",
+            "start":"2026-01-02T12:00:00Z","before":"2026-01-03T00:00:00Z",
+            "after":cursor,"limit":2,
+        }).json()
+        self.assertEqual([bar["close"] for bar in second["bars"]],[2602.0])
+        self.assertFalse(second["has_next"])
+        self.assertNotIn(first["bars"][-1]["time"],[bar["time"] for bar in second["bars"]])
+
+    def test_after_rejects_invalid_timestamp_or_unbounded_query(self):
+        base={"symbol":"XAUUSD_l","timeframe":"M5"}
+        for extra in ({"after":"not-a-date"},
+                      {"start":"2026-01-02T12:00:00Z","after":"bad"}):
+            response=self.client.get("/api/ea/v1/simulator/bars",{**base,**extra})
+            self.assertEqual(response.status_code,400)
+
     def test_invalid_queries_fail_closed(self):
         for params in [
             {"symbol": "XAUUSD_l", "timeframe": "INVALID"},
@@ -138,6 +163,27 @@ class HistoricalStrategyBacktestTests(TestCase):
         self.params["start"]="2026-01-08"
         response=self.client.get(self.path,self.params)
         self.assertEqual(response.status_code,400)
+
+    def test_rejections_reflect_actual_pipeline_stage_reasons(self):
+        from unittest.mock import patch
+        class Pipeline:
+            class Risk:
+                class Config:
+                    target_reward_risk=1.5
+                config=Config()
+            risk_manager=Risk()
+            def run(self,market):
+                return {"approved":False,"action":"HOLD","rejected_by":"risk_management",
+                        "stages":{"risk_management":{"approved":False,
+                            "reason":"RISK_BUDGET_BELOW_MINIMUM_VOLUME"}}}
+        with patch("ea_bridge.replay_backtest._build_pipeline",return_value=Pipeline()):
+            response=self.client.get(self.path,self.params)
+        self.assertEqual(response.status_code,200,response.content)
+        for strategy in response.json()["strategies"]:
+            self.assertGreater(strategy["evaluations"],0)
+            self.assertGreater(strategy["rejection_total"],0)
+            reasons={(row["stage"],row["reason"]) for row in strategy["rejections"]}
+            self.assertIn(("RISK_MANAGEMENT","RISK_BUDGET_BELOW_MINIMUM_VOLUME"),reasons)
 
     def test_evaluates_all_seven_read_only_without_commands(self):
         from unittest.mock import patch
