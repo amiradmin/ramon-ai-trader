@@ -69,9 +69,9 @@ button.primary{background:var(--gold);color:#161b23;border:0;font-weight:700}lab
 </section>
 <section class="panel">
 <div class="controls">
-<label>Market data <select id="marketFeed"><option value="broker">Broker telemetry (current)</option><option value="litefinance">LiteFinance XAUUSD_l · MT5 historical export</option><option value="dukascopy">Dukascopy XAUUSD BID · imported history</option></select></label>
-<label>Symbol <input id="symbol" maxlength="32" value="XAUUSD_o" size="13" autocomplete="off"></label>
-<label>Timeframe <select id="timeframe"><option>M1</option><option selected>M5</option><option>M15</option><option>H1</option></select></label>
+<label>Market data <select id="marketFeed"><option value="broker">Broker telemetry (current)</option><option value="litefinance" selected>LiteFinance XAUUSD_l · MT5 historical export</option><option value="dukascopy">Dukascopy XAUUSD BID · imported history</option></select></label>
+<label>Symbol <input id="symbol" maxlength="32" value="XAUUSD_l" size="13" autocomplete="off"></label>
+<label>Timeframe <select id="timeframe"><option>M1</option><option>M5</option><option selected>M15</option><option>H1</option></select></label>
 <label>Before (UTC) <input type="datetime-local" id="before"></label>
 <label>Bars <select id="limit"><option>300</option><option selected>700</option><option>1500</option><option>2000</option></select></label>
 <button id="load">Load history</button><span class="tag" id="source">Source: —</span>
