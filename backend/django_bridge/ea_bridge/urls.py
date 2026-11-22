@@ -18,12 +18,15 @@ from . import time_status
 from . import validation_views
 from . import replay_views
 from . import replay_backtest
+from . import replay_jobs
 
 urlpatterns = [
     path("simulator", replay_views.simulator, name="ramon-simulator"),
     path("simulator/bars", replay_views.simulator_bars, name="ramon-simulator-bars"),
     path("simulator/recorded-stats", replay_views.simulator_recorded_stats, name="ramon-simulator-recorded-stats"),
     path("simulator/backtest", replay_backtest.backtest, name="ramon-simulator-backtest"),
+    path("simulator/backtest/jobs", replay_jobs.create_job, name="ramon-simulator-backtest-job-create"),
+    path("simulator/backtest/jobs/<str:job_id>", replay_jobs.job_status, name="ramon-simulator-backtest-job-status"),
     path("time-status", time_status.time_status, name="ramon-time-status"),
     path("strategies", strategy_views.strategies_status, name="strategy-workers-status"),
     path("strategies/<slug:slug>", strategy_views.strategy_console, name="strategy-worker-console"),
