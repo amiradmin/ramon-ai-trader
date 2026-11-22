@@ -202,9 +202,9 @@ async function runBacktest(){
  const params=new URLSearchParams({symbol:el("symbol").value.trim(),source:el("source").textContent.replace(/^Source:\\s*/,"").trim(),start:el("testStart").value,end:el("testEnd").value});
  for(const [key,id] of Object.entries(ids)){const field=el(id);if(!field.value||!field.checkValidity()){el("backtestStatus").textContent="Enter valid "+key+" before running.";field.focus();return}params.set(key,field.value)}
  if(!params.get("start")||!params.get("end")){el("backtestStatus").textContent="Select both From and To dates.";return}
- if(el("timeframe").value!=="M15"){el("timeframe").value="M15";await load()}
+ el("timeframe").value="M15";el("limit").value="2000";await load();
  const source=el("source").textContent.replace(/^Source:\\s*/,"").trim();
- if(!source||source==="none"){el("backtestStatus").textContent="No historical source available. Load M15 candles first.";return}
+ if(!source||source==="none"||!bars.length){el("backtestStatus").textContent="No historical M15 candles in this date range. Check source and dates.";return}
  params.set("source",source);
  el("runBacktest").disabled=true;el("backtestStatus").textContent="Evaluating the seven independent SignalFlow strategies…";backtest=null;el("backtestResults").style.display="none";
  try{
