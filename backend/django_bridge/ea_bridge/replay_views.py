@@ -150,7 +150,10 @@ def simulator_recorded_stats(request):
         net_pnl=Sum("realized_pnl"),
     )
     total = totals["total"] or 0
-    accounts = list(records.values_list("account_login", flat=True).distinct()[:2])
+    # Clear LearningTradeOutcome's default ordering before DISTINCT. Otherwise
+    # PostgreSQL also selects close/receipt timestamps and counts two trades
+    # on the same account as two distinct accounts.
+    accounts = list(records.order_by("account_login").values_list("account_login", flat=True).distinct()[:2])
     mixed_accounts = len(accounts) > 1
     return JsonResponse({
         "scope": "recorded_closed_trades_not_replay_backtest",
