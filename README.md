@@ -31,8 +31,11 @@ service and store job progress/results in the existing `learning_models` volume
 and polls progress. A selected range of up to 15,744 M15 candles (plus 256
 warm-up) is supported for this first worker iteration; 20-year testing still
 requires a segmented engine and substantially more imported historical data.
-The chart itself continues to show a 2,000-candle window, but the full-period
-research result is displayed separately. Backtests call the existing seven
+The chart loads 2,000 candles per page and automatically fetches further pages
+when Play/Step reaches the current end, while retaining a 30-candle viewport.
+The full-period research result is displayed separately. A Trade Rejection
+Analysis panel aggregates actual SignalFlow gate rejection reasons by strategy,
+including opportunity, entry timing, risk sizing and invalid virtual fills. Backtests call the existing seven
 strategy SignalFlow evaluators with assumed broker specifications and isolated
 virtual execution; they never enqueue EA trading commands. These are estimates,
 not live-worker/broker fill parity. To deploy, run
