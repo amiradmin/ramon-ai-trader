@@ -5,11 +5,13 @@ from django.db.models import Count, Sum, Q
 from .models import LearningTradeOutcome
 from django.shortcuts import render
 from django.views.decorators.http import require_GET
+from django.views.decorators.csrf import ensure_csrf_cookie
 from .models import MarketBar
 
 ALLOWED_TIMEFRAMES = {"M1", "M5", "M15", "H1"}
 MAX_BARS = 2000
 
+@ensure_csrf_cookie
 @require_GET
 def simulator(request):
     return render(request, "ea_bridge/historical_simulator.html")
