@@ -181,6 +181,38 @@ class HistoricalStrategyBacktestTests(TestCase):
                 )
                 self.assertLessEqual(pipeline.risk_manager.maximum_risk_percent,0.5)
 
+    def test_validated_replay_matches_exact_backtest_filter(self):
+        from .replay_backtest import _clean_m15_rows
+        qs=MarketBar.objects.filter(source="historical-test",
+            symbol="XAUUSD_o",timeframe="M15").order_by("timestamp")
+        source=[{"time":int(row.timestamp.timestamp()),"open":float(row.open),
+            "high":float(row.high),"low":float(row.low),"close":float(row.close)}
+            for row in qs]
+        cleaned,_quality=_clean_m15_rows(source)
+        page=self.client.get("/api/ea/v1/simulator/bars",{
+            "symbol":"XAUUSD_o","source":"historical-test","timeframe":"M15",
+            "validated":"1","start":"2025-12-30T00:00:00Z",
+            "before":"2026-01-05T00:00:00Z","limit":300,
+        })
+        self.assertEqual(page.status_code,200,page.content)
+        self.assertTrue(page.json()["validated"])
+        self.assertEqual([r["time"] for r in page.json()["bars"]],
+            [r["time"] for r in cleaned])
+
+    def test_validated_chart_drops_offgrid_rows_without_rewriting_source(self):
+        stamp=datetime(2026,1,1,12,0,tzinfo=timezone.utc)
+        MarketBar.objects.create(source="historical-test",symbol="XAUUSD_o",
+            timeframe="M15",timestamp=stamp+timedelta(seconds=1),
+            open="9999",high="9999",low="9999",close="9999",volume="1")
+        response=self.client.get("/api/ea/v1/simulator/bars",{
+            "symbol":"XAUUSD_o","source":"historical-test","timeframe":"M15",
+            "validated":"1","start":"2026-01-01T00:00:00Z",
+            "before":"2026-01-05T00:00:00Z","limit":300})
+        self.assertEqual(response.status_code,200,response.content)
+        self.assertFalse(any(row["close"]==9999 for row in response.json()["bars"]))
+        self.assertTrue(MarketBar.objects.filter(
+            source="historical-test",timestamp=stamp+timedelta(seconds=1)).exists())
+
     def test_requires_explicit_symbol_economics(self):
         self.params.pop("tick_value")
         response=self.client.get(self.path,self.params)
@@ -224,7 +256,7 @@ class HistoricalStrategyBacktestTests(TestCase):
             risk_manager=Risk()
             def run(self,market):
                 return {"approved":False,"action":"HOLD"}
-        with patch("ea_bridge.replay_backtest._build_pipeline",return_value=Pipeline()):
+        with patch("ea_bridge.replay_backtest._research_pipeline",return_value=Pipeline()):
             response=self.client.get(self.path,self.params)
         self.assertEqual(response.status_code,200,response.content)
         report=response.json()
