@@ -6,7 +6,7 @@
 <style>
 :root{color-scheme:dark;--bg:#0b1525;--panel:#14233a;--text:#e9edf6;--muted:#a8b5ca;--line:#314159;--gold:#d4aa55;--green:#30be9b;--red:#e56a75}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);font:14px system-ui,sans-serif;color:var(--text)}
-main{max-width:1500px;padding:24px;margin:auto}header,.controls,.row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.research{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}.research label{flex-direction:column;align-items:flex-start}.research input{width:100%}.strategyGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin-top:10px}.strategyGrid .metric{min-height:92px}.strategyGrid strong{display:block;margin-top:8px;font-size:18px}.researchNote{border-left:3px solid var(--gold);padding-left:10px}.researchResults{display:none}main{max-width:1500px;padding:24px;margin:auto}header,.controls,.row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 header{justify-content:space-between;margin-bottom:18px}a{color:var(--gold)}h1{margin:4px 0;font-size:25px}.muted,small{color:var(--muted)}.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px}
 input,select,button{font:inherit;color:var(--text);background:#0d1b30;border:1px solid #42516a;border-radius:8px;padding:9px 12px}
 button{cursor:pointer}button:disabled{cursor:not-allowed;opacity:.4}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--gold)}
@@ -20,6 +20,31 @@ button.primary{background:var(--gold);color:#161b23;border:0;font-weight:700}lab
 <body>
 <main>
 <header><div><small>RAMON · SMART TRADER</small><h1>Historical Market Replay</h1><div class="muted">Real stored OHLC candles · Read-only · No MT5 orders</div></div><a href="{% url 'ramon-dashboard' %}">← Back to dashboard</a></header>
+<section class="panel">
+<h2>Strategy backtest · selected date range</h2>
+<p class="muted researchNote">Runs the existing seven M15 SignalFlow strategy evaluators with an isolated virtual account. Historical spreads and broker specifications are not stored with OHLC, so fill in explicit test assumptions. Results are estimates; no live trades are placed.</p>
+<div class="research">
+<label>From date (UTC)<input type="date" id="testStart" required></label>
+<label>To date (UTC)<input type="date" id="testEnd" required></label>
+<label>Starting account balance<input type="number" id="testBalance" min="1" step="any" placeholder="e.g. 10000" required></label>
+<label>Assumed spread (points)<input type="number" id="testSpread" min="0.00001" step="any" placeholder="Broker spread in points" required></label>
+<label>Point<input type="number" id="testPoint" min="0.000001" step="any" placeholder="Broker symbol point" required></label>
+<label>Tick size<input type="number" id="testTickSize" min="0.000001" step="any" placeholder="Broker tick size" required></label>
+<label>Tick value (per lot)<input type="number" id="testTickValue" min="0.000001" step="any" placeholder="Account currency per tick" required></label>
+<label>Minimum lot<input type="number" id="testMinLot" min="0.000001" step="any" placeholder="Broker volume min" required></label>
+<label>Maximum lot<input type="number" id="testMaxLot" min="0.000001" step="any" placeholder="Broker volume max" required></label>
+<label>Lot step<input type="number" id="testLotStep" min="0.000001" step="any" placeholder="Broker volume step" required></label>
+</div>
+<div class="controls"><button class="primary" id="runBacktest">Run strategy backtest</button><span id="backtestStatus" class="muted" role="status" aria-live="polite">Set dates and broker assumptions to begin.</span></div>
+<div id="backtestResults" class="researchResults">
+<h3>Simulated outcomes up to the current replay candle</h3>
+<div class="metrics"><div class="metric"><div class="label">Simulated closed trades</div><div class="value" id="simCount">0</div></div>
+<div class="metric"><div class="label">Simulated win rate</div><div class="value" id="simWin">—</div></div>
+<div class="metric"><div class="label">Simulated net gain · account units</div><div class="value" id="simGain">0</div></div></div>
+<div class="strategyGrid" id="strategyGrid"></div>
+<p class="muted">Each strategy uses an independent starting balance. The aggregate combines separate research books, not a shared seven-strategy portfolio. No historical slippage, commissions, news locks, or broker fill verification. When both SL and TP occur within one candle, stop-loss wins.</p>
+</div>
+</section>
 <section class="panel">
 <div class="controls">
 <label>Symbol <input id="symbol" maxlength="32" value="XAUUSD_l" size="13" autocomplete="off"></label>
@@ -54,7 +79,7 @@ button.primary{background:var(--gold);color:#161b23;border:0;font-weight:700}lab
 "use strict";
 const el=id=>document.getElementById(id);
 const controls=["toggle","step","reset","timeline"];
-let bars=[],cursor=0,playing=false,timer=null,chart=null,series=null,loading=false,statsTimer=null,statsRequest=0;
+let bars=[],cursor=0,playing=false,timer=null,chart=null,series=null,loading=false,statsTimer=null,statsRequest=0,backtest=null;
 const message=txt=>el("message").textContent=txt;
 function setPlaying(value){
  playing=value && bars.length>0 && cursor<bars.length-1;
@@ -93,6 +118,27 @@ function queueStats(){
   }catch(error){if(requestId===statsRequest)clearStats("Recorded trade metrics unavailable: "+error.message)}
  },playing?450:100);
 }
+function renderBacktest(){
+ if(!backtest)return;
+ const cutoff=bars.length?bars[cursor].time:0;
+ const grid=el("strategyGrid");grid.replaceChildren();
+ let wins=0,number=0,gain=0;
+ for(const strategy of backtest.strategies){
+  const completed=strategy.trades.filter(trade=>trade.closed_at<=cutoff);
+  const win=completed.filter(trade=>trade.pnl>0).length;
+  const pnl=completed.reduce((sum,trade)=>sum+trade.pnl,0);
+  wins+=win;number+=completed.length;gain+=pnl;
+  const card=document.createElement("div");card.className="metric";
+  const title=document.createElement("div");title.className="label";title.textContent=strategy.setup.replaceAll("_"," ");
+  const result=document.createElement("strong");result.textContent=completed.length+" trades · "+(completed.length?(100*win/completed.length).toFixed(1)+"%":"N/A")+" win";
+  const gainText=document.createElement("div");gainText.className="muted";gainText.textContent="Net "+pnl.toFixed(2);
+  card.append(title,result,gainText);grid.appendChild(card);
+ }
+ el("simCount").textContent=number;
+ el("simWin").textContent=number?(100*wins/number).toFixed(2)+"%":"N/A";
+ el("simGain").textContent=gain.toFixed(2);
+ el("simGain").className="value"+(gain<0?" negative":" positive");
+}
 function render(){
  if(!series)return;
  series.setData(bars.slice(0,cursor+1).map(({time,open,high,low,close})=>({time,open,high,low,close})));
@@ -101,7 +147,7 @@ function render(){
  el("date").textContent=bars.length?new Date(bars[cursor].time*1000).toISOString().replace("T"," ").slice(0,19)+" UTC":"—";
  el("step").disabled=!bars.length||cursor>=bars.length-1;
  el("toggle").disabled=!bars.length||cursor>=bars.length-1&&!playing;
- queueStats();
+ queueStats();renderBacktest();
 }
 function advance(){if(cursor>=bars.length-1){setPlaying(false);return}cursor++;render();if(cursor>=bars.length-1)setPlaying(false)}
 function tick(){
@@ -126,13 +172,19 @@ function ensureChart(){
 async function load(){
  if(loading)return;
  setPlaying(false);loading=true;el("load").disabled=true;
+ backtest=null;el("backtestResults").style.display="none";
  if(statsTimer!==null)clearTimeout(statsTimer);++statsRequest;clearStats("Loading historical trade metrics…");
  controls.forEach(id=>el(id).disabled=true);message("Loading saved historical candles…");
  try{
   const symbol=el("symbol").value.trim(),tf=el("timeframe").value;
   if(!symbol)throw Error("Enter a broker symbol (for example XAUUSD_l).");
   const params=new URLSearchParams({symbol,timeframe:tf,limit:el("limit").value});
-  if(el("before").value)params.set("before",new Date(el("before").value+"Z").toISOString());
+  if(el("testStart").value&&el("testEnd").value){
+   params.set("start",el("testStart").value+"T00:00:00Z");
+   const end=new Date(el("testEnd").value+"T00:00:00Z");end.setUTCDate(end.getUTCDate()+1);
+   params.set("before",new Date(end.getTime()-1).toISOString());
+  }
+  if(el("before").value&&!params.has("before"))params.set("before",new Date(el("before").value+"Z").toISOString());
   const response=await fetch("{% url 'ramon-simulator-bars' %}?"+params.toString(),{credentials:"same-origin"});
   const payload=await response.json();
   if(!response.ok)throw Error(payload.error||"History request failed");
@@ -144,6 +196,28 @@ async function load(){
  }catch(err){bars=[];cursor=0;if(series)series.setData([]);render();message("Unable to load history: "+err.message)}
  finally{loading=false;el("load").disabled=false}
 }
+async function runBacktest(){
+ if(loading)return;
+ const ids={balance:"testBalance",spread_points:"testSpread",point:"testPoint",tick_size:"testTickSize",tick_value:"testTickValue",volume_min:"testMinLot",volume_max:"testMaxLot",volume_step:"testLotStep"};
+ const params=new URLSearchParams({symbol:el("symbol").value.trim(),source:el("source").textContent.replace(/^Source:\\s*/,"").trim(),start:el("testStart").value,end:el("testEnd").value});
+ for(const [key,id] of Object.entries(ids)){const field=el(id);if(!field.value||!field.checkValidity()){el("backtestStatus").textContent="Enter valid "+key+" before running.";field.focus();return}params.set(key,field.value)}
+ if(!params.get("start")||!params.get("end")){el("backtestStatus").textContent="Select both From and To dates.";return}
+ if(el("timeframe").value!=="M15"){el("timeframe").value="M15";await load()}
+ const source=el("source").textContent.replace(/^Source:\\s*/,"").trim();
+ if(!source||source==="none"){el("backtestStatus").textContent="No historical source available. Load M15 candles first.";return}
+ params.set("source",source);
+ el("runBacktest").disabled=true;el("backtestStatus").textContent="Evaluating the seven independent SignalFlow strategies…";backtest=null;el("backtestResults").style.display="none";
+ try{
+  const response=await fetch("{% url 'ramon-simulator-backtest' %}?"+params.toString(),{credentials:"same-origin"});
+  const result=await response.json();
+  if(!response.ok)throw Error(result.error||"Backtest failed");
+  backtest=result;el("backtestResults").style.display="block";
+  el("backtestStatus").textContent=result.candles+" M15 candles analyzed. Estimated execution, not historical broker fills.";
+  renderBacktest();
+ }catch(error){el("backtestStatus").textContent="Backtest unavailable: "+error.message}
+ finally{el("runBacktest").disabled=false}
+}
+el("runBacktest").addEventListener("click",runBacktest);
 el("load").addEventListener("click",load);
 el("toggle").addEventListener("click",()=>setPlaying(!playing));
 el("step").addEventListener("click",()=>{setPlaying(false);advance()});
