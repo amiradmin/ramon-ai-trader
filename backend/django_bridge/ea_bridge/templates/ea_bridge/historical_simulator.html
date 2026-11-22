@@ -22,18 +22,18 @@ button.primary{background:var(--gold);color:#161b23;border:0;font-weight:700}lab
 <header><div><small>RAMON · SMART TRADER</small><h1>Historical Market Replay</h1><div class="muted">Real stored OHLC candles · Read-only · No MT5 orders</div></div><a href="{% url 'ramon-dashboard' %}">← Back to dashboard</a></header>
 <section class="panel">
 <h2>Strategy backtest · selected date range</h2>
-<p class="muted researchNote">Runs the existing seven M15 SignalFlow strategy evaluators with an isolated virtual account. Historical spreads and broker specifications are not stored with OHLC, so fill in explicit test assumptions. Results are estimates; no live trades are placed.</p>
+<p class="muted researchNote">Runs the existing seven M15 SignalFlow strategy evaluators with an isolated virtual account. Historical spreads and broker specifications are not stored with OHLC, so fill in explicit test assumptions. Results are estimates; no live trades are placed. <strong>Prefilled numbers are illustrative, not verified broker specifications.</strong> The default two-month range exceeds the current interactive backtest candle limit; select a shorter period until the multi-year runner is available.</p>
 <div class="research">
-<label>From date (UTC)<input type="date" id="testStart" required></label>
-<label>To date (UTC)<input type="date" id="testEnd" required></label>
-<label>Starting account balance<input type="number" id="testBalance" min="1" step="any" placeholder="e.g. 10000" required></label>
-<label>Assumed spread (points)<input type="number" id="testSpread" min="0.00001" step="any" placeholder="Broker spread in points" required></label>
-<label>Point<input type="number" id="testPoint" min="0.000001" step="any" placeholder="Broker symbol point" required></label>
-<label>Tick size<input type="number" id="testTickSize" min="0.000001" step="any" placeholder="Broker tick size" required></label>
-<label>Tick value (per lot)<input type="number" id="testTickValue" min="0.000001" step="any" placeholder="Account currency per tick" required></label>
-<label>Minimum lot<input type="number" id="testMinLot" min="0.000001" step="any" placeholder="Broker volume min" required></label>
-<label>Maximum lot<input type="number" id="testMaxLot" min="0.000001" step="any" placeholder="Broker volume max" required></label>
-<label>Lot step<input type="number" id="testLotStep" min="0.000001" step="any" placeholder="Broker volume step" required></label>
+<label>From date (UTC)<input type="date" id="testStart" required value="2026-09-22"></label>
+<label>To date (UTC)<input type="date" id="testEnd" required value="2026-11-22"></label>
+<label>Starting account balance<input type="number" id="testBalance" min="1" step="any" placeholder="e.g. 10000" required value="1000"></label>
+<label>Assumed spread (points)<input type="number" id="testSpread" min="0.00001" step="any" placeholder="Broker spread in points" required value="20"></label>
+<label>Point<input type="number" id="testPoint" min="0.000001" step="any" placeholder="Broker symbol point" required value="0.01"></label>
+<label>Tick size<input type="number" id="testTickSize" min="0.000001" step="any" placeholder="Broker tick size" required value="0.01"></label>
+<label>Tick value (per lot)<input type="number" id="testTickValue" min="0.000001" step="any" placeholder="Account currency per tick" required value="1"></label>
+<label>Minimum lot<input type="number" id="testMinLot" min="0.000001" step="any" placeholder="Broker volume min" required value="0.01"></label>
+<label>Maximum lot<input type="number" id="testMaxLot" min="0.000001" step="any" placeholder="Broker volume max" required value="100"></label>
+<label>Lot step<input type="number" id="testLotStep" min="0.000001" step="any" placeholder="Broker volume step" required value="0.01"></label>
 </div>
 <div class="controls"><button class="primary" id="runBacktest">Run strategy backtest</button><span id="backtestStatus" class="muted" role="status" aria-live="polite">Set dates and broker assumptions to begin.</span></div>
 <div id="backtestResults" class="researchResults">
