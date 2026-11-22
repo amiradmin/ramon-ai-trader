@@ -23,6 +23,7 @@ from . import replay_jobs
 
 urlpatterns = [
     path("dashboard/live-strategy-settings", live_strategy_settings.live_strategy_settings, name="ramon-live-strategy-settings"),
+    path("dashboard/live-scalper-risk", live_strategy_settings.live_scalper_risk, name="ramon-live-scalper-risk"),
     path("simulator", replay_views.simulator, name="ramon-simulator"),
     path("simulator/bars", replay_views.simulator_bars, name="ramon-simulator-bars"),
     path("simulator/recorded-stats", replay_views.simulator_recorded_stats, name="ramon-simulator-recorded-stats"),
