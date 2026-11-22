@@ -14,6 +14,7 @@ from . import scalp_observer
 from . import scalper_views
 from . import trend_observer
 from . import strategy_views
+from . import live_strategy_settings
 from . import time_status
 from . import validation_views
 from . import replay_views
@@ -21,6 +22,7 @@ from . import replay_backtest
 from . import replay_jobs
 
 urlpatterns = [
+    path("dashboard/live-strategy-settings", live_strategy_settings.live_strategy_settings, name="ramon-live-strategy-settings"),
     path("simulator", replay_views.simulator, name="ramon-simulator"),
     path("simulator/bars", replay_views.simulator_bars, name="ramon-simulator-bars"),
     path("simulator/recorded-stats", replay_views.simulator_recorded_stats, name="ramon-simulator-recorded-stats"),
