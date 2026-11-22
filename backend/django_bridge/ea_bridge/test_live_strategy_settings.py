@@ -48,7 +48,8 @@ class LiveStrategySettingsTests(TestCase):
         self.assertFalse(DecisionThresholdConfig.objects.filter(profile=profile_key(self.setup)).exists())
 
     def test_staff_required_and_scope_validation(self):
-        with patch("ea_bridge.live_strategy_settings.configured_feed", return_value=self.feed):
+        with patch("ea_bridge.live_strategy_settings.configured_feed", return_value=self.feed), \
+             patch("ea_bridge.live_strategy_settings.real_cent_scope", return_value=(True, "OK")):
             response = self.client.post(self.endpoint, json.dumps(self.payload),
                                         content_type="application/json")
             self.assertNotEqual(response.status_code, 200)
@@ -61,7 +62,8 @@ class LiveStrategySettingsTests(TestCase):
 
     def test_save_applies_only_to_worker_scope_not_simulator(self):
         self.client.force_login(self.user)
-        with patch("ea_bridge.live_strategy_settings.configured_feed", return_value=self.feed):
+        with patch("ea_bridge.live_strategy_settings.configured_feed", return_value=self.feed), \
+             patch("ea_bridge.live_strategy_settings.real_cent_scope", return_value=(True, "OK")):
             response = self.client.post(self.endpoint, json.dumps(self.payload),
                                         content_type="application/json")
         self.assertEqual(response.status_code, 200, response.content)
@@ -77,7 +79,8 @@ class LiveStrategySettingsTests(TestCase):
     def test_rejects_risk_increase_above_shared_ceiling(self):
         self.client.force_login(self.user)
         self.payload["overrides"]["maximum_risk_percent"] = 1.5
-        with patch("ea_bridge.live_strategy_settings.configured_feed", return_value=self.feed):
+        with patch("ea_bridge.live_strategy_settings.configured_feed", return_value=self.feed), \
+             patch("ea_bridge.live_strategy_settings.real_cent_scope", return_value=(True, "OK")):
             response = self.client.post(self.endpoint, json.dumps(self.payload),
                                         content_type="application/json")
         self.assertEqual(response.status_code, 400)
