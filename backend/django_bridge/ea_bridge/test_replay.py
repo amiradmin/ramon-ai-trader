@@ -327,3 +327,37 @@ class HistoricalBacktestQueueTests(TestCase):
                 })
                 self.assertEqual(response.status_code,400)
                 self.assertEqual(self.client.get("/api/ea/v1/simulator/backtest/jobs/not-a-uuid").status_code,404)
+
+class DukascopyImportTests(TestCase):
+    def test_decodes_real_binary_format_and_aggregates_full_m15_only(self):
+        import lzma
+        import struct
+        from datetime import date
+        from .management.commands.import_dukascopy_xauusd import decode_day, aggregate_m15
+        # Official-style BID M1 record format: time, OPEN, CLOSE, LOW, HIGH, volume.
+        raw=b"".join(struct.pack(">IIIIIf",minute*60,
+            3400000+minute*1000,3400500+minute*1000,3399500+minute*1000,
+            3401000+minute*1000,2.0) for minute in range(16))
+        rows=decode_day(lzma.compress(raw,format=lzma.FORMAT_ALONE),date(2026,10,27))
+        self.assertEqual(len(rows),16)
+        bars, incomplete=aggregate_m15(rows)
+        self.assertEqual(len(bars),1)
+        self.assertEqual(incomplete,1)
+        self.assertEqual(float(bars[0][1]),3400)
+        self.assertEqual(float(bars[0][4]),3414.5)
+        self.assertEqual(float(bars[0][5]),30.0)
+
+    def test_import_rejects_off_grid_minutes(self):
+        import lzma
+        import struct
+        from datetime import date
+        from .management.commands.import_dukascopy_xauusd import decode_day
+        payload=lzma.compress(struct.pack(">IIIIIf",61,3400000,3400000,
+            3399000,3401000,1),format=lzma.FORMAT_ALONE)
+        with self.assertRaisesRegex(ValueError,"minute grid"):
+            decode_day(payload,date(2026,10,27))
+
+    def test_external_history_source_kept_separate_from_broker(self):
+        from .management.commands.import_dukascopy_xauusd import SOURCE, SYMBOL
+        self.assertNotEqual(SOURCE,"ramon-command-ea-1")
+        self.assertEqual(SYMBOL,"XAUUSD")
