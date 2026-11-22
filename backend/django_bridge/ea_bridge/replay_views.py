@@ -1,6 +1,8 @@
 """Read-only historical candle replay. Never calls strategy execution or EA commands."""
 from datetime import datetime, timezone
 from django.http import JsonResponse
+from django.db.models import Count, Sum, Q
+from .models import LearningTradeOutcome
 from django.shortcuts import render
 from django.views.decorators.http import require_GET
 from .models import MarketBar
@@ -57,4 +59,42 @@ def simulator_bars(request):
              "close": float(row["close"]), "volume": float(row["volume"])}
             for row in rows
         ],
+    })
+
+@require_GET
+def simulator_recorded_stats(request):
+    """Historical closed broker outcomes only; NOT hypothetical replay/backtest trades.
+
+    Each request is bounded by the replay cursor and the loaded chart's start time.
+    No EA command, strategy evaluation, or simulated trade is created.
+    """
+    symbol = (request.GET.get("symbol") or "").strip()
+    if not symbol or len(symbol) > 32:
+        return JsonResponse({"error": "Valid symbol required"}, status=400)
+    try:
+        start = datetime.fromisoformat(request.GET["start"].replace("Z", "+00:00"))
+        through = datetime.fromisoformat(request.GET["through"].replace("Z", "+00:00"))
+        if start.tzinfo is None or through.tzinfo is None or through < start:
+            raise ValueError()
+    except (KeyError, ValueError):
+        return JsonResponse({"error": "Valid timezone-aware start and through required"}, status=400)
+    # Include only outcomes with a genuine broker close timestamp, never receipt time.
+    records = LearningTradeOutcome.objects.filter(
+        symbol=symbol, closed_at__gte=start, closed_at__lte=through
+    )
+    totals = records.aggregate(
+        total=Count("id"),
+        wins=Count("id", filter=Q(realized_pnl__gt=0)),
+        losses=Count("id", filter=Q(realized_pnl__lt=0)),
+        net_pnl=Sum("realized_pnl"),
+    )
+    total = totals["total"] or 0
+    return JsonResponse({
+        "scope": "recorded_closed_trades_not_replay_backtest",
+        "symbol": symbol, "trade_count": total,
+        "wins": totals["wins"], "losses": totals["losses"],
+        "win_rate_percent": round(100 * totals["wins"] / total, 2) if total else None,
+        "total_gain": str(totals["net_pnl"]) if total else None,
+        "currency": None,
+        "start": start.isoformat(), "through": through.isoformat(),
     })
