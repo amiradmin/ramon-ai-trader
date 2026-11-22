@@ -38,6 +38,10 @@ button.primary{background:var(--gold);color:#161b23;border:0;font-weight:700}lab
 <div class="controls"><button class="primary" id="runBacktest">Run strategy backtest</button><span id="backtestStatus" class="muted" role="status" aria-live="polite">Set dates and broker assumptions to begin.</span></div>
 <div id="backtestResults" class="researchResults">
 <h3>Full selected period · estimated research results</h3>
+<div class="panel" style="padding:12px;margin:10px 0"><strong>Historical M15 data quality</strong>
+<div id="qualitySummary" class="muted">Not evaluated yet</div>
+<div class="muted" id="profileSummary"></div>
+</div>
 <div class="metrics"><div class="metric"><div class="label">All closed trades in selected period</div><div class="value" id="fullCount">0</div></div>
 <div class="metric"><div class="label">Full-period win rate</div><div class="value" id="fullWin">—</div></div>
 <div class="metric"><div class="label">Full-period net gain (independent books)</div><div class="value" id="fullGain">0</div></div></div>
@@ -48,7 +52,7 @@ button.primary{background:var(--gold);color:#161b23;border:0;font-weight:700}lab
 <div class="strategyGrid" id="strategyGrid"></div>
 <details class="diagnostics" open>
 <summary><strong>Trade Rejection Analysis · full selected date range</strong></summary>
-<p class="muted">Reasons returned by each strategy's Opportunity, Entry Timing, and Risk Management stages. A rejected bar is not necessarily a valid trading signal; these are diagnostic counts, not missed-profit estimates.</p>
+<p class="muted">Reasons returned by each strategy's Opportunity, Entry Timing, and Risk Management stages. A rejected bar is not necessarily a valid trading signal; these are diagnostic counts, not missed-profit estimates. Minimum-volume risk rejections include the original sizing explanation where available.</p>
 <div id="rejectionDetails" role="region" aria-label="Per-strategy rejection reasons"></div>
 </details>
 <p class="muted">Each strategy uses an independent starting balance. The aggregate combines separate research books, not a shared seven-strategy portfolio. No historical slippage, commissions, news locks, or broker fill verification. When both SL and TP occur within one candle, stop-loss wins.</p>
@@ -139,6 +143,18 @@ function renderFullBacktest(){
  el("fullGain").textContent=gain.toFixed(2);
  el("fullGain").className="value"+(gain<0?" negative":" positive");
 }
+function renderQuality(){
+ if(!backtest)return;
+ const q=backtest.data_quality||{};
+ const excluded=q.excluded||{};
+ const total=Object.values(excluded).reduce((a,b)=>a+Number(b||0),0);
+ el("qualitySummary").textContent=(q.input_candles??"?")+" original candles · "+
+  (q.accepted_candles??"?")+" accepted · "+total+" excluded ("+
+  (excluded.off_grid||0)+" off-grid, "+(excluded.duplicate_slot||0)+" duplicate slots, "+
+  (excluded.short_interval||0)+" short intervals) · "+(q.gap_count??"?")+" remaining gaps.";
+ el("profileSummary").textContent="Profile: "+(backtest.research_profile||"unavailable")+
+  " · Original timestamps remain unchanged; missing candles were not fabricated.";
+}
 function renderRejections(){
  const root=el("rejectionDetails");root.replaceChildren();
  if(!backtest)return;
@@ -163,6 +179,11 @@ function renderRejections(){
     reason.appendChild(times);
    }
    group.appendChild(row);
+   if(item.detail){
+    const detail=document.createElement("div");detail.className="diagnostic-sample";
+    detail.style.padding="0 10px 8px";
+    detail.textContent=item.detail;group.appendChild(detail);
+   }
   }
   root.appendChild(group);
  }
@@ -325,7 +346,7 @@ async function runBacktest(){
   if(status.status!=="COMPLETED")throw Error(status.error||"Historical backtest failed");
   backtest=status.result;el("backtestResults").style.display="block";
   el("backtestStatus").textContent=backtest.candles+" M15 candles analyzed. Estimated execution, not historical broker fills. Chart statistics cover only visible candle window.";
-  renderFullBacktest();renderBacktest();renderRejections();
+  renderFullBacktest();renderBacktest();renderRejections();renderQuality();
  }catch(error){el("backtestStatus").textContent="Backtest unavailable: "+error.message}
  finally{el("runBacktest").disabled=false}
 }
