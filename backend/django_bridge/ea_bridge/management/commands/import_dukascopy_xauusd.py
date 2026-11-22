@@ -85,6 +85,8 @@ def fetch_day(day, retries=3):
                 content = response.read(5_000_001)
                 if len(content) > 5_000_000:
                     raise ValueError("Historical day file unexpectedly large")
+                if not content:
+                    return None
                 return content
         except HTTPError as exc:
             if exc.code == 404:
