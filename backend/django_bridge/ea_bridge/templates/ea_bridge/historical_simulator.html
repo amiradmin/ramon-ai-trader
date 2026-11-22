@@ -22,7 +22,7 @@ button.primary{background:var(--gold);color:#161b23;border:0;font-weight:700}lab
 <header><div><small>RAMON · SMART TRADER</small><h1>Historical Market Replay</h1><div class="muted">Real stored OHLC candles · Read-only · No MT5 orders</div></div><a href="{% url 'ramon-dashboard' %}">← Back to dashboard</a></header>
 <section class="panel">
 <h2>Strategy backtest · selected date range</h2>
-<p class="muted researchNote">Runs the existing seven M15 SignalFlow strategy evaluators with an isolated virtual account. Historical spreads and broker specifications are not stored with OHLC, so fill in explicit test assumptions. Results are estimates; no live trades are placed. <strong>Prefilled numbers are illustrative, not verified broker specifications.</strong> The default two-month range exceeds the current interactive backtest candle limit; select a shorter period until the multi-year runner is available.</p>
+<p class="muted researchNote">Runs the existing seven M15 SignalFlow strategy evaluators with an isolated virtual account. Historical spreads and broker specifications are not stored with OHLC, so fill in explicit test assumptions. Results are estimates; no live trades are placed. <strong>Prefilled numbers are illustrative, not verified broker specifications.</strong> Longer tests run in a separate research worker (up to 15,744 selected M15 candles including 256 warm-up bars). The interactive chart still displays at most 2,000 candles.</p>
 <div class="research">
 <label>From date (UTC)<input type="date" id="testStart" required value="2026-09-22"></label>
 <label>To date (UTC)<input type="date" id="testEnd" required value="2026-11-22"></label>
@@ -209,13 +209,30 @@ async function runBacktest(){
  const source=el("source").textContent.replace(/^Source:\s*/,"").trim();
  if(!source||source==="none"||!bars.length){el("backtestStatus").textContent="No historical M15 candles in this date range. Check source and dates.";return}
  params.set("source",source);
- el("runBacktest").disabled=true;el("backtestStatus").textContent="Evaluating the seven independent SignalFlow strategies…";backtest=null;el("backtestResults").style.display="none";
+ el("runBacktest").disabled=true;el("backtestStatus").textContent="Queueing isolated historical backtest…";backtest=null;el("backtestResults").style.display="none";
  try{
-  const response=await fetch("{% url 'ramon-simulator-backtest' %}?"+params.toString(),{credentials:"same-origin"});
-  const result=await response.json();
-  if(!response.ok)throw Error(result.error||"Backtest failed");
-  backtest=result;el("backtestResults").style.display="block";
-  el("backtestStatus").textContent=result.candles+" M15 candles analyzed. Estimated execution, not historical broker fills.";
+  const csrf=document.cookie.split("; ").find(item=>item.startsWith("csrftoken="))?.split("=")[1]||"";
+  if(!csrf)throw Error("CSRF cookie missing. Reload the simulator page and retry.");
+  const response=await fetch("{% url 'ramon-simulator-backtest-job-create' %}",{
+   method:"POST",body:params,credentials:"same-origin",
+   headers:{"X-CSRFToken":decodeURIComponent(csrf)}
+  });
+  const queued=await response.json();
+  if(!response.ok)throw Error(queued.error||"Backtest could not be queued");
+  const jobId=queued.job_id;
+  let status;
+  // Poll a durable worker job; do not hold open a long Gunicorn request.
+  while(true){
+   await new Promise(resolve=>setTimeout(resolve,1800));
+   const resultResponse=await fetch("{% url 'ramon-simulator-backtest-job-create' %}/"+jobId,{credentials:"same-origin",cache:"no-store"});
+   if(!resultResponse.ok)throw Error("Could not retrieve backtest progress");
+   status=await resultResponse.json();
+   el("backtestStatus").textContent="Historical strategy test: "+status.status+" · "+(status.progress_pct||0)+"%";
+   if(status.status==="COMPLETED"||status.status==="FAILED")break;
+  }
+  if(status.status!=="COMPLETED")throw Error(status.error||"Historical backtest failed");
+  backtest=status.result;el("backtestResults").style.display="block";
+  el("backtestStatus").textContent=backtest.candles+" M15 candles analyzed. Estimated execution, not historical broker fills. Chart statistics cover only visible candle window.";
   renderBacktest();
  }catch(error){el("backtestStatus").textContent="Backtest unavailable: "+error.message}
  finally{el("runBacktest").disabled=false}
