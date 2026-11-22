@@ -5,7 +5,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.http import JsonResponse, HttpResponse
 from django.db.models import Avg, Count, Q, Sum
-from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_POST, require_http_methods
 from .auth import BearerTokenRequired
 from .models import (EAEvent, EAHeartbeat, LearningTradeOutcome, MarketBar, StrategyDecisionRecord, RiskVerdictRecord, DecisionThresholdConfig)
@@ -115,7 +115,7 @@ def paper_results(request):
 
 
 @require_GET
-@__import__("django.views.decorators.csrf", fromlist=["ensure_csrf_cookie"]).ensure_csrf_cookie
+@ensure_csrf_cookie
 def dashboard(request):
     """Render the dashboard even when worker/telemetry status is temporarily down.
 
