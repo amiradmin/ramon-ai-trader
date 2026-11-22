@@ -1,4 +1,4 @@
-"""Django-owned demo breakeven planning and auditable, once-only commands.
+"""Django-owned real cent breakeven planning and auditable, once-only commands.
 
 MT5 supplies quotes/positions and executes commands. All policy calculations live
 here. No historical maximum is reconstructed when this feature is first enabled.

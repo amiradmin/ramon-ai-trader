@@ -1,4 +1,4 @@
-"""Independent demo scalper ownership and ticket-specific lifecycle.
+"""Independent real cent scalper ownership and ticket-specific lifecycle.
 
 No symbol-wide close, no retry of uncertain execution, no authority over main
 Ramon positions. Both engines share the existing account risk ceiling.
