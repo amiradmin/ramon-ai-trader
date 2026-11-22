@@ -79,6 +79,28 @@ services:
       retries: 3
       start_period: 45s
 
+  replay-backtest-worker:
+    <<: *python-service
+    container_name: ramon-replay-backtest-worker
+    environment:
+      TZ: UTC
+      DJANGO_SETTINGS_MODULE: ramon_django.settings
+      DJANGO_DEBUG: "0"
+      DJANGO_DB_ENGINE: postgresql
+      DJANGO_DB_HOST: timescaledb
+      DJANGO_DB_PORT: "5432"
+      DJANGO_DB_NAME: ${POSTGRES_DB:-ramon}
+      DJANGO_DB_USER: ${POSTGRES_USER:-ramon}
+      DJANGO_DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      RAMON_EA_COMMAND_CREATION_ENABLED: "0"
+      RAMON_EA_COMMAND_EXECUTION_ENABLED: "0"
+      RAMON_SCALP_EXECUTION_ENABLED: "0"
+    command: ["python", "manage.py", "run_replay_backtests"]
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    networks: [ramon_backend]
+
   ingest-worker:
     <<: *python-service
     container_name: ramon-ingest-worker
