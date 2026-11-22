@@ -71,7 +71,7 @@ button.primary{background:var(--gold);color:#161b23;border:0;font-weight:700}lab
 <input type="range" id="timeline" min="0" max="0" value="0" disabled aria-label="Replay candle position">
 <div class="row"><span class="muted" id="position">0 / 0 candles</span><span class="muted" id="date">—</span></div>
 </section>
-<section class="panel"><strong>Replay behavior</strong><p class="muted">Click Play to reveal candles automatically, Pause to stop, or Step Forward to reveal one completed candle. Drag the timeline to seek. Drag the chart to pan and use the mouse wheel to zoom. Future candles remain hidden from the chart until replay advances. The performance cards show broker trades previously recorded in Ramon's learning journal, restricted to the loaded chart time range and replay cursor. They are not strategy backtest performance. A later phase will execute strategies in an isolated simulated portfolio.</p></section>
+<section class="panel"><strong>Replay behavior</strong><p class="muted">Click Play to reveal candles automatically, Pause to stop, or Step Forward to reveal one completed candle. Drag the timeline to seek. Drag the chart to pan and use the mouse wheel to zoom. Future candles remain hidden from the chart until replay advances. The performance cards show broker trades previously recorded in Ramon's learning journal, restricted to the loaded chart time range and replay cursor. They are not strategy backtest performance. The separate Strategy Backtest form runs isolated estimated trades over a bounded period. The chart displays only its loaded candle window.</p></section>
 </main>
 <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
 <script>
@@ -195,18 +195,18 @@ async function load(){
   if(ensureChart()){render();chart.timeScale().fitContent()}
   el("timeline").max=Math.max(0,bars.length-1);el("timeline").disabled=!bars.length;
   el("reset").disabled=!bars.length;el("toggle").disabled=bars.length<2;el("step").disabled=bars.length<2;
-  message(bars.length?bars.length+" stored candles loaded. Start replay or move the timeline.":"No candles found for this symbol/timeframe. Try another broker symbol or date.");
+  message(bars.length?(payload.truncated?("Loaded the first "+bars.length+" candles in the selected range; more history exists beyond this chart window. The chart does not show the full period. Shorten the date range for interactive replay/backtesting."):bars.length+" stored candles loaded. Start replay or move the timeline."):"No candles found for this symbol/timeframe. Try another broker symbol or date.");
  }catch(err){bars=[];cursor=0;if(series)series.setData([]);render();message("Unable to load history: "+err.message)}
  finally{loading=false;el("load").disabled=false}
 }
 async function runBacktest(){
  if(loading)return;
  const ids={balance:"testBalance",spread_points:"testSpread",point:"testPoint",tick_size:"testTickSize",tick_value:"testTickValue",volume_min:"testMinLot",volume_max:"testMaxLot",volume_step:"testLotStep"};
- const params=new URLSearchParams({symbol:el("symbol").value.trim(),source:el("source").textContent.replace(/^Source:\\s*/,"").trim(),start:el("testStart").value,end:el("testEnd").value});
+ const params=new URLSearchParams({symbol:el("symbol").value.trim(),source:el("source").textContent.replace(/^Source:\s*/,"").trim(),start:el("testStart").value,end:el("testEnd").value});
  for(const [key,id] of Object.entries(ids)){const field=el(id);if(!field.value||!field.checkValidity()){el("backtestStatus").textContent="Enter valid "+key+" before running.";field.focus();return}params.set(key,field.value)}
  if(!params.get("start")||!params.get("end")){el("backtestStatus").textContent="Select both From and To dates.";return}
  el("timeframe").value="M15";el("limit").value="2000";await load();
- const source=el("source").textContent.replace(/^Source:\\s*/,"").trim();
+ const source=el("source").textContent.replace(/^Source:\s*/,"").trim();
  if(!source||source==="none"||!bars.length){el("backtestStatus").textContent="No historical M15 candles in this date range. Check source and dates.";return}
  params.set("source",source);
  el("runBacktest").disabled=true;el("backtestStatus").textContent="Evaluating the seven independent SignalFlow strategies…";backtest=null;el("backtestResults").style.display="none";
