@@ -33,6 +33,7 @@ def simulator_bars(request):
         return JsonResponse({"error": "limit must be between 1 and 2000"}, status=400)
     before = request.GET.get("before")
     start = request.GET.get("start")
+    after = request.GET.get("after")
     qs = MarketBar.objects.filter(symbol=symbol, timeframe=timeframe)
     if source:
         qs = qs.filter(source=source)
@@ -60,6 +61,16 @@ def simulator_bars(request):
         except ValueError:
             return JsonResponse({"error": "start must be timezone-aware ISO 8601"}, status=400)
         qs = qs.filter(timestamp__gte=start_dt)
+    if after:
+        if not start:
+            return JsonResponse({"error": "after requires a bounded date-range start"}, status=400)
+        try:
+            after_dt = datetime.fromisoformat(after.replace("Z", "+00:00"))
+            if after_dt.tzinfo is None or after_dt.utcoffset() is None:
+                raise ValueError()
+        except ValueError:
+            return JsonResponse({"error": "after must be timezone-aware ISO 8601"}, status=400)
+        qs = qs.filter(timestamp__gt=after_dt)
     # The chart is a bounded window, NOT the full history used by backtesting.
     # In a selected date range, start at the first candle so replay starts at
     # the chosen date. Outside that mode, show the latest candles as before.
@@ -76,6 +87,7 @@ def simulator_bars(request):
     return JsonResponse({
         "symbol": symbol, "timeframe": timeframe, "source": source,
         "truncated": truncated,
+        "has_next": bool(truncated and start),
         "window": "earliest_in_range" if start else "latest",
         "bars": [
             {"time": int(row["timestamp"].timestamp()), "open": float(row["open"]),
