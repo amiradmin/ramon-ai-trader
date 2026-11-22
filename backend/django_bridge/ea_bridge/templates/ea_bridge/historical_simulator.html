@@ -37,7 +37,11 @@ button.primary{background:var(--gold);color:#161b23;border:0;font-weight:700}lab
 </div>
 <div class="controls"><button class="primary" id="runBacktest">Run strategy backtest</button><span id="backtestStatus" class="muted" role="status" aria-live="polite">Set dates and broker assumptions to begin.</span></div>
 <div id="backtestResults" class="researchResults">
-<h3>Simulated outcomes up to the current replay candle</h3>
+<h3>Full selected period · estimated research results</h3>
+<div class="metrics"><div class="metric"><div class="label">All closed trades in selected period</div><div class="value" id="fullCount">0</div></div>
+<div class="metric"><div class="label">Full-period win rate</div><div class="value" id="fullWin">—</div></div>
+<div class="metric"><div class="label">Full-period net gain (independent books)</div><div class="value" id="fullGain">0</div></div></div>
+<h3>Simulated outcomes to the current visible replay candle</h3>
 <div class="metrics"><div class="metric"><div class="label">Simulated closed trades</div><div class="value" id="simCount">0</div></div>
 <div class="metric"><div class="label">Simulated win rate</div><div class="value" id="simWin">—</div></div>
 <div class="metric"><div class="label">Simulated net gain · account units</div><div class="value" id="simGain">0</div></div></div>
@@ -117,6 +121,16 @@ function queueStats(){
     : "No recorded closed trades found in the loaded chart range through this candle. Win rate and gain are unavailable until trades exist.";
   }catch(error){if(requestId===statsRequest)clearStats("Recorded trade metrics unavailable: "+error.message)}
  },playing?450:100);
+}
+function renderFullBacktest(){
+ if(!backtest)return;
+ const all=backtest.strategies.flatMap(strategy=>strategy.trades);
+ const win=all.filter(trade=>trade.pnl>0).length;
+ const gain=all.reduce((sum,trade)=>sum+trade.pnl,0);
+ el("fullCount").textContent=String(all.length);
+ el("fullWin").textContent=all.length?(100*win/all.length).toFixed(2)+"%":"N/A";
+ el("fullGain").textContent=gain.toFixed(2);
+ el("fullGain").className="value"+(gain<0?" negative":" positive");
 }
 function renderBacktest(){
  if(!backtest)return;
@@ -233,7 +247,7 @@ async function runBacktest(){
   if(status.status!=="COMPLETED")throw Error(status.error||"Historical backtest failed");
   backtest=status.result;el("backtestResults").style.display="block";
   el("backtestStatus").textContent=backtest.candles+" M15 candles analyzed. Estimated execution, not historical broker fills. Chart statistics cover only visible candle window.";
-  renderBacktest();
+  renderFullBacktest();renderBacktest();
  }catch(error){el("backtestStatus").textContent="Backtest unavailable: "+error.message}
  finally{el("runBacktest").disabled=false}
 }
