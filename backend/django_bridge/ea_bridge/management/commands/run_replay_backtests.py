@@ -67,8 +67,8 @@ class Command(BaseCommand):
                     # fixed-balance comparisons use exactly the same input
                     # parameters and validated OHLC fingerprint.
                     result=run_one(primary_balance,0,33)
-                    low=run_one(1000.0,33,33)
-                    high=run_one(10000.0,66,33)
+                    low=result if primary_balance==1000.0 else run_one(1000.0,33,33)
+                    high=result if primary_balance==10000.0 else run_one(10000.0,66,33)
                     fingerprint=result["data_quality"]["history_fingerprint"]
                     if any(x["data_quality"]["history_fingerprint"]!=fingerprint for x in (low,high)):
                         raise ValueError("Historical market data changed while comparing balances; retry on a frozen snapshot")
