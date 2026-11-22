@@ -75,7 +75,7 @@ button.primary{background:var(--gold);color:#161b23;border:0;font-weight:700}lab
 <input type="range" id="timeline" min="0" max="0" value="0" disabled aria-label="Replay candle position">
 <div class="row"><span class="muted" id="position">0 / 0 candles</span><span class="muted" id="date">—</span></div>
 </section>
-<section class="panel"><strong>Replay behavior</strong><p class="muted">Click Play to reveal candles automatically, Pause to stop, or Step Forward to reveal one completed candle. Drag the timeline to seek. Drag the chart to pan and use the mouse wheel to zoom. Future candles remain hidden from the chart until replay advances. The performance cards show broker trades previously recorded in Ramon's learning journal, restricted to the loaded chart time range and replay cursor. They are not strategy backtest performance. The separate Strategy Backtest form runs isolated estimated trades over a bounded period. The chart displays only its loaded candle window.</p></section>
+<section class="panel"><strong>Replay behavior</strong><p class="muted">The chart opens with approximately 15 visible historical candles. Click Play to reveal more candles automatically, Pause to stop, or Step Forward to reveal one completed candle. Drag the timeline to seek. Drag the chart to pan and use the mouse wheel to zoom. Future candles remain hidden from the chart until replay advances. The performance cards show broker trades previously recorded in Ramon's learning journal, restricted to the loaded chart time range and replay cursor. They are not strategy backtest performance. The separate Strategy Backtest form runs isolated estimated trades over a bounded period. The chart displays only its loaded candle window.</p></section>
 </main>
 <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
 <script>
@@ -83,6 +83,7 @@ button.primary{background:var(--gold);color:#161b23;border:0;font-weight:700}lab
 "use strict";
 const el=id=>document.getElementById(id);
 const controls=["toggle","step","reset","timeline"];
+const DEFAULT_VISIBLE_BARS=15;
 let bars=[],cursor=0,playing=false,timer=null,chart=null,series=null,loading=false,statsTimer=null,statsRequest=0,backtest=null;
 const message=txt=>el("message").textContent=txt;
 function setPlaying(value){
@@ -156,9 +157,19 @@ function renderBacktest(){
  el("simGain").textContent=gain.toFixed(2);
  el("simGain").className="value"+(gain<0?" negative":" positive");
 }
+function focusReplayWindow(){
+ if(!chart||!bars.length)return;
+ // Logical indexes permit a fixed-width viewport even before 15 real candles
+ // exist; never load or reveal future candles to fill the empty space.
+ chart.timeScale().setVisibleLogicalRange({
+  from:cursor-DEFAULT_VISIBLE_BARS+1,
+  to:cursor+1
+ });
+}
 function render(){
  if(!series)return;
  series.setData(bars.slice(0,cursor+1).map(({time,open,high,low,close})=>({time,open,high,low,close})));
+ focusReplayWindow();
  el("timeline").value=cursor;
  el("position").textContent=bars.length?(cursor+1)+" / "+bars.length+" candles":"0 / 0 candles";
  el("date").textContent=bars.length?new Date(bars[cursor].time*1000).toISOString().replace("T"," ").slice(0,19)+" UTC":"—";
@@ -205,8 +216,8 @@ async function load(){
   const response=await fetch("{% url 'ramon-simulator-bars' %}?"+params.toString(),{credentials:"same-origin"});
   const payload=await response.json();
   if(!response.ok)throw Error(payload.error||"History request failed");
-  bars=payload.bars||[];cursor=0;el("source").textContent="Source: "+(payload.source||"none");
-  if(ensureChart()){render();chart.timeScale().fitContent()}
+  bars=payload.bars||[];cursor=Math.min(DEFAULT_VISIBLE_BARS-1,Math.max(0,bars.length-1));el("source").textContent="Source: "+(payload.source||"none");
+  if(ensureChart()){render()}
   el("timeline").max=Math.max(0,bars.length-1);el("timeline").disabled=!bars.length;
   el("reset").disabled=!bars.length;el("toggle").disabled=bars.length<2;el("step").disabled=bars.length<2;
   message(bars.length?(payload.truncated?("Loaded the first "+bars.length+" candles in the selected range; more history exists beyond this chart window. The chart does not show the full period. Shorten the date range for interactive replay/backtesting."):bars.length+" stored candles loaded. Start replay or move the timeline."):"No candles found for this symbol/timeframe. Try another broker symbol or date.");
@@ -255,7 +266,7 @@ el("runBacktest").addEventListener("click",runBacktest);
 el("load").addEventListener("click",load);
 el("toggle").addEventListener("click",()=>setPlaying(!playing));
 el("step").addEventListener("click",()=>{setPlaying(false);advance()});
-el("reset").addEventListener("click",()=>{setPlaying(false);cursor=0;render();chart?.timeScale().fitContent()});
+el("reset").addEventListener("click",()=>{setPlaying(false);cursor=Math.min(DEFAULT_VISIBLE_BARS-1,Math.max(0,bars.length-1));render()});
 el("timeline").addEventListener("input",event=>{setPlaying(false);cursor=Number(event.target.value);render()});
 el("speed").addEventListener("change",()=>{if(playing){clearTimeout(timer);timer=null;tick()}});
 ensureChart();load();
