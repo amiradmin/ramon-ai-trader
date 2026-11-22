@@ -21,6 +21,7 @@ from ea_bridge.replay_ml import replay_training_rows
 from ea_bridge.management.commands.run_learning_training_worker import _persist_model_artifact
 
 MODEL_KEY = "replay_expected_r"
+CLASSIFIER_KEYS = ("replay_trade_success", "replay_market_regime")
 
 
 def _find_job(job_id, symbol):
@@ -145,25 +146,50 @@ class Command(BaseCommand):
             trained = train_report(report)
         except (KeyError, TypeError, ValueError) as exc:
             raise CommandError(str(exc)) from exc
-        # Explicit research run, not a regular trade-outcome training job.
+        # Three independent research models; one failure never prevents the
+        # other artifacts from being validated and recorded.
+        from ea_bridge.replay_ml_models import train_classifier, MODEL_SPECS
+        results = {MODEL_KEY: trained}
+        bars = _historical_bars(report)
+        for key in CLASSIFIER_KEYS:
+            try:
+                results[key] = train_classifier(key, report, bars)
+            except (KeyError, TypeError, ValueError) as exc:
+                results[key] = {"error": str(exc)}
         with transaction.atomic():
             job = LearningTrainingJob.objects.create(
                 symbol=symbol, timeframe="M15", source=report["source"],
-                requested_models=[MODEL_KEY], created_by="replay-shadow-command",
-                status=LearningTrainingJob.Status.COMPLETED,
+                requested_models=list(results), created_by="replay-shadow-command",
+                status=LearningTrainingJob.Status.PARTIAL,
                 started_at=django_timezone.now(), finished_at=django_timezone.now())
-            run = LearningModelRun(
-                job=job, model_key=MODEL_KEY, model_name="Replay expected R · Random Forest",
-                status=(LearningModelRun.Status.PASSED if trained["validation"]["passed"]
-                        else LearningModelRun.Status.REJECTED),
-                metrics=trained["metrics"], validation=trained["validation"],
-                version=trained["version"], training_started_at=django_timezone.now(),
-                training_finished_at=django_timezone.now(),
-            )
-            _persist_model_artifact(job, run, trained["artifact_bytes"])
-            run.save()
-        self.stdout.write(self.style.SUCCESS(
-            f"Replay ML research run={run.pk} status={run.status} "
-            f"labels={trained['metrics']['observations']} "
-            f"MAE={trained['metrics']['mae']:.4f} baseline={trained['metrics']['baseline_mae']:.4f}; "
-            "NO LIVE TRADING INFLUENCE"))
+            statuses = []
+            for key, model_result in results.items():
+                status = (LearningModelRun.Status.REJECTED
+                    if "error" in model_result or not model_result["validation"]["passed"]
+                    else LearningModelRun.Status.PASSED)
+                run = LearningModelRun(
+                    job=job, model_key=key,
+                    model_name=("Replay expected R · Random Forest" if key == MODEL_KEY
+                                else MODEL_SPECS[key][0]),
+                    status=status,
+                    metrics=model_result.get("metrics", {}),
+                    validation=model_result.get("validation", {"passed": False,
+                        "note": model_result.get("error", "Insufficient validation data")}),
+                    error=model_result.get("error", "")[:4000],
+                    version=model_result.get("version", ""),
+                    training_started_at=django_timezone.now(),
+                    training_finished_at=django_timezone.now(),
+                )
+                if "artifact_bytes" in model_result:
+                    _persist_model_artifact(job, run, model_result["artifact_bytes"])
+                run.save()
+                statuses.append(status)
+                self.stdout.write(
+                    f"{key}: {status}; observations="
+                    f"{model_result.get('metrics', {}).get('observations', 0)}; "
+                    f"{model_result.get('error', 'research-only')}")
+            job.status = (LearningTrainingJob.Status.COMPLETED
+                          if all(s == LearningModelRun.Status.PASSED for s in statuses)
+                          else LearningTrainingJob.Status.PARTIAL)
+            job.save(update_fields=["status"])
+        self.stdout.write(self.style.SUCCESS("Three replay model evaluations recorded; shadow-only."))
