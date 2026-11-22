@@ -199,7 +199,9 @@ function renderQuality(){
  const q=backtest.data_quality||{};
  const excluded=q.excluded||{};
  const total=Object.values(excluded).reduce((a,b)=>a+Number(b||0),0);
- el("qualitySummary").textContent=(q.input_candles??"?")+" original candles · "+
+ el("qualitySummary").style.color=q.validation_status==="DESCRIPTIVE_ONLY_HISTORY_QUALITY_WARNING"?"var(--red)":"var(--muted)";
+ el("qualitySummary").textContent=(q.validation_status==="DESCRIPTIVE_ONLY_HISTORY_QUALITY_WARNING"
+  ?"QUALITY WARNING · DESCRIPTIVE ESTIMATES ONLY · ":"")+(q.input_candles??"?")+" original candles · "+
   (q.accepted_candles??"?")+" accepted · "+total+" excluded ("+
   (excluded.off_grid||0)+" off-grid, "+(excluded.duplicate_slot||0)+" duplicate slots, "+
   (excluded.short_interval||0)+" short intervals) · "+(q.gap_count??"?")+" remaining gaps.";
