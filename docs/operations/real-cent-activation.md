@@ -4,14 +4,14 @@ The MT5 command EA v1.09 reports the broker's account trade mode, account curren
 
 ## Configure exact local scope
 
-Set these values in the deployment's untracked `.env` file, not in Git. The symbol for the current cent account is `XAUUSD_i`. Use the exact currency from `account.currency` in a fresh authenticated heartbeat; do not assume it is `USC` or `USD` from the broker portal.
+Set these values in the deployment's untracked `.env` file, not in Git. A fresh authenticated MT5 heartbeat confirmed symbol `XAUUSD_l` and account currency `USD` for this cent account. Match the currency and symbol against fresh telemetry on each activation; the broker portal's display is not the MT5 currency code.
 
 ```dotenv
 RAMON_REAL_CENT_INSTANCE=ramon-command-ea-1
 RAMON_REAL_CENT_LOGIN=<verified MT5 login>
 RAMON_REAL_CENT_SERVER=<exact MT5 server>
-RAMON_REAL_CENT_CURRENCY=<exact MT5 account currency>
-RAMON_REAL_CENT_SYMBOL=XAUUSD_i
+RAMON_REAL_CENT_CURRENCY=USD
+RAMON_REAL_CENT_SYMBOL=XAUUSD_l
 RAMON_EA_COMMAND_CREATION_ENABLED=0
 RAMON_EA_COMMAND_EXECUTION_ENABLED=0
 RAMON_REAL_CENT_PROFIT_PROTECTION_ENABLED=0
@@ -23,7 +23,7 @@ All five scope fields are required. Django refuses decisions, order creation and
 ## Verify before allowing orders
 
 1. Run `docker compose config` and `docker compose up -d --build --wait` without deleting named volumes.
-2. Confirm the MT5 command EA v1.09 is attached once to `XAUUSD_i` and its fresh heartbeat reports mode `2`, the exact login/server/currency, `TELEMETRY_OK`, enabled terminal trading and positive broker tick/volume metadata. Confirm balance and tick value are in the same account units. Cent conversion must never be applied a second time to risk sizing.
+2. Confirm the MT5 command EA v1.09 is attached once to `XAUUSD_l` and its fresh heartbeat reports mode `2`, the exact login/server/currency, `TELEMETRY_OK`, enabled terminal trading and positive broker tick/volume metadata. Confirm balance and tick value are in the same account units. Cent conversion must never be applied a second time to risk sizing.
 3. Inspect `/api/ea/v1/dashboard`: the execution boundary must show the configured account scope, fresh heartbeat and symbol match. Review per-trade sizing at the broker's minimum volume and confirm it does not exceed the 0.5% server cap. If minimum volume exceeds the budget, the trade must be rejected.
 4. Review any existing pending, claimed or reconciliation-required commands from the previous demo account. Let them expire or reconcile them; do not replay them on the real account.
 5. Enable `RAMON_EA_COMMAND_CREATION_ENABLED=1` and `RAMON_EA_COMMAND_EXECUTION_ENABLED=1` in the local environment only after checking the above. Recreate Django and the strategy workers so each reads the same scope; confirm a genuine approved decision produces one account-scoped order. Do not force a signal or trade to test this path.

@@ -23,7 +23,7 @@ class Command(BaseCommand):
                             help="Explicitly exclude misaligned historical rows (descriptive studies only).")
         parser.add_argument("--profile", choices=("standard", "expanded"), default="standard",
                             help="Use standard thresholds by default; expanded is a separate research policy.")
-        parser.add_argument("--symbol", default="XAUUSD_i")
+        parser.add_argument("--symbol", default="XAUUSD_l")
         parser.add_argument("--limit", type=int, default=2000)
         parser.add_argument("--spread-points", type=float, required=True)
         parser.add_argument("--slippage-points", type=float, required=True)

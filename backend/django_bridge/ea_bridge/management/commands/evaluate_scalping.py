@@ -19,7 +19,7 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument('--source', required=True)
-        parser.add_argument('--symbol', default='XAUUSD_i')
+        parser.add_argument('--symbol', default='XAUUSD_l')
         parser.add_argument('--limit', type=int, default=10000)
         parser.add_argument('--snapshot-output', help='Optional local research snapshot; no database writes.')
         parser.add_argument('--spread-points', type=float, required=True)

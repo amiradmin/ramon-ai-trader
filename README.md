@@ -82,7 +82,7 @@ The decision endpoint can call the command producer, but creation and delivery r
 
 The command EA sends completed M1, M5, M15 and H1 candles through the existing authenticated Django telemetry endpoint. Django validates and persists each timeframe independently in the existing `MarketBar` table; no separate candle tables are required. Repeated deliveries are idempotent, and the EA advances its in-memory candle cursor only after Django accepts the telemetry request. After an EA restart, its bounded recent history is sent again and database uniqueness prevents duplicate rows.
 
-Use `GET /api/ea/v1/market-data/status?symbol=XAUUSD_i` with the EA bearer token to inspect row counts, oldest/latest candle timestamps, last receipt time and candidate intraday gaps per source/timeframe. Gap entries are review candidates, not definitive outages: broker maintenance and instrument-specific sessions must be considered. The initial EA history request is capped at 512 completed candles per timeframe; collection then continues incrementally. This is not a substitute for a deeper broker-history backfill.
+Use `GET /api/ea/v1/market-data/status?symbol=XAUUSD_l` with the EA bearer token to inspect row counts, oldest/latest candle timestamps, last receipt time and candidate intraday gaps per source/timeframe. Gap entries are review candidates, not definitive outages: broker maintenance and instrument-specific sessions must be considered. The initial EA history request is capped at 512 completed candles per timeframe; collection then continues incrementally. This is not a substitute for a deeper broker-history backfill.
 
 ARIMA/SARIMA jobs read the selected `MarketBar` symbol/timeframe series; each timeframe is trained and validated independently, with M15 remaining the default training timeframe. Do not combine M1, M5, M15 and H1 candles into one frequency-mixed series. `LearningTradeOutcome` remains the dataset for the six trade-outcome learning pipelines, not for ARIMA fitting. Forecast results remain research-only and do not authorize orders.
 
@@ -91,15 +91,15 @@ ARIMA/SARIMA jobs read the selected `MarketBar` symbol/timeframe series; each ti
 The recommended retention horizon is 2 years for M1, 3 years for M5, and 5 years for M15/H1. The `prune_market_bars` management command is dry-run by default and reports expired rows without deleting anything. Review the counts first; only pass `--apply` when you intentionally want to prune data. You can scope it to a source with `--source`.
 
 ```bash
-docker compose exec django python manage.py prune_market_bars --symbol XAUUSD_i
-docker compose exec django python manage.py prune_market_bars --symbol XAUUSD_i --source ramon-command-ea-1 --apply
+docker compose exec django python manage.py prune_market_bars --symbol XAUUSD_l
+docker compose exec django python manage.py prune_market_bars --symbol XAUUSD_l --source ramon-command-ea-1 --apply
 ```
 
 ## Safety and validation
 
 1. Keep `RAMON_EA_COMMAND_CREATION_ENABLED=0` and `RAMON_EA_COMMAND_EXECUTION_ENABLED=0` until the real cent account scope and broker contract have been verified.
 2. Verify the command EA is attached once, and keep both Django command gates disabled while validating telemetry and decisions.
-3. Run on the intended real cent `XAUUSD_i` M15 chart after verifying the exact MT5 account and server.
+3. Run on the intended real cent `XAUUSD_l` M15 chart after verifying the exact MT5 account and server.
 4. Do not run a legacy `Ramon_v0.62.x` strategy EA beside the command EA. This legacy source is excluded from the update script and could duplicate order execution.
 5. A Django `WAIT`, stale/missing account data, missing quote, or invalid authorization must remain fail-closed.
 6. Never delete Docker volumes to silence Compose warnings.
