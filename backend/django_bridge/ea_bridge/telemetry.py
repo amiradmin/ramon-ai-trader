@@ -378,7 +378,7 @@ def market_data_status(request):
     if denied:
         return denied
 
-    symbol = str(request.GET.get("symbol", "XAUUSD_i")).strip()[:32]
+    symbol = str(request.GET.get("symbol", "XAUUSD_l")).strip()[:32]
     source = str(request.GET.get("source", "")).strip()[:128]
     if not symbol:
         return JsonResponse({"ok": False, "error": "symbol is required"}, status=400)

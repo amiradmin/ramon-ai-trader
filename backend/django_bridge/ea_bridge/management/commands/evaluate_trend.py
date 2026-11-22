@@ -22,7 +22,7 @@ class Command(BaseCommand):
 
     def add_arguments(self,parser):
         parser.add_argument('--source',required=True)
-        parser.add_argument('--symbol',default='XAUUSD_i')
+        parser.add_argument('--symbol',default='XAUUSD_l')
         parser.add_argument('--limit',type=int,default=5000)
         for cost in ['spread','slippage','commission','overnight']:
             parser.add_argument(f'--{cost}-points',type=float,required=True)

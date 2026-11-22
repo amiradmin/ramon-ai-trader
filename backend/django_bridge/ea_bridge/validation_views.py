@@ -12,7 +12,7 @@ MAX_ROWS = 50000
 @require_GET
 def strategy_validation(request):
     source = request.GET.get('source', 'ramon-command-ea-1').strip()
-    symbol = request.GET.get('symbol', 'XAUUSD_i').strip()
+    symbol = request.GET.get('symbol', 'XAUUSD_l').strip()
     try:
         year = int(request.GET.get('year', '2026'))
     except ValueError:

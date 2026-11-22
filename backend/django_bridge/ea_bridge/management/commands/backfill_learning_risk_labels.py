@@ -101,7 +101,7 @@ class Command(BaseCommand):
     help = "Dry-run or apply safe backfills for missing trade R-multiple labels."
 
     def add_arguments(self, parser):
-        parser.add_argument("--symbol", default="XAUUSD_i")
+        parser.add_argument("--symbol", default="XAUUSD_l")
         parser.add_argument(
             "--apply", action="store_true",
             help="Persist labels after all trust and uniqueness checks pass.",

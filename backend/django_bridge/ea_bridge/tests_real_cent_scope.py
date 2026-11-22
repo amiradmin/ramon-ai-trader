@@ -11,8 +11,8 @@ from .models import EACommand, EAHeartbeat
 
 SCOPE = dict(
     RAMON_REAL_CENT_INSTANCE="bridge-test", RAMON_REAL_CENT_LOGIN="12345",
-    RAMON_REAL_CENT_SERVER="Broker-Live", RAMON_REAL_CENT_CURRENCY="USC",
-    RAMON_REAL_CENT_SYMBOL="XAUUSD_i", EA_BEARER_TOKEN="test-token",
+    RAMON_REAL_CENT_SERVER="Broker-Live", RAMON_REAL_CENT_CURRENCY="USD",
+    RAMON_REAL_CENT_SYMBOL="XAUUSD_l", EA_BEARER_TOKEN="test-token",
     RAMON_EA_COMMAND_EXECUTION_ENABLED=True,
 )
 
@@ -22,9 +22,9 @@ class RealCentScopeTests(TestCase):
     def setUp(self):
         self.feed = EAHeartbeat.objects.create(
             instance_id="bridge-test", account_login="12345", server_name="Broker-Live",
-            symbol="XAUUSD_i", status="TELEMETRY_OK", terminal_connected=True,
+            symbol="XAUUSD_l", status="TELEMETRY_OK", terminal_connected=True,
             trade_allowed=True, payload={"account_trade_mode": 2, "server_name": "Broker-Live",
-                                         "account": {"currency": "USC"}},
+                                         "account": {"currency": "USD"}},
         )
 
     def poll(self):
@@ -37,7 +37,7 @@ class RealCentScopeTests(TestCase):
     def test_only_exact_real_cent_scope_can_claim_pending_order(self):
         command = EACommand.objects.create(
             command_id="pending-cent-test", instance_id="bridge-test", account_login="12345",
-            symbol="XAUUSD_i", action=EACommand.Action.OPEN,
+            symbol="XAUUSD_l", action=EACommand.Action.OPEN,
             payload={"server_name": "Broker-Live"}, execution_authorized=True,
             expires_at=timezone.now() + timedelta(minutes=1),
         )
@@ -59,7 +59,7 @@ class RealCentScopeTests(TestCase):
             command.refresh_from_db()
             self.assertEqual(command.state, EACommand.State.PENDING)
         snapshot = dict(self.feed.payload)
-        snapshot.update(account_trade_mode=2, server_name="Broker-Live", account={"currency": "USD"})
+        snapshot.update(account_trade_mode=2, server_name="Broker-Live", account={"currency": "USC"})
         self.feed.payload = snapshot
         self.feed.save(update_fields=["payload"])
         self.assertEqual(self.poll()["authorization_reason"], "REAL_CENT_CURRENCY_MISMATCH")

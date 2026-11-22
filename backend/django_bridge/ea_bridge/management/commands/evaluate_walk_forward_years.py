@@ -117,7 +117,7 @@ class Command(BaseCommand):
         parser.add_argument("--source", required=True)
         parser.add_argument("--allow-off-grid", action="store_true",
                             help="Descriptive only: skip/count legacy off-grid history; never repair timestamps.")
-        parser.add_argument("--symbol", default="XAUUSD_i")
+        parser.add_argument("--symbol", default="XAUUSD_l")
         parser.add_argument("--first-year", type=int, default=2022)
         parser.add_argument("--last-year", type=int, default=2026)
         parser.add_argument("--spread-points", type=float, required=True)
