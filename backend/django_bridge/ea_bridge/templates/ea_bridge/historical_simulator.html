@@ -6,7 +6,7 @@
 <style>
 :root{color-scheme:dark;--bg:#0b1525;--panel:#14233a;--text:#e9edf6;--muted:#a8b5ca;--line:#314159;--gold:#d4aa55;--green:#30be9b;--red:#e56a75}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);font:14px system-ui,sans-serif;color:var(--text)}
-.research{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}.research label{flex-direction:column;align-items:flex-start}.research input{width:100%}.strategyGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin-top:10px}.strategyGrid .metric{min-height:92px}.strategyGrid strong{display:block;margin-top:8px;font-size:18px}.researchNote{border-left:3px solid var(--gold);padding-left:10px}.researchResults{display:none}.diagnostics{margin-top:14px}.diagnostic-row{display:grid;grid-template-columns:minmax(180px,1fr) minmax(180px,2fr) 72px;gap:12px;padding:9px 10px;border-bottom:1px solid var(--line)}.diagnostic-row span:last-child{text-align:right;font-variant-numeric:tabular-nums}.diagnostic-title{font-weight:700;margin-top:12px}.diagnostic-sample{font-size:11px;color:var(--muted)}@media(max-width:700px){.diagnostic-row{grid-template-columns:1fr 1fr 48px;gap:6px}}main{max-width:1500px;padding:24px;margin:auto}header,.controls,.row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.research{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}.research label{flex-direction:column;align-items:flex-start}.research input{width:100%}.strategyGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin-top:10px}.strategyGrid .metric{min-height:92px}.strategyGrid strong{display:block;margin-top:8px;font-size:18px}.researchNote{border-left:3px solid var(--gold);padding-left:10px}.researchResults{display:none}.trades-scroll{overflow-x:auto;max-height:460px;overflow-y:auto}.trades-table{border-collapse:collapse;width:100%;min-width:1000px;font-size:12px}.trades-table th,.trades-table td{border-bottom:1px solid var(--line);padding:8px;text-align:left;white-space:nowrap}.trades-table th{position:sticky;top:0;background:var(--panel)}.smallhelp{font-size:12px;color:var(--muted)}.diagnostics{margin-top:14px}.diagnostic-row{display:grid;grid-template-columns:minmax(180px,1fr) minmax(180px,2fr) 72px;gap:12px;padding:9px 10px;border-bottom:1px solid var(--line)}.diagnostic-row span:last-child{text-align:right;font-variant-numeric:tabular-nums}.diagnostic-title{font-weight:700;margin-top:12px}.diagnostic-sample{font-size:11px;color:var(--muted)}@media(max-width:700px){.diagnostic-row{grid-template-columns:1fr 1fr 48px;gap:6px}}main{max-width:1500px;padding:24px;margin:auto}header,.controls,.row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 header{justify-content:space-between;margin-bottom:18px}a{color:var(--gold)}h1{margin:4px 0;font-size:25px}.muted,small{color:var(--muted)}.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px}
 input,select,button{font:inherit;color:var(--text);background:#0d1b30;border:1px solid #42516a;border-radius:8px;padding:9px 12px}
 button{cursor:pointer}button:disabled{cursor:not-allowed;opacity:.4}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--gold)}
@@ -35,6 +35,7 @@ button.primary{background:var(--gold);color:#161b23;border:0;font-weight:700}lab
 <label>Maximum lot<input type="number" id="testMaxLot" min="0.000001" step="any" placeholder="Broker volume max" required value="100"></label>
 <label>Lot step<input type="number" id="testLotStep" min="0.000001" step="any" placeholder="Broker volume step" required value="0.01"></label>
 </div>
+<div class="controls"><label><input id="compareBalances" type="checkbox" checked> Compare $1,000 and $10,000 virtual balances</label></div>
 <div class="controls"><button class="primary" id="runBacktest">Run strategy backtest</button><span id="backtestStatus" class="muted" role="status" aria-live="polite">Set dates and broker assumptions to begin.</span></div>
 <div id="backtestResults" class="researchResults">
 <h3>Full selected period · estimated research results</h3>
@@ -50,6 +51,14 @@ button.primary{background:var(--gold);color:#161b23;border:0;font-weight:700}lab
 <div class="metric"><div class="label">Simulated win rate</div><div class="value" id="simWin">—</div></div>
 <div class="metric"><div class="label">Simulated net gain · account units</div><div class="value" id="simGain">0</div></div></div>
 <div class="strategyGrid" id="strategyGrid"></div>
+<details open><summary><strong>Historical simulated trade history</strong></summary>
+<p class="smallhelp">Full selected period, seven independent virtual accounts. Table contains hypothetical fills, not actual MT5 executions.</p>
+<div class="trades-scroll"><table class="trades-table"><thead><tr><th>Strategy</th><th>Side</th><th>Signal (UTC)</th><th>Entry (UTC)</th><th>Exit (UTC)</th><th>Entry</th><th>SL</th><th>TP</th><th>Exit</th><th>Lots</th><th>Reason</th><th>Net P&amp;L</th></tr></thead><tbody id="tradesBody"></tbody></table></div>
+</details>
+<details open><summary><strong>$1,000 vs $10,000 · identical historical dataset</strong></summary>
+<p class="smallhelp">Two independent research accounts, with the same validated candles, broker assumptions and standard 0.5% risk cap. No pooled portfolio returns.</p>
+<div id="comparisonSummary" class="muted">Run a backtest with the comparison checkbox selected.</div>
+</details>
 <details class="diagnostics" open>
 <summary><strong>Trade Rejection Analysis · full selected date range</strong></summary>
 <p class="muted">Reasons returned by each strategy's Opportunity, Entry Timing, and Risk Management stages. A rejected bar is not necessarily a valid trading signal; these are diagnostic counts, not missed-profit estimates. Minimum-volume risk rejections include the original sizing explanation where available.</p>
@@ -143,6 +152,48 @@ function renderFullBacktest(){
  el("fullGain").textContent=gain.toFixed(2);
  el("fullGain").className="value"+(gain<0?" negative":" positive");
 }
+function renderTradeHistory(){
+ const root=el("tradesBody");root.replaceChildren();
+ if(!backtest)return;
+ const entries=backtest.strategies.flatMap(strategy=>strategy.trades.map(t=>({...t,setup:strategy.setup})))
+   .sort((a,b)=>a.opened_at-b.opened_at);
+ if(!entries.length){
+  const tr=document.createElement("tr");const td=document.createElement("td");td.colSpan=12;
+  td.textContent="No simulated closed trades for this date range.";tr.appendChild(td);root.appendChild(tr);return;
+ }
+ const date=timestamp=>timestamp?new Date(timestamp*1000).toISOString().slice(0,16).replace("T"," "):"—";
+ for(const trade of entries){
+  const tr=document.createElement("tr");
+  const values=[trade.setup,trade.side,date(trade.signal_at),date(trade.opened_at),date(trade.closed_at),
+    trade.entry,trade.stop??"—",trade.target??"—",trade.exit,trade.volume,trade.reason,
+    Number(trade.pnl).toFixed(2)];
+  for(const value of values){const td=document.createElement("td");td.textContent=String(value);tr.appendChild(td)}
+  tr.style.color=trade.pnl>=0?"var(--green)":"var(--red)";root.appendChild(tr);
+ }
+}
+function renderComparison(){
+ const elmt=el("comparisonSummary");
+ const comparison=backtest?.balance_comparison;
+ if(!comparison){elmt.textContent="No paired comparison was requested.";return}
+ elmt.replaceChildren();
+ const text=document.createElement("p");
+ text.textContent="Verified matching historical dataset SHA-256: "+comparison.history_fingerprint.slice(0,20)+"…";
+ elmt.appendChild(text);
+ const table=document.createElement("table");table.className="trades-table";
+ const head=document.createElement("tr");
+ for(const label of ["Starting balance","Closed trades","Winners","Win rate","Net P&L (account units)"]){
+  const th=document.createElement("th");th.textContent=label;head.appendChild(th);
+ }
+ table.appendChild(head);
+ for(const item of comparison.rows){
+  const tr=document.createElement("tr");
+  for(const value of [item.balance,item.trades,item.wins,item.win_rate===null?"N/A":item.win_rate+"%",item.net_gain]){
+   const td=document.createElement("td");td.textContent=String(value);tr.appendChild(td);
+  }
+  table.appendChild(tr);
+ }
+ const scroll=document.createElement("div");scroll.className="trades-scroll";scroll.appendChild(table);elmt.appendChild(scroll);
+}
 function renderQuality(){
  if(!backtest)return;
  const q=backtest.data_quality||{};
@@ -153,7 +204,7 @@ function renderQuality(){
   (excluded.off_grid||0)+" off-grid, "+(excluded.duplicate_slot||0)+" duplicate slots, "+
   (excluded.short_interval||0)+" short intervals) · "+(q.gap_count??"?")+" remaining gaps.";
  el("profileSummary").textContent="Profile: "+(backtest.research_profile||"unavailable")+
-  " · Original timestamps remain unchanged; missing candles were not fabricated.";
+  " · Source records remain unchanged; historical gaps were not filled. Offset distribution: "+JSON.stringify(q.offset_counts||{});
 }
 function renderRejections(){
  const root=el("rejectionDetails");root.replaceChildren();
@@ -224,6 +275,25 @@ function focusReplayWindow(){
 function render(){
  if(!series)return;
  series.setData(bars.slice(0,cursor+1).map(({time,open,high,low,close})=>({time,open,high,low,close})));
+ // Markers show only entries/exits already revealed by the replay cursor.
+ const available=new Set(bars.slice(0,cursor+1).map(b=>b.time));
+ const markers=[];
+ if(backtest){
+  for(const strategy of backtest.strategies){
+   for(const trade of strategy.trades){
+    if(available.has(trade.opened_at))markers.push({
+     time:trade.opened_at,position:trade.side==="BUY"?"belowBar":"aboveBar",
+     color:trade.side==="BUY"?"#30be9b":"#e56a75",shape:trade.side==="BUY"?"arrowUp":"arrowDown",
+     text:strategy.setup.replaceAll("_"," ").slice(0,14)+" "+trade.side});
+    if(available.has(trade.closed_at))markers.push({
+     time:trade.closed_at,position:trade.pnl>=0?"aboveBar":"belowBar",
+     color:trade.pnl>=0?"#30be9b":"#e56a75",shape:"circle",
+     text:(trade.pnl>=0?"+":"")+Number(trade.pnl).toFixed(2)});
+   }
+  }
+ }
+ markers.sort((a,b)=>a.time-b.time);
+ series.setMarkers(markers);
  focusReplayWindow();
  el("timeline").value=cursor;
  el("position").textContent=bars.length?(cursor+1)+" / "+bars.length+" candles":"0 / 0 candles";
@@ -292,7 +362,8 @@ async function load(){
   const symbol=el("symbol").value.trim(),tf=el("timeframe").value;
   if(!symbol)throw Error("Enter a broker symbol (for example XAUUSD_l).");
   const params=new URLSearchParams({symbol,timeframe:tf,limit:el("limit").value});
-  if(el("testStart").value&&el("testEnd").value){
+  if(tf==="M15"&&el("testStart").value&&el("testEnd").value){
+   params.set("validated","1");
    params.set("start",el("testStart").value+"T00:00:00Z");
    const end=new Date(el("testEnd").value+"T00:00:00Z");end.setUTCDate(end.getUTCDate()+1);
    params.set("before",new Date(end.getTime()-1).toISOString());
@@ -318,6 +389,7 @@ async function runBacktest(){
  const params=new URLSearchParams({symbol:el("symbol").value.trim(),source:el("source").textContent.replace(/^Source:\s*/,"").trim(),start:el("testStart").value,end:el("testEnd").value});
  for(const [key,id] of Object.entries(ids)){const field=el(id);if(!field.value||!field.checkValidity()){el("backtestStatus").textContent="Enter valid "+key+" before running.";field.focus();return}params.set(key,field.value)}
  if(!params.get("start")||!params.get("end")){el("backtestStatus").textContent="Select both From and To dates.";return}
+ if(el("compareBalances").checked)params.set("compare_balances","1");
  el("timeframe").value="M15";el("limit").value="2000";await load();
  const source=el("source").textContent.replace(/^Source:\s*/,"").trim();
  if(!source||source==="none"||!bars.length){el("backtestStatus").textContent="No historical M15 candles in this date range. Check source and dates.";return}
@@ -346,7 +418,7 @@ async function runBacktest(){
   if(status.status!=="COMPLETED")throw Error(status.error||"Historical backtest failed");
   backtest=status.result;el("backtestResults").style.display="block";
   el("backtestStatus").textContent=backtest.candles+" M15 candles analyzed. Estimated execution, not historical broker fills. Chart statistics cover only visible candle window.";
-  renderFullBacktest();renderBacktest();renderRejections();renderQuality();
+  renderFullBacktest();renderBacktest();renderRejections();renderQuality();renderTradeHistory();renderComparison();render();
  }catch(error){el("backtestStatus").textContent="Backtest unavailable: "+error.message}
  finally{el("runBacktest").disabled=false}
 }
