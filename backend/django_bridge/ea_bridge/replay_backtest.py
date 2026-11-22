@@ -91,7 +91,10 @@ def _clean_m15_rows(rows):
     gaps=sum(b["time"]-a["time"]>900 for a,b in zip(clean,clean[1:]))
     digest=hashlib.sha256()
     for row in clean:
-        digest.update(("{time}:{open:.8f}:{high:.8f}:{low:.8f}:{close:.8f};".format(**row)).encode())
+        digest.update(("{time}:{open:.8f}:{high:.8f}:{low:.8f}:{close:.8f};".format(
+            time=row["time"],open=float(row.get("open",0)),
+            high=float(row.get("high",0)),low=float(row.get("low",0)),
+            close=float(row["close"]))).encode())
     return clean,{"input_candles":len(rows),"accepted_candles":len(clean),
                   "offset_counts":offsets,"first_raw":rows[0]["time"] if rows else None,
                   "last_raw":rows[-1]["time"] if rows else None,
