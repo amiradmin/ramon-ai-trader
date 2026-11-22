@@ -292,6 +292,28 @@ class HistoricalBacktestQueueTests(TestCase):
                 self.assertEqual(self.client.post("/api/ea/v1/simulator/backtest/jobs",params).status_code,409)
                 self.assertEqual(EACommand.objects.count(),0)
 
+    def test_paired_comparison_flag_is_saved_without_commands(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from . import replay_jobs
+        from .models import EACommand
+        params={
+            "symbol":"XAUUSD_o","source":"research-test",
+            "start":"2026-09-22","end":"2026-11-22",
+            "balance":"1000","spread_points":"20","point":"0.01",
+            "tick_size":"0.01","tick_value":"1","volume_min":"0.01",
+            "volume_max":"100","volume_step":"0.01",
+            "compare_balances":"1",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(replay_jobs,"ROOT",Path(directory)):
+                response=self.client.post("/api/ea/v1/simulator/backtest/jobs",params)
+                self.assertEqual(response.status_code,202,response.content)
+                state=replay_jobs.read(response.json()["job_id"])
+                self.assertTrue(state["compare_balances"])
+                self.assertEqual(EACommand.objects.count(),0)
+
     def test_job_api_rejects_invalid_dates(self):
         import tempfile
         from pathlib import Path
