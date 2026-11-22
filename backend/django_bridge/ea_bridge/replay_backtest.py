@@ -6,6 +6,7 @@ explicit inputs, not broker-verified historical fills.
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 import math
+import hashlib
 
 from django.http import JsonResponse
 from django.views.decorators.http import require_GET
@@ -67,11 +68,14 @@ def _indicators(history):
 def _clean_m15_rows(rows):
     """Keep original on-grid bars only: never shift timestamps or invent candles."""
     clean=[]
+    offsets={}
     excluded={"off_grid":0,"duplicate_slot":0,"short_interval":0}
     examples=[]
     for row in rows:
         ts=row["time"]
-        if ts % 900 != 0:
+        offset=ts % 900
+        offsets[str(offset)]=offsets.get(str(offset),0)+1
+        if offset != 0:
             excluded["off_grid"]+=1
             if len(examples)<5:examples.append({"reason":"OFF_GRID","time":ts})
             continue
@@ -85,7 +89,13 @@ def _clean_m15_rows(rows):
             continue
         clean.append(row)
     gaps=sum(b["time"]-a["time"]>900 for a,b in zip(clean,clean[1:]))
+    digest=hashlib.sha256()
+    for row in clean:
+        digest.update(("{time}:{open:.8f}:{high:.8f}:{low:.8f}:{close:.8f};".format(**row)).encode())
     return clean,{"input_candles":len(rows),"accepted_candles":len(clean),
+                  "offset_counts":offsets,"first_raw":rows[0]["time"] if rows else None,
+                  "last_raw":rows[-1]["time"] if rows else None,
+                  "history_fingerprint":digest.hexdigest(),
                   "excluded":excluded,"examples":examples,"gap_count":gaps,
                   "method":"EXCLUDE_OFF_GRID_OR_DUPLICATE_ONLY_NO_SYNTHETIC_CANDLES"}
 
@@ -159,7 +169,9 @@ def _simulate(data, rows, progress=None):
             if state["peak"]>0:state["drawdown"]=max(state["drawdown"],(state["peak"]-state["equity"])/state["peak"]*100)
             state["trades"].append({"setup":name,"side":pos["side"],"opened_at":pos["opened_at"],
                "closed_at":bar["time"],"entry":round(pos["entry"],5),"exit":round(exit_price,5),
-               "volume":pos["volume"],"pnl":round(pnl,2),"reason":"STOP" if stop_hit else "TARGET"})
+               "volume":pos["volume"],"stop":round(pos["stop"],5),
+               "target":round(pos["target"],5),"signal_at":pos["signal_at"],
+               "pnl":round(pnl,2),"reason":"STOP" if stop_hit else "TARGET"})
             state["open"]=None
         # Don't evaluate the final candle: an order requires a next candle to fill.
         if idx==len(rows)-1 or not within:continue
@@ -220,7 +232,7 @@ def _simulate(data, rows, progress=None):
                 rejected(state,"RISK","INVALID_STOP_TARGET_OR_VOLUME",bar["time"])
                 continue
             state["signals"]+=1
-            state["pending"]=dict(side=result["action"],stop=stop,target=target,volume=volume)
+            state["pending"]=dict(side=result["action"],stop=stop,target=target,volume=volume,signal_at=bar["time"])
     if progress is not None:
         progress(len(rows), len(rows))
     report=[]
