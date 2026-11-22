@@ -72,8 +72,18 @@ def _simulate(data, rows, progress=None):
     # but never the live decision API or its persistent command boundary.
     with override_settings(RAMON_DEDUPE_SIGNALS=False):
         pipelines={setup:_build_pipeline(demo_mode=False,strategy_setup=setup) for setup in setups}
-    book={name:{"open":None,"trades":[],"equity":data["balance"],"peak":data["balance"],"drawdown":0,"signals":0}
+    book={name:{"open":None,"trades":[],"equity":data["balance"],"peak":data["balance"],"drawdown":0,"signals":0,
+                "evaluations":0,"rejections":{},"rejection_examples":{}}
           for name in setups}
+    def rejected(state, stage, reason, bar_time):
+        # Aggregate actual returned stage reasons, not guesses about why a trade
+        # did not execute. Keep a bounded sample for inspection without huge jobs.
+        code=str(reason or "UNSPECIFIED")[:128]
+        key=stage+":"+code
+        state["rejections"][key]=state["rejections"].get(key,0)+1
+        examples=state["rejection_examples"].setdefault(key,[])
+        if len(examples)<3:
+            examples.append(bar_time)
     first_ts=int(datetime.combine(data["start"],time.min,tzinfo=timezone.utc).timestamp())
     end_ts=int(datetime.combine(data["end"]+timedelta(days=1),time.min,tzinfo=timezone.utc).timestamp())
     for idx in range(WARMUP,len(rows)):
@@ -92,6 +102,8 @@ def _simulate(data, rows, progress=None):
                     if (pos["side"]=="BUY" and pos["stop"]<entry<pos["target"]) or (pos["side"]=="SELL" and pos["target"]<entry<pos["stop"]):
                         pos["entry"]=entry;pos["opened_at"]=bar["time"]
                         state["open"]=pos
+                    else:
+                        rejected(state,"FILL","ENTRY_OUTSIDE_STOP_TARGET",bar["time"])
             pos=state["open"]
             if pos is None: continue
             # Bid-chart approximation; conservative SL first if both hit same bar.
@@ -135,11 +147,25 @@ def _simulate(data, rows, progress=None):
                 take_profit_points=max(1,2*atr/data["point"]),
                 target_reward_risk=pipeline.risk_manager.config.target_reward_risk,
                 open_risk_percent=0)
+            state["evaluations"]+=1
             try:
                 result=pipeline.run(market)
-            except (ValueError, TypeError, KeyError, ArithmeticError):
+            except (ValueError, TypeError, KeyError, ArithmeticError) as exc:
+                rejected(state,"EVALUATION",type(exc).__name__,bar["time"])
                 continue
-            if not result.get("approved") or result.get("action") not in ("BUY","SELL"):continue
+            if not result.get("approved") or result.get("action") not in ("BUY","SELL"):
+                stages=result.get("stages") or {}
+                rejection_stage=result.get("rejected_by")
+                if rejection_stage not in ("opportunities","entry_timing","risk_management"):
+                    rejection_stage=next((name for name in ("opportunities","entry_timing","risk_management")
+                        if isinstance(stages.get(name),dict) and not stages[name].get("approved")),None)
+                if rejection_stage:
+                    rejected(state,rejection_stage.upper(),
+                        (stages.get(rejection_stage) or {}).get("reason") or result.get("reason"),
+                        bar["time"])
+                else:
+                    rejected(state,"EVALUATION",result.get("reason") or "NO_APPROVED_SIGNAL",bar["time"])
+                continue
             risk=result["stages"]["risk_management"]
             stop=risk.get("stop_price");target=risk.get("target_price")
             if target is None:
@@ -148,7 +174,9 @@ def _simulate(data, rows, progress=None):
             try:
                 stop=float(stop);target=float(target);volume=float(volume)
                 if not all(math.isfinite(v) for v in (stop,target,volume)) or volume<=0:continue
-            except (ValueError,TypeError):continue
+            except (ValueError,TypeError):
+                rejected(state,"RISK","INVALID_STOP_TARGET_OR_VOLUME",bar["time"])
+                continue
             state["signals"]+=1
             state["pending"]=dict(side=result["action"],stop=stop,target=target,volume=volume)
     if progress is not None:
@@ -164,7 +192,12 @@ def _simulate(data, rows, progress=None):
            net_gain=round(state["equity"]-data["balance"],2),
            profit_factor=round(gross_win/gross_loss,2) if gross_loss else None,
            max_drawdown_pct=round(state["drawdown"],2),
-           open_position=state["open"] is not None,trades=trades))
+           open_position=state["open"] is not None,trades=trades,
+           evaluations=state["evaluations"],
+           rejections=[dict(stage=key.split(":",1)[0],reason=key.split(":",1)[1],
+                count=count,sample_bar_times=state["rejection_examples"][key])
+              for key,count in sorted(state["rejections"].items(),key=lambda item:(-item[1],item[0]))[:25]],
+           rejection_total=sum(state["rejections"].values())))
     return report
 
 def run_backtest_data(data, *, max_candles=MAX_TEST_CANDLES, progress=None):
