@@ -111,7 +111,7 @@ class HistoricalStrategyBacktestTests(TestCase):
             tick_size="0.01",tick_value="1",volume_min="0.01",
             volume_max="10",volume_step="0.01")
         base=datetime(2025,12,30,0,0,tzinfo=timezone.utc)
-        for i in range(140):
+        for i in range(240):
             stamp=base+timedelta(minutes=15*i)
             MarketBar.objects.create(source="historical-test",symbol="XAUUSD_o",timeframe="M15",
                 timestamp=stamp,open="2600",high="2602",low="2598",close="2600",volume="1")
