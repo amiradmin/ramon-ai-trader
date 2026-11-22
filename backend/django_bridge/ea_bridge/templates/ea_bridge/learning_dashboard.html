@@ -79,6 +79,7 @@ svg{width:100%;height:145px;display:block}.chart-label{fill:var(--muted);font-si
 <form hidden>{% csrf_token %}</form>
 </main>
 <script>
+const TRAINING_SYMBOL = "{{ training_symbol|escapejs }}";
 const API="/api/ea/v1/learning/";
 const $=id=>document.getElementById(id);
 const fmt=(v,n=2)=>v===null||v===undefined||!Number.isFinite(Number(v))?"—":Number(v).toFixed(n);
@@ -179,7 +180,7 @@ document.querySelectorAll("[data-train-pipeline]").forEach(button=>button.addEve
  pendingTrainingButton=button;
  $("pipeline-train-title").textContent=isArima?"Confirm ARIMA forecast":"Confirm pipeline training";
  $("pipeline-train-description").textContent=isArima?"You are about to queue an ARIMA forecast training run using completed market candles.":"You are about to train one selected trade-outcome model.";
- $("pipeline-train-summary").innerHTML="<strong>Selected pipeline:</strong> "+esc(pipelineName)+"<br><strong>Symbol:</strong> XAUUSD_o<br><strong>Timeframe:</strong> M15<br><strong>Scope:</strong> "+(isArima?"ARIMA market-candle forecasting":"This pipeline only; the other six pipelines will not be trained");
+ $("pipeline-train-summary").innerHTML="<strong>Selected pipeline:</strong> "+esc(pipelineName)+"<br><strong>Symbol:</strong> "+esc(TRAINING_SYMBOL)+"<br><strong>Timeframe:</strong> M15<br><strong>Scope:</strong> "+(isArima?"ARIMA market-candle forecasting":"This pipeline only; the other six pipelines will not be trained");
  $("pipeline-train-warning").textContent=isArima?"At least 50 matching completed candles are required. The forecast is research evidence only and cannot authorize trades.":"Training uses eligible closed-trade outcomes. Training does not change live strategy settings, authorize trades, or bypass Django risk controls.";
  $("pipeline-train-confirm").disabled=false;
  $("pipeline-train-confirm").textContent="Start training";
@@ -196,7 +197,7 @@ async function submitPipelineTraining(){
  button.disabled=true;
  if(status)status.textContent="Submitting…";
  try{
-  const d=await request(API+"training/start",{method:"POST",headers:{"Content-Type":"application/json","X-CSRFToken":csrf()},body:JSON.stringify({symbol:"XAUUSD_o",timeframe:"M15",models:[modelKey]})});
+  const d=await request(API+"training/start",{method:"POST",headers:{"Content-Type":"application/json","X-CSRFToken":csrf()},body:JSON.stringify({symbol:TRAINING_SYMBOL,timeframe:"M15",models:[modelKey]})});
   if(status)status.textContent=d.message||"Training queued";
   closeTrainingDialog();
   await loadTraining();

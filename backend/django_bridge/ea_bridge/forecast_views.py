@@ -42,7 +42,7 @@ def arima_status(request):
     result["model_version"] = version
     feeds = demo_feeds(now=now)
     if not feeds:
-        return JsonResponse({**result, "state": "NO_DEMO_FEED"})
+        return JsonResponse({**result, "state": "NO_ACCOUNT_FEED"})
     feed = feeds[0]
     age = (now-feed.last_seen).total_seconds()
     result.update(source=feed.instance_id, symbol=feed.symbol, feed_age_seconds=max(0, round(age)))

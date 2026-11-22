@@ -7,16 +7,16 @@ from .profit_protection import protection_status, create_protection_commands
 from ramon_pipeline.signalflow.profit_protection import ProfitProtection
 
 
-@override_settings(RAMON_PROFIT_PROTECTION_INSTANCE='demo',RAMON_PROFIT_PROTECTION_LOGIN='123',
-    RAMON_PROFIT_PROTECTION_SERVER='Demo',RAMON_DEMO_PROFIT_PROTECTION_ENABLED=True,
+@override_settings(RAMON_REAL_CENT_INSTANCE='demo',RAMON_REAL_CENT_LOGIN='123',RAMON_REAL_CENT_SERVER='Demo',RAMON_REAL_CENT_CURRENCY='USC',RAMON_REAL_CENT_SYMBOL='XAUUSD_o',RAMON_PROFIT_PROTECTION_INSTANCE='demo',RAMON_PROFIT_PROTECTION_LOGIN='123',
+    RAMON_PROFIT_PROTECTION_SERVER='Demo',RAMON_REAL_CENT_PROFIT_PROTECTION_ENABLED=True,
     RAMON_EA_COMMAND_CREATION_ENABLED=True, RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
 class ProfitProtectionTests(TestCase):
     def setUp(self):
         self.feed=EAHeartbeat.objects.create(instance_id='demo',account_login='123',symbol='XAUUSD_o',
             server_name='Demo',status='TELEMETRY_OK',terminal_connected=True,trade_allowed=True,
-            payload=dict(account_trade_mode=0,server_name='Demo',quote_time=timezone.now().isoformat(),
+            payload=dict(account_trade_mode=2,server_name='Demo',quote_time=timezone.now().isoformat(),
                 quote=dict(bid=111,ask=111.2,point=.01),symbol_info=dict(tick_size=.01,stops_level_points=0),
-                positions=[dict(ticket='42',symbol='XAUUSD_o',type=0,price_open=100,sl=90,tp=112.5,volume=.02)]))
+                account=dict(currency='USC'),positions=[dict(ticket='42',symbol='XAUUSD_o',type=0,price_open=100,sl=90,tp=112.5,volume=.02)]))
         self.original=EACommand.objects.create(command_id='original',instance_id='demo',account_login='123',
             symbol='XAUUSD_o',action='OPEN',state='EXECUTED',execution_authorized=True,decision_id='protect-decision',
             expires_at=timezone.now(),payload=dict(side='BUY',stop_loss=90,take_profit=112.5,volume=.02,server_name='Demo'),
@@ -67,7 +67,7 @@ class ProfitProtectionTests(TestCase):
     def test_scope_prevents_activation_for_other_demo_accounts(self):
         with self.settings(RAMON_PROFIT_PROTECTION_LOGIN='other'):
             self.assertEqual(self.produce().count(),0)
-            self.assertEqual(protection_status(self.feed)['state'],'OUTSIDE_CONFIGURED_DEMO_SCOPE')
+            self.assertEqual(protection_status(self.feed)['state'],'OUTSIDE_CONFIGURED_ACCOUNT_SCOPE')
 
     def test_short_uses_ask_and_never_loosens_existing_protection(self):
         self.original.payload.update(side='SELL',stop_loss=110,take_profit=87.5);self.original.save()
@@ -83,7 +83,7 @@ class ProfitProtectionTests(TestCase):
 
     def test_demo_identity_freshness_and_permissions_fail_closed(self):
         original=deepcopy(self.feed.payload)
-        for key,value in [('account_trade_mode',2),('account_trade_mode',False),('server_name','Other'),
+        for key,value in [('account_trade_mode',0),('account_trade_mode',False),('server_name','Other'),
             ('quote_time',(timezone.now()-timedelta(minutes=2)).isoformat())]:
             self.feed.payload=deepcopy(original);self.feed.payload[key]=value;self.save()
             self.assertEqual(self.produce().count(),0)
@@ -104,7 +104,7 @@ class ProfitProtectionTests(TestCase):
         self.assertEqual(self.produce().count(),0)
 
     def test_each_gate_blocks_command_and_observation_is_read_only(self):
-        for key in ['RAMON_DEMO_PROFIT_PROTECTION_ENABLED','RAMON_EA_COMMAND_CREATION_ENABLED','RAMON_EA_COMMAND_EXECUTION_ENABLED']:
+        for key in ['RAMON_REAL_CENT_PROFIT_PROTECTION_ENABLED','RAMON_EA_COMMAND_CREATION_ENABLED','RAMON_EA_COMMAND_EXECUTION_ENABLED']:
             with self.settings(**{key:False}): self.assertEqual(self.produce().count(),0)
         self.assertEqual(protection_status(self.feed)['positions'][0]['state'],'READY')
         self.assertEqual(EACommand.objects.count(),1)

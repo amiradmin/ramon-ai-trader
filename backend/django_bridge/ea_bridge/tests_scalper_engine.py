@@ -9,7 +9,7 @@ from .models import AccountDailyBaseline, EACommand, EAHeartbeat, ScalperControl
 from .scalper_engine import MAGIC, open_scalp, close_scalp, allow_main_alongside_scalps, exposure_money, engine_cycle
 
 
-@override_settings(RAMON_SCALP_EXECUTION_ENABLED=True, RAMON_EA_COMMAND_CREATION_ENABLED=True,
+@override_settings(RAMON_REAL_CENT_INSTANCE='demo',RAMON_REAL_CENT_LOGIN='123',RAMON_REAL_CENT_SERVER='Demo',RAMON_REAL_CENT_CURRENCY='USC',RAMON_REAL_CENT_SYMBOL='GOLD',RAMON_SCALP_EXECUTION_ENABLED=True, RAMON_EA_COMMAND_CREATION_ENABLED=True,
     RAMON_EA_COMMAND_EXECUTION_ENABLED=True, RAMON_SCALP_INSTANCE='demo',RAMON_SCALP_LOGIN='123',RAMON_SCALP_SERVER='Demo')
 class IndependentScalperTests(TestCase):
     def setUp(self):
@@ -17,10 +17,10 @@ class IndependentScalperTests(TestCase):
         self.main = dict(ticket='1',symbol='GOLD',type=0,volume=.1,price_open=100,sl=90,tp=120,
                          tick_size=.01,tick_value=1,magic=0)
         self.feed = EAHeartbeat.objects.create(instance_id='demo',account_login='123',server_name='Demo',symbol='GOLD',
-            status='TELEMETRY_OK',terminal_connected=True,trade_allowed=True,payload=dict(account_trade_mode=0,
+            status='TELEMETRY_OK',terminal_connected=True,trade_allowed=True,payload=dict(account_trade_mode=2,
                 account_margin_mode=2,execution_profile='ticket-magic-v1',server_name='Demo',broker_day='2026-11-10',
                 quote_time=self.now.isoformat(),quote=dict(bid=100,ask=100.2,point=.01),
-                account=dict(balance=10000,equity=10000),positions=[self.main],
+                account=dict(currency='USC',balance=10000,equity=10000),positions=[self.main],
                 symbol_info=dict(tick_size=.01,tick_value=1,volume_step=.01,volume_min=.01,volume_max=100,stops_level_points=0)))
         EAHeartbeat.objects.filter(pk=self.feed.pk).update(last_seen=self.now)
         self.feed.refresh_from_db()

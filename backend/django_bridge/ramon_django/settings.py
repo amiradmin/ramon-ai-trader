@@ -62,11 +62,16 @@ RAMON_ARIMA_SHADOW_WINDOW = int(os.environ.get("RAMON_ARIMA_SHADOW_WINDOW", "256
 RAMON_SHORT_STOP_SPREAD_ADJUST = os.environ.get("RAMON_SHORT_STOP_SPREAD_ADJUST", "0") == "1"
 RAMON_IMPULSE_START_MODE = os.environ.get("RAMON_IMPULSE_START_MODE", "LAST_SWING_LOW")
 RAMON_ENFORCE_BAR_CLOSE = os.environ.get("RAMON_ENFORCE_BAR_CLOSE", "0") == "1"
-# Legacy compatibility only. Per-trade demo risk is persisted in the Django Risk Management dashboard.
-RAMON_DEMO_RISK_PERCENT = float(os.environ.get("RAMON_DEMO_RISK_PERCENT", "0.5"))
 # Command creation and delivery are separate explicit opt-ins; both default off.
 RAMON_EA_COMMAND_CREATION_ENABLED = os.environ.get("RAMON_EA_COMMAND_CREATION_ENABLED", "0") == "1"
 RAMON_EA_COMMAND_EXECUTION_ENABLED = os.environ.get("RAMON_EA_COMMAND_EXECUTION_ENABLED", "0") == "1"
+# All five values must be explicitly set in the local deployment environment.
+# A real MT5 trade mode alone cannot establish that an account uses cent units.
+RAMON_REAL_CENT_INSTANCE = os.environ.get("RAMON_REAL_CENT_INSTANCE", "")
+RAMON_REAL_CENT_LOGIN = os.environ.get("RAMON_REAL_CENT_LOGIN", "")
+RAMON_REAL_CENT_SERVER = os.environ.get("RAMON_REAL_CENT_SERVER", "")
+RAMON_REAL_CENT_CURRENCY = os.environ.get("RAMON_REAL_CENT_CURRENCY", "")
+RAMON_REAL_CENT_SYMBOL = os.environ.get("RAMON_REAL_CENT_SYMBOL", "")
 RAMON_REDIS_URL = os.environ.get("RAMON_REDIS_URL", "redis://127.0.0.1:6379/0")
 RAMON_REDIS_MARKET_MAXLEN = int(os.environ.get("RAMON_REDIS_MARKET_MAXLEN", "100000"))
 RAMON_REDIS_CONSUMER = os.environ.get("RAMON_REDIS_CONSUMER", "ramon-worker-1")
@@ -80,7 +85,7 @@ else:
     DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": str(DB_PATH)}}
 
 # Django calculates protection; the EA only executes the authorized command.
-RAMON_DEMO_PROFIT_PROTECTION_ENABLED = os.environ.get("RAMON_DEMO_PROFIT_PROTECTION_ENABLED", "0") == "1"
+RAMON_REAL_CENT_PROFIT_PROTECTION_ENABLED = os.environ.get("RAMON_REAL_CENT_PROFIT_PROTECTION_ENABLED", "0") == "1"
 RAMON_PROFIT_PROTECTION_INSTANCE = os.environ.get("RAMON_PROFIT_PROTECTION_INSTANCE", "")
 RAMON_PROFIT_PROTECTION_LOGIN = os.environ.get("RAMON_PROFIT_PROTECTION_LOGIN", "")
 RAMON_PROFIT_PROTECTION_SERVER = os.environ.get("RAMON_PROFIT_PROTECTION_SERVER", "")

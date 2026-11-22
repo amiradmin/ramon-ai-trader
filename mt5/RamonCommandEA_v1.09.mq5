@@ -877,10 +877,9 @@ void SafeOpen(const string command_json,const string command_id,
    double tp=JsonNumber(command_json,"take_profit",0);
    bool scalp=JsonString(command_json,"engine","")=="SCALPER";
    ulong magic=(ulong)JsonNumber(command_json,"magic",0);
-   if(scalp && ((int)AccountInfoInteger(ACCOUNT_TRADE_MODE)!=ACCOUNT_TRADE_MODE_DEMO ||
-      (int)AccountInfoInteger(ACCOUNT_MARGIN_MODE)!=ACCOUNT_MARGIN_MODE_RETAIL_HEDGING || magic!=26092213))
+   if(scalp && ((int)AccountInfoInteger(ACCOUNT_MARGIN_MODE)!=ACCOUNT_MARGIN_MODE_RETAIL_HEDGING || magic!=26092213))
    {
-      reason="SCALPER_DEMO_HEDGING_MAGIC_REQUIRED";
+      reason="SCALPER_HEDGING_MAGIC_REQUIRED";
       ack_state="REJECTED";
       return;
    }

@@ -9,7 +9,7 @@ from ea_bridge.scalper_engine import engine_cycle
 
 
 class Command(BaseCommand):
-    help = 'Independent demo scalper: paper collection and separately gated ticket-scoped execution.'
+    help = 'Independent real cent scalper: paper collection and separately gated ticket-scoped execution.'
     def add_arguments(self, parser):
         parser.add_argument('--once', action='store_true')
     def handle(self,*args,**options):

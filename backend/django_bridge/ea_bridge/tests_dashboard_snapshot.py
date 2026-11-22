@@ -69,7 +69,7 @@ class DashboardMarketSnapshotTests(TestCase):
         self.assertEqual(data["broker"]["account"]["balance"], "10000.00")
         self.assertNotIn("account_login", data["broker"])
         self.assertNotIn("login", data["broker"]["account"])
-        self.assertEqual(data["thresholds"]["profile"], "demo")
+        self.assertEqual(data["thresholds"]["profile"], "standard")
 
 class DashboardRangeAnalysisTests(TestCase):
     def test_range_analysis_uses_saved_decisions_and_account_scoped_closed_outcomes(self):
@@ -135,7 +135,7 @@ class DashboardRangeAnalysisTests(TestCase):
         self.assertEqual(analysis["closed_trades"], 1)
         self.assertEqual(analysis["winning_trades"], 1)
         self.assertEqual(analysis["win_rate_percent"], 100.0)
-        self.assertEqual(analysis["net_pnl"], "25.50000000")
+        self.assertEqual(Decimal(analysis["net_pnl"]), Decimal("25.5"))
         self.assertEqual(analysis["average_r_multiple"], 1.5)
         self.assertEqual(analysis["latest_setup"]["side"], "BUY")
         self.assertIn(analysis["market"]["status"], {"CLOSED", "STALE_OR_UNAVAILABLE"})

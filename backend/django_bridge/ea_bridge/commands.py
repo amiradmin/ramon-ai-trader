@@ -2,7 +2,7 @@
 
 The decision pipeline may create an OPEN command only after strategy approval,
 a passing risk verdict, and server-side account validation. This module delivers durable commands and invokes the separately gated Django
-profit-protection planner for demo positions.
+profit-protection planner for positions on the configured real cent account.
 Execution remains gated by RAMON_EA_COMMAND_EXECUTION_ENABLED.
 """
 import json
@@ -16,6 +16,7 @@ from django.views.decorators.http import require_POST
 
 from .auth import BearerTokenRequired
 from .models import EACommand, EAHeartbeat
+from .account_scope import real_cent_scope
 
 
 TERMINAL_STATES = {
@@ -85,7 +86,6 @@ def next_command(request):
             "trading_authorization": False, "authorization_reason": "HEARTBEAT_MISSING",
         })
     payload = heartbeat.payload if isinstance(heartbeat.payload, dict) else {}
-    trade_mode = payload.get("account_trade_mode")
     max_age = int(getattr(settings, "RAMON_EA_HEARTBEAT_MAX_AGE_SECONDS", 90))
     age = (now - heartbeat.last_seen).total_seconds()
     if age < 0 or age > max_age:
@@ -98,10 +98,8 @@ def next_command(request):
         reason = "TERMINAL_NOT_READY"
     elif not heartbeat.trade_allowed:
         reason = "TERMINAL_TRADING_DISABLED"
-    elif type(trade_mode) is not int or trade_mode != 0:
-        reason = "DEMO_ACCOUNT_REQUIRED"
     else:
-        reason = ""
+        _, reason = real_cent_scope(heartbeat)
 
     if reason:
         return JsonResponse({

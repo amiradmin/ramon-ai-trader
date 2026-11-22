@@ -1,11 +1,12 @@
 from datetime import timedelta
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from .models import EACommand,EAHeartbeat,LearningTradeOutcome,StrategyDecisionRecord
 from .execution_observer import request_metrics,enrich_outcome
 
 
+@override_settings(RAMON_REAL_CENT_INSTANCE='demo',RAMON_REAL_CENT_LOGIN='123',RAMON_REAL_CENT_SERVER='Broker-Live',RAMON_REAL_CENT_CURRENCY='USC',RAMON_REAL_CENT_SYMBOL='XAUUSD_o')
 class ExecutionObserverTests(TestCase):
     def setUp(self):
         self.decision=StrategyDecisionRecord.objects.create(decision_id="execution-d",symbol="XAUUSD_o",action="BUY",
@@ -15,7 +16,7 @@ class ExecutionObserverTests(TestCase):
             symbol="XAUUSD_o",action="OPEN",state="EXECUTED",decision_id=self.decision.decision_id,
             payload={"side":"BUY"},expires_at=timezone.now()+timedelta(seconds=60),
             result={"execution":{"version":1,"request_price":100.3,"fill_price":100.25,"bid":100.1,"ask":100.3}})
-        EAHeartbeat.objects.create(instance_id="demo",account_login="123",symbol="XAUUSD_o",payload={"account_trade_mode":0})
+        EAHeartbeat.objects.create(instance_id="demo",account_login="123",server_name="Broker-Live",symbol="XAUUSD_o",payload={"account_trade_mode":2,"server_name":"Broker-Live","account":{"currency":"USC"}})
 
     def test_signed_request_slippage_and_decision_drift_are_different(self):
         values=request_metrics(self.command)

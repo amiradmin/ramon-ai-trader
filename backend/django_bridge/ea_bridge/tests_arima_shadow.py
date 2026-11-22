@@ -15,10 +15,11 @@ FITTER = "ramon_pipeline.signalflow.forecasting.arima.forecast_next_close"
 
 
 @override_settings(RAMON_ARIMA_SHADOW_ENABLED=True, RAMON_ARIMA_SHADOW_WINDOW=256)
+@override_settings(RAMON_REAL_CENT_INSTANCE='shadow-demo',RAMON_REAL_CENT_LOGIN='123',RAMON_REAL_CENT_SERVER='Broker-Live',RAMON_REAL_CENT_CURRENCY='USC',RAMON_REAL_CENT_SYMBOL='XAUUSD_o')
 class ArimaShadowLifecycleTests(TestCase):
     def setUp(self):
-        self.feed = EAHeartbeat.objects.create(instance_id="shadow-demo", symbol="XAUUSD_o",
-            status="TELEMETRY_OK", terminal_connected=True, payload={"account_trade_mode": 0})
+        self.feed = EAHeartbeat.objects.create(instance_id="shadow-demo", account_login="123", server_name="Broker-Live", symbol="XAUUSD_o",
+            status="TELEMETRY_OK", terminal_connected=True, payload={"account_trade_mode": 2,"server_name":"Broker-Live","account":{"currency":"USC"}})
         EAHeartbeat.objects.filter(pk=self.feed.pk).update(last_seen=NOW)
         MarketBar.objects.bulk_create([MarketBar(source=self.feed.instance_id, symbol=self.feed.symbol,
             timeframe="M15", timestamp=BASE-INTERVAL*(128-i),
@@ -144,9 +145,9 @@ class ArimaShadowLifecycleTests(TestCase):
 
     @patch(FITTER)
     def test_non_demo_or_stale_feeds_do_not_start_models(self, fit):
-        EAHeartbeat.objects.filter(pk=self.feed.pk).update(payload={"account_trade_mode": 2})
+        EAHeartbeat.objects.filter(pk=self.feed.pk).update(payload={"account_trade_mode": 0})
         self.cycle()
-        EAHeartbeat.objects.filter(pk=self.feed.pk).update(payload={"account_trade_mode": 0}, last_seen=NOW-timedelta(minutes=6))
+        EAHeartbeat.objects.filter(pk=self.feed.pk).update(payload={"account_trade_mode": 2,"server_name":"Broker-Live","account":{"currency":"USC"}}, last_seen=NOW-timedelta(minutes=6))
         self.cycle()
         fit.assert_not_called()
         self.assertFalse(ArimaShadowForecast.objects.exists())

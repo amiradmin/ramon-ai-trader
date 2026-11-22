@@ -1,5 +1,6 @@
 """Forward-only ARIMA observation and scoring. No decision or order writes."""
 from __future__ import annotations
+from .account_scope import real_cent_scope
 
 from datetime import timedelta
 from decimal import Decimal
@@ -33,8 +34,7 @@ def demo_feeds(*, fresh_only=False, now=None):
         rows = rows.filter(last_seen__gte=now-timedelta(minutes=5), last_seen__lte=now,
                            terminal_connected=True, status="TELEMETRY_OK")
     return [row for row in rows[:100] if isinstance(row.payload, dict)
-            and type(row.payload.get("account_trade_mode")) is int
-            and row.payload["account_trade_mode"] == 0]
+            and real_cent_scope(row)[0]]
 
 
 def _market_rows(source, symbol, now):

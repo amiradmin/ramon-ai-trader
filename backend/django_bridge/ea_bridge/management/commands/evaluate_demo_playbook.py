@@ -1,4 +1,6 @@
 """Read-only chronological comparison of the demo playbook and original policy."""
+from ea_bridge.account_scope import real_cent_scope
+
 from dataclasses import replace
 import json
 import math
@@ -21,7 +23,7 @@ class Command(BaseCommand):
                             help="Explicitly exclude misaligned historical rows (descriptive studies only).")
         parser.add_argument("--profile", choices=("standard", "expanded"), default="standard",
                             help="Use standard thresholds by default; expanded is a separate research policy.")
-        parser.add_argument("--symbol", default="XAUUSD_o")
+        parser.add_argument("--symbol", default="XAUUSD_i")
         parser.add_argument("--limit", type=int, default=2000)
         parser.add_argument("--spread-points", type=float, required=True)
         parser.add_argument("--slippage-points", type=float, required=True)
@@ -36,8 +38,8 @@ class Command(BaseCommand):
             raise CommandError("--limit must be between 129 and 20000")
         heartbeat = EAHeartbeat.objects.filter(instance_id=options["source"], symbol=options["symbol"]).first()
         payload = heartbeat.payload if heartbeat and isinstance(heartbeat.payload, dict) else {}
-        if type(payload.get("account_trade_mode")) is not int or payload["account_trade_mode"] != 0:
-            raise CommandError("A matching, explicitly demo EA heartbeat is required for broker metadata.")
+        if not real_cent_scope(heartbeat)[0]:
+            raise CommandError("A matching, configured real cent EA heartbeat is required for broker metadata.")
         try:
             quote, info = payload["quote"], payload["symbol_info"]
             point = float(quote["point"])
@@ -51,7 +53,7 @@ class Command(BaseCommand):
             if not math.isfinite(account["stop_level_points"]) or account["stop_level_points"] < 0:
                 raise ValueError("invalid broker stop level")
         except (KeyError, TypeError, ValueError, ZeroDivisionError) as exc:
-            raise CommandError(f"Complete valid demo symbol metadata is required: {exc}") from exc
+            raise CommandError(f"Complete valid real cent symbol metadata is required: {exc}") from exc
 
         quality = {}
         periods = {"M15": 900, "M5": 300, "H1": 3600}

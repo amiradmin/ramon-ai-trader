@@ -14,6 +14,7 @@ from django.utils.dateparse import parse_datetime
 
 from .models import AccountDailyBaseline, DecisionThresholdConfig, EACommand, EAHeartbeat, ScalperControl, ScalpObservation
 from .command_producer import _decimal
+from .account_scope import real_cent_scope
 
 ENGINE = 'SCALPER'
 MAGIC = 26092213
@@ -35,7 +36,7 @@ def owned_position(feed, position):
 
 
 def limits():
-    saved = DecisionThresholdConfig.objects.filter(profile='demo').first()
+    saved = DecisionThresholdConfig.objects.filter(profile='standard').first()
     risk = saved.values.get('risk_management',{}) if saved else {}
     return (_decimal(risk.get('max_total_risk_percent',2),'portfolio limit'),
             _decimal(risk.get('max_daily_loss_percent',5),'daily limit'))
@@ -77,7 +78,8 @@ def readiness(feed, *, now=None):
     scope = (getattr(settings,'RAMON_SCALP_INSTANCE',''),getattr(settings,'RAMON_SCALP_LOGIN',''),
              getattr(settings,'RAMON_SCALP_SERVER',''))
     if scope != (feed.instance_id,feed.account_login,feed.server_name): return 'OUTSIDE_SCALPER_SCOPE'
-    if type(p.get('account_trade_mode')) is not int or p['account_trade_mode'] != 0: return 'DEMO_REQUIRED'
+    allowed, reason = real_cent_scope(feed)
+    if not allowed: return reason
     if p.get('account_margin_mode') != 2 or type(p.get('account_margin_mode')) is not int:
         return 'HEDGING_TELEMETRY_REQUIRED'
     if p.get('execution_profile') != 'ticket-magic-v1': return 'EA_109_REQUIRED'

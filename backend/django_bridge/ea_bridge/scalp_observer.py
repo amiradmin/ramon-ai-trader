@@ -1,4 +1,6 @@
 """Forward paper scalping on completed M1/M5 data; cannot create commands."""
+from .account_scope import real_cent_scope
+
 from collections import Counter
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone as utc_timezone
@@ -29,10 +31,10 @@ def record_scalp(feed, *, now=None):
     with transaction.atomic():
         feed = EAHeartbeat.objects.select_for_update().get(pk=feed.pk)
         p = feed.payload
-        if (not isinstance(p, dict) or type(p.get('account_trade_mode')) is not int or p['account_trade_mode'] != 0
+        if (not real_cent_scope(feed)[0]
             or not feed.terminal_connected or not 0 <= (now-feed.last_seen).total_seconds() <= 30
             or p.get('server_name') != feed.server_name):
-            health_skip(feed,'DEMO_FEED_NOT_READY',now)
+            health_skip(feed,'ACCOUNT_FEED_NOT_READY',now)
             return 0
         try:
             quote_time = parse_datetime(str(p.get('quote_time', '')))

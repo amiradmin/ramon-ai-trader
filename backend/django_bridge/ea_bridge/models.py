@@ -236,7 +236,7 @@ class LearningTrainingJob(models.Model):
         PARTIAL = "PARTIAL", "Partially completed"
         FAILED = "FAILED", "Failed"
 
-    symbol = models.CharField(max_length=32, default="XAUUSD_o")
+    symbol = models.CharField(max_length=32, default="XAUUSD_i")
     timeframe = models.CharField(max_length=16, default="M15")
     source = models.CharField(max_length=128, blank=True, default="")
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.QUEUED, db_index=True)

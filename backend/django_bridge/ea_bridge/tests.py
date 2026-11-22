@@ -26,7 +26,7 @@ class DecisionThresholdConfigurationTests(TestCase):
         response = self.client.get(self.url)
         self.assertEqual(response.status_code, 200)
         data = response.json()
-        self.assertEqual(data["profile"], "demo")
+        self.assertEqual(data["profile"], "standard")
         groups = {group["key"]: group for group in data["groups"]}
         volatility = {item["key"]: item for item in groups["opportunities"]["items"]}
         self.assertEqual(volatility["atr_ratio_min"]["value"], 0.6)
@@ -53,7 +53,7 @@ class DecisionThresholdConfigurationTests(TestCase):
         )
         self.assertEqual(response.status_code, 200, response.content)
         from .decision import _build_pipeline
-        pipeline = _build_pipeline(demo_mode=True)
+        pipeline = _build_pipeline(demo_mode=False)
         self.assertEqual(pipeline.opportunities.config.atr_ratio_min, 0.75)
         self.assertEqual(pipeline.opportunities.config.atr_ratio_max, 2.2)
         self.assertEqual(pipeline.entry_timer.config.max_chase_atr, 0.7)
@@ -123,7 +123,7 @@ class DecisionThresholdConfigurationTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["values"]["opportunities"]["atr_ratio_min"], 0.6)
-        self.assertEqual(DecisionThresholdConfig.objects.get(profile="demo").values, {})
+        self.assertEqual(DecisionThresholdConfig.objects.get(profile="standard").values, {})
 
 class DemoOpportunityProfileTests(TestCase):
     def test_expanded_opportunity_profile_is_demo_only_and_keeps_risk_limits(self):
@@ -537,6 +537,7 @@ class ServerDailyBaselineTelemetryTests(TestCase):
         ).exists())
 
 
+@override_settings(RAMON_REAL_CENT_INSTANCE='ea-decision-test',RAMON_REAL_CENT_LOGIN='12345678',RAMON_REAL_CENT_SERVER='LiteFinance-MT5-Demo',RAMON_REAL_CENT_CURRENCY='USD',RAMON_REAL_CENT_SYMBOL='XAUUSD_o')
 class DjangoDecisionApiTests(TestCase):
     url="/api/ea/v1/decision"
     headers={"HTTP_AUTHORIZATION":"Bearer test-token"}
@@ -553,7 +554,7 @@ class DjangoDecisionApiTests(TestCase):
             trade_allowed=False,
             payload={
                 "server_name": "LiteFinance-MT5-Demo",
-                "account_trade_mode": 0,
+                "account_trade_mode": 2,
                 "broker_day": date.today().isoformat(),
                 "account": {"balance": "10000", "equity": "10000",
                             "margin": "0", "free_margin": "10000",
@@ -872,6 +873,7 @@ class DjangoDecisionApiTests(TestCase):
         r=self.client.post(self.url,data=json.dumps(p),content_type="application/json",**self.headers)
         self.assertEqual(r.status_code,400)
 
+@override_settings(RAMON_REAL_CENT_INSTANCE='command-poll-ea',RAMON_REAL_CENT_LOGIN='12345678',RAMON_REAL_CENT_SERVER='LiteFinance-MT5-Demo',RAMON_REAL_CENT_CURRENCY='USC',RAMON_REAL_CENT_SYMBOL='XAUUSD_o')
 class CommandPollingTests(TestCase):
     url = "/api/ea/v1/commands/next"
     headers = {"HTTP_AUTHORIZATION": "Bearer test-token"}
@@ -890,7 +892,7 @@ class CommandPollingTests(TestCase):
             status="TELEMETRY_OK",
             terminal_connected=True,
             trade_allowed=True,
-            payload={"server_name": "LiteFinance-MT5-Demo", "account_trade_mode": 0},
+            payload={"server_name": "LiteFinance-MT5-Demo", "account_trade_mode": 2,"account":{"currency":"USC"}},
         )
         command = EACommand.objects.create(
             command_id="ramon-open-test-001",
@@ -980,7 +982,7 @@ class CommandPollingTests(TestCase):
             status="TELEMETRY_OK",
             terminal_connected=True,
             trade_allowed=True,
-            payload={"server_name": "LiteFinance-MT5-Demo", "account_trade_mode": 0},
+            payload={"server_name": "LiteFinance-MT5-Demo", "account_trade_mode": 2,"account":{"currency":"USC"}},
         )
         EAHeartbeat.objects.filter(pk=heartbeat.pk).update(
             last_seen=timezone.now() - timedelta(seconds=120)
@@ -1038,7 +1040,7 @@ class CommandPollingTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.json()["command"])
-        self.assertEqual(response.json()["authorization_reason"], "DEMO_ACCOUNT_REQUIRED")
+        self.assertEqual(response.json()["authorization_reason"], "REAL_CENT_SCOPE_MISMATCH")
 
 
 class DashboardDataTests(TestCase):
@@ -1049,6 +1051,7 @@ class DashboardDataTests(TestCase):
         RAMON_EA_COMMAND_EXECUTION_ENABLED=False,
         RAMON_EA_HEARTBEAT_MAX_AGE_SECONDS=90,
     )
+    @override_settings(RAMON_REAL_CENT_INSTANCE='dashboard-live-ea',RAMON_REAL_CENT_LOGIN='sensitive-account-id',RAMON_REAL_CENT_SERVER='private-broker-server',RAMON_REAL_CENT_CURRENCY='USC',RAMON_REAL_CENT_SYMBOL='XAUUSD_o')
     def test_dashboard_exposes_live_execution_checks_without_account_identifiers(self):
         EAHeartbeat.objects.create(
             instance_id="dashboard-live-ea",
@@ -1058,7 +1061,7 @@ class DashboardDataTests(TestCase):
             status="TELEMETRY_OK",
             terminal_connected=True,
             trade_allowed=False,
-            payload={"account_trade_mode": 0},
+            payload={"account_trade_mode": 2,"server_name":"private-broker-server","account":{"currency":"USC"}},
         )
         StrategyDecisionRecord.objects.create(
             decision_id="dashboard-decision",
@@ -1095,7 +1098,7 @@ class DashboardDataTests(TestCase):
         self.assertTrue(checks["telemetry_status"]["passed"])
         self.assertTrue(checks["terminal_connected"]["passed"])
         self.assertFalse(checks["terminal_trade_allowed"]["passed"])
-        self.assertTrue(checks["demo_account"]["passed"])
+        self.assertTrue(checks["real_cent_account"]["passed"])
         self.assertTrue(checks["symbol_match"]["passed"])
         self.assertNotIn("sensitive-account-id", json.dumps(execution))
         self.assertNotIn("private-broker-server", json.dumps(execution))
@@ -1105,6 +1108,7 @@ class DashboardDataTests(TestCase):
         RAMON_EA_COMMAND_EXECUTION_ENABLED=True,
         RAMON_EA_HEARTBEAT_MAX_AGE_SECONDS=90,
     )
+    @override_settings(RAMON_REAL_CENT_INSTANCE='dashboard-authorized-ea',RAMON_REAL_CENT_LOGIN='private-account-id',RAMON_REAL_CENT_SERVER='private-demo-server',RAMON_REAL_CENT_CURRENCY='USC',RAMON_REAL_CENT_SYMBOL='XAUUSD_o')
     def test_dashboard_reports_command_authorization_ready_for_fresh_demo_ea(self):
         EAHeartbeat.objects.create(
             instance_id="dashboard-authorized-ea",
@@ -1114,7 +1118,7 @@ class DashboardDataTests(TestCase):
             status="TELEMETRY_OK",
             terminal_connected=True,
             trade_allowed=True,
-            payload={"account_trade_mode": 0},
+            payload={"account_trade_mode": 2,"server_name":"private-demo-server","account":{"currency":"USC"}},
         )
         StrategyDecisionRecord.objects.create(
             decision_id="dashboard-authorized-decision",
@@ -1137,7 +1141,7 @@ class DashboardDataTests(TestCase):
         self.assertTrue(checks["ea_heartbeat"]["passed"])
         self.assertTrue(checks["terminal_connected"]["passed"])
         self.assertTrue(checks["terminal_trade_allowed"]["passed"])
-        self.assertTrue(checks["demo_account"]["passed"])
+        self.assertTrue(checks["real_cent_account"]["passed"])
         self.assertTrue(checks["symbol_match"]["passed"])
         # Dashboard readiness is not itself an order authorization.
         self.assertFalse(EACommand.objects.exists())
@@ -1320,10 +1324,10 @@ class MarketBarRetentionCommandTests(TestCase):
             close="2300.5", volume="10",
         )
 
-        call_command("prune_market_bars", source="retention-test", stdout=Mock())
+        call_command("prune_market_bars", source="retention-test", symbol="XAUUSD_o", stdout=Mock())
         self.assertEqual(MarketBar.objects.filter(source="retention-test").count(), 2)
 
-        call_command("prune_market_bars", source="retention-test", apply=True, stdout=Mock())
+        call_command("prune_market_bars", source="retention-test", symbol="XAUUSD_o", apply=True, stdout=Mock())
         self.assertFalse(MarketBar.objects.filter(source="retention-test", timeframe="M1").exists())
         self.assertTrue(MarketBar.objects.filter(source="retention-test", timeframe="M5").exists())
 

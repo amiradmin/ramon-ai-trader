@@ -16,15 +16,7 @@ from django.utils.dateparse import parse_datetime
 from ramon_pipeline.signalflow.risk_management import RiskConfig
 
 from .models import EACommand, EAHeartbeat, RiskVerdictRecord, StrategyDecisionRecord
-
-
-def _is_demo_account(snapshot):
-    """Only an explicit integer trade-mode value from broker telemetry counts as demo."""
-    return (
-        isinstance(snapshot, dict)
-        and type(snapshot.get("account_trade_mode")) is int
-        and snapshot.get("account_trade_mode") == 0
-    )
+from .account_scope import real_cent_scope
 
 
 def _decimal(value, field):
@@ -79,8 +71,9 @@ def create_open_command(*, decision, verdict, instance_id, account_login, server
         return None, False, "TERMINAL_TRADE_PERMISSION_DENIED"
 
     snapshot = heartbeat.payload if isinstance(heartbeat.payload, dict) else {}
-    if not _is_demo_account(snapshot):
-        return None, False, "DEMO_ACCOUNT_REQUIRED"
+    allowed, account_reason = real_cent_scope(heartbeat)
+    if not allowed:
+        return None, False, account_reason
     positions = snapshot.get("positions")
     account = snapshot.get("account")
     quote = snapshot.get("quote")

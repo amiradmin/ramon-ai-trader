@@ -32,7 +32,7 @@ def scalper_console(request):
                 ready = readiness(feed)
                 if ready == 'READY':
                     ScalperControl.objects.filter(pk=control.pk).update(automatic=True)
-                    message = 'Automatic demo scalping enabled at a maximum 0.15% planned risk per trade.'
+                    message = 'Automatic real cent scalping enabled at a maximum 0.15% planned risk per trade.'
                 else:
                     message = 'Cannot start: '+ready
             elif action == 'close':

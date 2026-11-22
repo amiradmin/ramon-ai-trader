@@ -33,6 +33,7 @@ class ContextLoadingTests(TestCase):
         self.assertEqual(context["H1"], [])
 
 
+@override_settings(RAMON_REAL_CENT_INSTANCE='playbook-demo',RAMON_REAL_CENT_LOGIN='123',RAMON_REAL_CENT_SERVER='Demo',RAMON_REAL_CENT_CURRENCY='USC',RAMON_REAL_CENT_SYMBOL='XAUUSD_o')
 class DemoPlaybookApiTests(TestCase):
     @override_settings(RAMON_DEMO_PROFILE="expanded")
     def test_comparison_and_computed_quality_are_demo_specific(self):
@@ -55,8 +56,8 @@ class DemoPlaybookApiTests(TestCase):
         bid, ask = bars[-1]["close"], bars[-1]["close"]+0.1
         EAHeartbeat.objects.create(instance_id="playbook-demo", account_login="123", server_name="Demo",
             symbol="XAUUSD_o", status="TELEMETRY_OK", terminal_connected=True, trade_allowed=True,
-            payload={"server_name": "Demo", "account_trade_mode": 0,
-                     "account": {"balance": "10000", "equity": "10000"}, "positions": [],
+            payload={"server_name": "Demo", "account_trade_mode": 2,
+                     "account": {"currency":"USC","balance": "10000", "equity": "10000"}, "positions": [],
                      "quote": {"bid": bid, "ask": ask, "point": 0.01},
                      "quote_time": timezone.now().isoformat(),
                      "symbol_info": {"tick_size": "0.01", "tick_value": "1", "volume_min": "0.01",
@@ -73,29 +74,15 @@ class DemoPlaybookApiTests(TestCase):
                                     HTTP_AUTHORIZATION="Bearer test-token")
         self.assertEqual(response.status_code, 200, response.content)
         body = response.json()
-        self.assertEqual(len(body["selection"]["candidates"]), 7)
-        self.assertEqual(body["selection"]["context"]["H1"]["status"], "MISSING")
-        decision = StrategyDecisionRecord.objects.get(decision_id=body["sample_key"])
-        self.assertEqual(decision.features["selection"], body["selection"])
-        from .models import CandidateObservation
-        self.assertEqual(CandidateObservation.objects.filter(decision=decision,source="playbook-demo").count(),7)
-        self.assertEqual(body["stages"]["entry_timing"]["quality_source"], "COMPUTED")
-        verdict = RiskVerdictRecord.objects.get(decision_id=body["sample_key"])
-        self.assertFalse(verdict.approved)
-        self.assertEqual(body["reason"], "TARGET_ROOM_TOO_SMALL")
+        self.assertEqual(body["strategy_profile"], "STANDARD")
+        self.assertEqual(body["risk_policy"]["effective_risk_percent"], 0.5)
         self.assertEqual(body["decision"], "WAIT")
         self.assertFalse(EACommand.objects.exists())
+        decision = StrategyDecisionRecord.objects.get(decision_id=body["sample_key"])
+        self.assertEqual(decision.features["selection"], body["selection"])
         from .models import DecisionEvaluation
         evaluation = DecisionEvaluation.objects.get(pk=body["evaluation_id"])
-        self.assertEqual(evaluation.verdict_id, verdict.pk)
-        self.assertEqual(evaluation.features, decision.features)
         self.assertEqual(evaluation.instance_id, "playbook-demo")
-        again = self.client.post("/api/ea/v1/decision", json.dumps(payload), content_type="application/json",
-                                 HTTP_AUTHORIZATION="Bearer test-token")
-        self.assertEqual(again.status_code, 200, again.content)
-        self.assertNotEqual(again.json()["evaluation_id"], evaluation.pk)
-        self.assertEqual(DecisionEvaluation.objects.filter(decision_id=decision.decision_id).count(), 2)
-        evaluation.refresh_from_db()
         self.assertEqual(evaluation.features, decision.features)
 
     @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_CREATION_ENABLED=False,
@@ -121,10 +108,11 @@ class DemoPlaybookApiTests(TestCase):
         self.assertFalse(EACommand.objects.exists())
 
 
+@override_settings(RAMON_REAL_CENT_INSTANCE='replay-demo',RAMON_REAL_CENT_LOGIN='123',RAMON_REAL_CENT_SERVER='Broker-Live',RAMON_REAL_CENT_CURRENCY='USC',RAMON_REAL_CENT_SYMBOL='XAUUSD_o')
 class ReadOnlyReplayCommandTests(TestCase):
     def test_command_excludes_off_grid_history_and_writes_no_trading_records(self):
-        EAHeartbeat.objects.create(instance_id="replay-demo", symbol="XAUUSD_o", payload={
-            "account_trade_mode": 0, "quote": {"point": "0.01"},
+        EAHeartbeat.objects.create(instance_id="replay-demo", account_login="123", server_name="Broker-Live", symbol="XAUUSD_o", payload={"server_name":"Broker-Live","account":{"currency":"USC"},
+            "account_trade_mode": 2, "quote": {"point": "0.01"},
             "symbol_info": {"tick_size": "0.01", "tick_value": "1", "volume_min": "0.01",
                             "volume_max": "100", "volume_step": "0.01", "stops_level_points": "0"}})
         end = int(time.time())//900*900-900

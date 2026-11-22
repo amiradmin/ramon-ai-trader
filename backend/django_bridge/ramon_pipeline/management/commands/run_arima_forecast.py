@@ -10,7 +10,7 @@ class Command(BaseCommand):
     help = "Evaluate ARIMA on a chronological candle holdout and forecast the next candle close."
 
     def add_arguments(self, parser):
-        parser.add_argument("--symbol", required=True, help="Exact market symbol, e.g. XAUUSD_o")
+        parser.add_argument("--symbol", required=True, help="Exact market symbol, e.g. XAUUSD_i")
         parser.add_argument("--timeframe", default="M15", help="Candle timeframe (default: M15)")
         parser.add_argument("--source", default=None, help="Optional EA instance/source filter")
         parser.add_argument("--limit", type=int, default=1000, help="Maximum candles to use")

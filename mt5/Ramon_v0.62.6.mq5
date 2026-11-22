@@ -22,14 +22,14 @@ long GlobalFree(long hMem);
 long lstrcpyW(long dst,const string src);
 #import
 
-input string TradeSymbol = "XAUUSD_o";
+input string TradeSymbol = "XAUUSD_i";
 input string RequiredServerText = "LiteFinance";
 input bool AutoLockCurrentAccount = false; // Bind this EA session to the account active at OnInit.
-input long AllowedAccountLogin = 91422263; // Used only when AutoLockCurrentAccount=false.
+input long AllowedAccountLogin = 0; // Set to the verified real cent login locally.
 input bool EnableRangeMain = true; // Explicit cent-account range-reversal trial on MAIN.
 const double RangeMainTargetUnits = 5.0; // Quick RANGE take-profit: USD 0.05 on 100 units/USD.
 const double RangeMainMaxLossUnits = 5.0; // RANGE entries must keep broker SL risk <= USD 0.05.
-input bool EnableLiveTrading = true;
+input bool EnableLiveTrading = false; // Explicit local opt-in after verifying account scope.
 input bool EnableV2AccountRiskGuard = true; // Reject new entries without an account-wide risk preflight.
 input double V2MaxPortfolioRiskUSD = 0.35;
 input double V2MaxSymbolRiskUSD = 0.35;
@@ -391,9 +391,19 @@ bool LiveExecutionReady(string &reason)
       reason="Live trading disabled";
       return false;
    }
-   if(AccountInfoInteger(ACCOUNT_TRADE_MODE)!=ACCOUNT_TRADE_MODE_DEMO)
+   if(AccountInfoInteger(ACCOUNT_TRADE_MODE)!=ACCOUNT_TRADE_MODE_REAL)
    {
-      reason="BLOCKED: demo accounts only";
+      reason="BLOCKED: real account required";
+      return false;
+   }
+   if(!AccountIsCent)
+   {
+      reason="BLOCKED: cent units not confirmed";
+      return false;
+   }
+   if(StringLen(ExpectedAccountCurrency)==0)
+   {
+      reason="BLOCKED: expected account currency required";
       return false;
    }
    if(!ConfirmMoneyUnitsPerUSD)

@@ -60,7 +60,7 @@ class LearningRiskBackfillTests(TestCase):
 
     def test_dry_run_does_not_mutate_outcome(self):
         output = StringIO()
-        call_command("backfill_learning_risk_labels", stdout=output)
+        call_command("backfill_learning_risk_labels", symbol="XAUUSD_o", stdout=output)
         self.outcome.refresh_from_db()
         self.assertIsNone(self.outcome.r_multiple)
         self.assertEqual(self.outcome.risk_amount, Decimal("0"))
@@ -69,7 +69,7 @@ class LearningRiskBackfillTests(TestCase):
 
     def test_apply_uses_only_approved_command_risk(self):
         output = StringIO()
-        call_command("backfill_learning_risk_labels", "--apply", stdout=output)
+        call_command("backfill_learning_risk_labels", "--apply", symbol="XAUUSD_o", stdout=output)
         self.outcome.refresh_from_db()
         self.assertEqual(self.outcome.risk_amount, Decimal("12.5"))
         self.assertEqual(self.outcome.r_multiple, Decimal("0.50000000"))
@@ -91,7 +91,7 @@ class LearningRiskBackfillTests(TestCase):
             result={"broker_ticket": "backfill-ticket-002"},
         )
         output = StringIO()
-        call_command("backfill_learning_risk_labels", "--apply", stdout=output)
+        call_command("backfill_learning_risk_labels", "--apply", symbol="XAUUSD_o", stdout=output)
         self.outcome.refresh_from_db()
         self.assertIsNone(self.outcome.r_multiple)
         self.assertEqual(self.outcome.risk_amount, Decimal("0"))

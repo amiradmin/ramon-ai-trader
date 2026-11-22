@@ -75,7 +75,7 @@ def strategy_console(request,slug):
             elif action=='start' and scope_matches and fresh and ready=='READY' and settings.RAMON_STRATEGY_CONTAINERS_ENABLED and all(
                     getattr(settings,k,False) for k in ['RAMON_EA_COMMAND_CREATION_ENABLED','RAMON_EA_COMMAND_EXECUTION_ENABLED']):
                 control.automatic=True;control.save(update_fields=['automatic'])
-                text='Automatic demo entries enabled for this strategy only.'
+                text='Automatic real cent entries enabled for this strategy only.'
             elif action=='close' and scope_matches:
                 _,text=close_strategy_position(setup,request.POST.get('ticket',''))
             else:

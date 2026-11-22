@@ -10,7 +10,7 @@ The single `docker-compose.yaml` defines:
 
 - `django`: Django API, bound to `127.0.0.1:8017` on the host.
 - `ingest-worker`: Redis Streams consumer that persists queued events; replaces the old `ramon-worker` container.
-- `trend-pullback`, `breakout-retest`, `failed-breakout-sweep`, `range-edge-fade`, `session-opening-range-breakout`, `volatility-compression-expansion`, `exhaustion-reversal`: independent M15 strategy containers. Each can issue its own demo orders within the shared account budget.
+- `trend-pullback`, `breakout-retest`, `failed-breakout-sweep`, `range-edge-fade`, `session-opening-range-breakout`, `volatility-compression-expansion`, `exhaustion-reversal`: independent M15 strategy containers. Each can issue orders only for the configured real cent account within the shared account budget.
 - `scalper-worker`: existing independent M1/M5 scalper.
 - `trend-worker`: existing H1/H4 paper-only research candidate.
 - `forecast-worker`: forward ARIMA forecasts and automatic accuracy tracking; observation only.
@@ -76,13 +76,13 @@ Authenticated API routes are under `/api/ea/v1/`:
 | POST | `commands/ack` | Acknowledge command lifecycle and broker outcome |
 | GET | `status` | Read EA heartbeat status |
 
-The decision endpoint can call the command producer, but creation and delivery remain gated by both `RAMON_EA_COMMAND_CREATION_ENABLED` and `RAMON_EA_COMMAND_EXECUTION_ENABLED`. Both default to `0`. A BUY/SELL decision alone is not permission to place an order.
+The decision endpoint can call the command producer, but creation and delivery remain gated by both `RAMON_EA_COMMAND_CREATION_ENABLED` and `RAMON_EA_COMMAND_EXECUTION_ENABLED`. Both default to `0`. Configure all five `RAMON_REAL_CENT_*` identity fields locally; they default to empty. The standard risk profile caps a proposed trade at 0.5% of the account balance, using broker reported tick value and volume metadata in the account's own currency. A BUY/SELL decision alone is not permission to place an order.
 
 ## Multi-timeframe market data
 
 The command EA sends completed M1, M5, M15 and H1 candles through the existing authenticated Django telemetry endpoint. Django validates and persists each timeframe independently in the existing `MarketBar` table; no separate candle tables are required. Repeated deliveries are idempotent, and the EA advances its in-memory candle cursor only after Django accepts the telemetry request. After an EA restart, its bounded recent history is sent again and database uniqueness prevents duplicate rows.
 
-Use `GET /api/ea/v1/market-data/status?symbol=XAUUSD_o` with the EA bearer token to inspect row counts, oldest/latest candle timestamps, last receipt time and candidate intraday gaps per source/timeframe. Gap entries are review candidates, not definitive outages: broker maintenance and instrument-specific sessions must be considered. The initial EA history request is capped at 512 completed candles per timeframe; collection then continues incrementally. This is not a substitute for a deeper broker-history backfill.
+Use `GET /api/ea/v1/market-data/status?symbol=XAUUSD_i` with the EA bearer token to inspect row counts, oldest/latest candle timestamps, last receipt time and candidate intraday gaps per source/timeframe. Gap entries are review candidates, not definitive outages: broker maintenance and instrument-specific sessions must be considered. The initial EA history request is capped at 512 completed candles per timeframe; collection then continues incrementally. This is not a substitute for a deeper broker-history backfill.
 
 ARIMA/SARIMA jobs read the selected `MarketBar` symbol/timeframe series; each timeframe is trained and validated independently, with M15 remaining the default training timeframe. Do not combine M1, M5, M15 and H1 candles into one frequency-mixed series. `LearningTradeOutcome` remains the dataset for the six trade-outcome learning pipelines, not for ARIMA fitting. Forecast results remain research-only and do not authorize orders.
 
@@ -91,16 +91,16 @@ ARIMA/SARIMA jobs read the selected `MarketBar` symbol/timeframe series; each ti
 The recommended retention horizon is 2 years for M1, 3 years for M5, and 5 years for M15/H1. The `prune_market_bars` management command is dry-run by default and reports expired rows without deleting anything. Review the counts first; only pass `--apply` when you intentionally want to prune data. You can scope it to a source with `--source`.
 
 ```bash
-docker compose exec django python manage.py prune_market_bars --symbol XAUUSD_o
-docker compose exec django python manage.py prune_market_bars --symbol XAUUSD_o --source ramon-command-ea-1 --apply
+docker compose exec django python manage.py prune_market_bars --symbol XAUUSD_i
+docker compose exec django python manage.py prune_market_bars --symbol XAUUSD_i --source ramon-command-ea-1 --apply
 ```
 
 ## Safety and validation
 
-1. Keep `RAMON_EA_COMMAND_CREATION_ENABLED=0` and `RAMON_EA_COMMAND_EXECUTION_ENABLED=0` until the demo-validation checklist is completed.
-2. Keep `EnableCommandExecution=false` in MT5 while validating telemetry and decisions.
-3. Run only on the intended demo `XAUUSD_o` M15 chart for diagnostics.
-4. Do not run a legacy `Ramon_v0.62.x` strategy EA beside the command EA. Those strategy sources are not present in this repository and have not been reviewed here for duplicate order execution.
+1. Keep `RAMON_EA_COMMAND_CREATION_ENABLED=0` and `RAMON_EA_COMMAND_EXECUTION_ENABLED=0` until the real cent account scope and broker contract have been verified.
+2. Verify the command EA is attached once, and keep both Django command gates disabled while validating telemetry and decisions.
+3. Run on the intended real cent `XAUUSD_i` M15 chart after verifying the exact MT5 account and server.
+4. Do not run a legacy `Ramon_v0.62.x` strategy EA beside the command EA. This legacy source is excluded from the update script and could duplicate order execution.
 5. A Django `WAIT`, stale/missing account data, missing quote, or invalid authorization must remain fail-closed.
 6. Never delete Docker volumes to silence Compose warnings.
 
@@ -117,7 +117,7 @@ Useful runbooks:
 - [One-command update/build](docs/operations/one-command-update-build.md)
 - [EA heartbeat troubleshooting](docs/EA-HEARTBEAT-TROUBLESHOOTING.md)
 - [Daily risk baseline recovery](docs/operations/daily-risk-baseline-recovery.md)
-- [Demo-only activation checklist](docs/operations/demo-trading-activation.md)
+- [Real cent activation checklist](docs/operations/real-cent-activation.md)
 - [Command EA v1.07 validation](docs/ramon-commandea-v1.06-validation.md)
 - [Learning Engine package architecture](docs/architecture/learning-engine-package.md)
 - Learning Engine dashboard: `/api/ea/v1/learning/dashboard` (linked from the main Ramon dashboard)
@@ -141,4 +141,4 @@ The repository also contains SignalFlow, forecasting, learning, and historical r
 
 ## What counts as verified
 
-A healthy Django container verifies the API process is responsive; it does **not** verify MT5 compilation, live telemetry, strategy quality, safe broker execution, or profitability. EA build acceptance requires a fresh MetaEditor log with `0 errors, 0 warnings`, a new nonempty EX5, and local Experts-log validation. Trading acceptance requires a separate demo-only lifecycle test and must not be inferred from compilation or CI alone.
+A healthy Django container verifies the API process is responsive; it does **not** verify MT5 compilation, live telemetry, strategy quality, safe broker execution, or profitability. EA build acceptance requires a fresh MetaEditor log with `0 errors, 0 warnings`, a new nonempty EX5, and local Experts-log validation. Trading acceptance requires broker-side validation on the configured account and must not be inferred from compilation or CI alone.

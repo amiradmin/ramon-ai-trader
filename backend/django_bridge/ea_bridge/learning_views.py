@@ -7,6 +7,7 @@ from decimal import Decimal, InvalidOperation
 from functools import wraps
 
 from django.core.paginator import Paginator
+from django.conf import settings
 from django.http import JsonResponse
 from django.shortcuts import render
 from django.utils import timezone
@@ -75,7 +76,9 @@ def _execution_diagnostics():
 
 @require_GET
 def learning_dashboard(request):
-    return render(request, "ea_bridge/learning_dashboard.html")
+    return render(request, "ea_bridge/learning_dashboard.html", {
+        "training_symbol": settings.RAMON_REAL_CENT_SYMBOL or "XAUUSD_i",
+    })
 
 
 @require_GET
@@ -487,7 +490,7 @@ def training_status(request):
 def start_training(request):
     try:
         payload = _body(request)
-        symbol = str(payload.get("symbol") or "XAUUSD_o").strip()[:32]
+        symbol = str(payload.get("symbol") or "XAUUSD_i").strip()[:32]
         timeframe = str(payload.get("timeframe") or "M15").strip().upper()[:16]
         source = str(payload.get("source") or "").strip()[:128]
         if not symbol or not timeframe:
