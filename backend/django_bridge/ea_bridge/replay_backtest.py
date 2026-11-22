@@ -64,7 +64,7 @@ def _indicators(history):
     slow=_ema(closes[-150:],50)
     return atr,fast,slow
 
-def _simulate(data, rows):
+def _simulate(data, rows, progress=None):
     spread = data["spread_points"]*data["point"]
     value_per_price=data["tick_value"]/data["tick_size"]
     setups=list(STRATEGIES)
@@ -77,6 +77,8 @@ def _simulate(data, rows):
     first_ts=int(datetime.combine(data["start"],time.min,tzinfo=timezone.utc).timestamp())
     end_ts=int(datetime.combine(data["end"]+timedelta(days=1),time.min,tzinfo=timezone.utc).timestamp())
     for idx in range(WARMUP,len(rows)):
+        if progress is not None and idx % 50 == 0:
+            progress(idx, len(rows))
         bar=rows[idx]
         previous=rows[idx-1]
         within=first_ts<=bar["time"]<end_ts
@@ -149,6 +151,8 @@ def _simulate(data, rows):
             except (ValueError,TypeError):continue
             state["signals"]+=1
             state["pending"]=dict(side=result["action"],stop=stop,target=target,volume=volume)
+    if progress is not None:
+        progress(len(rows), len(rows))
     report=[]
     for name,state in book.items():
         trades=state["trades"];wins=[t for t in trades if t["pnl"]>0]
@@ -163,17 +167,14 @@ def _simulate(data, rows):
            open_position=state["open"] is not None,trades=trades))
     return report
 
-@require_GET
-def backtest(request):
-    try:
-        data=_inputs(request)
+def run_backtest_data(data, *, max_candles=MAX_TEST_CANDLES, progress=None):
         start_dt=datetime.combine(data["start"],time.min,tzinfo=timezone.utc)
         end_dt=datetime.combine(data["end"]+timedelta(days=1),time.min,tzinfo=timezone.utc)
         scope=dict(source=data["source"],symbol=data["symbol"],timeframe="M15")
         selected=MarketBar.objects.filter(**scope,timestamp__gte=start_dt,timestamp__lt=end_dt).order_by("timestamp")
         count=selected.count()
-        if count+256>MAX_TEST_CANDLES:
-            return JsonResponse({"error":f"Selected range contains {count} M15 candles; this interactive research runner allows at most {MAX_TEST_CANDLES-256} plus warmup. Choose a shorter range. Multi-year backtests need a background job."},status=422)
+        if count+256>max_candles:
+            return JsonResponse({"error":f"Selected range contains {count} M15 candles; this interactive research runner allows at most {max_candles-256} plus warmup. Choose a shorter range. For longer ranges, import complete historical data and use segmented batch processing."},status=422)
         prior=list(MarketBar.objects.filter(**scope,timestamp__lt=start_dt).order_by("-timestamp")[:256])
         prior.reverse()
         selected_rows=list(selected)
@@ -182,7 +183,7 @@ def backtest(request):
               low=float(r.low),close=float(r.close)) for r in all_rows]
         if not selected_rows or len(rows)<WARMUP+2:
             return JsonResponse({"error":"Insufficient historical M15 data: need at least 130 candles including warmup."},status=422)
-        report=_simulate(data,rows)
+        report=_simulate(data,rows,progress=progress)
         return JsonResponse(dict(mode="ISOLATED_STRATEGY_RESEARCH_ESTIMATE",
              timeframe="M15",symbol=data["symbol"],source=data["source"],
              start=data["start"].isoformat(),end=data["end"].isoformat(),
@@ -192,5 +193,11 @@ def backtest(request):
                "balance","spread_points","point","tick_size","tick_value","volume_min","volume_max","volume_step")},
              limitations="Model-priced fixed spread, no historical spread/slippage/fees; OHLC intrabar order assumed stop first; no news/account state history; not broker validation, not full live-worker parity.",
              strategies=report))
+
+
+@require_GET
+def backtest(request):
+    try:
+        return run_backtest_data(_inputs(request))
     except ValueError as error:
-        return JsonResponse({"error":str(error)},status=400)
+        return JsonResponse({"error": str(error)}, status=400)
