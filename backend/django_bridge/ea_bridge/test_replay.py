@@ -39,6 +39,18 @@ class HistoricalReplayTests(TestCase):
         })
         self.assertEqual(len(response.json()["bars"]), 2)
 
+    def test_large_date_range_loads_first_window_without_claiming_full_coverage(self):
+        response = self.client.get("/api/ea/v1/simulator/bars", {
+            "symbol": "XAUUSD_l", "timeframe": "M5", "source": "broker-a",
+            "start": "2026-01-02T12:00:00Z",
+            "before": "2026-01-03T00:00:00Z", "limit": 2,
+        })
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertTrue(body["truncated"])
+        self.assertEqual(body["window"], "earliest_in_range")
+        self.assertEqual([b["close"] for b in body["bars"]], [2600., 2601.])
+
     def test_invalid_queries_fail_closed(self):
         for params in [
             {"symbol": "XAUUSD_l", "timeframe": "INVALID"},
