@@ -96,6 +96,8 @@ services:
       RAMON_EA_COMMAND_EXECUTION_ENABLED: "0"
       RAMON_SCALP_EXECUTION_ENABLED: "0"
     command: ["python", "manage.py", "run_replay_backtests"]
+    volumes:
+      - learning_models:/app/media
     depends_on:
       timescaledb:
         condition: service_healthy
