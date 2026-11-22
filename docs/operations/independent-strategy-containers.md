@@ -168,3 +168,10 @@ counts remain visible when entries are paused; stale/missing telemetry reports
 position status unavailable and disables the pulse. Reduced-motion preferences
 use a static highlighted border instead. Position and entry states refresh every
 15 seconds; this indicator never creates or modifies orders.
+
+The main dashboard also links the existing independent M1/M5 fast scalper as an
+eighth card. Its read-only status uses the configured scalper account scope,
+execution readiness and exact verified scalp position ownership; unavailable or
+stale telemetry cannot light the open-position indicator. The card links to the
+existing staff-only scalper console. It does not add another worker or enable
+scalp execution.

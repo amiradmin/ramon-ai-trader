@@ -23,6 +23,7 @@ urlpatterns = [
     path("strategies/<slug:slug>", strategy_views.strategy_console, name="strategy-worker-console"),
     path("research/trend", trend_observer.trend_status, name="ramon-trend-shadow"),
     path("scalper", scalper_views.scalper_console, name="ramon-scalper-console"),
+    path("scalper/status", scalper_views.scalper_status, name="ramon-scalper-status"),
     path("research/scalping", scalp_observer.scalp_status, name="ramon-scalping-shadow"),
     path("reliability", reliability.reliability_status, name="ramon-reliability"),
     path("handshake", views.handshake, name="ea-handshake"),

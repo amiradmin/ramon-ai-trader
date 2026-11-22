@@ -6,7 +6,31 @@ from django.shortcuts import render, redirect
 from django.views.decorators.http import require_http_methods
 from .models import EAEvent, EAHeartbeat, ScalperControl, LearningTradeOutcome
 from django.db.models import Sum, Count
+from django.conf import settings
+from django.http import JsonResponse
+from django.utils import timezone
+from django.views.decorators.http import require_GET
 from .scalper_engine import engine_commands, owned_position, readiness, close_scalp
+
+
+@require_GET
+def scalper_status(request):
+    """Read-only, account-scoped status for the fast scalp dashboard card."""
+    scope = (settings.RAMON_SCALP_INSTANCE, settings.RAMON_SCALP_LOGIN, settings.RAMON_SCALP_SERVER)
+    feed = (EAHeartbeat.objects.filter(instance_id=scope[0], account_login=scope[1],
+        server_name=scope[2]).first() if all(scope) else None)
+    control = (ScalperControl.objects.filter(source=feed.instance_id, account_login=feed.account_login,
+        server_name=feed.server_name, symbol=feed.symbol).first() if feed else None)
+    known = bool(feed and control and feed.status == 'TELEMETRY_OK' and feed.terminal_connected
+        and 0 <= (timezone.now() - feed.last_seen).total_seconds() <= 30
+        and isinstance(feed.payload, dict) and feed.payload.get('server_name') == feed.server_name
+        and isinstance(feed.payload.get('positions'), list))
+    positions = sum(owned_position(feed, position) is not None for position in feed.payload['positions']) if known else 0
+    response = JsonResponse(dict(automatic=bool(control and control.automatic),
+        readiness=readiness(feed) if feed else 'NO_CONFIGURED_FEED',
+        position_status_known=known, open_positions=positions))
+    response['Cache-Control'] = 'no-store'
+    return response
 
 
 @staff_member_required

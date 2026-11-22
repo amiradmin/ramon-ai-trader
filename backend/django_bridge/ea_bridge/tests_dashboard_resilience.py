@@ -27,4 +27,6 @@ class DashboardResilienceTests(SimpleTestCase):
         # or account lookup a regression, even if it happens to succeed in CI.
         response = self.client.get("/api/ea/v1/dashboard")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.content.count(b'class="card strategy-card'), len(STRATEGIES))
+        self.assertEqual(response.content.count(b'class="card strategy-card'), len(STRATEGIES) + 1)
+        self.assertContains(response, 'href="/api/ea/v1/scalper"')
+        self.assertContains(response, 'FAST_SCALP')

@@ -9,7 +9,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-  <div class="brand"><div class="logo">R</div><div><div class="eyebrow">RAMON · SMART TRADER</div><div class="title">Independent Strategy Desk</div><div class="sub">XAUUSD · Seven independent M15 strategy containers</div></div></div>
+  <div class="brand"><div class="logo">R</div><div><div class="eyebrow">RAMON · SMART TRADER</div><div class="title">Independent Strategy Desk</div><div class="sub">XAUUSD · Seven M15 strategies + M1/M5 fast scalp</div></div></div>
   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><a class="btn" style="text-decoration:none" href="{% url 'ramon-strategy-validation' %}">Strategy Validation ↗</a><a class="btn" style="text-decoration:none" href="{% url 'ramon-paper-results' %}">Research / Paper Results ↗</a><a class="btn" style="text-decoration:none" href="{% url 'ramon-trade-forensics' %}">Trade Analysis ↗</a><button class="btn" id="copyMarketSnapshot" type="button">Copy Market Snapshot</button><span id="copySnapshotStatus" class="small" role="status" aria-live="polite"></span><div class="status"><span class="dot"></span><span id="connection">DJANGO · DECISION FEED</span></div></div>
 </header>
 <p class="small" id="timeStatus" role="status" aria-live="polite">Checking UTC, laptop clock and quote timestamps…</p>
@@ -24,6 +24,10 @@
       <a class="btn" style="display:inline-block;text-decoration:none" href="{{ worker.url }}">Open strategy ↗</a>
     </article>
     {% endfor %}
+    <article id="scalper-card" class="card strategy-card"><h3 style="font-size:14px;overflow-wrap:anywhere;margin-top:0">FAST_SCALP · M1/M5</h3><p class="small">Fast M1 entries with M5 context · separate scalper worker</p>
+      <p class="small" id="scalper-card-status" role="status" aria-live="polite">Checking status · Position status unavailable</p>
+      <a class="btn" style="display:inline-block;text-decoration:none" href="{% url 'ramon-scalper-console' %}">Open fast scalp ↗</a>
+    </article>
   </div>
 </section>
 <section class="card" id="pnlSummary" style="margin-bottom:18px">
@@ -263,12 +267,35 @@ async function refreshStrategyFleet() {
     }
   } catch (error) {
     $("connection").textContent = "DJANGO · FLEET STATUS UNAVAILABLE";
-    document.querySelectorAll(".strategy-card").forEach(card => card.classList.remove("strategy-on", "strategy-position-open"));
+    document.querySelectorAll("[id^='strategy-card-']").forEach(card => card.classList.remove("strategy-on", "strategy-position-open"));
     $("strategyFleetStatus").textContent = "Container status unavailable; previous values may be stale.";
   } finally { clearTimeout(timeout); strategyFleetInFlight = false; }
 }
 refreshStrategyFleet();
 setInterval(refreshStrategyFleet, 15000);
+
+let scalpStatusInFlight = false;
+async function refreshScalpStatus() {
+  if (scalpStatusInFlight) return;
+  scalpStatusInFlight = true;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  const card = $("scalper-card");
+  const status = $("scalper-card-status");
+  try {
+    const response = await fetch("/api/ea/v1/scalper/status", {cache:"no-store", signal:controller.signal});
+    if (!response.ok) throw new Error("Scalper status unavailable");
+    const data = await response.json();
+    card.classList.toggle("strategy-on", Boolean(data.automatic && data.readiness === "READY"));
+    card.classList.toggle("strategy-position-open", Boolean(data.position_status_known && data.open_positions > 0));
+    status.textContent = `Entries ${data.automatic ? "On" : "Paused"} · ${data.readiness} · ${data.position_status_known ? `${data.open_positions} open position${data.open_positions === 1 ? "" : "s"}` : "Position status unavailable"}`;
+  } catch (error) {
+    card.classList.remove("strategy-on", "strategy-position-open");
+    status.textContent = "Scalper status unavailable · Position status unavailable";
+  } finally { clearTimeout(timeout); scalpStatusInFlight = false; }
+}
+refreshScalpStatus();
+setInterval(refreshScalpStatus, 15000);
 
 let reliabilityInFlight = false;
 async function refreshReliability() {
