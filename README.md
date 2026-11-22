@@ -24,6 +24,21 @@ Dashboard: `http://127.0.0.1:8017/api/ea/v1/dashboard` contains a link to each s
 
 Paper research results: `http://127.0.0.1:8017/api/ea/v1/research/paper-results` (linked from the main dashboard). Historical records and the existing journal API are preserved.
 
+Historical simulator: `http://127.0.0.1:8017/api/ea/v1/simulator`.
+Long-range M15 tests now run through the isolated `replay-backtest-worker` Compose
+service and store job progress/results in the existing `learning_models` volume
+(`/app/media/historical-replay-jobs`). The browser submits a CSRF-protected job
+and polls progress. A selected range of up to 15,744 M15 candles (plus 256
+warm-up) is supported for this first worker iteration; 20-year testing still
+requires a segmented engine and substantially more imported historical data.
+The chart itself continues to show a 2,000-candle window, but the full-period
+research result is displayed separately. Backtests call the existing seven
+strategy SignalFlow evaluators with assumed broker specifications and isolated
+virtual execution; they never enqueue EA trading commands. These are estimates,
+not live-worker/broker fill parity. To deploy, run
+`docker compose up -d --build django replay-backtest-worker`; do not delete
+named volumes.
+
 Health check: `http://127.0.0.1:8017/healthz`
 
 The Compose pipeline ingestion switch is off by default. The named database and Redis volumes contain persistent state; **never use `docker compose down -v` as a troubleshooting step**.
