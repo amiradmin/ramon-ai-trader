@@ -124,7 +124,7 @@ def observe_replay_shadow(decision, *, symbol, setup, market_bars, spread_points
             return {**status, "status": "MODEL_CONTRACT_MISMATCH"}
         trained = set(bundle.get("feature_names") or ())
         # All numeric features must be present for a meaningful replay score.
-        if not trained.issubset(features):
+        if not {name.split("=", 1)[0] for name in trained}.issubset(features):
             return {**status, "status": "FEATURE_COVERAGE_INSUFFICIENT"}
         prediction = float(bundle["estimator"].predict(bundle["vectorizer"].transform([features]))[0])
         if not math.isfinite(prediction):
@@ -134,3 +134,78 @@ def observe_replay_shadow(decision, *, symbol, setup, market_bars, spread_points
                 "note": "Simulated fixed-spread replay estimate; not a live-trade win probability."}
     except Exception:
         return {**status, "status": "OBSERVER_ERROR"}
+
+
+def observe_replay_classifiers(decision, *, symbol, setup, market_bars, spread_points):
+    """Observe replay success and future-regime estimators without affecting execution."""
+    from .replay_ml import make_features
+    base = {"mode": "SHADOW_ONLY", "training_source": "SIMULATED_REPLAY"}
+    output = {}
+    specifications = {
+        "replay_trade_success": ("target_before_stop", "tp_before_sl_fraction"),
+        "replay_market_regime": ("forward_4bar_regime", "regime_probabilities"),
+    }
+    try:
+        if not market_bars:
+            return {key: {**base, "status": "NO_MARKET_BARS"} for key in specifications}
+        ts = int(market_bars[-1]["time"])
+        action = decision.get("decision")
+        for key, (target, field) in specifications.items():
+            if key == "replay_trade_success" and action not in ("BUY", "SELL"):
+                output[key] = {**base, "status": "NO_CANDIDATE"}
+                continue
+            features = make_features(
+                market_bars, signal_at=ts,
+                setup=setup if key == "replay_trade_success" else "MARKET",
+                side=action if key == "replay_trade_success" else "BUY",
+                spread_points=spread_points if key == "replay_trade_success" else 0)
+            if key == "replay_market_regime":
+                features = {k: v for k, v in features.items() if not k.startswith("tag_")}
+            try:
+                run = (LearningModelRun.objects.select_related("job")
+                       .filter(model_key=key, job__symbol=symbol,
+                               status=LearningModelRun.Status.PASSED, validation__passed=True)
+                       .exclude(artifact_path="").order_by("-training_finished_at", "-id").first())
+                if run is None:
+                    output[key] = {**base, "status": "NO_VALIDATED_MODEL"}
+                    continue
+                if (run.artifact_format != "joblib" or not run.artifact_sha256
+                        or not run.artifact_size_bytes or run.artifact_size_bytes > 20_000_000):
+                    output[key] = {**base, "status": "ARTIFACT_INVALID"}
+                    continue
+                with default_storage.open(run.artifact_path, "rb") as handle:
+                    raw = handle.read(run.artifact_size_bytes + 1)
+                if len(raw) != run.artifact_size_bytes or hashlib.sha256(raw).hexdigest() != run.artifact_sha256:
+                    output[key] = {**base, "status": "ARTIFACT_MISMATCH"}
+                    continue
+                import joblib
+                bundle = joblib.load(io.BytesIO(raw))
+                if bundle.get("model_key") != key or bundle.get("target") != target:
+                    output[key] = {**base, "status": "MODEL_CONTRACT_MISMATCH"}
+                    continue
+                trained = {name.split("=", 1)[0] for name in bundle.get("feature_names", ())}
+                if not trained.issubset(features):
+                    output[key] = {**base, "status": "FEATURE_COVERAGE_INSUFFICIENT"}
+                    continue
+                probabilities = bundle["estimator"].predict_proba(
+                    bundle["vectorizer"].transform([features]))[0]
+                classes = list(bundle["estimator"].classes_)
+                if any(not math.isfinite(float(p)) for p in probabilities):
+                    output[key] = {**base, "status": "PREDICTION_INVALID"}
+                    continue
+                if key == "replay_trade_success":
+                    if 1 not in classes:
+                        output[key] = {**base, "status": "MODEL_CONTRACT_MISMATCH"}
+                        continue
+                    values = {field: round(float(probabilities[classes.index(1)]), 4)}
+                else:
+                    values = {field: {str(cls): round(float(p), 4)
+                             for cls, p in zip(classes, probabilities)}}
+                output[key] = {**base, **values, "status": "SCORED_REPLAY",
+                    "model_version": run.version,
+                    "note": "Simulation-based uncalibrated research output; not live-trade probability."}
+            except Exception:
+                output[key] = {**base, "status": "OBSERVER_ERROR"}
+        return output
+    except Exception:
+        return {key: {**base, "status": "OBSERVER_ERROR"} for key in specifications}
