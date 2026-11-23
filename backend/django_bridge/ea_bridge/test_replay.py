@@ -23,6 +23,9 @@ class HistoricalReplayTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Step Forward")
         self.assertContains(response, 'id="testStrategies"')
+        choices=response.content.split(b'id="testStrategies"',1)[1].split(b'</div>',1)[0]
+        self.assertNotIn(b' checked',choices)
+        self.assertNotContains(response,'id="compareBalances" type="checkbox" checked')
         self.assertContains(response, 'id="testOpportunityScore"')
         self.assertContains(response, 'id="testEntryQuality"')
         self.assertEqual(response.content.count(b'type="checkbox" value="'), 8)
