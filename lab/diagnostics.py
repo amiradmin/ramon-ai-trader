@@ -21,8 +21,9 @@ def gap_diagnostics(rows, *, expected_seconds=900):
         end=datetime.fromtimestamp(b["time"],timezone.utc)
         # Friday into Sunday/Monday across the broker's usual closed interval
         # is a likely session closure, NOT proof of a valid trading calendar.
-        calendar_weekend=(start.weekday()==4 and end.weekday()>=6) or (
-            start.weekday()>=5 and end.weekday() in (0,6))
+        calendar_weekend=(delta>=24*3600 and (
+            (start.weekday()==4 and end.weekday()>=6) or
+            (start.weekday()>=5 and end.weekday() in (0,6))))
         if delta<=0 or delta%expected_seconds:
             kind="IRREGULAR_TIMESTAMP"
         elif calendar_weekend:
