@@ -3,6 +3,9 @@ import uuid
 from decimal import Decimal
 from django.contrib.admin.views.decorators import staff_member_required
 from django.shortcuts import render, redirect
+from django.http import JsonResponse
+from django.utils import timezone
+from django.views.decorators.http import require_GET
 from django.views.decorators.http import require_http_methods
 from .models import EAEvent, EAHeartbeat, ScalperControl, LearningTradeOutcome
 from django.db.models import Sum, Count
@@ -54,3 +57,31 @@ def scalper_console(request):
     return render(request,'ea_bridge/scalper_console.html' ,dict(feed=feed,control=control,message=message,
         ready=readiness(feed) if feed else 'NO_FEED',positions=positions,closed=closed,
         recent=engine_commands(feed).order_by('-created_at')[:20] if feed else []))
+
+
+@require_GET
+def scalper_status(request):
+    """Read-only status for the Fast Scalp dashboard card."""
+    feed = EAHeartbeat.objects.filter(status='TELEMETRY_OK').order_by('-last_seen').first()
+    control = ScalperControl.objects.filter(
+        source=feed.instance_id, account_login=feed.account_login,
+        server_name=feed.server_name, symbol=feed.symbol,
+    ).first() if feed else None
+    fresh = bool(
+        feed and feed.terminal_connected
+        and 0 <= (timezone.now() - feed.last_seen).total_seconds() <= 60
+        and isinstance(feed.payload, dict)
+        and feed.payload.get('server_name') == feed.server_name
+    )
+    positions_known = bool(fresh and control and isinstance(feed.payload.get('positions'), list))
+    positions = sum(owned_position(feed, position) is not None
+                    for position in feed.payload['positions']) if positions_known else 0
+    response = JsonResponse({
+        'fresh': fresh,
+        'automatic': bool(control and control.automatic),
+        'readiness': readiness(feed) if feed else 'NO_FEED',
+        'position_status_known': positions_known,
+        'open_positions': positions,
+    })
+    response['Cache-Control'] = 'no-store'
+    return response
