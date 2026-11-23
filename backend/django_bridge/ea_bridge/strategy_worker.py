@@ -34,6 +34,25 @@ def strategy_readiness(feed, *, now=None):
     return 'READY'
 
 
+def live_m15_quality(rows, *, now, warmup=128):
+    """Fail closed before live evaluation: never synthesize/shift M15 candles.
+
+    A fresh latest bar is insufficient when prior candles contain missing,
+    repeated, or off-grid timestamps. Trend indicators require contiguous data.
+    """
+    if len(rows) < warmup:
+        return 'M15_WARMUP'
+    latest = rows[-1].timestamp
+    if latest.tzinfo is None or not 0 <= (now - latest - timedelta(minutes=15)).total_seconds() < 900:
+        return 'M15_STALE'
+    stamps = [row.timestamp for row in rows[-warmup:]]
+    if any(int(stamp.timestamp()) % 900 != 0 for stamp in stamps):
+        return 'M15_OFF_GRID'
+    if any(right - left != timedelta(minutes=15) for left, right in zip(stamps, stamps[1:])):
+        return 'M15_GAPS_OR_DUPLICATES'
+    return 'READY'
+
+
 def worker_cycle(setup, *, now=None):
     if setup not in STRATEGIES: raise ValueError('Unknown strategy')
     now=now or timezone.now(); feed=configured_feed()
@@ -62,8 +81,8 @@ def worker_cycle(setup, *, now=None):
         if stamp and 0<=(now-stamp).total_seconds()<30: return finish(control.state)
         rows=list(MarketBar.objects.filter(source=feed.instance_id,symbol=feed.symbol,timeframe='M15',
             timestamp__lte=now-timedelta(minutes=15),received_at__lte=now).order_by('-timestamp')[:256])[::-1]
-        if len(rows)<128: return finish('M15_WARMUP')
-        if not 0<=(now-rows[-1].timestamp-timedelta(minutes=15)).total_seconds()<900: return finish('M15_STALE')
+        history_state=live_m15_quality(rows,now=now)
+        if history_state!='READY': return finish(history_state)
         quote=feed.payload.get('quote',{})
         payload=dict(instance_id=feed.instance_id,account_login=feed.account_login,server_name=feed.server_name,
             symbol=feed.symbol,timeframe='M15',bid=quote.get('bid'),ask=quote.get('ask'),point=quote.get('point'),
