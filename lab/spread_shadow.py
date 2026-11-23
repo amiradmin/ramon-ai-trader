@@ -74,7 +74,7 @@ def cohort_difference(control, expanded, starting_balance, start, end):
 
 
 def comparison_report(*, replay_module, data, rows, start, end, baseline,
-                      quality, progress_callback=None):
+                      quality, progress_callback=None, progress_factory=None):
     if abs(float(data["spread_points"])-42.0)>1e-8:
         raise ValueError("Frozen experiment expects a 42-point baseline spread")
     if float(data.get("slippage_points",0))!=2.0:
@@ -94,7 +94,8 @@ def comparison_report(*, replay_module, data, rows, start, end, baseline,
             progress_callback(name)
         report=precomputed if precomputed is not None else run_shadow(
             replay_module,data,rows,spread_points=spread,
-            limit_points=limit)
+            limit_points=limit,
+            progress=progress_factory(name) if progress_factory else None)
         stored[name]=report
         details.append({
             "name":name,"spread_points":spread,"absolute_spread_limit_points":limit,
