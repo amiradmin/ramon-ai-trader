@@ -61,9 +61,9 @@ class DeliveryRepricingTests(SimpleTestCase):
             self.call(plan=plan)
 
     def test_balance_risk_ceiling_is_applied(self):
-        adjusted, diag = self.call(budget="100", balance="2000")
+        adjusted, diag = self.call(budget="100", balance="4000")
         self.assertEqual(adjusted["volume"], 0.01)
-        self.assertLessEqual(Decimal(diag["delivery_risk_money"]), Decimal("10"))
+        self.assertLessEqual(Decimal(diag["delivery_risk_money"]), Decimal("20"))
 
     def test_buy_uses_ask_and_preserves_stops(self):
         plan = dict(side="BUY", volume=0.03, stop_loss=98, take_profit=110)
