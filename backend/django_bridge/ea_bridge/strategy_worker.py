@@ -53,6 +53,12 @@ def worker_cycle(setup, *, now=None):
         if feed and control.symbol!=feed.symbol: return finish('CONTROL_SYMBOL_CHANGED')
         ready=strategy_readiness(feed,now=now)
         if ready!='READY': return finish(ready)
+        # Read-only position lifecycle telemetry. Never authorizes a broker command.
+        # Preserve the latest entry decision while refreshing management on every tick.
+        if setup == 'TREND_PULLBACK':
+            from .position_management import trend_pullback_management_snapshot
+            control.latest = dict(control.latest or {})
+            control.latest['position_management'] = trend_pullback_management_snapshot(feed)
         # Existing owned positions retain their independent protection even while paused.
         from .profit_protection import create_protection_commands
         create_protection_commands(feed.instance_id,feed.account_login,strategy_setup=setup)
@@ -117,6 +123,7 @@ def worker_cycle(setup, *, now=None):
             command_id=data.get('command_id'),
             command_reason=data.get('command_reason'),
             command_created=data.get('command_created', False),
+            **({'position_management': trend_pullback_management_snapshot(feed)} if setup == 'TREND_PULLBACK' else {}),
             ai_shadow=shadow,
             ai_replay_shadow=replay_shadow,
             ai_trade_success=replay_classifiers['replay_trade_success'],
