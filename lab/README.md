@@ -159,3 +159,59 @@ candles, gaps, full run summaries, and training/validation/test slices.
 Both the existing TREND_PULLBACK pipeline and the experimental candidate are
 descriptive OHLC simulations, not live broker execution models. No result
 is eligible to automate real trading directly.
+
+## Diagnostics and transaction-cost stress (2026-11-23)
+
+The full historical run on 65,424 M15 candles had **300 experimental
+IMPULSE_CONTINUATION signals, all rejected by MINIMUM_LOT_EXCEEDS_RISK**,
+and 742 interval discontinuities. These are observations from the previous
+local report, not a prediction of profits. The laboratory now includes:
+
+1. `candidate_risk_diagnostics`: a detailed entry-by-entry record of each
+   minimum-lot rejection, including signal timestamp, trade side, stop
+   distance (price and points), cash risk at the smallest lot, cash risk
+   as percent of running equity, available 0.5% risk budget, approximate
+   affordable volume, and required account balance at 0.5% risk.
+   The laboratory does **not** bypass the 0.5% ceiling.
+2. `contract_diagnostics`: mathematical checks for submitted parameters
+   with a **permanent unverified** badge. Confirm the actual account currency,
+   cent-denominated balance units, tick-value denomination, contract size and
+   broker volume constraints manually. The tool does NOT infer real broker
+   values from OHLC data.
+3. `gap_diagnostics`: UTC-based heuristics classifying likely weekend gaps,
+   multiday closures, other long closures, irregular timestamps and
+   unexplained intraday gaps. This is NOT an authoritative broker session
+   calendar. Strategy simulation still treats missing OHLC price paths as
+   unobserved.
+4. `annual_performance` and `regime_performance`: observed closed-trade
+   metrics by year and pre-existing signal regime labels. Unlabeled
+   trades remain UNCLASSIFIED.
+5. `cost_sensitivity`: optional independent replays at 1x, 2x and 3x
+   the supplied spread and slippage; risk settings and input history remain
+   identical. This re-runs the full TREND_PULLBACK pipeline and may be
+   substantially slower than the base comparison.
+
+Append **`--cost-stress`** to the previous laboratory `docker compose run`
+command to include the three cost scenarios in its JSON. For example:
+
+```bash
+# From ~/Documents/Presentation/ramon-market-lab
+docker compose -f docker-compose.yaml -f docker-compose.lab.yaml \
+  --profile lab run --rm --no-deps laboratory \
+  --source litefinance-mt5-live-export-20261122 \
+  --symbol XAUUSD_l --start 2024-01-24 --end 2026-11-20 \
+  --balance 1024.23 --spread-points 42 \
+  --point 0.01 --tick-size 0.01 --tick-value 1 \
+  --volume-min 0.01 --volume-max 100 --volume-step 0.01 \
+  --slippage-points 2 --commission-per-lot 0 \
+  --batch-size 2000 --cost-stress > impulse-lab-diagnostics.json
+
+python3 lab/render_report.py impulse-lab-diagnostics.json \
+  > impulse-lab-diagnostics.html
+xdg-open impulse-lab-diagnostics.html
+```
+
+The report is **descriptive only** and cannot establish broker-correct
+profitability. Never relax the real risk ceiling or move these candidate
+rules into real execution based solely on simulated gains. Preserve any
+error from stderr; a failed run may leave a zero-byte redirected JSON file.
