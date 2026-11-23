@@ -70,6 +70,23 @@ def render(payload):
             h(trend.get("closed_trades"))+"</td><td>"+
             fmt(impulse.get("net_gain"),sign=True)+"</td><td>"+
             h(impulse.get("closed_trades"))+"</td></tr>")
+    filter_rows=[]
+    for scenario in payload.get("cost_sensitivity") or []:
+        for setup in ("trend_pullback","impulse_continuation"):
+            strategy=scenario.get(setup) or {}
+            for item in (strategy.get("rejections") or [])[:12]:
+                filter_rows.append(
+                    "<tr><td>"+h(scenario.get("name"))+"</td><td>"+h(setup)+
+                    "</td><td>"+h(item.get("stage") or "SIGNAL")+"</td><td>"+
+                    h(item.get("reason"))+"</td><td>"+h(item.get("count"))+"</td></tr>")
+    gap_breakdown_rows="".join(
+        "<tr><td>"+h(key)+"</td><td>"+h(value)+"</td></tr>"
+        for key,value in (gaps.get("unexpected_by_weekday_hour") or {}).items())
+    gap_sample_rows="".join(
+        "<tr><td>"+h(item.get("previous_utc"))+"</td><td>"+
+        h(item.get("next_utc"))+"</td><td>"+
+        h(item.get("missing_15m_slots"))+"</td></tr>"
+        for item in (gaps.get("unexpected_examples") or [])[:20])
     gap_rows="".join("<tr><td>"+h(name.replace("_"," "))+"</td><td>"+
         h(count)+"</td></tr>" for name,count in
         sorted((gaps.get("categories") or {}).items(),key=lambda x:-x[1]))
@@ -147,6 +164,18 @@ not a verified broker trading calendar. All gaps are unknown paths in OHLC repla
 These are hypothetical spreads, not recorded historical transactions.</p>
 <div class="tablewrap"><table><thead><tr><th>Scenario</th><th>Spread points</th><th>Slippage points</th><th>Trend PnL</th><th>Trend trades</th><th>Impulse PnL</th><th>Impulse trades</th></tr></thead>
 <tbody>{''.join(cost_rows) or '<tr><td colspan="7">Not requested for this report</td></tr>'}</tbody></table></div>
+<h2>Rejected trades: cost-filter diagnostic</h2>
+<p class="sub">These are genuine stage rejections returned by each strategy replay. Zero trades is not zero-loss cost stress.</p>
+<div class="tablewrap"><table><thead><tr><th>Cost scenario</th><th>Strategy</th><th>Stage</th><th>Reason</th><th>Count</th></tr></thead>
+<tbody>{''.join(filter_rows) or '<tr><td colspan="5">Rejection breakdown not reported</td></tr>'}</tbody></table></div>
+<h2>Unexplained gap timing (UTC)</h2>
+<p class="sub">Highest-frequency weekday/hour combinations across unexplained intraday gaps;
+a heuristic only, not a broker session calendar.</p>
+<div class="tablewrap"><table><thead><tr><th>Previous candle weekday / hour</th><th>Gap count</th></tr></thead>
+<tbody>{gap_breakdown_rows or '<tr><td colspan="2">No intraday gap timing data</td></tr>'}</tbody></table></div>
+<h3>Sample unexplained intervals</h3>
+<div class="tablewrap"><table><thead><tr><th>Previous candle UTC</th><th>Next candle UTC</th><th>Missing M15 slots</th></tr></thead>
+<tbody>{gap_sample_rows or '<tr><td colspan="3">No samples</td></tr>'}</tbody></table></div>
 <h2>Annual performance</h2>
 <div class="tablewrap"><table><thead><tr><th>Strategy</th><th>Year</th><th>Trades</th><th>Net PnL</th><th>Profit factor</th></tr></thead><tbody>
 {''.join(year_rows) or '<tr><td colspan="5">No closed trades</td></tr>'}</tbody></table></div>
