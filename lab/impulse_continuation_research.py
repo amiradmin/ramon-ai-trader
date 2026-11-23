@@ -20,7 +20,7 @@ def impulse_continuation_research(rows, *, start_ts, end_ts, balance,
     """Descriptive independent sequential position replay; no trading side effects."""
     result = {"setup": "IMPULSE_CONTINUATION", "mode": "RESEARCH_ONLY",
               "executions_authorized": False, "signals": 0, "trades": [],
-              "rejections": {}, "open_position": False,
+              "rejections": {}, "risk_rejections": [], "open_position": False,
               "assumptions": {"entry": "NEXT_BAR_OPEN", "intrabar": "STOP_FIRST",
                               "max_hold_m15": MAX_HOLD, "atr_period": ATR_PERIOD,
                               "breakout_lookback": BREAKOUT_LOOKBACK,
@@ -98,6 +98,23 @@ def impulse_continuation_research(rows, *, start_ts, end_ts, balance,
                     if (risk_budget < volume_min * risk_per_lot or
                             volume * risk_per_lot > risk_budget + 1e-9):
                         reject("MINIMUM_LOT_EXCEEDS_RISK")
+                        # Record every blocked entry, including its precise
+                        # modeled contract economics. No risk controls relaxed.
+                        required_risk = volume_min * risk_per_lot
+                        result["risk_rejections"].append({
+                            "timestamp":bar["time"], "side":side,
+                            "entry":round(entry,5),
+                            "stop":round(open_pos["stop"],5),
+                            "stop_distance":round(stop_distance,5),
+                            "stop_points":round(stop_distance/point,3),
+                            "risk_budget":round(risk_budget,4),
+                            "minimum_lot":volume_min,
+                            "minimum_lot_risk":round(required_risk,4),
+                            "minimum_lot_risk_percent":round(100*required_risk/cash,4) if cash>0 else None,
+                            "minimum_required_balance":round(100*required_risk/risk_percent,4),
+                            "affordable_volume_unrounded":round(risk_budget/risk_per_lot,8),
+                            "tick_value_assumed":tick_value,
+                            "tick_size_assumed":tick_size})
                         open_pos = None
                     else:
                         open_pos.update(entry=entry, volume=volume, opened_at=bar["time"])
