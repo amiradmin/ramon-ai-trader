@@ -62,7 +62,7 @@ def render(payload):
     summary="".join(f"""<tr><th>{h(n.replace('_',' '))}</th>
         <td>{h(p['closed_trades'])}</td><td>{fmt(p['net_gain'],sign=True)}</td>
         <td>{fmt(p['win_rate'])}%</td><td>{fmt(p['profit_factor'])}</td>
-        <td>{fmt(p['max_drawdown_pct'])}%</td></tr>""" for n,p in (
+        <td>{fmt(p.get('max_drawdown_pct'))}%</td></tr>""" for n,p in (
             ("TREND_PULLBACK",payload["trend_pullback"]),
             ("IMPULSE_CONTINUATION",payload["impulse_continuation"])))
     return f"""<!doctype html>
