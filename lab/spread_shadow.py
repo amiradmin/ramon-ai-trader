@@ -6,6 +6,7 @@ trading config, database thresholds, EA commands or the production worker.
 All other spread/ATR, spread/risk, quality, and 0.5% sizing gates remain.
 """
 from datetime import datetime, timezone
+from math import isfinite
 from unittest.mock import patch
 
 from segmented import breakdown, period_metrics, partition_dates
@@ -25,8 +26,10 @@ def run_shadow(replay_module, data, rows, *, spread_points, limit_points, progre
     def lab_pipeline(*args, **kwargs):
         pipeline=original(*args, **kwargs)
         configured=float(pipeline.entry_timer.maximum_spread_points)
-        if configured > 50.0 + 1e-9:
-            raise RuntimeError("Unexpected production spread limit; shadow experiment invalid")
+        if not isfinite(configured) or configured <= 0:
+            raise RuntimeError("Invalid loaded spread limit; shadow experiment invalid")
+        # The original threshold may come from the read-only DB config table.
+        # Never assume it equals the file default; do not persist this override.
         pipeline.entry_timer.maximum_spread_points=limit_points
         return pipeline
 
@@ -82,7 +85,16 @@ def comparison_report(*, replay_module, data, rows, start, end, baseline,
     if abs(float(data.get("risk_percent",0.5))-0.5)>1e-8:
         raise ValueError("Frozen experiment requires the unchanged 0.5% risk cap")
     starting=float(data["balance"])
-    runs=[("BASE_42_LIMIT_50",42.0,50.0,baseline),
+    # Actual configured cap is read from the standard pipeline once, without writes.
+    loaded_pipeline=replay_module._research_pipeline("TREND_PULLBACK",
+        risk_percent=.5, stop_buffer_atr=data.get("stop_buffer_atr"),
+        target_reward_risk=data.get("target_reward_risk"),
+        minimum_opportunity_score=data.get("minimum_opportunity_score"),
+        minimum_entry_quality=data.get("minimum_entry_quality"))
+    configured_limit=float(loaded_pipeline.entry_timer.maximum_spread_points)
+    if not isfinite(configured_limit) or configured_limit<=0:
+        raise ValueError("Invalid configured entry spread limit")
+    runs=[("BASE_42_LIMIT_50",42.0,50.0,None),
           ("HIGH_84_LIMIT_50",84.0,50.0,None),
           ("HIGH_84_LIMIT_90",84.0,90.0,None),
           ("HIGH_126_LIMIT_50",126.0,50.0,None),
@@ -123,6 +135,8 @@ def comparison_report(*, replay_module, data, rows, start, end, baseline,
         "live_eligible":False,
         "trading_authorized":False,
         "baseline_spread_points":42,
+        "configured_entry_spread_limit_points":configured_limit,
+        "preflight_original_baseline":sensitivity_metric(baseline),
         "fixed_risk_percent":0.5,
         "fixed_slippage_points":2,
         "experiment":"PREDECLARED_ABSOLUTE_SPREAD_LIMITS_50_90_130",
@@ -131,6 +145,7 @@ def comparison_report(*, replay_module, data, rows, start, end, baseline,
         "historical_gap_count":quality.get("gap_count"),
         "limitations":[
             "Research-only limit adjustments apply solely to in-memory strategy pipelines in an isolated process.",
+            "The independently replayed 42/50 scenario is a fixed-limit control, not necessarily the currently configured production threshold; the original baseline is reported separately.",
             "All ATR-relative spread, risk-distance, signal freshness, quality, broker volume and 0.5% risk checks remain active.",
             "Bid-only M15 OHLC; spread and slippage are modeled constants, not measured historical costs.",
             "Sequential positions cause path dependence; newly admitted trades are not an independent incremental P&L estimate.",
