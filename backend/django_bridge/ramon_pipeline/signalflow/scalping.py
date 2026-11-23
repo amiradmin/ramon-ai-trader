@@ -2,6 +2,7 @@
 from dataclasses import asdict, dataclass
 import math
 from collections import Counter
+from bisect import bisect_right
 
 VERSION = "m1-m5-pullback-v1"
 
@@ -147,12 +148,15 @@ def resolve_scalp(bars, plan, costs, *, max_holding_bars=5):
 
 def replay_scalper(m1, m5, *, costs, tick_size, stop_level_points=0, score_start=0, config=ScalpConfig()):
     trades, reasons = [], Counter()
+    m5_times = [bar['time'] for bar in m5]
     i, decisions = config.m1_window-1, 0
     while i < len(m1)-1:
         if m1[i]['time']+60 < score_start:
             i += 1
             continue
-        plan = detect_scalp(m1[:i+1], m5, bid=m1[i]['close'], costs=costs,
+        m5_end = bisect_right(m5_times, m1[i]['time']+60-300)
+        plan = detect_scalp(m1[max(0, i+1-config.m1_window):i+1],
+                            m5[max(0, m5_end-config.m5_window):m5_end], bid=m1[i]['close'], costs=costs,
                             tick_size=tick_size, stop_level_points=stop_level_points, config=config)
         decisions += 1
         if plan['action'] == 'WAIT':
