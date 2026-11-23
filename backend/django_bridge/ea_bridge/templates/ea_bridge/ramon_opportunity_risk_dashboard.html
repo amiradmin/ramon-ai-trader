@@ -268,7 +268,7 @@ async function refreshStrategyFleet() {
     }
   } catch (error) {
     $("connection").textContent = "DJANGO · FLEET STATUS UNAVAILABLE";
-    document.querySelectorAll(".strategy-card").forEach(card => card.classList.remove("strategy-on", "strategy-position-open"));
+    document.querySelectorAll(".strategy-card:not(#strategy-card-fast-scalp)").forEach(card => card.classList.remove("strategy-on", "strategy-position-open"));
     $("strategyFleetStatus").textContent = "Container status unavailable; previous values may be stale.";
   } finally { clearTimeout(timeout); strategyFleetInFlight = false; }
 }
