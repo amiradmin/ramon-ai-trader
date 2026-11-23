@@ -45,12 +45,31 @@ def impulse_continuation_research(rows, *, start_ts, end_ts, balance,
     last_segment_start = 0
     for i, bar in enumerate(rows):
         if i and bar["time"] - rows[i-1]["time"] != 900:
-            # Never carry simulated risk across unknowable OHLC gaps.
+            # Unknown path through an unobserved interval. Force a conservative
+            # open-of-next-observed-candle exit and flag the affected trade.
             if open_pos:
                 reject("DATA_GAP_POSITION_UNRESOLVED")
-                result["status"] = "INCOMPLETE_DATA_GAP"
-                result["open_position"] = True
-                return result
+                if "entry" in open_pos:
+                    side = open_pos["side"]
+                    exit_price = bar["open"] + (-slip if side == "BUY" else spread + slip)
+                    pnl = ((exit_price - open_pos["entry"]) *
+                           (1 if side == "BUY" else -1) * value_per_unit *
+                           open_pos["volume"] - commission_per_lot * open_pos["volume"])
+                    cash += pnl
+                    peak = max(peak, cash)
+                    if peak > 0:
+                        max_drawdown = max(max_drawdown, (peak-cash)/peak*100)
+                    result["trades"].append({
+                        "signal_at":open_pos["signal_at"],
+                        "opened_at":open_pos["opened_at"],
+                        "closed_at":bar["time"],"side":side,
+                        "entry":round(open_pos["entry"],5),"exit":round(exit_price,5),
+                        "stop":round(open_pos["stop"],5),"target":round(open_pos["target"],5),
+                        "volume":round(open_pos["volume"],4),"pnl":round(pnl,4),
+                        "reason":"DATA_GAP_FORCED_EXIT","data_gap_affected":True})
+                else:
+                    reject("DATA_GAP_PENDING_CANCELLED")
+                open_pos = None
             last_segment_start = i
             reject("DATA_GAP_RESET")
         if open_pos:
