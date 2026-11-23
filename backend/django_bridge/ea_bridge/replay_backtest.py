@@ -16,6 +16,7 @@ from django.test.utils import override_settings
 from .models import MarketBar
 from .strategy_registry import STRATEGIES
 from .decision import _build_pipeline, _ema
+from ramon_pipeline.signalflow.scalping import ScalpCosts, replay_scalper, valid_bar
 
 MAX_TEST_CANDLES = 1500
 WARMUP = 128
@@ -73,9 +74,11 @@ def _inputs(request):
     else:
         if isinstance(values, str):
             values = [values]
-        if not values or any(value not in STRATEGIES for value in values) or len(values) != len(set(values)):
-            raise ValueError("Select at least one valid, unique M15 strategy")
-        setups = [setup for setup in STRATEGIES if setup in values]
+        if not values or any(value not in (*STRATEGIES, "FAST_SCALP") for value in values) or len(values) != len(set(values)):
+            raise ValueError("Select at least one valid, unique strategy")
+        if "FAST_SCALP" in values and len(values) != 1:
+            raise ValueError("Fast Scalp requires a separate M1/M5 test; select it alone")
+        setups = [setup for setup in (*STRATEGIES, "FAST_SCALP") if setup in values]
     return dict(symbol=symbol,source=source,start=start,end=end,balance=balance,
        spread_points=spread_points,point=point,tick_size=tick_size,tick_value=tick_value,
        volume_min=volume_min,volume_max=volume_max,volume_step=volume_step,setups=setups,
@@ -363,7 +366,57 @@ def _simulate(data, rows, progress=None):
            rejection_total=sum(state["rejections"].values())))
     return report
 
+def _scalp_backtest_data(data, progress=None):
+    """Separate M1/M5 research in points and R, without invented account sizing."""
+    start=datetime.combine(data["start"],time.min,tzinfo=timezone.utc)
+    end=datetime.combine(data["end"]+timedelta(days=1),time.min,tzinfo=timezone.utc)
+    scope=dict(source=data["source"],symbol=data["symbol"])
+    query=MarketBar.objects.filter(**scope,timeframe="M1",timestamp__gte=start,timestamp__lt=end).order_by("timestamp")
+    count=query.count()
+    if count>100000:
+        return JsonResponse({"error":f"Fast Scalp has {count} M1 candles; select a shorter range (maximum 100,000)."},status=422)
+    # 32 complete M5 bars need at least 160 M1 warm-up bars before the start date.
+    prior=list(MarketBar.objects.filter(**scope,timeframe="M1",timestamp__lt=start).order_by("-timestamp")[:160])
+    prior.reverse()
+    raw=[dict(time=int(b.timestamp.timestamp()),open=float(b.open),high=float(b.high),
+              low=float(b.low),close=float(b.close)) for b in prior+list(query)]
+    m1=[bar for bar in raw if valid_bar(bar,60)]
+    groups={}
+    for bar in m1:
+        groups.setdefault(bar["time"]//300*300,[]).append(bar)
+    m5=[]
+    for stamp,group in sorted(groups.items()):
+        if [bar["time"] for bar in group] != [stamp+60*i for i in range(5)]:
+            continue
+        m5.append(dict(time=stamp,open=group[0]["open"],high=max(b["high"] for b in group),
+                       low=min(b["low"] for b in group),close=group[-1]["close"]))
+    history={"M1":m1,"M5":m5}
+    quality={"M1":dict(input_candles=len(raw),accepted_candles=len(m1),excluded=len(raw)-len(m1),
+                       gap_count=sum(b["time"]-a["time"]!=60 for a,b in zip(m1,m1[1:]))),
+             "M5":dict(input_groups=len(groups),accepted_candles=len(m5),
+                       incomplete_groups=len(groups)-len(m5),
+                       gap_count=sum(b["time"]-a["time"]!=300 for a,b in zip(m5,m5[1:])),
+                       method="COMPLETE_FIVE_CONSECUTIVE_M1_ONLY")}
+    if len(history["M1"])<65 or len(history["M5"])<32 or not any(start.timestamp()<=b["time"]<end.timestamp() for b in history["M1"]):
+        return JsonResponse({"error":"Fast Scalp needs completed, aligned M1 and M5 candles from this exact source and date range."},status=422)
+    if progress:progress(0,1)
+    value_per_point=data["tick_value"]*data["point"]/data["tick_size"]
+    costs=ScalpCosts(data["point"],data["spread_points"],data.get("slippage_points",0),
+                     data.get("commission_per_lot",0)/value_per_point)
+    scalp=replay_scalper(history["M1"],history["M5"],costs=costs,tick_size=data["tick_size"],
+                        score_start=int(start.timestamp()))
+    if progress:progress(1,1)
+    return JsonResponse(dict(mode="ISOLATED_SCALP_RESEARCH_ESTIMATE",timeframe="M1/M5",
+        symbol=data["symbol"],source=data["source"],start=data["start"].isoformat(),
+        end=data["end"].isoformat(),candles=len(history["M1"]),selected_setups=["FAST_SCALP"],
+        strategies=[],scalp_research=scalp,scalp_data_quality=quality,
+        assumptions={key:data.get(key) for key in ("spread_points","point","tick_size","tick_value",
+                     "slippage_points","commission_per_lot")},
+        limitations="Descriptive M1/M5 replay; complete M5 candles derived from stored M1. Fixed modeled costs, unknown historical broker stop level, no historical quotes or tick path. Points per lot and R are not account-currency profit or a 1,000/10,000 balance comparison."))
+
 def run_backtest_data(data, *, max_candles=MAX_TEST_CANDLES, progress=None):
+        if data.get("setups")==["FAST_SCALP"]:
+            return _scalp_backtest_data(data,progress=progress)
         start_dt=datetime.combine(data["start"],time.min,tzinfo=timezone.utc)
         end_dt=datetime.combine(data["end"]+timedelta(days=1),time.min,tzinfo=timezone.utc)
         scope=dict(source=data["source"],symbol=data["symbol"],timeframe="M15")
