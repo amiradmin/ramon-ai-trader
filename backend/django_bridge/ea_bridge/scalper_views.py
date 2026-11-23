@@ -5,11 +5,56 @@ from django.contrib.admin.views.decorators import staff_member_required
 from django.shortcuts import render, redirect
 from django.http import JsonResponse
 from django.utils import timezone
-from django.views.decorators.http import require_GET
+from django.views.decorators.http import require_GET, require_POST
 from django.views.decorators.http import require_http_methods
-from .models import EAEvent, EAHeartbeat, ScalperControl, LearningTradeOutcome
+from .models import EAEvent, EAHeartbeat, EACommand, ScalperControl, LearningTradeOutcome
 from django.db.models import Sum, Count
+from django.db import transaction
 from .scalper_engine import engine_commands, owned_position, readiness, close_scalp
+
+
+def _set_scalper_entries(request, action, scope):
+    """Apply the existing scalp readiness and account scope to dashboard controls."""
+    with transaction.atomic():
+        feed = EAHeartbeat.objects.filter(status='TELEMETRY_OK').order_by('-last_seen').first()
+        control = ScalperControl.objects.select_for_update().filter(
+            source=feed.instance_id, account_login=feed.account_login,
+            server_name=feed.server_name, symbol=feed.symbol,
+        ).first() if feed else None
+        if not control or str(control.pk) != str(scope):
+            return False, 'Scalper scope changed. Reload before using controls.'
+        if action == 'pause':
+            control.automatic = False
+            control.save(update_fields=['automatic'])
+            EACommand.objects.filter(instance_id=feed.instance_id,account_login=feed.account_login,
+                symbol=feed.symbol,payload__server_name=feed.server_name,payload__engine='SCALPER',
+                action='OPEN',state='PENDING').update(state='EXPIRED',completed_at=timezone.now())
+            message = 'Automatic scalp entries paused; queued entries expired. Already claimed orders may finish; existing exits remain managed.'
+            success = True
+        elif action == 'start' and readiness(feed) == 'READY':
+            control.automatic = True
+            control.save(update_fields=['automatic'])
+            message = 'Automatic real cent scalping enabled at a maximum 0.15% planned risk per trade.'
+            success = True
+        else:
+            message = 'Cannot enable Fast Scalp: '+readiness(feed)
+            success = False
+        EAEvent.objects.create(instance_id=feed.instance_id,event_id='scalper-control-'+uuid.uuid4().hex,
+            event_type='SCALPER_CONTROL',payload=dict(user=request.user.get_username(),action=action,
+                account_login=feed.account_login,server_name=feed.server_name,message=message))
+        return success,message
+
+
+@staff_member_required
+@require_POST
+def scalper_entries_control(request):
+    action=request.POST.get('action')
+    if action not in ('start','pause'):
+        return JsonResponse({'ok':False,'error':'Unsupported action.'},status=400)
+    success,message=_set_scalper_entries(request,action,request.POST.get('scope'))
+    response=JsonResponse({'ok':success,'message':message},status=200 if success else 409)
+    response['Cache-Control']='no-store'
+    return response
 
 
 @staff_member_required
@@ -21,32 +66,20 @@ def scalper_console(request):
     if feed:
         control = ScalperControl.objects.filter(source=feed.instance_id,account_login=feed.account_login,
             server_name=feed.server_name,symbol=feed.symbol).first()
-    if request.method == 'POST':
-        if not feed or not control:
-            message = 'No configured scalper feed. Controls are unavailable.'
-        elif request.POST.get('scope') != str(control.pk):
-            message = 'Account scope changed. Reload before submitting a control.'
-        else:
-            action = request.POST.get('action')
-            if action == 'pause':
-                ScalperControl.objects.filter(pk=control.pk).update(automatic=False)
-                message = 'Automatic scalp entries paused. Existing scalp exits remain managed.'
-            elif action == 'start':
-                ready = readiness(feed)
-                if ready == 'READY':
-                    ScalperControl.objects.filter(pk=control.pk).update(automatic=True)
-                    message = 'Automatic real cent scalping enabled at a maximum 0.15% planned risk per trade.'
-                else:
-                    message = 'Cannot start: '+ready
-            elif action == 'close':
-                command, reason = close_scalp(feed=feed,ticket=request.POST.get('ticket',''))
-                message = reason + (' · '+command.command_id if command else '')
-            else:
-                message = 'Unknown control.'
+    if request.method == 'POST' and request.POST.get('action') in ('start','pause'):
+        _,message = _set_scalper_entries(request,request.POST['action'],request.POST.get('scope'))
+        control.refresh_from_db() if control else None
+    elif request.method == 'POST':
+        if not feed or not control or request.POST.get('scope') != str(control.pk):
+            message = 'Scalper scope changed. Reload before submitting a control.'
+        elif request.POST.get('action') == 'close':
+            command, reason = close_scalp(feed=feed,ticket=request.POST.get('ticket',''))
+            message = reason + (' · '+command.command_id if command else '')
             EAEvent.objects.create(instance_id=feed.instance_id,event_id='scalper-control-'+uuid.uuid4().hex,
-                event_type='SCALPER_CONTROL',payload=dict(user=request.user.get_username(),action=action,
+                event_type='SCALPER_CONTROL',payload=dict(user=request.user.get_username(),action='close',
                     account_login=feed.account_login,server_name=feed.server_name,message=message))
-            control.refresh_from_db()
+        else:
+            message = 'Unknown control.'
     positions = []
     if feed:
         for p in feed.payload.get('positions',[]):
@@ -79,6 +112,7 @@ def scalper_status(request):
     response = JsonResponse({
         'fresh': fresh,
         'automatic': bool(control and control.automatic),
+        'control_scope': control.pk if control else None,
         'readiness': readiness(feed) if feed else 'NO_FEED',
         'position_status_known': positions_known,
         'open_positions': positions,
