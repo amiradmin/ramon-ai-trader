@@ -33,9 +33,9 @@ services:
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
-    network_mode: "none"
-    # The default networking is deliberately disabled. For PostgreSQL access
-    # use the explicit network override documented in lab/README.md.
+    # Same internal DB network as the existing stack; no published ports.
+    # The separate DB role is SELECT-only and cannot modify live tables.
+    networks: [ramon_backend]
     pids_limit: 80
     mem_limit: 1g
     cpus: 1.0
