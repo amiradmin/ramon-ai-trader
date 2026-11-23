@@ -23,6 +23,8 @@ class HistoricalReplayTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Step Forward")
         self.assertContains(response, 'id="testStrategies"')
+        self.assertContains(response, 'id="testOpportunityScore"')
+        self.assertContains(response, 'id="testEntryQuality"')
         self.assertEqual(response.content.count(b'type="checkbox" value="'), 7)
 
     def test_validated_bars_are_ordered_and_single_source(self):
@@ -272,10 +274,15 @@ class HistoricalStrategyBacktestTests(TestCase):
         from .replay_backtest import _research_pipeline
         baseline=_research_pipeline("TREND_PULLBACK")
         tuned=_research_pipeline("TREND_PULLBACK",risk_percent=0.2,
-            stop_buffer_atr=0.5,target_reward_risk=2.0)
+            stop_buffer_atr=0.5,target_reward_risk=2.0,
+            minimum_opportunity_score=0.7,minimum_entry_quality=0.8)
         self.assertEqual(tuned.risk_manager.maximum_risk_percent,0.2)
         self.assertEqual(tuned.risk_manager.config.stop_buffer_atr,0.5)
         self.assertEqual(tuned.risk_manager.config.target_reward_risk,2.0)
+        self.assertEqual(tuned.opportunities.minimum_score,0.7)
+        self.assertEqual(tuned.entry_timer.minimum_quality,0.8)
+        self.assertNotEqual(baseline.opportunities.minimum_score,0.7)
+        self.assertNotEqual(baseline.entry_timer.minimum_quality,0.8)
         self.assertEqual(baseline.risk_manager.config.stop_buffer_atr,0.25)
         self.assertNotEqual(baseline.risk_manager.config.target_reward_risk,2.0)
 
@@ -368,6 +375,8 @@ class HistoricalStrategyBacktestTests(TestCase):
     def test_invalid_research_costs_and_risk_are_rejected(self):
         for extra in ({"risk_percent":"0.6"},{"risk_percent":"0"},
                       {"target_reward_risk":"1.0"},{"stop_buffer_atr":"-0.1"},
+                      {"minimum_opportunity_score":"-0.01"},{"minimum_opportunity_score":"1.01"},
+                      {"minimum_entry_quality":"-0.01"},{"minimum_entry_quality":"1.01"},
                       {"slippage_points":"-1"},{"commission_per_lot":"NaN"}):
             with self.subTest(extra=extra):
                 response=self.client.get(self.path,{**self.params,**extra})
@@ -481,6 +490,7 @@ class HistoricalBacktestQueueTests(TestCase):
             "tick_size":"0.01","tick_value":"1","volume_min":"0.01",
             "volume_max":"100","volume_step":"0.01",
             "risk_percent":"0.2","stop_buffer_atr":"0.5","target_reward_risk":"2",
+            "minimum_opportunity_score":"0.7","minimum_entry_quality":"0.8",
             "slippage_points":"2","commission_per_lot":"3",
         }
         with tempfile.TemporaryDirectory() as directory:
@@ -490,8 +500,10 @@ class HistoricalBacktestQueueTests(TestCase):
                 saved=replay_jobs.read(response.json()["job_id"])["params"]
                 self.assertEqual({key:saved[key] for key in (
                     "risk_percent","stop_buffer_atr","target_reward_risk",
+                    "minimum_opportunity_score","minimum_entry_quality",
                     "slippage_points","commission_per_lot")},
                     {"risk_percent":0.2,"stop_buffer_atr":0.5,"target_reward_risk":2.0,
+                     "minimum_opportunity_score":0.7,"minimum_entry_quality":0.8,
                      "slippage_points":2.0,"commission_per_lot":3.0})
 
     def test_job_api_rejects_invalid_dates(self):
