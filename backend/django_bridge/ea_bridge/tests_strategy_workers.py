@@ -178,6 +178,31 @@ class StrategyWorkerTests(TestCase):
         self.assertEqual(a.state,'EXPIRED');self.assertEqual(b.state,'PENDING')
         self.assertTrue(StrategyWorkerControl.objects.get(setup='BREAKOUT_RETEST').automatic)
 
+    def test_dashboard_entry_toggle_is_scoped_and_rechecks_readiness(self):
+        user=get_user_model().objects.create_user(username='dashboard-operator',password='local-test',is_staff=True)
+        url='/api/ea/v1/strategies/trend-pullback/entries'
+        control=StrategyWorkerControl.objects.get(setup='TREND_PULLBACK')
+        other=StrategyWorkerControl.objects.get(setup='BREAKOUT_RETEST')
+        self.assertEqual(self.client.post(url,{'action':'pause','scope':control.pk}).status_code,302)
+        from django.test import Client
+        strict=Client(enforce_csrf_checks=True);strict.force_login(user)
+        self.assertEqual(strict.post(url,{'action':'pause','scope':control.pk}).status_code,403)
+        self.client.force_login(user)
+        pending,_,_=open_for('TREND_PULLBACK')
+        response=self.client.post(url,{'action':'pause','scope':other.pk})
+        self.assertEqual(response.status_code,409)
+        self.assertTrue(StrategyWorkerControl.objects.get(pk=control.pk).automatic)
+        self.assertTrue(self.client.post(url,{'action':'pause','scope':control.pk}).json()['ok'])
+        control.refresh_from_db();other.refresh_from_db();pending.refresh_from_db()
+        self.assertFalse(control.automatic)
+        self.assertTrue(other.automatic)
+        self.assertEqual(pending.state,'EXPIRED')
+        StrategyWorkerControl.objects.filter(pk=control.pk).update(last_seen=timezone.now()-timedelta(minutes=3))
+        response=self.client.post(url,{'action':'start','scope':control.pk})
+        self.assertEqual(response.status_code,409)
+        control.refresh_from_db()
+        self.assertFalse(control.automatic)
+
     def test_retired_learning_keeps_legacy_rows_and_excludes_setup_results(self):
         from .models import LearningTradeOutcome
         from .learning_store import DjangoOutcomeStore
