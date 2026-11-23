@@ -61,6 +61,8 @@ def _inputs(request):
     risk_percent = _positive(request.GET.get("risk_percent", "0.5"), "risk per trade (%)", 0, 0.5)
     stop_buffer_atr = _nonnegative(request.GET.get("stop_buffer_atr", "0.25"), "structural stop buffer (ATR)", 1.5)
     target_reward_risk = _positive(request.GET.get("target_reward_risk", "1.25"), "target reward/risk", 1.2 - 1e-9, 5)
+    minimum_opportunity_score = _nonnegative(request.GET.get("minimum_opportunity_score", "0.55"), "minimum opportunity score", 1)
+    minimum_entry_quality = _nonnegative(request.GET.get("minimum_entry_quality", "0.55"), "minimum entry quality", 1)
     slippage_points = _nonnegative(request.GET.get("slippage_points", "0"), "slippage (points per side)", 1e4)
     commission_per_lot = _nonnegative(request.GET.get("commission_per_lot", "0"), "round-trip commission per lot", 1e6)
     if volume_max < volume_min:
@@ -78,6 +80,7 @@ def _inputs(request):
        spread_points=spread_points,point=point,tick_size=tick_size,tick_value=tick_value,
        volume_min=volume_min,volume_max=volume_max,volume_step=volume_step,setups=setups,
        risk_percent=risk_percent,stop_buffer_atr=stop_buffer_atr,target_reward_risk=target_reward_risk,
+       minimum_opportunity_score=minimum_opportunity_score,minimum_entry_quality=minimum_entry_quality,
        slippage_points=slippage_points,commission_per_lot=commission_per_lot)
 
 def _indicators(history):
@@ -128,7 +131,8 @@ def _clean_m15_rows(rows):
                   "excluded":excluded,"examples":examples,"gap_count":gaps,
                   "method":"EXCLUDE_OFF_GRID_OR_DUPLICATE_ONLY_NO_SYNTHETIC_CANDLES"}
 
-def _research_pipeline(setup, *, risk_percent=0.5, stop_buffer_atr=None, target_reward_risk=None):
+def _research_pipeline(setup, *, risk_percent=0.5, stop_buffer_atr=None, target_reward_risk=None,
+                       minimum_opportunity_score=None, minimum_entry_quality=None):
     """Use standard risk policy, enabling exactly one config-approved research setup."""
     pipeline=_build_pipeline(demo_mode=False,strategy_setup=setup)
     configs=pipeline.opportunities.trading_settings["opportunity_finder"]["setups"]
@@ -141,6 +145,10 @@ def _research_pipeline(setup, *, risk_percent=0.5, stop_buffer_atr=None, target_
     for key,settings in configs.items():
         settings["enabled"]=(key==name)
     # Tune only the isolated research pipeline, never persisted/live thresholds.
+    if minimum_opportunity_score is not None:
+        pipeline.opportunities.minimum_score = minimum_opportunity_score
+    if minimum_entry_quality is not None:
+        pipeline.entry_timer.minimum_quality = minimum_entry_quality
     pipeline.risk_manager.maximum_risk_percent = min(
         pipeline.risk_manager.maximum_risk_percent, risk_percent, 0.5
     )
@@ -199,6 +207,8 @@ def _simulate(data, rows, progress=None):
             setup, risk_percent=risk_percent,
             stop_buffer_atr=data.get("stop_buffer_atr"),
             target_reward_risk=data.get("target_reward_risk"),
+            minimum_opportunity_score=data.get("minimum_opportunity_score"),
+            minimum_entry_quality=data.get("minimum_entry_quality"),
         ) for setup in setups}
     book={name:{"open":None,"trades":[],"equity":data["balance"],"peak":data["balance"],"drawdown":0,"signals":0,
                 "evaluations":0,"rejections":{},"rejection_examples":{},"rejection_details":{}}
@@ -393,7 +403,8 @@ def run_backtest_data(data, *, max_candles=MAX_TEST_CANDLES, progress=None):
                "balance","spread_points","point","tick_size","tick_value","volume_min","volume_max","volume_step")},
                **{k:data.get(k,default) for k,default in (
                    ("risk_percent",0.5),("stop_buffer_atr",0.25),
-                   ("target_reward_risk",1.25),("slippage_points",0),("commission_per_lot",0))}},
+                   ("target_reward_risk",1.25),("minimum_opportunity_score",0.55),
+                   ("minimum_entry_quality",0.55),("slippage_points",0),("commission_per_lot",0))}},
              limitations="Model-priced fixed spread, per-side adverse slippage and round-trip commission assumptions; no historical cost records or gap fills; OHLC intrabar order assumed stop first; no news/account state history; not broker validation, not full live-worker parity.",
              selected_setups=data.get("setups",list(STRATEGIES)),strategies=report))
 
