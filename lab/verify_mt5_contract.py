@@ -52,8 +52,15 @@ def main():
     p.add_argument("broker_snapshot_json")
     p.add_argument("lab_report_json")
     args=p.parse_args()
-    snapshot=json.loads(Path(args.broker_snapshot_json).read_text(encoding="utf-8"))
-    report=json.loads(Path(args.lab_report_json).read_text(encoding="utf-8"))
+    raw=Path(args.broker_snapshot_json).read_text(encoding="utf-8")
+    if not raw.strip():
+        parser_error="Broker snapshot is empty. Export it from MT5 (MQL5 script), then retry."
+        raise SystemExit(parser_error)
+    snapshot=json.loads(raw)
+    report_text=Path(args.lab_report_json).read_text(encoding="utf-8")
+    if not report_text.strip():
+        raise SystemExit("Laboratory report is empty. Run the historical replay first.")
+    report=json.loads(report_text)
     print(json.dumps(compare(snapshot,report),indent=2))
 
 
