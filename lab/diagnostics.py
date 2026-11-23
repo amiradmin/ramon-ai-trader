@@ -13,6 +13,9 @@ def gap_diagnostics(rows, *, expected_seconds=900):
     totals=Counter()
     samples={}
     missing_slots=Counter()
+    unexpected_by_year=Counter()
+    unexpected_by_weekday_hour=Counter()
+    unexpected_details=[]
     for a,b in zip(rows,rows[1:]):
         delta=int(b["time"])-int(a["time"])
         if delta==expected_seconds:
@@ -35,6 +38,12 @@ def gap_diagnostics(rows, *, expected_seconds=900):
         else:
             kind="UNEXPECTED_INTRADAY_GAP"
         totals[kind]+=1
+        if kind=='UNEXPECTED_INTRADAY_GAP':
+            unexpected_by_year[str(start.year)]+=1
+            unexpected_by_weekday_hour[f'{start.strftime("%a")} {start.hour:02d}:00 UTC']+=1
+            if len(unexpected_details)<30:
+                unexpected_details.append({'previous_utc':start.isoformat(),'next_utc':end.isoformat(),
+                                           'missing_15m_slots':max(0,delta//expected_seconds-1)})
         missing_slots[kind]+=max(0, delta//expected_seconds-1)
         if len(samples.setdefault(kind,[]))<5:
             samples[kind].append({
@@ -49,6 +58,9 @@ def gap_diagnostics(rows, *, expected_seconds=900):
         "estimated_missing_slots":dict(sorted(missing_slots.items())),
         "examples":samples,
         "verified_market_calendar":False,
+        "unexpected_by_year":dict(sorted(unexpected_by_year.items())),
+        "unexpected_by_weekday_hour":dict(sorted(unexpected_by_weekday_hour.items(), key=lambda kv:-kv[1])[:20]),
+        "unexpected_examples":unexpected_details,
         "note":"Weekend and holiday classifications are provisional; every gap must be treated as unknown price path in replay."
     }
 
@@ -130,3 +142,20 @@ def sensitivity_metric(report):
     return {k:report.get(k) for k in (
         "signals","closed_trades","win_rate","net_gain",
         "profit_factor","max_drawdown_pct","open_position","status")}
+    # Preserve actual pipeline stage reason counts in each cost scenario.
+    # This explains zero trades caused by filters rather than pnl=0.
+    reasons=report.get("rejections") or {}
+    if isinstance(reasons,list):
+        reasons=[{"stage":r.get("stage"),"reason":r.get("reason"),
+                  "count":r.get("count")} for r in reasons[:25]]
+    elif isinstance(reasons,dict):
+        reasons=[{"reason":k,"count":v} for k,v in
+                 sorted(reasons.items(),key=lambda x:-x[1])[:25]]
+    else:
+        reasons=[]
+    return {**{k:report.get(k) for k in (
+        "signals","closed_trades","win_rate","net_gain",
+        "profit_factor","max_drawdown_pct","open_position","status")},
+        "evaluations":report.get("evaluations"),
+        "rejection_total":report.get("rejection_total"),
+        "rejections":reasons}
