@@ -51,6 +51,8 @@ def parse():
     p.add_argument("--batch-size", type=int, default=2000,
                    help="Read historical rows from PostgreSQL in bounded batches")
     args = p.parse_args()
+    if args.cost_attribution and args.cost_stress:
+        p.error("Choose --cost-attribution OR --cost-stress, not both")
     if args.list_data:
         return args
     required = ("source","symbol","start","end","balance","spread_points",
