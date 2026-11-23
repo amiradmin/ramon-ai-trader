@@ -4,6 +4,7 @@ import json
 import math
 import os
 import sys
+import time as clock
 from datetime import date, datetime, time, timedelta, timezone
 
 import django
@@ -62,8 +63,30 @@ def parse():
     return args
 
 
+def progress(stage, done=None, total=None):
+    # stderr is visible even when JSON stdout is redirected.
+    if done is None or total is None:
+        print(f"[LAB] {stage}", file=sys.stderr, flush=True)
+    else:
+        print(f"[LAB] {stage}: {done:,}/{total:,} bars ({done/total:.0%})",
+              file=sys.stderr, flush=True)
+
+
+def replay_progress(stage):
+    last=[-1]
+    def emit(done, total):
+        # The existing replay invokes callbacks frequently: log only every
+        # 10 percentage points, plus the final completion event.
+        step=min(10, int(100*done/max(total,1))//10)
+        if step>last[0]:
+            last[0]=step
+            progress(stage, done, total)
+    return emit
+
+
 def main():
     args = parse()
+    progress('Starting isolated read-only laboratory')
     # Harden even if environment is accidentally misconfigured.
     if os.environ.get("DJANGO_DB_USER") != "ramon_lab_reader":
         raise RuntimeError("LAB_DB_READER_REQUIRED")
@@ -103,6 +126,7 @@ def main():
     # Fetch long time series in bounded batches. Evaluation is continuous
     # across fetch boundaries: indicator warm-up, pending orders and positions
     # never reset at a batch boundary.
+    progress('Reading M15 candles from PostgreSQL')
     selected=[]
     batches=0
     with psycopg.connect(**params) as conn:
@@ -132,6 +156,7 @@ def main():
                 batches+=1
                 if len(selected)>120000:
                     raise RuntimeError("MAX_120000_M15_BARS_EXCEEDED")
+    progress(f'Loaded {len(selected):,} candles in {batches} database batches')
     if not selected:
         raise RuntimeError("NO_SELECTED_M15_BARS: inspect --list-data for source/symbol/date coverage")
     rows = [dict(time=int(r[0].timestamp()),open=float(r[1]),high=float(r[2]),
@@ -153,7 +178,10 @@ def main():
     from segmented import breakdown, fingerprint, quality_gate
     from diagnostics import (gap_diagnostics, risk_diagnostics, contract_diagnostics,
                              per_year, per_regime, sensitivity_metric)
-    baseline = _simulate(data, rows)[0]
+    progress('Running TREND_PULLBACK, baseline costs')
+    baseline = _simulate(data, rows, progress=replay_progress('TREND_PULLBACK 1x'))[0]
+    progress('Completed TREND_PULLBACK, baseline costs')
+    progress('Running IMPULSE_CONTINUATION, baseline costs')
     candidate = impulse_continuation_research(
         rows, start_ts=int(start.timestamp()), end_ts=int(end.timestamp()),
         balance=args.balance, spread_points=args.spread_points, point=args.point,
@@ -162,6 +190,7 @@ def main():
         volume_step=args.volume_step, risk_percent=args.risk_percent,
         slippage_points=args.slippage_points,
         commission_per_lot=args.commission_per_lot)
+    progress('Completed IMPULSE_CONTINUATION, baseline costs')
     # Fixed predeclared chronological partitions. The original strategy and
     # candidate are each replayed exactly ONCE across the full timeline.
     # This avoids resets or phantom trading at PostgreSQL batch boundaries.
@@ -183,7 +212,9 @@ def main():
         for name,multiplier in (("BASE_COST",1),("DOUBLE_COST",2),("TRIPLE_COST",3)):
             stressed=dict(data,spread_points=data["spread_points"]*multiplier,
                           slippage_points=data["slippage_points"]*multiplier)
-            trend = baseline if multiplier==1 else _simulate(stressed,rows)[0]
+            progress(f'Cost stress {name}: starting')
+            trend = baseline if multiplier==1 else _simulate(
+                stressed,rows,progress=replay_progress(f'TREND_PULLBACK {multiplier}x'))[0]
             impulse = candidate if multiplier==1 else impulse_continuation_research(
                 rows, start_ts=int(start.timestamp()), end_ts=int(end.timestamp()),
                 balance=args.balance, spread_points=stressed["spread_points"],
@@ -192,6 +223,7 @@ def main():
                 volume_step=args.volume_step, risk_percent=args.risk_percent,
                 slippage_points=stressed["slippage_points"],
                 commission_per_lot=args.commission_per_lot)
+            progress(f'Cost stress {name}: completed')
             stress.append({"name":name,
                            "spread_points":stressed["spread_points"],
                            "slippage_points":stressed["slippage_points"],
@@ -232,7 +264,9 @@ def main():
         "candidate_rejections":candidate.get("rejections"),
         "limitations":"Historical bid-only OHLC and modeled costs; not broker-verified; gaps may invalidate comparisons; cent-account units require broker verification. No live execution."
     }
+    progress('Writing final JSON result')
     print(json.dumps(output,indent=2,sort_keys=True))
+    progress('Completed successfully')
 
 
 if __name__=="__main__":
