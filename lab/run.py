@@ -46,6 +46,8 @@ def parse():
     p.add_argument("--risk-percent", type=positive, default=.5)
     p.add_argument("--cost-stress", action="store_true",
                    help="Re-evaluate both strategies with larger modeled spread/slippage")
+    p.add_argument("--cost-attribution", action="store_true",
+                   help="Separate spread vs slippage effects with fixed 1x/2x/3x scenarios; research only")
     p.add_argument("--batch-size", type=int, default=2000,
                    help="Read historical rows from PostgreSQL in bounded batches")
     args = p.parse_args()
@@ -206,29 +208,45 @@ def main():
                        "open_position":candidate.get("open_position")},
                       min_test_trades=30)
     stress = []
-    if args.cost_stress:
-        # Re-run on identical rows with unchanged risk limit and account
-        # assumptions. No strategy parameter optimization; no live commands.
-        for name,multiplier in (("BASE_COST",1),("DOUBLE_COST",2),("TRIPLE_COST",3)):
-            stressed=dict(data,spread_points=data["spread_points"]*multiplier,
-                          slippage_points=data["slippage_points"]*multiplier)
-            progress(f'Cost stress {name}: starting')
-            trend = baseline if multiplier==1 else _simulate(
-                stressed,rows,progress=replay_progress(f'TREND_PULLBACK {multiplier}x'))[0]
-            impulse = candidate if multiplier==1 else impulse_continuation_research(
-                rows, start_ts=int(start.timestamp()), end_ts=int(end.timestamp()),
-                balance=args.balance, spread_points=stressed["spread_points"],
-                point=args.point, tick_size=args.tick_size, tick_value=args.tick_value,
-                volume_min=args.volume_min, volume_max=args.volume_max,
-                volume_step=args.volume_step, risk_percent=args.risk_percent,
-                slippage_points=stressed["slippage_points"],
-                commission_per_lot=args.commission_per_lot)
-            progress(f'Cost stress {name}: completed')
-            stress.append({"name":name,
-                           "spread_points":stressed["spread_points"],
-                           "slippage_points":stressed["slippage_points"],
-                           "trend_pullback":sensitivity_metric(trend),
-                           "impulse_continuation":sensitivity_metric(impulse)})
+    if args.cost_attribution:
+        # Factorial, predeclared scenarios: vary one modeled cost at a
+        # time to isolate rejection effects. NEVER relax spread checks,
+        # risk limits, score thresholds or any live settings.
+        scenarios = (("BASE_COST", 1, 1),
+                     ("SPREAD_ONLY_2X", 2, 1),
+                     ("SLIPPAGE_ONLY_2X", 1, 2),
+                     ("DOUBLE_COST", 2, 2),
+                     ("SPREAD_ONLY_3X", 3, 1),
+                     ("SLIPPAGE_ONLY_3X", 1, 3),
+                     ("TRIPLE_COST", 3, 3))
+    elif args.cost_stress:
+        scenarios = (("BASE_COST", 1, 1), ("DOUBLE_COST", 2, 2),
+                     ("TRIPLE_COST", 3, 3))
+    else:
+        scenarios = ()
+    for name, spread_multiple, slippage_multiple in scenarios:
+        stressed=dict(data,
+                      spread_points=data["spread_points"]*spread_multiple,
+                      slippage_points=data["slippage_points"]*slippage_multiple)
+        progress(f'Cost scenario {name}: starting')
+        trend = baseline if (spread_multiple, slippage_multiple)==(1,1) else _simulate(
+            stressed,rows,progress=replay_progress(f'TREND_PULLBACK {name}'))[0]
+        impulse = candidate if (spread_multiple, slippage_multiple)==(1,1) else impulse_continuation_research(
+            rows, start_ts=int(start.timestamp()), end_ts=int(end.timestamp()),
+            balance=args.balance, spread_points=stressed["spread_points"],
+            point=args.point, tick_size=args.tick_size, tick_value=args.tick_value,
+            volume_min=args.volume_min, volume_max=args.volume_max,
+            volume_step=args.volume_step, risk_percent=args.risk_percent,
+            slippage_points=stressed["slippage_points"],
+            commission_per_lot=args.commission_per_lot)
+        progress(f'Cost scenario {name}: completed')
+        stress.append({"name":name,
+                       "spread_multiple":spread_multiple,
+                       "slippage_multiple":slippage_multiple,
+                       "spread_points":stressed["spread_points"],
+                       "slippage_points":stressed["slippage_points"],
+                       "trend_pullback":sensitivity_metric(trend),
+                       "impulse_continuation":sensitivity_metric(impulse)})
     output = {
         "mode":"ISOLATED_READ_ONLY_LABORATORY", "trading_authorized":False,
         "gap_diagnostics":gap_diagnostics(rows),
@@ -241,7 +259,8 @@ def main():
             "trend_pullback":per_regime(baseline,initial_balance=args.balance),
             "impulse_continuation":per_regime(candidate,initial_balance=args.balance)},
         "cost_sensitivity":stress,
-        "cost_sensitivity_status":"REPLAYED" if args.cost_stress else "NOT_REQUESTED",
+        "cost_sensitivity_status":"ATTRIBUTION_REPLAYED" if args.cost_attribution else ("REPLAYED" if args.cost_stress else "NOT_REQUESTED"),
+        "cost_experiment_method":"FIXED_SEPARATE_SPREAD_AND_SLIPPAGE_NO_THRESHOLD_TUNING" if args.cost_attribution else "JOINT_COST_SCALING",
         "market_source":args.source,"symbol":args.symbol,
         "start":args.start.isoformat(),"end":args.end.isoformat(),
         "data_quality":quality,
