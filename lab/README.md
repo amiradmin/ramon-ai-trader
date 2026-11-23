@@ -215,3 +215,53 @@ The report is **descriptive only** and cannot establish broker-correct
 profitability. Never relax the real risk ceiling or move these candidate
 rules into real execution based solely on simulated gains. Preserve any
 error from stderr; a failed run may leave a zero-byte redirected JSON file.
+
+## Contract verification and cost-rejection/gap drilldown
+
+The existing 1x cost scenario generated 49 TREND_PULLBACK trades, but 2x/3x
+produced **zero**. That is NOT a breakeven P&L backtest: we must inspect
+pipeline rejection reasons per scenario before claiming cost robustness.
+The new JSON includes each scenario's
+`cost_sensitivity[].trend_pullback.rejections`, `rejection_total`,
+and `evaluations`. The offline HTML dashboard shows rejection stage,
+reason, and count. The `gap_diagnostics` section now includes the
+highest-frequency UTC weekday/hour combinations for unexplained gaps,
+the year breakdown and up to 30 sample timestamps. These are clues,
+NOT proof of missing candles or valid sessions.
+
+**Read-only MT5 snapshot:** On the same computer and Python environment
+that already has a *connected* MetaTrader 5 terminal and working
+`MetaTrader5` Python module, run:
+
+```bash
+python lab/inspect_mt5_contract.py --symbol XAUUSD_l > mt5-contract-snapshot.json
+```
+
+On Ubuntu/Wine, ordinary Linux `python` usually cannot import the Windows
+MT5 Python integration. The script must be run with the compatible Python
+interpreter associated with an already connected terminal; it never opens
+orders or changes account settings. The snapshot excludes login/account ID,
+server identity and authentication details. It DOES contain current balance,
+which is sensitive financial data: **do not commit either snapshot or report
+to Git**.
+
+When the next lab backtest has produced `impulse-lab-diagnostics.json`,
+compare the snapshot *offline on the host* (no extra DB permissions):
+
+```bash
+python3 lab/verify_mt5_contract.py \
+  mt5-contract-snapshot.json impulse-lab-diagnostics.json \
+  > contract-verification.json
+python3 -m json.tool contract-verification.json
+```
+
+The comparison reports matched and mismatched contract fields, including
+tick size/value and minimum volume. It never updates the replay assumptions,
+cannot authorize real trading, and flags both cent-account denomination
+and historical contract changes as still unverified. The MT5 balance may
+have changed since the historical starting balance; that difference
+is reported but should not be automatically corrected.
+
+After rebuilding only the laboratory container, rerun the standard
+`--cost-stress` command to obtain new rejection counts and richer gap details.
+The isolated live MT5 worker does not need restarting.
