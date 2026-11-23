@@ -139,11 +139,7 @@ def per_regime(report, *, initial_balance):
 
 
 def sensitivity_metric(report):
-    return {k:report.get(k) for k in (
-        "signals","closed_trades","win_rate","net_gain",
-        "profit_factor","max_drawdown_pct","open_position","status")}
-    # Preserve actual pipeline stage reason counts in each cost scenario.
-    # This explains zero trades caused by filters rather than pnl=0.
+    """Retain real pipeline rejection reasons for each modeled-cost rerun."""
     reasons=report.get("rejections") or {}
     if isinstance(reasons,list):
         reasons=[{"stage":r.get("stage"),"reason":r.get("reason"),
