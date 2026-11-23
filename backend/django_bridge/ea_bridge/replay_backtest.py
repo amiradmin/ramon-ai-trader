@@ -4,6 +4,7 @@ No EA/command functions are imported. Assumed spreads and contract economics are
 explicit inputs, not broker-verified historical fills.
 """
 from datetime import date, datetime, time, timedelta, timezone
+from dataclasses import replace
 from decimal import Decimal
 import math
 import hashlib
@@ -23,6 +24,15 @@ def _positive(raw, name, low=0.0, high=1e9):
     try:
         value = float(raw)
         if not math.isfinite(value) or not low < value <= high:
+            raise ValueError()
+        return value
+    except (ValueError, TypeError):
+        raise ValueError("Invalid or missing "+name)
+
+def _nonnegative(raw, name, high=1e6):
+    try:
+        value = float(raw)
+        if not math.isfinite(value) or not 0 <= value <= high:
             raise ValueError()
         return value
     except (ValueError, TypeError):
@@ -48,6 +58,11 @@ def _inputs(request):
     volume_min = _positive(request.GET.get("volume_min"),"minimum lot",0,1e3)
     volume_step = _positive(request.GET.get("volume_step"),"lot step",0,1e3)
     volume_max = _positive(request.GET.get("volume_max"),"maximum lot",0,1e6)
+    risk_percent = _positive(request.GET.get("risk_percent", "0.5"), "risk per trade (%)", 0, 0.5)
+    stop_buffer_atr = _nonnegative(request.GET.get("stop_buffer_atr", "0.25"), "structural stop buffer (ATR)", 1.5)
+    target_reward_risk = _positive(request.GET.get("target_reward_risk", "1.25"), "target reward/risk", 1.2 - 1e-9, 5)
+    slippage_points = _nonnegative(request.GET.get("slippage_points", "0"), "slippage (points per side)", 1e4)
+    commission_per_lot = _nonnegative(request.GET.get("commission_per_lot", "0"), "round-trip commission per lot", 1e6)
     if volume_max < volume_min:
         raise ValueError("Maximum lot must be >= minimum lot")
     values = (request.GET.getlist("setups") if hasattr(request.GET, "getlist") else request.GET.get("setups")) if "setups" in request.GET else None
@@ -61,7 +76,9 @@ def _inputs(request):
         setups = [setup for setup in STRATEGIES if setup in values]
     return dict(symbol=symbol,source=source,start=start,end=end,balance=balance,
        spread_points=spread_points,point=point,tick_size=tick_size,tick_value=tick_value,
-       volume_min=volume_min,volume_max=volume_max,volume_step=volume_step,setups=setups)
+       volume_min=volume_min,volume_max=volume_max,volume_step=volume_step,setups=setups,
+       risk_percent=risk_percent,stop_buffer_atr=stop_buffer_atr,target_reward_risk=target_reward_risk,
+       slippage_points=slippage_points,commission_per_lot=commission_per_lot)
 
 def _indicators(history):
     closes=[b["close"] for b in history]
@@ -111,7 +128,7 @@ def _clean_m15_rows(rows):
                   "excluded":excluded,"examples":examples,"gap_count":gaps,
                   "method":"EXCLUDE_OFF_GRID_OR_DUPLICATE_ONLY_NO_SYNTHETIC_CANDLES"}
 
-def _research_pipeline(setup):
+def _research_pipeline(setup, *, risk_percent=0.5, stop_buffer_atr=None, target_reward_risk=None):
     """Use standard risk policy, enabling exactly one config-approved research setup."""
     pipeline=_build_pipeline(demo_mode=False,strategy_setup=setup)
     configs=pipeline.opportunities.trading_settings["opportunity_finder"]["setups"]
@@ -123,16 +140,36 @@ def _research_pipeline(setup):
         raise ValueError("Strategy disabled in both standard and research configuration: "+name)
     for key,settings in configs.items():
         settings["enabled"]=(key==name)
+    # Tune only the isolated research pipeline, never persisted/live thresholds.
+    pipeline.risk_manager.maximum_risk_percent = min(
+        pipeline.risk_manager.maximum_risk_percent, risk_percent, 0.5
+    )
+    updates = {}
+    if stop_buffer_atr is not None:
+        updates["stop_buffer_atr"] = stop_buffer_atr
+    if target_reward_risk is not None:
+        if target_reward_risk < pipeline.risk_manager.config.min_reward_risk:
+            raise ValueError("Target reward/risk is below the configured minimum for "+setup)
+        updates["target_reward_risk"] = target_reward_risk
+    if updates:
+        pipeline.risk_manager.config = replace(pipeline.risk_manager.config, **updates)
     return pipeline
 
 def _simulate(data, rows, progress=None):
     spread = data["spread_points"]*data["point"]
     value_per_price=data["tick_value"]/data["tick_size"]
+    risk_percent=data.get("risk_percent", 0.5)
+    slippage=data.get("slippage_points", 0)*data["point"]
+    commission_per_lot=data.get("commission_per_lot", 0)
     setups=data.get("setups", list(STRATEGIES))
     # Research pipelines use exactly the worker's detector and risk implementation,
     # but never the live decision API or its persistent command boundary.
     with override_settings(RAMON_DEDUPE_SIGNALS=False):
-        pipelines={setup:_research_pipeline(setup) for setup in setups}
+        pipelines={setup:_research_pipeline(
+            setup, risk_percent=risk_percent,
+            stop_buffer_atr=data.get("stop_buffer_atr"),
+            target_reward_risk=data.get("target_reward_risk"),
+        ) for setup in setups}
     book={name:{"open":None,"trades":[],"equity":data["balance"],"peak":data["balance"],"drawdown":0,"signals":0,
                 "evaluations":0,"rejections":{},"rejection_examples":{},"rejection_details":{}}
           for name in setups}
@@ -161,7 +198,7 @@ def _simulate(data, rows, progress=None):
             if pos is not None:
                 state["pending"]=None
                 if within and state["open"] is None:
-                    entry=bar["open"]+(spread if pos["side"]=="BUY" else 0)
+                    entry=bar["open"]+(spread+slippage if pos["side"]=="BUY" else -slippage)
                     if (pos["side"]=="BUY" and pos["stop"]<entry<pos["target"]) or (pos["side"]=="SELL" and pos["target"]<entry<pos["stop"]):
                         pos["entry"]=entry;pos["opened_at"]=bar["time"]
                         state["open"]=pos
@@ -173,9 +210,12 @@ def _simulate(data, rows, progress=None):
             stop_hit=bar["low"]<=pos["stop"] if pos["side"]=="BUY" else bar["high"]+spread>=pos["stop"]
             target_hit=bar["high"]>=pos["target"] if pos["side"]=="BUY" else bar["low"]+spread<=pos["target"]
             if not (stop_hit or target_hit):continue
-            exit_price=pos["stop"] if stop_hit else pos["target"]
+            level=pos["stop"] if stop_hit else pos["target"]
+            exit_price=level+(-slippage if pos["side"]=="BUY" else slippage)
             direction=1 if pos["side"]=="BUY" else -1
-            pnl=(exit_price-pos["entry"])*direction*value_per_price*pos["volume"]
+            gross_pnl=(exit_price-pos["entry"])*direction*value_per_price*pos["volume"]
+            commission=commission_per_lot*pos["volume"]
+            pnl=gross_pnl-commission
             state["equity"]+=pnl
             state["peak"]=max(state["peak"],state["equity"])
             if state["peak"]>0:state["drawdown"]=max(state["drawdown"],(state["peak"]-state["equity"])/state["peak"]*100)
@@ -183,7 +223,10 @@ def _simulate(data, rows, progress=None):
                "closed_at":bar["time"],"entry":round(pos["entry"],5),"exit":round(exit_price,5),
                "volume":pos["volume"],"stop":round(pos["stop"],5),
                "target":round(pos["target"],5),"signal_at":pos["signal_at"],
-               "pnl":round(pnl,2),"reason":"STOP" if stop_hit else "TARGET"})
+               "pnl":round(pnl,2),"gross_pnl":round(gross_pnl,2),
+               "commission":round(commission,2),"entry_slippage_points":data.get("slippage_points",0),
+               "exit_slippage_points":data.get("slippage_points",0),
+               "reason":"STOP" if stop_hit else "TARGET"})
             state["open"]=None
         # Don't evaluate the final candle: an order requires a next candle to fill.
         if idx==len(rows)-1 or not within:continue
@@ -204,7 +247,7 @@ def _simulate(data, rows, progress=None):
                 setup_score=min(1,abs(fast-slow)/(atr*.8)),
                 entry_quality=min(1,abs(close-history[-5]["close"])/(atr*1.5)),
                 spread_points=data["spread_points"],
-                account_balance=state["equity"],risk_percent=0.5,
+                account_balance=state["equity"],risk_percent=risk_percent,
                 stop_loss_points=atr*1.5/data["point"],
                 point_value_per_lot=value_per_price*data["point"],
                 volume_step=data["volume_step"],min_volume=data["volume_min"],
@@ -303,9 +346,12 @@ def run_backtest_data(data, *, max_candles=MAX_TEST_CANDLES, progress=None):
              last_bar=datetime.fromtimestamp(rows[-1]["time"],tz=timezone.utc).isoformat(),
              candles=len(rows),data_quality=quality,
              research_profile="STANDARD_RISK_EXPLICIT_SETUP_RESEARCH",
-             assumptions={k:data[k] for k in (
+             assumptions={**{k:data[k] for k in (
                "balance","spread_points","point","tick_size","tick_value","volume_min","volume_max","volume_step")},
-             limitations="Model-priced fixed spread, no historical spread/slippage/fees; OHLC intrabar order assumed stop first; no news/account state history; not broker validation, not full live-worker parity.",
+               **{k:data.get(k,default) for k,default in (
+                   ("risk_percent",0.5),("stop_buffer_atr",0.25),
+                   ("target_reward_risk",1.25),("slippage_points",0),("commission_per_lot",0))}},
+             limitations="Model-priced fixed spread, per-side adverse slippage and round-trip commission assumptions; no historical cost records or gap fills; OHLC intrabar order assumed stop first; no news/account state history; not broker validation, not full live-worker parity.",
              selected_setups=data.get("setups",list(STRATEGIES)),strategies=report))
 
 
