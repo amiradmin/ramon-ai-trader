@@ -265,3 +265,43 @@ is reported but should not be automatically corrected.
 After rebuilding only the laboratory container, rerun the standard
 `--cost-stress` command to obtain new rejection counts and richer gap details.
 The isolated live MT5 worker does not need restarting.
+
+## Ubuntu/Wine MT5: export the broker contract without Python MetaTrader5
+
+The pure Linux `python lab/inspect_mt5_contract.py` may say
+`MetaTrader5 Python API missing`. Do **not** install a new MT5 instance
+or change the live EA.
+
+Use the new read-only **`lab/RamonContractSnapshot.mq5`** instead:
+
+1. In your already connected MetaTrader 5 desktop application, open
+   **File → Open Data Folder**. Open `MQL5/Scripts` and copy
+   `lab/RamonContractSnapshot.mq5` from the laboratory Git checkout into
+   that Scripts folder. You can also open the script from the terminal's
+   MetaEditor, save it under `MQL5/Scripts`, and compile there.
+2. Compile the file using MetaEditor (F7). This script only reads
+   `AccountInfo*`, `SymbolInfo*` and writes one JSON text file.
+   It calls **no** `OrderSend`, trading classes, position modification
+   or HTTP functions.
+3. In MT5 **Navigator → Scripts**, run `RamonContractSnapshot` with
+   **ResearchSymbol = XAUUSD_l**.
+4. MT5's **Experts** tab will print the output location. Open
+   **File → Open Data Folder → MQL5 → Files** and copy
+   `ramon-contract-snapshot.json` into the lab checkout as
+   `mt5-contract-snapshot.json`. It includes current account balance,
+   so keep it private.
+5. Run:
+
+```bash
+cd ~/Documents/Presentation/ramon-market-lab
+python3 -m json.tool mt5-contract-snapshot.json >/dev/null &&
+python3 lab/verify_mt5_contract.py \
+  mt5-contract-snapshot.json impulse-lab-diagnostics.json \
+  > contract-verification.json &&
+python3 -m json.tool contract-verification.json
+```
+
+**Note:** MetaEditor compilation and execution must happen on your actual
+connected MT5 installation; GitHub CI does not compile MQL5, so inspect the
+MetaEditor errors if any. This snapshot represents current broker specs,
+not necessarily the full 2024–2026 historical contract.
