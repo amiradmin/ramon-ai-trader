@@ -50,9 +50,18 @@ def _inputs(request):
     volume_max = _positive(request.GET.get("volume_max"),"maximum lot",0,1e6)
     if volume_max < volume_min:
         raise ValueError("Maximum lot must be >= minimum lot")
+    values = (request.GET.getlist("setups") if hasattr(request.GET, "getlist") else request.GET.get("setups")) if "setups" in request.GET else None
+    if values is None:
+        setups = list(STRATEGIES)  # Existing API calls and queued jobs keep their prior behavior.
+    else:
+        if isinstance(values, str):
+            values = [values]
+        if not values or any(value not in STRATEGIES for value in values) or len(values) != len(set(values)):
+            raise ValueError("Select at least one valid, unique M15 strategy")
+        setups = [setup for setup in STRATEGIES if setup in values]
     return dict(symbol=symbol,source=source,start=start,end=end,balance=balance,
        spread_points=spread_points,point=point,tick_size=tick_size,tick_value=tick_value,
-       volume_min=volume_min,volume_max=volume_max,volume_step=volume_step)
+       volume_min=volume_min,volume_max=volume_max,volume_step=volume_step,setups=setups)
 
 def _indicators(history):
     closes=[b["close"] for b in history]
@@ -119,7 +128,7 @@ def _research_pipeline(setup):
 def _simulate(data, rows, progress=None):
     spread = data["spread_points"]*data["point"]
     value_per_price=data["tick_value"]/data["tick_size"]
-    setups=list(STRATEGIES)
+    setups=data.get("setups", list(STRATEGIES))
     # Research pipelines use exactly the worker's detector and risk implementation,
     # but never the live decision API or its persistent command boundary.
     with override_settings(RAMON_DEDUPE_SIGNALS=False):
@@ -297,7 +306,7 @@ def run_backtest_data(data, *, max_candles=MAX_TEST_CANDLES, progress=None):
              assumptions={k:data[k] for k in (
                "balance","spread_points","point","tick_size","tick_value","volume_min","volume_max","volume_step")},
              limitations="Model-priced fixed spread, no historical spread/slippage/fees; OHLC intrabar order assumed stop first; no news/account state history; not broker validation, not full live-worker parity.",
-             strategies=report))
+             selected_setups=data.get("setups",list(STRATEGIES)),strategies=report))
 
 
 @require_GET
