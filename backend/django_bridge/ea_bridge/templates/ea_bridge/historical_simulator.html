@@ -43,12 +43,14 @@ button.primary{background:var(--gold);color:#161b23;border:0;font-weight:700}lab
 <label>Round-trip commission (account units per lot)<input type="number" id="testCommission" min="0" step="any" required value="0"></label>
 </div>
 <fieldset style="border:0;padding:0;margin:14px 0 0"><legend style="font-weight:700">Strategies to test</legend>
-<div class="strategyChoices" id="testStrategies">{% for setup in strategies %}<label><input type="checkbox" value="{{ setup }}" checked> {{ setup }}</label>{% endfor %}</div>
-<small>These selections and tuning values affect only this historical test. Score and quality are minimum thresholds from 0 to 1; higher values reject more candidate entries. Risk is capped at 0.5% per trade. Stop buffer adds distance beyond structural invalidation; it is not a fixed stop distance. Slippage is adverse on entry and exit; commission is per completed lot. Fast Scalp uses M1/M5 data and is outside this M15 backtest.</small>
+<div class="strategyChoices" id="testStrategies">{% for setup in strategies %}<label><input type="checkbox" value="{{ setup }}" checked> {{ setup }}</label>{% endfor %}<label><input type="checkbox" value="FAST_SCALP"> FAST_SCALP · M1/M5</label></div>
+<small>These selections and tuning values affect only this historical test. M15 score, entry quality, risk and exit tuning apply to the seven M15 strategies. Fast Scalp is tested alone using its frozen M1/M5 policy; only symbol, source, dates, spread, point, tick size, slippage and commission apply. Its results are points per lot and R, not account profit. Historical costs and fills remain assumptions.</small>
 </fieldset>
 <div class="controls"><label><input id="compareBalances" type="checkbox" checked> Compare 1,000 and 10,000 virtual account units</label></div>
 <div class="controls"><button class="primary" id="runBacktest">Run strategy backtest</button><button id="exportBacktest" type="button" disabled>Download backtest result (JSON)</button><span id="backtestStatus" class="muted" role="status" aria-live="polite">Set dates and broker assumptions to begin.</span></div>
 <div id="backtestResults" class="researchResults">
+<div id="scalpResults" style="display:none" role="region" aria-label="Fast Scalp research results"></div>
+<div id="m15Results">
 <h3>Full selected period · estimated research results</h3>
 <div class="panel" style="padding:12px;margin:10px 0"><strong>Historical M15 data quality</strong>
 <div id="qualitySummary" class="muted">Not evaluated yet</div>
@@ -80,6 +82,7 @@ button.primary{background:var(--gold);color:#161b23;border:0;font-weight:700}lab
 <div id="rejectionDetails" role="region" aria-label="Per-strategy rejection reasons"></div>
 </details>
 <p class="muted">Each strategy uses an independent starting balance. The aggregate combines separate research books, not a shared portfolio. Slippage and commission are assumed, not historical measurements; no news locks or broker fill verification. When both SL and TP occur within one candle, stop-loss wins.</p>
+</div>
 </div>
 </section>
 <section class="panel">
@@ -138,8 +141,10 @@ let bars=[],cursor=0,playing=false,timer=null,chart=null,series=null,loading=fal
 function clearBacktest(){backtest=null;backtestInputs=null;el("exportBacktest").disabled=true;el("backtestResults").style.display="none"}
 function exportBacktest(){
  if(!backtest||!backtestInputs)return;
- const report={format:"ramon-simulator-backtest-v1",exported_at_utc:new Date().toISOString(),inputs:backtestInputs,
-  caveats:["Estimated research fills, not broker executions.","Selected independent strategy accounts; aggregate is not a shared portfolio.","Spread, slippage, commission and symbol specifications are user supplied assumptions; historical broker costs, news locks, and fills are not verified.","When stop and target both occur within one candle, stop wins."],result:backtest};
+ const scalp=Boolean(backtest.scalp_research);
+ const report={format:scalp?"ramon-simulator-scalp-replay-v1":"ramon-simulator-backtest-v1",exported_at_utc:new Date().toISOString(),inputs:backtestInputs,
+  caveats:scalp?["Fast Scalp is a separate M1/M5 descriptive replay; points per lot and R are not account profit.","Fixed costs and OHLC fills are assumptions; no historical broker executions or lot sizing are reconstructed."]:
+   ["Estimated research fills, not broker executions.","Selected independent strategy accounts; aggregate is not a shared portfolio.","Spread, slippage, commission and symbol specifications are user supplied assumptions; historical broker costs, news locks, and fills are not verified.","When stop and target both occur within one candle, stop wins."],result:backtest};
  const blob=new Blob([JSON.stringify(report,null,2)+"\n"],{type:"application/json"});
  const url=URL.createObjectURL(blob),link=document.createElement("a");
  link.href=url;link.download="ramon-backtest-"+backtestInputs.symbol.replace(/[^a-zA-Z0-9_-]/g,"_")+"-"+backtestInputs.start+"-"+backtestInputs.end+".json";
@@ -193,6 +198,27 @@ function renderFullBacktest(){
  el("fullWin").textContent=all.length?(100*win/all.length).toFixed(2)+"%":"N/A";
  el("fullGain").textContent=gain.toFixed(2);
  el("fullGain").className="value"+(gain<0?" negative":" positive");
+}
+function renderScalp(){
+ const scalp=backtest?.scalp_research;
+ el("scalpResults").style.display=scalp?"block":"none";
+ el("m15Results").style.display=scalp?"none":"block";
+ if(!scalp)return;
+ const quality=backtest.scalp_data_quality||{};
+ const line=document.createElement("p");line.className="muted";
+ line.textContent="Separate M1/M5 descriptive replay · "+backtest.start+" to "+backtest.end+
+  " UTC · M1 "+(quality.M1?.accepted_candles??0)+" candles / "+(quality.M1?.gap_count??0)+" gaps · M5 "+
+  (quality.M5?.accepted_candles??0)+" candles / "+(quality.M5?.gap_count??0)+" gaps.";
+ const title=document.createElement("h3");title.textContent="Fast Scalp · full selected period";
+ const result=document.createElement("p");
+ result.textContent=scalp.trade_count+" closed trades · "+(scalp.win_rate===null?"N/A":(100*scalp.win_rate).toFixed(2)+"%")+
+  " win · net "+scalp.net_points.toFixed(2)+" points per lot · net "+scalp.net_r.toFixed(2)+" R · closed cumulative drawdown "+
+  scalp.closed_cumulative_r_drawdown.toFixed(2)+" R.";
+ const note=document.createElement("p");note.className="muted";
+ note.textContent="No 1,000/10,000 account comparison or currency profit: Fast Scalp replay has no historical lot sizing or broker fills. Fixed spread/slippage and converted commission are assumptions.";
+ const reasons=document.createElement("p");reasons.className="muted";
+ reasons.textContent="Decision reasons: "+JSON.stringify(scalp.rejections);
+ el("scalpResults").replaceChildren(title,line,result,note,reasons);
 }
 function renderTradeHistory(){
  const root=el("tradesBody");root.replaceChildren();
@@ -485,12 +511,13 @@ async function runBacktest(){
  for(const [key,id] of Object.entries(ids)){const field=el(id);if(!field.value||!field.checkValidity()){el("backtestStatus").textContent="Enter valid "+key+" before running.";field.focus();return}params.set(key,field.value)}
  if(!params.get("start")||!params.get("end")){el("backtestStatus").textContent="Select both From and To dates.";return}
  const selected=[...document.querySelectorAll("#testStrategies input:checked")].map(input=>input.value);
- if(!selected.length){el("backtestStatus").textContent="Select at least one M15 strategy to test.";return}
+ if(!selected.length){el("backtestStatus").textContent="Select at least one strategy to test.";return}
  for(const setup of selected)params.append("setups",setup);
- if(el("compareBalances").checked)params.set("compare_balances","1");
- el("timeframe").value="M15";el("limit").value="2000";await load();
- const source=el("source").textContent.replace(/^Source:\s*/,"").trim();
- if(!source||source==="none"||!bars.length){el("backtestStatus").textContent="No historical M15 candles in this date range. Check source and dates.";return}
+ if(el("compareBalances").checked&&!selected.includes("FAST_SCALP"))params.set("compare_balances","1");
+ if(!selected.includes("FAST_SCALP")){el("timeframe").value="M15";el("limit").value="2000";await load();}
+ const source=el("marketFeed").value==="litefinance"?LITEFINANCE_SOURCE:
+  el("marketFeed").value==="dukascopy"?EXTERNAL_SOURCE:el("source").textContent.replace(/^Source:\s*/,"").trim();
+ if(!source||source==="none"||(!selected.includes("FAST_SCALP")&&!bars.length)){el("backtestStatus").textContent="No historical candles in this date range. Check source and dates.";return}
  params.set("source",source);
  el("runBacktest").disabled=true;el("backtestStatus").textContent="Queueing isolated historical backtest…";clearBacktest();
  try{
@@ -514,13 +541,22 @@ async function runBacktest(){
    if(status.status==="COMPLETED"||status.status==="FAILED")break;
   }
   if(status.status!=="COMPLETED")throw Error(status.error||"Historical backtest failed");
-  backtest=status.result;backtestInputs={...Object.fromEntries(params.entries()),setups:params.getAll("setups")};el("backtestResults").style.display="block";el("exportBacktest").disabled=false;
-  el("backtestStatus").textContent=backtest.candles+" M15 candles analyzed. Estimated execution, not historical broker fills. Chart statistics cover only visible candle window.";
-  renderFullBacktest();renderBacktest();renderRejections();renderQuality();renderTradeHistory();renderTradeDiagnostics();renderComparison();render();
+  backtest=status.result;backtestInputs={...Object.fromEntries(params.entries()),setups:params.getAll("setups")};
+  if(backtest.scalp_research)for(const key of ["balance","volume_min","volume_max","volume_step","risk_percent","stop_buffer_atr","target_reward_risk","minimum_opportunity_score","minimum_entry_quality"])delete backtestInputs[key];
+  el("backtestResults").style.display="block";el("exportBacktest").disabled=false;
+  el("backtestStatus").textContent=backtest.candles+" "+backtest.timeframe+" candles analyzed. Estimated execution, not historical broker fills.";
+  renderScalp();if(!backtest.scalp_research){renderFullBacktest();renderBacktest();renderRejections();renderQuality();renderTradeHistory();renderTradeDiagnostics();renderComparison();}render();
  }catch(error){el("backtestStatus").textContent="Backtest unavailable: "+error.message}
  finally{el("runBacktest").disabled=false}
 }
-document.querySelectorAll("#testStrategies input, #testRiskPercent, #testStopBuffer, #testTargetRatio, #testOpportunityScore, #testEntryQuality, #testSlippage, #testCommission").forEach(input=>input.addEventListener("change",()=>{clearBacktest();render();el("backtestStatus").textContent="Test inputs changed. Run a new backtest to see results."; }));
+document.querySelectorAll("#testStrategies input").forEach(input=>input.addEventListener("change",()=>{
+ if(input.checked){if(input.value==="FAST_SCALP")document.querySelectorAll('#testStrategies input:not([value="FAST_SCALP"])').forEach(other=>other.checked=false);
+ else document.querySelector('#testStrategies input[value="FAST_SCALP"]').checked=false;}
+ const scalp=document.querySelector('#testStrategies input[value="FAST_SCALP"]').checked;
+ for(const id of ["testRiskPercent","testStopBuffer","testTargetRatio","testOpportunityScore","testEntryQuality","compareBalances"])el(id).disabled=scalp;
+ clearBacktest();render();el("backtestStatus").textContent=scalp?"Fast Scalp uses M1/M5 and reports points per lot and R.":"Test inputs changed. Run a new backtest to see results.";
+}));
+document.querySelectorAll("#testRiskPercent, #testStopBuffer, #testTargetRatio, #testOpportunityScore, #testEntryQuality, #testSlippage, #testCommission").forEach(input=>input.addEventListener("change",()=>{clearBacktest();render();el("backtestStatus").textContent="Test inputs changed. Run a new backtest to see results."; }));
 el("runBacktest").addEventListener("click",runBacktest);
 el("exportBacktest").addEventListener("click",exportBacktest);
 el("load").addEventListener("click",load);
