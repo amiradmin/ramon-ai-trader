@@ -43,11 +43,11 @@ button.primary{background:var(--gold);color:#161b23;border:0;font-weight:700}lab
 <label>Round-trip commission (account units per lot)<input type="number" id="testCommission" min="0" step="any" required value="0"></label>
 </div>
 <fieldset style="border:0;padding:0;margin:14px 0 0"><legend style="font-weight:700">Strategies to test</legend>
-<div class="strategyChoices" id="testStrategies">{% for setup in strategies %}<label><input type="checkbox" value="{{ setup }}" checked> {{ setup }}</label>{% endfor %}<label><input type="checkbox" value="FAST_SCALP"> FAST_SCALP · M1/M5</label></div>
+<div class="strategyChoices" id="testStrategies">{% for setup in strategies %}<label><input type="checkbox" value="{{ setup }}"> {{ setup }}</label>{% endfor %}<label><input type="checkbox" value="FAST_SCALP"> FAST_SCALP · M1/M5</label></div>
 <small>These selections and tuning values affect only this historical test. M15 score, entry quality, risk and exit tuning apply to the seven M15 strategies. Fast Scalp is tested alone using its frozen M1/M5 policy; only symbol, source, dates, spread, point, tick size, slippage and commission apply. Its results are points per lot and R, not account profit. Historical costs and fills remain assumptions.</small>
 </fieldset>
-<div class="controls"><label><input id="compareBalances" type="checkbox" checked> Compare 1,000 and 10,000 virtual account units</label></div>
-<div class="controls"><button class="primary" id="runBacktest">Run strategy backtest</button><button id="exportBacktest" type="button" disabled>Download backtest result (JSON)</button><span id="backtestStatus" class="muted" role="status" aria-live="polite">Set dates and broker assumptions to begin.</span></div>
+<div class="controls"><label><input id="compareBalances" type="checkbox"> Compare 1,000 and 10,000 virtual account units</label></div>
+<div class="controls"><button class="primary" id="runBacktest">Run strategy backtest</button><button id="exportBacktest" type="button" disabled>Download backtest result (JSON)</button><span id="backtestStatus" class="muted" role="status" aria-live="polite">Select a strategy and set dates and broker assumptions to begin.</span></div>
 <div id="backtestResults" class="researchResults">
 <div id="scalpResults" style="display:none" role="region" aria-label="Fast Scalp research results"></div>
 <div id="m15Results">
