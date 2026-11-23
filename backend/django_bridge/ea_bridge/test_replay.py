@@ -25,7 +25,7 @@ class HistoricalReplayTests(TestCase):
         self.assertContains(response, 'id="testStrategies"')
         self.assertContains(response, 'id="testOpportunityScore"')
         self.assertContains(response, 'id="testEntryQuality"')
-        self.assertEqual(response.content.count(b'type="checkbox" value="'), 7)
+        self.assertEqual(response.content.count(b'type="checkbox" value="'), 8)
 
     def test_frozen_forward_command_does_not_retest_development_history(self):
         from io import StringIO
@@ -395,11 +395,34 @@ class HistoricalStrategyBacktestTests(TestCase):
                 self.assertEqual(response.status_code,400,response.content)
 
     def test_invalid_or_empty_selected_strategy_is_rejected(self):
-        for setups in ([""],["FAST_SCALP"],["TREND_PULLBACK","TREND_PULLBACK"]):
+        for setups in ([""],["FAST_SCALP","TREND_PULLBACK"],["TREND_PULLBACK","TREND_PULLBACK"]):
             with self.subTest(setups=setups):
                 response=self.client.get(self.path,{**self.params,"setups":setups})
                 self.assertEqual(response.status_code,400)
-                self.assertIn("strategy",response.json()["error"].lower())
+                self.assertTrue(response.json()["error"])
+
+    def test_fast_scalp_needs_its_own_m1_m5_source(self):
+        response=self.client.get(self.path,{**self.params,"setups":["FAST_SCALP"]})
+        self.assertEqual(response.status_code,422)
+        self.assertIn("M1 and M5",response.json()["error"])
+
+    def test_fast_scalp_uses_separate_replay_without_m15_currency_profit(self):
+        from unittest.mock import patch
+        base=datetime(2026,1,1,tzinfo=timezone.utc)
+        MarketBar.objects.bulk_create([MarketBar(source="historical-test",symbol="XAUUSD_o",
+            timeframe="M1",timestamp=base+timedelta(minutes=i),
+            open="2600",high="2602",low="2598",close="2600",volume="1") for i in range(165) if i != 50])
+        fake={"trade_count":0,"trades":[],"win_rate":None,"net_points":0,
+              "net_r":0,"closed_cumulative_r_drawdown":0,"rejections":{}}
+        with patch("ea_bridge.replay_backtest.replay_scalper",return_value=fake) as runner:
+            response=self.client.get(self.path,{**self.params,"setups":["FAST_SCALP"],
+                "commission_per_lot":"1","slippage_points":"1"})
+        self.assertEqual(response.status_code,200,response.content)
+        self.assertEqual(response.json()["strategies"],[])
+        self.assertEqual(response.json()["scalp_research"],fake)
+        self.assertEqual(response.json()["scalp_data_quality"]["M5"]["accepted_candles"],32)
+        self.assertEqual(response.json()["scalp_data_quality"]["M5"]["incomplete_groups"],1)
+        self.assertEqual(runner.call_args.kwargs["costs"].commission_points,1)
 
     def test_evaluates_all_seven_read_only_without_commands(self):
         from unittest.mock import patch
