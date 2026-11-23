@@ -48,6 +48,23 @@ class ShadowSafetyTests(unittest.TestCase):
         # Only the dummy pipeline object changed; no production config touched.
         self.assertEqual(self.inputs["spread_points"],42.0)
 
+    def test_db_configured_limit_above_50_is_not_a_live_guard_failure(self):
+        self.replay.pipeline.entry_timer.maximum_spread_points=75.0
+        run_shadow(self.replay,self.inputs,[],spread_points=84,limit_points=90)
+        self.assertEqual(self.replay.saw,[(84,90,.5)])
+
+    def test_fixed_50_control_is_explicit_not_assumed_from_loaded_threshold(self):
+        self.replay.pipeline.entry_timer.maximum_spread_points=75.0
+        report=comparison_report(
+            replay_module=self.replay,data=self.inputs,rows=[],
+            start=date(2025,1,1),end=date(2025,3,1),
+            baseline={"trades":[],"signals":0,"closed_trades":0,
+                      "net_gain":0,"rejections":[]},quality={"gap_count":0})
+        self.assertEqual(report["configured_entry_spread_limit_points"],75.0)
+        self.assertEqual(report["scenarios"][0]["absolute_spread_limit_points"],50.0)
+        self.assertEqual(self.replay.saw[0],(42,50,.5))
+        self.assertFalse(report["live_eligible"])
+
     def test_reject_unapproved_limits_and_risk(self):
         for limit in (0,500,200):
             with self.assertRaisesRegex(ValueError,"fixed presets"):
