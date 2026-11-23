@@ -268,6 +268,56 @@ class HistoricalStrategyBacktestTests(TestCase):
         self.assertEqual(factory.call_count,2)
         self.assertTrue(set(selected).issubset(STRATEGIES))
 
+    def test_research_tuning_changes_only_isolated_pipeline(self):
+        from .replay_backtest import _research_pipeline
+        baseline=_research_pipeline("TREND_PULLBACK")
+        tuned=_research_pipeline("TREND_PULLBACK",risk_percent=0.2,
+            stop_buffer_atr=0.5,target_reward_risk=2.0)
+        self.assertEqual(tuned.risk_manager.maximum_risk_percent,0.2)
+        self.assertEqual(tuned.risk_manager.config.stop_buffer_atr,0.5)
+        self.assertEqual(tuned.risk_manager.config.target_reward_risk,2.0)
+        self.assertEqual(baseline.risk_manager.config.stop_buffer_atr,0.25)
+        self.assertNotEqual(baseline.risk_manager.config.target_reward_risk,2.0)
+
+    def test_assumed_slippage_and_commission_reduce_estimated_trade_pnl(self):
+        from unittest.mock import patch
+        from .replay_backtest import _simulate
+        class Pipeline:
+            class Risk:
+                class Config:
+                    target_reward_risk=1.25
+                config=Config()
+            risk_manager=Risk()
+            def run(self,market):
+                return {"approved":True,"action":"BUY",
+                    "stages":{"risk_management":{"stop_price":99,"target_price":101,"volume":1}}}
+        start=datetime(2026,1,1,tzinfo=timezone.utc)
+        rows=[{"time":int((start+timedelta(minutes=15*i)).timestamp()),
+               "open":100,"high":101,"low":99,"close":100} for i in range(140)]
+        data={"start":start.date(),"end":start.date(),"symbol":"XAUUSD_o",
+              "balance":1000,"spread_points":10,"point":0.01,"tick_size":0.01,
+              "tick_value":1,"volume_min":0.01,"volume_max":10,"volume_step":0.01,
+              "setups":["TREND_PULLBACK"],"risk_percent":0.5,
+              "stop_buffer_atr":0.25,"target_reward_risk":1.25}
+        with patch("ea_bridge.replay_backtest._research_pipeline",return_value=Pipeline()):
+            baseline=_simulate({**data,"slippage_points":0,"commission_per_lot":0},rows)[0]
+            costly=_simulate({**data,"slippage_points":2,"commission_per_lot":3},rows)[0]
+        self.assertGreater(baseline["closed_trades"],0)
+        self.assertEqual(baseline["closed_trades"],costly["closed_trades"])
+        for plain,charged in zip(baseline["trades"],costly["trades"]):
+            self.assertAlmostEqual(plain["pnl"]-charged["pnl"],7)
+            self.assertEqual(charged["commission"],3)
+            self.assertEqual(charged["entry_slippage_points"],2)
+            self.assertEqual(charged["exit_slippage_points"],2)
+
+    def test_invalid_research_costs_and_risk_are_rejected(self):
+        for extra in ({"risk_percent":"0.6"},{"risk_percent":"0"},
+                      {"target_reward_risk":"1.0"},{"stop_buffer_atr":"-0.1"},
+                      {"slippage_points":"-1"},{"commission_per_lot":"NaN"}):
+            with self.subTest(extra=extra):
+                response=self.client.get(self.path,{**self.params,**extra})
+                self.assertEqual(response.status_code,400,response.content)
+
     def test_invalid_or_empty_selected_strategy_is_rejected(self):
         for setups in ([""],["FAST_SCALP"],["TREND_PULLBACK","TREND_PULLBACK"]):
             with self.subTest(setups=setups):
@@ -363,6 +413,31 @@ class HistoricalBacktestQueueTests(TestCase):
                 self.assertEqual(response.status_code,202,response.content)
                 state=replay_jobs.read(response.json()["job_id"])
                 self.assertEqual(state["params"]["setups"],params["setups"])
+
+    def test_queued_job_preserves_research_tuning(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from . import replay_jobs
+        params={
+            "symbol":"XAUUSD_o","source":"research-test",
+            "start":"2026-09-22","end":"2026-11-22",
+            "balance":"1000","spread_points":"20","point":"0.01",
+            "tick_size":"0.01","tick_value":"1","volume_min":"0.01",
+            "volume_max":"100","volume_step":"0.01",
+            "risk_percent":"0.2","stop_buffer_atr":"0.5","target_reward_risk":"2",
+            "slippage_points":"2","commission_per_lot":"3",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(replay_jobs,"ROOT",Path(directory)):
+                response=self.client.post("/api/ea/v1/simulator/backtest/jobs",params)
+                self.assertEqual(response.status_code,202,response.content)
+                saved=replay_jobs.read(response.json()["job_id"])["params"]
+                self.assertEqual({key:saved[key] for key in (
+                    "risk_percent","stop_buffer_atr","target_reward_risk",
+                    "slippage_points","commission_per_lot")},
+                    {"risk_percent":0.2,"stop_buffer_atr":0.5,"target_reward_risk":2.0,
+                     "slippage_points":2.0,"commission_per_lot":3.0})
 
     def test_job_api_rejects_invalid_dates(self):
         import tempfile
