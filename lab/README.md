@@ -346,3 +346,64 @@ profitability. No market-data writes, trading authorizations, or EA
 changes are introduced. Because replay reports only the most
 frequent 25 rejection types, the per-reason deltas are not necessarily
 exhaustive. Actual historical quote spread and slippage are not known.
+
+## Higher-spread shadow experiment — no live changes
+
+Use `--spread-shadow` as an **alternative** to `--cost-stress`
+and `--cost-attribution`. It requires the frozen baseline assumptions
+(42 spread points, 2 slippage points, risk cap 0.5%). The existing
+baseline replay is reused; then the lab performs four additional
+TREND_PULLBACK-only experiments:
+
+| Scenario | Assumed spread | Absolute cap |
+| --- | --- | --- |
+| BASE_42_LIMIT_50 | 42 | 50 (current control) |
+| HIGH_84_LIMIT_50 | 84 | 50 (strict matched control) |
+| HIGH_84_LIMIT_90 | 84 | 90 (lab-only expanded) |
+| HIGH_126_LIMIT_50 | 126 | 50 (strict matched control) |
+| HIGH_126_LIMIT_130 | 126 | 130 (lab-only expanded) |
+
+The wider cap is applied to the new, in-memory entry-timing pipeline
+**only in the isolated laboratory process**. No persistent config,
+live MT5 EA, command queue or broker account is changed. All other
+checks remain active, including ATR-relative spread, spread-to-risk,
+signal quality, stop/volume sizing and risk <= 0.5%.
+
+Example command with current confirmed snapshot parameters:
+
+```bash
+docker compose -f docker-compose.yaml -f docker-compose.lab.yaml \
+  --profile lab run --rm --no-deps laboratory \
+  --source litefinance-mt5-live-export-20261122 --symbol XAUUSD_l \
+  --start 2024-01-24 --end 2026-11-20 --balance 1024.23 \
+  --spread-points 42 --point 0.01 --tick-size 0.01 --tick-value 1 \
+  --volume-min 0.01 --volume-max 100 --volume-step 0.01 \
+  --slippage-points 2 --commission-per-lot 0 --batch-size 2000 \
+  --spread-shadow > spread-shadow-results.json \
+  2> >(tee spread-shadow-progress.log >&2)
+```
+
+Verify and render offline (without launching any trade services):
+
+```bash
+python3 -m json.tool spread-shadow-results.json >/dev/null &&
+python3 lab/render_spread_shadow.py spread-shadow-results.json \
+  > spread-shadow-dashboard.html
+xdg-open spread-shadow-dashboard.html
+```
+
+For every scenario the JSON and dashboard include closed trades,
+net P&L, PF, maximum drawdown, gap-free results, stage rejection
+reasons, and chronological TRAIN / VALIDATION / previously viewed
+TEST results. Each high-spread research cap is compared with the
+50-point control **at the same spread** to describe newly admitted and
+displaced signal cohorts, with separate gap-unaffected numbers.
+
+**Interpretation limits:** These fixed-cost bid-chart experiments are
+hypothetical, not evidence of profitable execution at broker spreads.
+A different accepted trade can change all later entries due to
+single-open-position path dependence. The earlier test interval has
+already been examined, so it must no longer be treated as an
+uncontaminated untouched holdout. The simulated $/tick unit has been
+matched to the terminal snapshot but historical quote economics remain
+unverified. The results cannot authorize live strategy changes.
