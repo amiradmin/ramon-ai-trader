@@ -37,12 +37,14 @@ button.primary{background:var(--gold);color:#161b23;border:0;font-weight:700}lab
 <label>Risk per trade (%)<input type="number" id="testRiskPercent" min="0.01" max="0.5" step="0.01" required value="0.5"></label>
 <label>Structural stop buffer (ATR)<input type="number" id="testStopBuffer" min="0" max="1.5" step="0.05" required value="0.25"></label>
 <label>Target reward/risk<input type="number" id="testTargetRatio" min="1.2" max="5" step="0.05" required value="1.25"></label>
+<label>Minimum opportunity score (0–1)<input type="number" id="testOpportunityScore" min="0" max="1" step="0.01" required value="0.55"></label>
+<label>Minimum entry quality (0–1)<input type="number" id="testEntryQuality" min="0" max="1" step="0.01" required value="0.55"></label>
 <label>Assumed slippage (points per side)<input type="number" id="testSlippage" min="0" max="10000" step="any" required value="0"></label>
 <label>Round-trip commission (account units per lot)<input type="number" id="testCommission" min="0" step="any" required value="0"></label>
 </div>
 <fieldset style="border:0;padding:0;margin:14px 0 0"><legend style="font-weight:700">Strategies to test</legend>
 <div class="strategyChoices" id="testStrategies">{% for setup in strategies %}<label><input type="checkbox" value="{{ setup }}" checked> {{ setup }}</label>{% endfor %}</div>
-<small>These selections and tuning values affect only this historical test. Risk is capped at 0.5% per trade. Stop buffer adds distance beyond structural invalidation; it is not a fixed stop distance. Slippage is adverse on entry and exit; commission is per completed lot. Fast Scalp uses M1/M5 data and is outside this M15 backtest.</small>
+<small>These selections and tuning values affect only this historical test. Score and quality are minimum thresholds from 0 to 1; higher values reject more candidate entries. Risk is capped at 0.5% per trade. Stop buffer adds distance beyond structural invalidation; it is not a fixed stop distance. Slippage is adverse on entry and exit; commission is per completed lot. Fast Scalp uses M1/M5 data and is outside this M15 backtest.</small>
 </fieldset>
 <div class="controls"><label><input id="compareBalances" type="checkbox" checked> Compare 1,000 and 10,000 virtual account units</label></div>
 <div class="controls"><button class="primary" id="runBacktest">Run strategy backtest</button><button id="exportBacktest" type="button" disabled>Download backtest result (JSON)</button><span id="backtestStatus" class="muted" role="status" aria-live="polite">Set dates and broker assumptions to begin.</span></div>
@@ -478,7 +480,7 @@ async function load(){
 }
 async function runBacktest(){
  if(loading)return;
- const ids={balance:"testBalance",spread_points:"testSpread",point:"testPoint",tick_size:"testTickSize",tick_value:"testTickValue",volume_min:"testMinLot",volume_max:"testMaxLot",volume_step:"testLotStep",risk_percent:"testRiskPercent",stop_buffer_atr:"testStopBuffer",target_reward_risk:"testTargetRatio",slippage_points:"testSlippage",commission_per_lot:"testCommission"};
+ const ids={balance:"testBalance",spread_points:"testSpread",point:"testPoint",tick_size:"testTickSize",tick_value:"testTickValue",volume_min:"testMinLot",volume_max:"testMaxLot",volume_step:"testLotStep",risk_percent:"testRiskPercent",stop_buffer_atr:"testStopBuffer",target_reward_risk:"testTargetRatio",minimum_opportunity_score:"testOpportunityScore",minimum_entry_quality:"testEntryQuality",slippage_points:"testSlippage",commission_per_lot:"testCommission"};
  const params=new URLSearchParams({symbol:el("symbol").value.trim(),source:el("source").textContent.replace(/^Source:\s*/,"").trim(),start:el("testStart").value,end:el("testEnd").value});
  for(const [key,id] of Object.entries(ids)){const field=el(id);if(!field.value||!field.checkValidity()){el("backtestStatus").textContent="Enter valid "+key+" before running.";field.focus();return}params.set(key,field.value)}
  if(!params.get("start")||!params.get("end")){el("backtestStatus").textContent="Select both From and To dates.";return}
@@ -518,7 +520,7 @@ async function runBacktest(){
  }catch(error){el("backtestStatus").textContent="Backtest unavailable: "+error.message}
  finally{el("runBacktest").disabled=false}
 }
-document.querySelectorAll("#testStrategies input, #testRiskPercent, #testStopBuffer, #testTargetRatio, #testSlippage, #testCommission").forEach(input=>input.addEventListener("change",()=>{clearBacktest();render();el("backtestStatus").textContent="Test inputs changed. Run a new backtest to see results."; }));
+document.querySelectorAll("#testStrategies input, #testRiskPercent, #testStopBuffer, #testTargetRatio, #testOpportunityScore, #testEntryQuality, #testSlippage, #testCommission").forEach(input=>input.addEventListener("change",()=>{clearBacktest();render();el("backtestStatus").textContent="Test inputs changed. Run a new backtest to see results."; }));
 el("runBacktest").addEventListener("click",runBacktest);
 el("exportBacktest").addEventListener("click",exportBacktest);
 el("load").addEventListener("click",load);
