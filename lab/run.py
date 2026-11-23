@@ -103,16 +103,22 @@ def main():
                 SELECT timestamp, open, high, low, close
                 FROM public.ea_bridge_marketbar
                 WHERE source=%s AND symbol=%s AND timeframe='M15'
-                  AND timestamp < %s AND timestamp >= %s
-                ORDER BY timestamp
-                LIMIT 16513
-            """, (args.source, args.symbol, end, start - timedelta(days=90)))
-            fetched = cur.fetchall()
-    selected = [r for r in fetched if start <= r[0] < end]
-    if not selected or len(fetched) >= 16513:
-        raise RuntimeError("NO_SELECTED_BARS_OR_RANGE_TOO_LARGE: narrow dates to under 16000 candles")
-    prior = [r for r in fetched if r[0] < start][-256:]
-    selected = selected[:16000]
+                  AND timestamp >= %s AND timestamp < %s
+                ORDER BY timestamp LIMIT 16001
+            """, (args.source, args.symbol, start, end))
+            selected = cur.fetchall()
+            if len(selected)>16000:
+                raise RuntimeError("TOO_MANY_M15_BARS: narrow the date range")
+            cur.execute("""
+                SELECT timestamp, open, high, low, close
+                FROM public.ea_bridge_marketbar
+                WHERE source=%s AND symbol=%s AND timeframe='M15'
+                  AND timestamp < %s
+                ORDER BY timestamp DESC LIMIT 256
+            """, (args.source, args.symbol, start))
+            prior = list(reversed(cur.fetchall()))
+    if not selected:
+        raise RuntimeError("NO_SELECTED_M15_BARS: inspect --list-data for source/symbol/date coverage")
     rows = [dict(time=int(r[0].timestamp()),open=float(r[1]),high=float(r[2]),
                  low=float(r[3]),close=float(r[4])) for r in prior+selected]
     rows, quality = _clean_m15_rows(rows)
