@@ -155,6 +155,36 @@ def _research_pipeline(setup, *, risk_percent=0.5, stop_buffer_atr=None, target_
         pipeline.risk_manager.config = replace(pipeline.risk_manager.config, **updates)
     return pipeline
 
+def _trade_diagnostics(trades):
+    """Descriptive slices of hypothetical closed trades, never entry filters."""
+    def group(label):
+        groups={}
+        for trade in trades:
+            key=label(trade)
+            groups.setdefault(key,[]).append(trade)
+        return [
+            dict(label=key,trades=len(items),wins=sum(t["pnl"]>0 for t in items),
+                net_pnl=round(sum(t["pnl"] for t in items),2),
+                gross_profit=round(sum(t["pnl"] for t in items if t["pnl"]>0),2),
+                gross_loss=round(sum(t["pnl"] for t in items if t["pnl"]<0),2))
+            for key,items in sorted(groups.items())
+        ]
+    def month(trade):
+        return datetime.fromtimestamp(trade["opened_at"],tz=timezone.utc).strftime("%Y-%m")
+    def utc_block(trade):
+        hour=datetime.fromtimestamp(trade["opened_at"],tz=timezone.utc).hour
+        start=hour//6*6
+        return f"{start:02d}:00–{start+5:02d}:59 UTC"
+    return dict(
+        by_month=group(month),by_side=group(lambda t:t["side"]),
+        by_regime=group(lambda t:t.get("signal_regime") or "UNAVAILABLE"),
+        by_utc_block=group(utc_block),by_exit=group(lambda t:t["reason"]),
+        gap_affected_trades=sum(t.get("gaps_crossed",0)>0 for t in trades),
+        gross_pnl=round(sum(t.get("gross_pnl",t["pnl"]) for t in trades),2),
+        commission=round(sum(t.get("commission",0) for t in trades),2),
+    )
+
+
 def _simulate(data, rows, progress=None):
     spread = data["spread_points"]*data["point"]
     value_per_price=data["tick_value"]/data["tick_size"]
@@ -191,9 +221,11 @@ def _simulate(data, rows, progress=None):
             progress(idx, len(rows))
         bar=rows[idx]
         previous=rows[idx-1]
+        gap_before_bar=bar["time"]-previous["time"]>900
         within=first_ts<=bar["time"]<end_ts
         # Fill pending orders at next candle OPEN (never at a signal candle close).
         for name,state in book.items():
+            filled_this_bar=False
             pos=state.get("pending")
             if pos is not None:
                 state["pending"]=None
@@ -202,10 +234,14 @@ def _simulate(data, rows, progress=None):
                     if (pos["side"]=="BUY" and pos["stop"]<entry<pos["target"]) or (pos["side"]=="SELL" and pos["target"]<entry<pos["stop"]):
                         pos["entry"]=entry;pos["opened_at"]=bar["time"]
                         state["open"]=pos
+                        filled_this_bar=True
+                        pos["gaps_crossed"]=int(gap_before_bar)
                     else:
                         rejected(state,"FILL","ENTRY_OUTSIDE_STOP_TARGET",bar["time"])
             pos=state["open"]
             if pos is None: continue
+            if gap_before_bar and not filled_this_bar:
+                pos["gaps_crossed"]=pos.get("gaps_crossed",0)+1
             # Bid-chart approximation; conservative SL first if both hit same bar.
             stop_hit=bar["low"]<=pos["stop"] if pos["side"]=="BUY" else bar["high"]+spread>=pos["stop"]
             target_hit=bar["high"]>=pos["target"] if pos["side"]=="BUY" else bar["low"]+spread<=pos["target"]
@@ -226,6 +262,8 @@ def _simulate(data, rows, progress=None):
                "pnl":round(pnl,2),"gross_pnl":round(gross_pnl,2),
                "commission":round(commission,2),"entry_slippage_points":data.get("slippage_points",0),
                "exit_slippage_points":data.get("slippage_points",0),
+               "signal_regime":pos.get("signal_regime"),"signal_adx":pos.get("signal_adx"),
+               "gaps_crossed":pos.get("gaps_crossed",0),
                "reason":"STOP" if stop_hit else "TARGET"})
             state["open"]=None
         # Don't evaluate the final candle: an order requires a next candle to fill.
@@ -287,7 +325,11 @@ def _simulate(data, rows, progress=None):
                 rejected(state,"RISK","INVALID_STOP_TARGET_OR_VOLUME",bar["time"])
                 continue
             state["signals"]+=1
-            state["pending"]=dict(side=result["action"],stop=stop,target=target,volume=volume,signal_at=bar["time"])
+            regime=(result.get("stages") or {}).get("opportunities") or {}
+            regime=regime.get("regime") or {}
+            state["pending"]=dict(side=result["action"],stop=stop,target=target,volume=volume,
+                signal_at=bar["time"],signal_regime=regime.get("label"),
+                signal_adx=regime.get("adx"))
     if progress is not None:
         progress(len(rows), len(rows))
     report=[]
@@ -302,6 +344,7 @@ def _simulate(data, rows, progress=None):
            profit_factor=round(gross_win/gross_loss,2) if gross_loss else None,
            max_drawdown_pct=round(state["drawdown"],2),
            open_position=state["open"] is not None,trades=trades,
+           trade_diagnostics=_trade_diagnostics(trades),
            evaluations=state["evaluations"],
            rejections=[dict(stage=key.split(":",1)[0],reason=key.split(":",1)[1],
                 count=count,sample_bar_times=state["rejection_examples"][key],
