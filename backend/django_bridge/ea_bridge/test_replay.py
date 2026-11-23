@@ -27,6 +27,18 @@ class HistoricalReplayTests(TestCase):
         self.assertContains(response, 'id="testEntryQuality"')
         self.assertEqual(response.content.count(b'type="checkbox" value="'), 7)
 
+    def test_frozen_forward_command_does_not_retest_development_history(self):
+        from io import StringIO
+        from django.core.management import call_command
+        MarketBar.objects.create(
+            source="litefinance-mt5-live-export-20261122", symbol="XAUUSD_l",
+            timeframe="M15", timestamp=datetime(2026, 11, 20, 12, tzinfo=timezone.utc),
+            open="3500", high="3501", low="3499", close="3500", volume="1",
+        )
+        output=StringIO()
+        call_command("evaluate_frozen_forward", stdout=output)
+        self.assertIn("WAITING: no new complete-day M15 candles after 2026-11-22", output.getvalue())
+
     def test_validated_bars_are_ordered_and_single_source(self):
         response = self.client.get("/api/ea/v1/simulator/bars", {
             "symbol": "XAUUSD_l", "timeframe": "M5", "source": "broker-a",
