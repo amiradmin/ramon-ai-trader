@@ -4,6 +4,8 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 from .models import EAHeartbeat, EACommand, LearningTradeOutcome
 from .profit_protection import protection_status, create_protection_commands
+from .position_management import trend_pullback_management_snapshot
+from .strategy_registry import STRATEGIES
 from ramon_pipeline.signalflow.profit_protection import ProfitProtection
 
 
@@ -151,3 +153,36 @@ class ProfitProtectionTests(TestCase):
         trail=ProfitProtection(trailing_trigger_r=1)
         self.assertEqual(trail.stop(side='BUY',entry=100,original_risk=10,current_stop=90,favorable_price=115),110)
         with self.assertRaises(ValueError): ProfitProtection(breakeven_trigger_r=0)
+
+    def test_trend_pullback_snapshot_only_reports_verified_owned_positions(self):
+        self.original.payload.update(engine='STRATEGY', strategy_setup='TREND_PULLBACK',
+                                     magic=STRATEGIES['TREND_PULLBACK'][2])
+        self.original.save()
+        self.feed.payload['positions'][0]['magic'] = STRATEGIES['TREND_PULLBACK'][2]
+        self.feed.payload['positions'].append(dict(
+            ticket='99', symbol='XAUUSD_o', magic=0, type=0,
+            price_open=100, sl=90, tp=112.5, volume=.02))
+        self.save()
+        with self.settings(RAMON_REAL_CENT_PROFIT_PROTECTION_ENABLED=False):
+            before = EACommand.objects.count()
+            snapshot = trend_pullback_management_snapshot(self.feed)
+            self.assertEqual(EACommand.objects.count(), before)
+            self.assertEqual(snapshot['mode'], 'OBSERVE_ONLY')
+        self.assertEqual(snapshot['position_count'], 1)
+        self.assertEqual(snapshot['positions'][0]['ticket'], '42')
+        self.assertEqual(snapshot['positions'][0]['state'], 'READY')
+        self.assertAlmostEqual(snapshot['positions'][0]['current_r'], 1.1)
+        self.assertEqual(snapshot['positions'][0]['original_target'], 112.5)
+        self.assertEqual(snapshot['trailing_stop'], 'DISABLED')
+        self.assertEqual(snapshot['dynamic_take_profit'], 'DISABLED')
+
+    def test_trend_pullback_monitor_fails_closed_on_stale_quotes(self):
+        self.original.payload.update(engine='STRATEGY', strategy_setup='TREND_PULLBACK',
+                                     magic=STRATEGIES['TREND_PULLBACK'][2])
+        self.original.save()
+        self.feed.payload['positions'][0]['magic'] = STRATEGIES['TREND_PULLBACK'][2]
+        self.feed.payload['quote_time'] = (timezone.now()-timedelta(minutes=2)).isoformat()
+        self.save()
+        snapshot = trend_pullback_management_snapshot(self.feed)
+        self.assertEqual(snapshot['state'], 'TELEMETRY_NOT_READY')
+        self.assertEqual(snapshot['position_count'], 0)
