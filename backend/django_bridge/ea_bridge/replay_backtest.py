@@ -445,6 +445,18 @@ def run_backtest_data(data, *, max_candles=MAX_TEST_CANDLES, progress=None):
             else "HISTORY_FILTERED_CHECK_BROKER_FILLS"
         )
         report=_simulate(data,rows,progress=progress)
+        # A separate counterfactual research report, never a registered live setup.
+        impulse_research = None
+        if "TREND_PULLBACK" in data.get("setups", list(STRATEGIES)):
+            from .impulse_continuation_research import impulse_continuation_research
+            impulse_research = impulse_continuation_research(
+                rows, start_ts=int(start_dt.timestamp()), end_ts=int(end_dt.timestamp()),
+                balance=data["balance"], spread_points=data["spread_points"],
+                point=data["point"], tick_size=data["tick_size"], tick_value=data["tick_value"],
+                volume_min=data["volume_min"], volume_max=data["volume_max"],
+                volume_step=data["volume_step"], risk_percent=data.get("risk_percent",0.5),
+                slippage_points=data.get("slippage_points",0),
+                commission_per_lot=data.get("commission_per_lot",0))
         return JsonResponse(dict(mode="ISOLATED_STRATEGY_RESEARCH_ESTIMATE",
              timeframe="M15",symbol=data["symbol"],source=data["source"],
              start=data["start"].isoformat(),end=data["end"].isoformat(),
@@ -459,7 +471,8 @@ def run_backtest_data(data, *, max_candles=MAX_TEST_CANDLES, progress=None):
                    ("target_reward_risk",1.25),("minimum_opportunity_score",0.55),
                    ("minimum_entry_quality",0.55),("slippage_points",0),("commission_per_lot",0))}},
              limitations="Model-priced fixed spread, per-side adverse slippage and round-trip commission assumptions; no historical cost records or gap fills; OHLC intrabar order assumed stop first; no news/account state history; not broker validation, not full live-worker parity.",
-             selected_setups=data.get("setups",list(STRATEGIES)),strategies=report))
+             selected_setups=data.get("setups",list(STRATEGIES)),strategies=report,
+             impulse_continuation_research=impulse_research))
 
 
 @require_GET
