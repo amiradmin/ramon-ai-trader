@@ -22,11 +22,15 @@
     {% for worker in strategy_workers %}
     <article id="strategy-card-{{ worker.slug }}" class="card strategy-card{% if worker.fresh and worker.automatic %} strategy-on{% endif %}{% if worker.open_positions %} strategy-position-open{% endif %}"><h3 style="font-size:14px;overflow-wrap:anywhere;margin-top:0">{{ worker.setup }}</h3><p class="small">{{ worker.description }}</p>
       <p class="small" id="strategy-{{ worker.slug }}">{% if worker.state == "STATUS_LOADING" %}Checking status{% elif worker.fresh %}Running{% else %}Stopped or stale{% endif %} · {{ worker.state }} · {% if worker.position_status_known %}{{ worker.open_positions }} open position{{ worker.open_positions|pluralize }}{% else %}Position status unavailable{% endif %}</p>
+      <label class="small" style="display:flex;align-items:center;gap:8px;margin:10px 0"><input type="checkbox" class="entry-toggle" id="entries-{{ worker.slug }}" data-control-url="{{ worker.url }}/entries" aria-label="Enable {{ worker.setup }} new entries" disabled> Enable new entries</label>
+      <p class="small" id="entry-message-{{ worker.slug }}" role="status" aria-live="polite"></p>
       <a class="btn" style="display:inline-block;text-decoration:none" href="{{ worker.url }}">Open strategy ↗</a>
     </article>
     {% endfor %}
     <article id="strategy-card-fast-scalp" class="card strategy-card"><h3 style="font-size:14px;overflow-wrap:anywhere;margin-top:0">FAST_SCALP</h3><p class="small">Independent M1/M5 fast scalp strategy</p>
       <p class="small" id="strategy-fast-scalp">Checking status · Position status unavailable</p>
+      <label class="small" style="display:flex;align-items:center;gap:8px;margin:10px 0"><input type="checkbox" class="entry-toggle" id="entries-fast-scalp" data-control-url="{% url 'ramon-scalper-entries' %}" aria-label="Enable Fast Scalp new entries" disabled> Enable new entries</label>
+      <p class="small" id="entry-message-fast-scalp" role="status" aria-live="polite"></p>
       <a class="btn" style="display:inline-block;text-decoration:none" href="{% url 'ramon-scalper-console' %}">Open strategy ↗</a>
     </article>
   </div>
@@ -244,6 +248,60 @@ const pnlThirtyDaysAgo = new Date(pnlToday.getTime() - 29 * 86400000);
 $("pnlFrom").value = utcDateInputValue(pnlThirtyDaysAgo);
 $("pnlTo").value = utcDateInputValue(pnlToday);
 loadPnlSummary();
+function syncEntryToggle(slug, automatic, scope) {
+  const toggle = $("entries-" + slug);
+  if (!toggle || toggle.dataset.pending === "true") return;
+  toggle.dataset.scope = scope == null ? "" : String(scope);
+  toggle.checked = Boolean(automatic);
+  toggle.indeterminate = false;
+  toggle.disabled = scope == null;
+}
+function unavailableEntryToggle(slug) {
+  const toggle = $("entries-" + slug);
+  if (!toggle || toggle.dataset.pending === "true") return;
+  toggle.checked = false;
+  toggle.indeterminate = true;
+  toggle.disabled = true;
+  toggle.dataset.scope = "";
+}
+function csrfCookie() {
+  const cookie = document.cookie.split("; ").find(item => item.startsWith("csrftoken="));
+  return cookie ? decodeURIComponent(cookie.slice("csrftoken=".length)) : "";
+}
+document.querySelectorAll(".entry-toggle").forEach(toggle => {
+  toggle.addEventListener("change", async () => {
+    const slug = toggle.id.slice("entries-".length);
+    const message = $("entry-message-" + slug);
+    const action = toggle.checked ? "start" : "pause";
+    const scope = toggle.dataset.scope;
+    const csrf = csrfCookie();
+    toggle.checked = !toggle.checked;
+    if (!scope || !csrf) {
+      message.textContent = "Sign in as a staff user and reload to change entries.";
+      return;
+    }
+    toggle.dataset.pending = "true";
+    toggle.disabled = true;
+    message.textContent = action === "start" ? "Enabling new entries…" : "Pausing new entries…";
+    try {
+      const response = await fetch(toggle.dataset.controlUrl, {
+        method:"POST", credentials:"same-origin", cache:"no-store",
+        headers:{"Content-Type":"application/x-www-form-urlencoded", "X-CSRFToken":csrf},
+        body:new URLSearchParams({action,scope}).toString()
+      });
+      const payload = response.headers.get("content-type")?.includes("application/json") ? await response.json() : null;
+      if (!response.ok || !payload?.ok) throw new Error(payload?.message || payload?.error || "Sign in as a staff user and reload, or check strategy readiness.");
+      message.textContent = payload.message;
+    } catch (error) {
+      message.textContent = error.message;
+    } finally {
+      toggle.dataset.pending = "false";
+      if (slug === "fast-scalp") await refreshFastScalp();
+      else await refreshStrategyFleet();
+    }
+  });
+});
+
 let strategyFleetInFlight = false;
 async function refreshStrategyFleet() {
   if (strategyFleetInFlight) return;
@@ -265,10 +323,12 @@ async function refreshStrategyFleet() {
       const el = $("strategy-" + worker.slug);
       if (el) el.textContent = `${worker.fresh ? "Running" : "Stopped or stale"} · Entries ${worker.automatic ? "On" : "Paused"} · ${worker.state} · ${worker.latest.action || "No decision yet"} · ${worker.position_status_known ? `${worker.open_positions} open position${worker.open_positions === 1 ? "" : "s"}` : "Position status unavailable"}`;
       if (el && worker.news_lock && worker.news_lock.enabled) el.textContent += " · " + (worker.news_lock.blocked ? worker.news_lock.reason : "News clear");
+      syncEntryToggle(worker.slug, worker.automatic, worker.control_scope);
     }
   } catch (error) {
     $("connection").textContent = "DJANGO · FLEET STATUS UNAVAILABLE";
     document.querySelectorAll(".strategy-card:not(#strategy-card-fast-scalp)").forEach(card => card.classList.remove("strategy-on", "strategy-position-open"));
+    document.querySelectorAll(".entry-toggle:not(#entries-fast-scalp)").forEach(toggle => unavailableEntryToggle(toggle.id.slice("entries-".length)));
     $("strategyFleetStatus").textContent = "Container status unavailable; previous values may be stale.";
   } finally { clearTimeout(timeout); strategyFleetInFlight = false; }
 }
@@ -287,6 +347,7 @@ async function refreshFastScalp() {
     const response = await fetch("{% url 'ramon-scalper-status' %}", {cache:"no-store", signal:controller.signal});
     if (!response.ok) throw new Error("Fast Scalp status unavailable");
     const data = await response.json();
+    syncEntryToggle("fast-scalp", data.automatic, data.control_scope);
     card.classList.toggle("strategy-on", Boolean(data.fresh && data.automatic && data.readiness === "READY"));
     card.classList.toggle("strategy-position-open", Boolean(data.position_status_known && data.open_positions > 0));
     const positionText = data.position_status_known
@@ -295,6 +356,7 @@ async function refreshFastScalp() {
     status.textContent = `${data.fresh ? "Feed current" : "Feed stale or unavailable"} · Entries ${data.automatic ? "On" : "Paused"} · ${data.readiness} · ${positionText}`;
   } catch (error) {
     card.classList.remove("strategy-on", "strategy-position-open");
+    unavailableEntryToggle("fast-scalp");
     status.textContent = "Fast Scalp status unavailable · Position status unavailable";
   } finally { clearTimeout(timeout); scalpStatusInFlight = false; }
 }
