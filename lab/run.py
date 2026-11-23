@@ -26,22 +26,30 @@ def nonnegative(value):
 
 def parse():
     p = argparse.ArgumentParser(description="Isolated M15 momentum/pullback research; never trades")
-    p.add_argument("--source", required=True)
-    p.add_argument("--symbol", required=True)
-    p.add_argument("--start", type=date.fromisoformat, required=True)
-    p.add_argument("--end", type=date.fromisoformat, required=True)
-    p.add_argument("--balance", type=positive, required=True)
-    p.add_argument("--spread-points", type=positive, required=True)
-    p.add_argument("--point", type=positive, required=True)
-    p.add_argument("--tick-size", type=positive, required=True)
-    p.add_argument("--tick-value", type=positive, required=True)
-    p.add_argument("--volume-min", type=positive, required=True)
-    p.add_argument("--volume-max", type=positive, required=True)
-    p.add_argument("--volume-step", type=positive, required=True)
+    p.add_argument("--list-data", action="store_true",
+                   help="List stored OHLC source/symbol/timeframe coverage; no replay")
+    p.add_argument("--source")
+    p.add_argument("--symbol")
+    p.add_argument("--start", type=date.fromisoformat)
+    p.add_argument("--end", type=date.fromisoformat)
+    p.add_argument("--balance", type=positive)
+    p.add_argument("--spread-points", type=positive)
+    p.add_argument("--point", type=positive)
+    p.add_argument("--tick-size", type=positive)
+    p.add_argument("--tick-value", type=positive)
+    p.add_argument("--volume-min", type=positive)
+    p.add_argument("--volume-max", type=positive)
+    p.add_argument("--volume-step", type=positive)
     p.add_argument("--slippage-points", type=nonnegative, default=2)
     p.add_argument("--commission-per-lot", type=nonnegative, default=0)
     p.add_argument("--risk-percent", type=positive, default=.5)
     args = p.parse_args()
+    if args.list_data:
+        return args
+    required = ("source","symbol","start","end","balance","spread_points",
+                "point","tick_size","tick_value","volume_min","volume_max","volume_step")
+    if any(getattr(args, k) is None for k in required):
+        p.error("Replay requires source, symbol, dates, balance, spread and broker contract values")
     if (not args.source.strip() or not args.symbol.strip() or len(args.source)>128
             or len(args.symbol)>32 or args.start>args.end or args.end>date.today()
             or args.volume_max<args.volume_min or args.risk_percent>.5):
@@ -63,14 +71,30 @@ def main():
     from ea_bridge.replay_backtest import _simulate, _clean_m15_rows, WARMUP
     from impulse_continuation_research import impulse_continuation_research
 
-    start = datetime.combine(args.start, time.min, tzinfo=timezone.utc)
-    end = datetime.combine(args.end + timedelta(days=1), time.min, tzinfo=timezone.utc)
     params = {"host":os.environ["DJANGO_DB_HOST"],
               "port":int(os.environ.get("DJANGO_DB_PORT","5432")),
               "dbname":os.environ["DJANGO_DB_NAME"],
               "user":os.environ["DJANGO_DB_USER"],
               "password":os.environ["DJANGO_DB_PASSWORD"],
               "connect_timeout":5, "options":"-c default_transaction_read_only=on -c statement_timeout=120000"}
+    if args.list_data:
+        with psycopg.connect(**params) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SET TRANSACTION READ ONLY")
+                cur.execute("""
+                    SELECT source, symbol, timeframe, COUNT(*), MIN(timestamp), MAX(timestamp)
+                    FROM public.ea_bridge_marketbar
+                    GROUP BY source, symbol, timeframe
+                    ORDER BY source, symbol, timeframe
+                """)
+                coverage = cur.fetchall()
+        print(json.dumps({"mode":"READ_ONLY_LAB_DATA_CATALOG","datasets":[
+            {"source":r[0],"symbol":r[1],"timeframe":r[2],"candles":r[3],
+             "first_utc":r[4].isoformat(),"last_utc":r[5].isoformat()}
+            for r in coverage]}, indent=2))
+        return
+    start = datetime.combine(args.start, time.min, tzinfo=timezone.utc)
+    end = datetime.combine(args.end + timedelta(days=1), time.min, tzinfo=timezone.utc)
     # Rely on database-enforced SELECT-only role as well as read-only transaction.
     with psycopg.connect(**params) as conn:
         with conn.cursor() as cur:
