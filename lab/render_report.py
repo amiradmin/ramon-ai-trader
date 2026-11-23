@@ -54,6 +54,42 @@ def render(payload):
     quality=payload["data_quality"]
     risk=payload.get("live_eligibility") or {}
     alerts="".join(f"<li>{h(x.replace('_',' '))}</li>" for x in risk.get("warnings",[]))
+    risks=payload.get("candidate_risk_diagnostics") or {}
+    risk_stats=risks.get("summary") or {}
+    gaps=payload.get("gap_diagnostics") or {}
+    contracts=payload.get("contract_diagnostics") or {}
+    cost_rows=[]
+    for scenario in payload.get("cost_sensitivity") or []:
+        trend=scenario.get("trend_pullback") or {}
+        impulse=scenario.get("impulse_continuation") or {}
+        cost_rows.append(
+            "<tr><th>"+h(scenario.get("name"))+"</th><td>"+
+            fmt(scenario.get("spread_points"))+"</td><td>"+
+            fmt(scenario.get("slippage_points"))+"</td><td>"+
+            fmt(trend.get("net_gain"),sign=True)+"</td><td>"+
+            h(trend.get("closed_trades"))+"</td><td>"+
+            fmt(impulse.get("net_gain"),sign=True)+"</td><td>"+
+            h(impulse.get("closed_trades"))+"</td></tr>")
+    gap_rows="".join("<tr><td>"+h(name.replace("_"," "))+"</td><td>"+
+        h(count)+"</td></tr>" for name,count in
+        sorted((gaps.get("categories") or {}).items(),key=lambda x:-x[1]))
+    risk_rows="".join("<tr><td>"+h(name.replace("_"," "))+"</td><td>"+
+        fmt(values.get("min"))+"</td><td>"+fmt(values.get("median"))+
+        "</td><td>"+fmt(values.get("max"))+"</td></tr>"
+        for name,values in risk_stats.items())
+    year_rows=[]
+    for setup, values in (payload.get("annual_performance") or {}).items():
+        for year, perf in sorted(values.items()):
+            year_rows.append("<tr><th>"+h(setup)+"</th><td>"+h(year)+
+                "</td><td>"+h(perf.get("closed_trades"))+"</td><td>"+
+                fmt(perf.get("net_gain"),sign=True)+"</td><td>"+
+                fmt(perf.get("profit_factor"))+"</td></tr>")
+    regime_rows=[]
+    for setup, values in (payload.get("regime_performance") or {}).items():
+        for regime, perf in sorted(values.items()):
+            regime_rows.append("<tr><th>"+h(setup)+"</th><td>"+h(regime)+
+                "</td><td>"+h(perf.get("closed_trades"))+"</td><td>"+
+                fmt(perf.get("net_gain"),sign=True)+"</td></tr>")
     notes=f"""<div class="notice">
         <strong>Historical research only — not approved for real trading</strong>
         <p>{h(payload.get('limitations',''))}</p>
@@ -96,6 +132,33 @@ small{{color:var(--muted)}}.meta b{{display:block;overflow-wrap:anywhere}}footer
 <h2>Chronological train / validation / untouched test</h2>
 <p class="sub">Single continuous simulation across PostgreSQL fetch batches. Trades are grouped by entry date; results are descriptive, not a trained model.</p>
 <section class="cards">{''.join(cards)}</section>
+<h2>Minimum-lot risk rejections</h2>
+<p class="sub">{h(risks.get('count',0))} blocked candidate entries; account units are not broker-verified.
+Do not remove the 0.5% risk ceiling to force entries.</p>
+<div class="tablewrap"><table><thead><tr><th>Risk diagnostic</th><th>Min</th><th>Median</th><th>Max</th></tr></thead>
+<tbody>{risk_rows or '<tr><td colspan="4">No minimum-lot risk rejections</td></tr>'}</tbody></table></div>
+<h2>Market data gaps (heuristic)</h2>
+<p class="sub">{h(gaps.get('method'))}. Weekend classification is only a hypothesis,
+not a verified broker trading calendar. All gaps are unknown paths in OHLC replay.</p>
+<div class="tablewrap"><table><thead><tr><th>Gap category</th><th>Count</th></tr></thead>
+<tbody>{gap_rows or '<tr><td colspan="2">No gaps reported</td></tr>'}</tbody></table></div>
+<h2>Cost sensitivity</h2>
+<p class="sub">Independent replays with unchanged risk settings; enable using --cost-stress.
+These are hypothetical spreads, not recorded historical transactions.</p>
+<div class="tablewrap"><table><thead><tr><th>Scenario</th><th>Spread points</th><th>Slippage points</th><th>Trend PnL</th><th>Trend trades</th><th>Impulse PnL</th><th>Impulse trades</th></tr></thead>
+<tbody>{''.join(cost_rows) or '<tr><td colspan="7">Not requested for this report</td></tr>'}</tbody></table></div>
+<h2>Annual performance</h2>
+<div class="tablewrap"><table><thead><tr><th>Strategy</th><th>Year</th><th>Trades</th><th>Net PnL</th><th>Profit factor</th></tr></thead><tbody>
+{''.join(year_rows) or '<tr><td colspan="5">No closed trades</td></tr>'}</tbody></table></div>
+<h2>Market regime performance</h2>
+<p class="sub">Regime is taken from the stored strategy signal label, if present.
+Unclassified trades are not assigned an invented regime.</p>
+<div class="tablewrap"><table><thead><tr><th>Strategy</th><th>Signal regime</th><th>Trades</th><th>Net PnL</th></tr></thead><tbody>
+{''.join(regime_rows) or '<tr><td colspan="4">No regime-labeled trades</td></tr>'}</tbody></table></div>
+<h2>Broker contract validation</h2>
+<div class="notice"><strong>{h(contracts.get('status','UNVERIFIED'))}</strong>
+<p>Tick value, currency units, account denomination, and volume economics require independent MT5/broker verification.</p>
+<ul>{''.join('<li>'+h(w)+'</li>' for w in contracts.get('warnings',[]))}</ul></div>
 <h2>Dataset provenance</h2><div class="meta">
 <div><small>Source</small><b>{h(payload.get('market_source'))}</b></div>
 <div><small>Symbol</small><b>{h(payload.get('symbol'))}</b></div>
