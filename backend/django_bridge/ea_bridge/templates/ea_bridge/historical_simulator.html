@@ -60,9 +60,13 @@ button.primary{background:var(--gold);color:#161b23;border:0;font-weight:700}lab
 <div class="metric"><div class="label">Simulated win rate</div><div class="value" id="simWin">—</div></div>
 <div class="metric"><div class="label">Simulated net gain · account units</div><div class="value" id="simGain">0</div></div></div>
 <div class="strategyGrid" id="strategyGrid"></div>
+<details class="diagnostics" open><summary><strong>Closed-trade diagnostics · descriptive research</strong></summary>
+<p class="smallhelp">Groups use trade entry time in UTC. Time blocks are UTC buckets, not named market sessions. Signal regime is the evaluator's label at the signal. Small groups and months selected after seeing results are not independent validation. A gap may be a market closure or missing data; affected trades need inspection.</p>
+<div id="tradeDiagnostics" role="region" aria-label="Per-strategy closed-trade diagnostics"></div>
+</details>
 <details open><summary><strong>Historical simulated trade history</strong></summary>
 <p class="smallhelp">Full selected period, selected independent virtual accounts. Table contains hypothetical fills, not actual MT5 executions.</p>
-<div class="trades-scroll"><table class="trades-table"><thead><tr><th>Strategy</th><th>Side</th><th>Signal (UTC)</th><th>Entry (UTC)</th><th>Exit (UTC)</th><th>Entry</th><th>SL</th><th>TP</th><th>Exit</th><th>Lots</th><th>Reason</th><th>Net P&amp;L</th></tr></thead><tbody id="tradesBody"></tbody></table></div>
+<div class="trades-scroll"><table class="trades-table"><thead><tr><th>Strategy</th><th>Side</th><th>Signal (UTC)</th><th>Entry (UTC)</th><th>Exit (UTC)</th><th>Entry</th><th>SL</th><th>TP</th><th>Exit</th><th>Lots</th><th>Signal regime</th><th>Gaps crossed</th><th>Reason</th><th>Net P&amp;L</th></tr></thead><tbody id="tradesBody"></tbody></table></div>
 </details>
 <details open><summary><strong>1,000 vs 10,000 account units · identical historical dataset</strong></summary>
 <p class="smallhelp">Two independent research accounts, with the same validated candles, broker assumptions and standard 0.5% risk cap. No pooled portfolio returns.</p>
@@ -194,17 +198,66 @@ function renderTradeHistory(){
  const entries=backtest.strategies.flatMap(strategy=>strategy.trades.map(t=>({...t,setup:strategy.setup})))
    .sort((a,b)=>a.opened_at-b.opened_at);
  if(!entries.length){
-  const tr=document.createElement("tr");const td=document.createElement("td");td.colSpan=12;
+  const tr=document.createElement("tr");const td=document.createElement("td");td.colSpan=14;
   td.textContent="No simulated closed trades for this date range.";tr.appendChild(td);root.appendChild(tr);return;
  }
  const date=timestamp=>timestamp?new Date(timestamp*1000).toISOString().slice(0,16).replace("T"," "):"—";
  for(const trade of entries){
   const tr=document.createElement("tr");
   const values=[trade.setup,trade.side,date(trade.signal_at),date(trade.opened_at),date(trade.closed_at),
-    trade.entry,trade.stop??"—",trade.target??"—",trade.exit,trade.volume,trade.reason,
+    trade.entry,trade.stop??"—",trade.target??"—",trade.exit,trade.volume,trade.signal_regime??"Unavailable",trade.gaps_crossed??"Unavailable",trade.reason,
     Number(trade.pnl).toFixed(2)];
   for(const value of values){const td=document.createElement("td");td.textContent=String(value);tr.appendChild(td)}
   tr.style.color=trade.pnl>=0?"var(--green)":"var(--red)";root.appendChild(tr);
+ }
+}
+function renderTradeDiagnostics(){
+ const root=el("tradeDiagnostics");root.replaceChildren();
+ if(!backtest)return;
+ for(const strategy of backtest.strategies){
+  const detail=strategy.trade_diagnostics;
+  const section=document.createElement("section");
+  const title=document.createElement("div");title.className="diagnostic-title";
+  title.textContent=strategy.setup.replaceAll("_"," ")+" · "+strategy.closed_trades+" closed trades";
+  section.appendChild(title);
+  if(!detail){
+   const unavailable=document.createElement("p");unavailable.className="muted";
+   unavailable.textContent="Diagnostics unavailable in this saved result. Run a new backtest.";
+   section.appendChild(unavailable);root.appendChild(section);continue;
+  }
+  const summary=document.createElement("p");summary.className="muted";
+  summary.textContent="Gross before commission: "+Number(detail.gross_pnl).toFixed(2)+
+   " · Assumed round-trip commission: "+Number(detail.commission).toFixed(2)+
+   " · Trades crossing at least one candle gap: "+detail.gap_affected_trades+
+   ". Slippage is already reflected in gross P&L.";
+  section.appendChild(summary);
+  if(!strategy.closed_trades){
+   const empty=document.createElement("p");empty.className="muted";
+   empty.textContent="No closed trades to group.";section.appendChild(empty);root.appendChild(section);continue;
+  }
+  for(const [key,label] of [
+   ["by_month","Entry month (UTC)"],["by_side","Side"],["by_regime","Signal regime"],
+   ["by_utc_block","Entry time block (UTC)"],["by_exit","Exit reason"]
+  ]){
+   const heading=document.createElement("h4");heading.textContent=label;section.appendChild(heading);
+   const scroll=document.createElement("div");scroll.className="trades-scroll";
+   const table=document.createElement("table");table.className="trades-table";
+   const header=document.createElement("tr");
+   for(const name of [label,"Trades","Wins","Net P&L","Winners total","Losers total"]){
+    const th=document.createElement("th");th.textContent=name;header.appendChild(th);
+   }
+   table.appendChild(header);
+   for(const row of detail[key]||[]){
+    const tr=document.createElement("tr");
+    for(const value of [row.label,row.trades,row.wins,
+     Number(row.net_pnl).toFixed(2),Number(row.gross_profit).toFixed(2),Number(row.gross_loss).toFixed(2)]){
+      const td=document.createElement("td");td.textContent=String(value);tr.appendChild(td);
+    }
+    table.appendChild(tr);
+   }
+   scroll.appendChild(table);section.appendChild(scroll);
+  }
+  root.appendChild(section);
  }
 }
 function renderComparison(){
@@ -461,7 +514,7 @@ async function runBacktest(){
   if(status.status!=="COMPLETED")throw Error(status.error||"Historical backtest failed");
   backtest=status.result;backtestInputs={...Object.fromEntries(params.entries()),setups:params.getAll("setups")};el("backtestResults").style.display="block";el("exportBacktest").disabled=false;
   el("backtestStatus").textContent=backtest.candles+" M15 candles analyzed. Estimated execution, not historical broker fills. Chart statistics cover only visible candle window.";
-  renderFullBacktest();renderBacktest();renderRejections();renderQuality();renderTradeHistory();renderComparison();render();
+  renderFullBacktest();renderBacktest();renderRejections();renderQuality();renderTradeHistory();renderTradeDiagnostics();renderComparison();render();
  }catch(error){el("backtestStatus").textContent="Backtest unavailable: "+error.message}
  finally{el("runBacktest").disabled=false}
 }
