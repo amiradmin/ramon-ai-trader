@@ -25,3 +25,12 @@ compose.pg-canary.yaml
 
 # Local Django media and trained model artifacts
 backend/django_bridge/media/
+
+# Private broker snapshots and local research outputs (never commit financial data)
+mt5-contract-snapshot.json
+contract-verification.json
+impulse-lab-*.json
+impulse-lab-*.html
+lab-test.json
+lab-test-errors.log
+lab-data-check.json
