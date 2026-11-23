@@ -16,7 +16,7 @@ from .entry_timing import EntryTimer
 from .learning import Learning
 from .opportunities import OpportunityDetector
 from .risk_management import RiskManager
-from .trade_planning import market_context, plan_target, rank_candidate
+from .trade_planning import market_context, plan_target, rank_candidate, previous_week_context
 
 # Server-owned calculation definitions. These describe the rules implemented by the
 # corresponding stage methods; per-decision operands and active thresholds are attached
@@ -184,12 +184,13 @@ _STAGE_ORDER = ("opportunities", "entry_timing", "risk_management")
 
 
 class SignalFlowPipeline:
-    def __init__(self, opportunities: OpportunityDetector | None = None, entry_timer: EntryTimer | None = None, risk_manager: RiskManager | None = None, learning: Learning | None = None, *, compare_candidates: bool = False) -> None:
+    def __init__(self, opportunities: OpportunityDetector | None = None, entry_timer: EntryTimer | None = None, risk_manager: RiskManager | None = None, learning: Learning | None = None, *, compare_candidates: bool = False, use_previous_week: bool = False) -> None:
         self.opportunities = opportunities or OpportunityDetector()
         self.entry_timer = entry_timer or EntryTimer()
         self.risk_manager = risk_manager or RiskManager()
         self.learning = learning or Learning()
         self.compare_candidates = compare_candidates
+        self.use_previous_week = use_previous_week
 
     def _evaluate_risk(self, market: Mapping[str, Any], upstream: bool, opportunity: Mapping[str, Any], timing: Mapping[str, Any]) -> dict[str, Any]:
         """Call the risk stage with stage context, tolerating custom managers with the old signature."""
@@ -210,6 +211,8 @@ class SignalFlowPipeline:
 
     def _run_candidates(self, market: Mapping[str, Any], learning_result: dict[str, Any]) -> dict[str, Any]:
         context = market_context(market)
+        if self.use_previous_week:
+            context["PREVIOUS_WEEK"] = previous_week_context(market)
         evaluated = []
         for opportunity in self.opportunities.evaluate_candidates(market):
             timing = self.entry_timer.evaluate(opportunity, market)

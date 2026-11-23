@@ -88,7 +88,7 @@ button.primary{background:var(--gold);color:#161b23;border:0;font-weight:700}lab
 <button class="primary" id="toggle" disabled>▶ Play</button>
 <button id="step" disabled>⏭ Step Forward</button>
 <button id="reset" disabled>↺ Reset</button>
-<label>Speed <select id="speed"><option value="1">1×</option><option value="5">5×</option><option value="10">10×</option><option value="50">50×</option><option value="100">100×</option></select></label>
+<label>Speed <select id="speed"><option value="1">1×</option><option value="5">5×</option><option value="10">10×</option><option value="50">50×</option><option value="100">100×</option><option value="200">200×</option><option value="300">300×</option></select></label>
 <span class="status" id="state">No data</span>
 </div>
 <input type="range" id="timeline" min="0" max="0" value="0" disabled aria-label="Replay candle position">
@@ -363,7 +363,7 @@ async function advance(){
 }
 function tick(){
  if(!playing)return;
- timer=setTimeout(async()=>{timer=null;await advance();if(playing)tick()},Math.max(40,750/Number(el("speed").value)));
+ timer=setTimeout(async()=>{timer=null;await advance();if(playing)tick()},Math.max(1,750/Number(el("speed").value)));
 }
 function ensureChart(){
  if(chart)return true;

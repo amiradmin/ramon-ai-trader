@@ -10,10 +10,11 @@ class ReplayTests(TestCase):
                       "low": 99.5, "close": 100.0} for i in range(132)]
         self.account = {"point": 0.01, "point_value_per_lot": 1.0, "account_balance": 10000.0}
 
-    def run_replay(self, *, side="BUY", spread=0, slip=0, commission=0, context=None, **replay_options):
+    def run_replay(self, *, side="BUY", spread=0, slip=0, commission=0, context=None, weekly=False, **replay_options):
         calls = []
 
         class Pipeline:
+            use_previous_week = weekly
             risk_manager = SimpleNamespace(maximum_risk_percent=0.5,
                                            config=SimpleNamespace(target_reward_risk=2.0, min_reward_risk=1.2))
 
@@ -51,12 +52,43 @@ class ReplayTests(TestCase):
         result, _ = self.run_replay(side="SELL", spread=20)
         self.assertEqual(result["trades"][0]["exit_reason"], "STOP")
 
+    def test_bar_open_spread_updates_short_exit_without_future_leakage(self):
+        for bar in self.bars:
+            bar["spread_points"] = 10
+        self.bars[128].update(high=100.5, spread_points=10)
+        self.bars[129].update(high=100.8, spread_points=30)
+        result, calls = self.run_replay(side="SELL", spread_mode="bar_open")
+        self.assertEqual(calls[0]["spread_points"], 10)
+        self.assertEqual(result["trades"][0]["exit_reason"], "STOP")
+        self.assertEqual(result["trades"][0]["entry_spread_points"], 10)
+        self.assertEqual(result["trades"][0]["exit_spread_points"], 30)
+        self.bars[129]["spread_points"] = 10
+        _, changed_calls = self.run_replay(side="SELL", spread_mode="bar_open")
+        self.assertEqual(calls[0], changed_calls[0])
+
+    def test_bar_open_spread_fails_closed_when_missing_or_invalid(self):
+        with self.assertRaises(ValueError):
+            self.run_replay(spread_mode="bar_open")
+        for bar in self.bars:
+            bar["spread_points"] = 10
+        self.bars[129]["spread_points"] = float("nan")
+        with self.assertRaises(ValueError):
+            self.run_replay(spread_mode="bar_open")
+
     def test_signals_never_receive_future_or_incomplete_candles(self):
         context = {"M5": [{"time": self.bars[127]["time"]+i*300} for i in range(20)]}
         _, calls = self.run_replay(context=context)
         for market in calls:
             self.assertLess(market["bars"][-1]["time"], market["decision_time"])
             self.assertTrue(all(bar["time"]+300 <= market["decision_time"] for bar in market["context_bars"]["M5"]))
+
+    def test_weekly_replay_passes_only_the_previous_completed_week(self):
+        from ramon_pipeline.signalflow.trade_planning import previous_week_bounds
+        cutoff = self.bars[128]["time"]
+        start, end = previous_week_bounds(cutoff)
+        weekly = [{"time": start-900}, {"time": start}, {"time": end-900}, {"time": end}]
+        _, calls = self.run_replay(context={"WEEK_M15":weekly}, weekly=True)
+        self.assertEqual([b["time"] for b in calls[0]["context_bars"]["WEEK_M15"]], [start, end-900])
 
     def test_future_price_changes_do_not_change_the_entry_plan(self):
         before, calls_before = self.run_replay()

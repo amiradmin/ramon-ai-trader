@@ -16,6 +16,20 @@ from .models import EACommand, EAHeartbeat, MarketBar, RiskVerdictRecord, Strate
 
 
 class ContextLoadingTests(TestCase):
+    def test_weekly_context_excludes_other_sources_and_late_receipts(self):
+        from datetime import datetime, timezone as utc_timezone
+        cutoff = datetime(2026, 11, 17, tzinfo=utc_timezone.utc)
+        common = {"source":"demo", "symbol":"XAUUSD_o", "timeframe":"M15",
+                  "timestamp":datetime(2026, 11, 9, tzinfo=utc_timezone.utc),
+                  "open":100, "high":101, "low":99, "close":100}
+        valid = MarketBar.objects.create(**common)
+        MarketBar.objects.filter(pk=valid.pk).update(received_at=cutoff-timedelta(days=1))
+        MarketBar.objects.create(**{**common, "source":"other"})
+        late = MarketBar.objects.create(**{**common, "timestamp":common["timestamp"]+timedelta(minutes=15)})
+        MarketBar.objects.filter(pk=late.pk).update(received_at=cutoff+timedelta(seconds=1))
+        context = load_decision_context(source="demo", symbol="XAUUSD_o", decision_time=cutoff.timestamp(), include_previous_week=True)
+        self.assertEqual([b["time"] for b in context["WEEK_M15"]], [valid.timestamp.timestamp()])
+
     def test_context_is_scoped_completed_and_known_at_decision_time(self):
         cutoff = timezone.now()+timedelta(seconds=5)
         common = {"source": "demo", "symbol": "XAUUSD_o", "timeframe": "M5",
@@ -35,6 +49,12 @@ class ContextLoadingTests(TestCase):
 
 @override_settings(RAMON_REAL_CENT_INSTANCE='playbook-demo',RAMON_REAL_CENT_LOGIN='123',RAMON_REAL_CENT_SERVER='Demo',RAMON_REAL_CENT_CURRENCY='USC',RAMON_REAL_CENT_SYMBOL='XAUUSD_o')
 class DemoPlaybookApiTests(TestCase):
+    @override_settings(RAMON_DEMO_PROFILE="expanded", RAMON_DEMO_PREVIOUS_WEEK_CONTEXT=True)
+    def test_weekly_context_switch_is_demo_only(self):
+        self.assertTrue(_build_pipeline(demo_mode=True).use_previous_week)
+        self.assertFalse(_build_pipeline(demo_mode=False).use_previous_week)
+        self.assertFalse(_build_pipeline(demo_mode=True, strategy_setup="TREND_PULLBACK").use_previous_week)
+
     @override_settings(RAMON_DEMO_PROFILE="expanded")
     def test_comparison_and_computed_quality_are_demo_specific(self):
         demo, live = _build_pipeline(demo_mode=True), _build_pipeline(demo_mode=False)

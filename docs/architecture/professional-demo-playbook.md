@@ -55,6 +55,24 @@ Opposing context penalizes a plan rather than prohibiting every reversal trade.
 Context is scoped to the same EA source and symbol, with candle completion and
 receipt times bounded by decision time.
 
+An experimental previous-week context is available for the expanded demo
+candidate selector with `RAMON_DEMO_PREVIOUS_WEEK_CONTEXT=1` (default `0`). It
+uses the previous completed UTC Monday-to-Monday week, including any Sunday
+bars in that UTC week; it is not a broker-session week. It computes OHLC, range,
+range percentage and a directional bias from the same source and symbol's M15
+bars. The direction is neutral if the open-to-close move is at most 10% of the
+weekly range. At least 350 weekday bars, at least 40 per weekday, coverage near
+the beginning and end, and no weekday gap over three hours are required. These
+heuristics do not verify the broker calendar and may reject holiday weeks.
+Missing, malformed or incomplete context is neutral. Aligned directional bias
+adds 0.05 to a candidate's ranking score; opposing bias subtracts 0.05, bounded
+to [0,1]. It does not override opportunity, entry or risk gates. The context
+and adjustment appear in the existing selection record. This is a hypothesis,
+not a calibrated forecast or a validated improvement. The option has no effect
+on standard, live, or independent strategy-worker pipelines. Backfilled rows are
+usable for descriptive replay, but their actual receipt times do not establish
+forward availability. The setting is off by default pending research.
+
 The continuity checker now distinguishes a narrowly defined Friday-night to
 Sunday-night timestamp pattern from weekday outages. It preserves the observed
 bars without interpolation and marks the break as observed, with the broker

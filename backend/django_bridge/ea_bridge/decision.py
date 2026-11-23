@@ -129,7 +129,8 @@ def _build_pipeline(*, demo_mode=False, strategy_setup=None, live_scope=None):
     # entry timer above, so both standard and demo paths remain capped.
     risk.maximum_risk_percent = maximum_risk_percent
     return SignalFlowPipeline(opportunities=detector, entry_timer=timer, risk_manager=risk,
-                              compare_candidates=bool(strategy_setup) or (relaxed and bool(opt("RAMON_DEMO_COMPARE_CANDIDATES", True))))
+                              compare_candidates=bool(strategy_setup) or (relaxed and bool(opt("RAMON_DEMO_COMPARE_CANDIDATES", True))),
+                              use_previous_week=relaxed and not strategy_setup and bool(opt("RAMON_DEMO_PREVIOUS_WEEK_CONTEXT", False)))
 
 def _num(v, name):
     v=float(v)
@@ -406,6 +407,7 @@ def evaluate_payload(p, *, strategy_setup=None, input_evidence=None, live_worker
             market["decision_time"] = time.time()
             market["context_bars"] = load_decision_context(
                 source=instance_id, symbol=symbol, decision_time=market["decision_time"],
+                include_previous_week=pipeline.use_previous_week,
             )
         result = pipeline.run(market)
         if account_state_reason:

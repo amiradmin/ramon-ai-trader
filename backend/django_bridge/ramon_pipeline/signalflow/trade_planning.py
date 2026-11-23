@@ -6,12 +6,64 @@ All thresholds here are hypotheses to evaluate on chronological demo replays.
 from __future__ import annotations
 
 import math
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 
 from .common import REJECTED, parse_timestamp
 
 _INTERVALS = {"M5": 300, "H1": 3600}
+
+
+def previous_week_bounds(decision_time: float) -> tuple[float, float]:
+    now = datetime.fromtimestamp(decision_time, timezone.utc)
+    monday = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+    return (monday - timedelta(days=7)).timestamp(), monday.timestamp()
+
+
+def previous_week_context(market: Mapping[str, Any]) -> dict[str, Any]:
+    """Summarize only a well-covered prior UTC week, otherwise remain neutral."""
+    result = {"status": "MISSING", "bias": "UNKNOWN", "bars": 0}
+    try:
+        cutoff = float(market["decision_time"])
+        if not math.isfinite(cutoff):
+            raise ValueError("invalid cutoff")
+        start, end = previous_week_bounds(cutoff)
+        result.update(start_utc=start, end_utc=end)
+        raw = market.get("context_bars", {}).get("WEEK_M15", [])
+        if not raw:
+            return result
+        bars = []
+        for row in raw:
+            stamp = parse_timestamp(row["time"])
+            if not start <= stamp < end or stamp + 900 > cutoff or row.get("closed") is False:
+                continue
+            values = {key: float(row[key]) for key in ("open", "high", "low", "close")}
+            if (stamp % 900 or not all(math.isfinite(x) and x > 0 for x in values.values())
+                    or not values["low"] <= min(values["open"], values["close"]) <= max(values["open"], values["close"]) <= values["high"]
+                    or (bars and stamp <= bars[-1]["time"])):
+                raise ValueError("invalid weekly candle")
+            bars.append({"time": stamp, **values})
+        result["bars"] = len(bars)
+        weekdays = [b for b in bars if datetime.fromtimestamp(b["time"], timezone.utc).weekday() < 5]
+        day_counts = [sum(datetime.fromtimestamp(b["time"], timezone.utc).weekday() == d for b in weekdays) for d in range(5)]
+        result["weekday_counts"] = day_counts
+        if (len(weekdays) < 350 or min(day_counts) < 40
+                or not weekdays or weekdays[0]["time"] > start + 12*3600
+                or weekdays[-1]["time"] < start + 4*86400 + 12*3600
+                or any(b["time"] - a["time"] > 3*3600 for a, b in zip(weekdays, weekdays[1:]))):
+            result["status"] = "INCOMPLETE_HISTORY"
+            return result
+        high, low = max(b["high"] for b in bars), min(b["low"] for b in bars)
+        opening, closing = bars[0]["open"], bars[-1]["close"]
+        width = high - low
+        bias = "NEUTRAL" if width <= 0 or abs(closing-opening) <= .1*width else "BUY" if closing > opening else "SELL"
+        result.update(status="AVAILABLE", bias=bias, open=opening, high=high, low=low,
+                      close=closing, range=width, range_percent=100*width/opening,
+                      interpretation="PREVIOUS_UTC_WEEK_DESCRIPTIVE_NOT_A_FORECAST")
+        return result
+    except (KeyError, TypeError, ValueError, OverflowError, OSError):
+        result["status"] = "INVALID"
+        return result
 
 
 def weekend_break(previous: float, following: float, interval: int) -> bool:
@@ -182,5 +234,10 @@ def rank_candidate(opportunity: Mapping[str, Any], timing: Mapping[str, Any], ri
                   "m5_trigger": m5_score, "target_room": min(1.0, max(0.0, float(risk.get("reward_risk") or 0) / 3.0))}
     weights = {"setup": 0.40, "entry": 0.25, "h1_alignment": 0.15, "m5_trigger": 0.10, "target_room": 0.10}
     score = sum(weights[key] * min(1.0, max(0.0, value)) for key, value in components.items())
+    weekly = context.get("PREVIOUS_WEEK", {})
+    if weekly.get("status") == "AVAILABLE" and weekly.get("bias") in {"BUY", "SELL"} and side in {"BUY", "SELL"}:
+        adjustment = 0.05 if weekly["bias"] == side else -0.05
+        components["previous_week_adjustment"] = adjustment
+        score = max(0.0, min(1.0, score + adjustment))
     return {"score": round(score, 6), "components": components, "weights": weights,
             "interpretation": "HEURISTIC_RANK_NOT_WIN_PROBABILITY"}

@@ -5,7 +5,7 @@ from unittest import TestCase
 from ramon_pipeline.signalflow.entry_timing import EntryTimer, EntryTimingConfig
 from ramon_pipeline.signalflow.opportunities import OpportunityDetector
 from ramon_pipeline.signalflow.pipeline import SignalFlowPipeline
-from ramon_pipeline.signalflow.trade_planning import completed_context, market_context, plan_target, rank_candidate
+from ramon_pipeline.signalflow.trade_planning import completed_context, market_context, plan_target, rank_candidate, previous_week_context
 from ramon_pipeline.signalflow.additional_setups import detect_additional_opportunity
 from ramon_pipeline.signalflow.trading_config import load_trading_config
 
@@ -23,6 +23,41 @@ def context_bars(count, interval, cutoff, rising=True):
 
 
 class ContextTests(TestCase):
+    def week_snapshot(self):
+        start = datetime(2026, 11, 9, tzinfo=timezone.utc).timestamp()
+        rows = [{"time": start+i*900, "open": 100+i*.01, "high": 100.1+i*.01,
+                 "low": 99.9+i*.01, "close": 100.05+i*.01, "closed": True}
+                for i in range(5*96)]
+        return {"decision_time": start+8*86400, "context_bars": {"WEEK_M15": rows}}
+
+    def test_previous_week_uses_only_completed_previous_utc_week(self):
+        market = self.week_snapshot()
+        week = previous_week_context(market)
+        self.assertEqual(week["status"], "AVAILABLE")
+        self.assertEqual(week["bias"], "BUY")
+        self.assertEqual(week["bars"], 480)
+        market["context_bars"]["WEEK_M15"].append({"time": week["end_utc"], "open": 1, "high": 9999, "low": 1, "close": 9999})
+        self.assertEqual(previous_week_context(market), week)
+
+    def test_previous_week_rejects_partial_or_misaligned_history(self):
+        market = self.week_snapshot()
+        market["context_bars"]["WEEK_M15"] = market["context_bars"]["WEEK_M15"][:100]
+        self.assertEqual(previous_week_context(market)["status"], "INCOMPLETE_HISTORY")
+        market = self.week_snapshot()
+        market["context_bars"]["WEEK_M15"][0]["time"] += 1
+        self.assertEqual(previous_week_context(market)["status"], "INVALID")
+
+    def test_weekly_bias_adjusts_ranking_and_missing_context_is_neutral(self):
+        context = market_context(self.snapshot())
+        op, timing, risk = {"side":"BUY", "score":0.7}, {"quality":0.8}, {"reward_risk":1.5}
+        baseline = rank_candidate(op, timing, risk, context)["score"]
+        context["PREVIOUS_WEEK"] = {"status":"INCOMPLETE_HISTORY", "bias":"UNKNOWN"}
+        self.assertEqual(rank_candidate(op, timing, risk, context)["score"], baseline)
+        context["PREVIOUS_WEEK"] = {"status":"AVAILABLE", "bias":"BUY"}
+        self.assertAlmostEqual(rank_candidate(op, timing, risk, context)["score"], baseline+.05)
+        context["PREVIOUS_WEEK"]["bias"] = "SELL"
+        self.assertAlmostEqual(rank_candidate(op, timing, risk, context)["score"], baseline-.05)
+
     def snapshot(self):
         cutoff = 1_700_000_000
         return {"bars": [{"time": cutoff-900}], "decision_time": cutoff,

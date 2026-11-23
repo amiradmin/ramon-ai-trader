@@ -56,6 +56,7 @@ RAMON_DEDUPE_SIGNALS = os.environ.get("RAMON_DEDUPE_SIGNALS", "0") == "1"
 RAMON_USE_COMPUTED_ENTRY_QUALITY = os.environ.get("RAMON_USE_COMPUTED_ENTRY_QUALITY", "0") == "1"
 # The expanded demo profile compares complete executable plans; standard/live paths are unchanged.
 RAMON_DEMO_COMPARE_CANDIDATES = os.environ.get("RAMON_DEMO_COMPARE_CANDIDATES", "1") == "1"
+RAMON_DEMO_PREVIOUS_WEEK_CONTEXT = os.environ.get("RAMON_DEMO_PREVIOUS_WEEK_CONTEXT", "0") == "1"
 # Forward-only ARIMA observation, isolated from decision/command authorization.
 RAMON_ARIMA_SHADOW_ENABLED = os.environ.get("RAMON_ARIMA_SHADOW_ENABLED", "1") == "1"
 RAMON_ARIMA_SHADOW_WINDOW = int(os.environ.get("RAMON_ARIMA_SHADOW_WINDOW", "256"))
