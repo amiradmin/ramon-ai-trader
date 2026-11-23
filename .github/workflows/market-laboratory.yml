@@ -28,7 +28,9 @@ jobs:
         env:
           POSTGRES_PASSWORD: github-actions-test-only
           LAB_DB_PASSWORD: github-actions-test-only
-        run: docker compose -f docker-compose.yaml -f docker-compose.lab.yaml --profile lab config --quiet
+        run: |
+          touch .env
+          docker compose -f docker-compose.yaml -f docker-compose.lab.yaml --profile lab config --quiet
       - name: Confirm trading switches disabled and no network ports published
         run: |
           python - <<'PY'
