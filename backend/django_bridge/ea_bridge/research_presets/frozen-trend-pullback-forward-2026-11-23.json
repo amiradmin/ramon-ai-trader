@@ -1,0 +1,26 @@
+{
+  "frozen_at_utc": "2026-11-23",
+  "development_period_end_utc": "2026-11-22",
+  "reference_export": "ramon-backtest-XAUUSD_l-2026-10-22-2026-11-22.json",
+  "reference_history_fingerprint": "b66ef48c7140e12e46ff5c782057c3abefe6d10fd98dc6a5735d2730d7708ef0",
+  "inputs": {
+    "symbol": "XAUUSD_l",
+    "source": "litefinance-mt5-live-export-20261122",
+    "balance": 1000,
+    "spread_points": 20,
+    "point": 0.01,
+    "tick_size": 0.01,
+    "tick_value": 1,
+    "volume_min": 0.01,
+    "volume_max": 100,
+    "volume_step": 0.01,
+    "risk_percent": 0.5,
+    "stop_buffer_atr": 0.1,
+    "target_reward_risk": 1.2,
+    "minimum_opportunity_score": 0.55,
+    "minimum_entry_quality": 0.5,
+    "slippage_points": 1,
+    "commission_per_lot": 1,
+    "setups": ["TREND_PULLBACK"]
+  }
+}
