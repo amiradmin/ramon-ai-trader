@@ -34,10 +34,15 @@ button.primary{background:var(--gold);color:#161b23;border:0;font-weight:700}lab
 <label>Minimum lot<input type="number" id="testMinLot" min="0.000001" step="any" placeholder="Broker volume min" required value="0.01"></label>
 <label>Maximum lot<input type="number" id="testMaxLot" min="0.000001" step="any" placeholder="Broker volume max" required value="100"></label>
 <label>Lot step<input type="number" id="testLotStep" min="0.000001" step="any" placeholder="Broker volume step" required value="0.01"></label>
+<label>Risk per trade (%)<input type="number" id="testRiskPercent" min="0.01" max="0.5" step="0.01" required value="0.5"></label>
+<label>Structural stop buffer (ATR)<input type="number" id="testStopBuffer" min="0" max="1.5" step="0.05" required value="0.25"></label>
+<label>Target reward/risk<input type="number" id="testTargetRatio" min="1.2" max="5" step="0.05" required value="1.25"></label>
+<label>Assumed slippage (points per side)<input type="number" id="testSlippage" min="0" max="10000" step="any" required value="0"></label>
+<label>Round-trip commission (account units per lot)<input type="number" id="testCommission" min="0" step="any" required value="0"></label>
 </div>
 <fieldset style="border:0;padding:0;margin:14px 0 0"><legend style="font-weight:700">Strategies to test</legend>
 <div class="strategyChoices" id="testStrategies">{% for setup in strategies %}<label><input type="checkbox" value="{{ setup }}" checked> {{ setup }}</label>{% endfor %}</div>
-<small>These selections affect only this historical test. Fast Scalp uses M1/M5 data and is outside this M15 backtest.</small>
+<small>These selections and tuning values affect only this historical test. Risk is capped at 0.5% per trade. Stop buffer adds distance beyond structural invalidation; it is not a fixed stop distance. Slippage is adverse on entry and exit; commission is per completed lot. Fast Scalp uses M1/M5 data and is outside this M15 backtest.</small>
 </fieldset>
 <div class="controls"><label><input id="compareBalances" type="checkbox" checked> Compare 1,000 and 10,000 virtual account units</label></div>
 <div class="controls"><button class="primary" id="runBacktest">Run strategy backtest</button><button id="exportBacktest" type="button" disabled>Download backtest result (JSON)</button><span id="backtestStatus" class="muted" role="status" aria-live="polite">Set dates and broker assumptions to begin.</span></div>
@@ -68,7 +73,7 @@ button.primary{background:var(--gold);color:#161b23;border:0;font-weight:700}lab
 <p class="muted">Reasons returned by each strategy's Opportunity, Entry Timing, and Risk Management stages. A rejected bar is not necessarily a valid trading signal; these are diagnostic counts, not missed-profit estimates. Minimum-volume risk rejections include the original sizing explanation where available.</p>
 <div id="rejectionDetails" role="region" aria-label="Per-strategy rejection reasons"></div>
 </details>
-<p class="muted">Each strategy uses an independent starting balance. The aggregate combines separate research books, not a shared portfolio. No historical slippage, commissions, news locks, or broker fill verification. When both SL and TP occur within one candle, stop-loss wins.</p>
+<p class="muted">Each strategy uses an independent starting balance. The aggregate combines separate research books, not a shared portfolio. Slippage and commission are assumed, not historical measurements; no news locks or broker fill verification. When both SL and TP occur within one candle, stop-loss wins.</p>
 </div>
 </section>
 <section class="panel">
@@ -128,7 +133,7 @@ function clearBacktest(){backtest=null;backtestInputs=null;el("exportBacktest").
 function exportBacktest(){
  if(!backtest||!backtestInputs)return;
  const report={format:"ramon-simulator-backtest-v1",exported_at_utc:new Date().toISOString(),inputs:backtestInputs,
-  caveats:["Estimated research fills, not broker executions.","Selected independent strategy accounts; aggregate is not a shared portfolio.","Spread and symbol specifications are user supplied; historical slippage, commissions, news locks, and broker fills are not verified.","When stop and target both occur within one candle, stop wins."],result:backtest};
+  caveats:["Estimated research fills, not broker executions.","Selected independent strategy accounts; aggregate is not a shared portfolio.","Spread, slippage, commission and symbol specifications are user supplied assumptions; historical broker costs, news locks, and fills are not verified.","When stop and target both occur within one candle, stop wins."],result:backtest};
  const blob=new Blob([JSON.stringify(report,null,2)+"\n"],{type:"application/json"});
  const url=URL.createObjectURL(blob),link=document.createElement("a");
  link.href=url;link.download="ramon-backtest-"+backtestInputs.symbol.replace(/[^a-zA-Z0-9_-]/g,"_")+"-"+backtestInputs.start+"-"+backtestInputs.end+".json";
@@ -420,7 +425,7 @@ async function load(){
 }
 async function runBacktest(){
  if(loading)return;
- const ids={balance:"testBalance",spread_points:"testSpread",point:"testPoint",tick_size:"testTickSize",tick_value:"testTickValue",volume_min:"testMinLot",volume_max:"testMaxLot",volume_step:"testLotStep"};
+ const ids={balance:"testBalance",spread_points:"testSpread",point:"testPoint",tick_size:"testTickSize",tick_value:"testTickValue",volume_min:"testMinLot",volume_max:"testMaxLot",volume_step:"testLotStep",risk_percent:"testRiskPercent",stop_buffer_atr:"testStopBuffer",target_reward_risk:"testTargetRatio",slippage_points:"testSlippage",commission_per_lot:"testCommission"};
  const params=new URLSearchParams({symbol:el("symbol").value.trim(),source:el("source").textContent.replace(/^Source:\s*/,"").trim(),start:el("testStart").value,end:el("testEnd").value});
  for(const [key,id] of Object.entries(ids)){const field=el(id);if(!field.value||!field.checkValidity()){el("backtestStatus").textContent="Enter valid "+key+" before running.";field.focus();return}params.set(key,field.value)}
  if(!params.get("start")||!params.get("end")){el("backtestStatus").textContent="Select both From and To dates.";return}
@@ -460,7 +465,7 @@ async function runBacktest(){
  }catch(error){el("backtestStatus").textContent="Backtest unavailable: "+error.message}
  finally{el("runBacktest").disabled=false}
 }
-document.querySelectorAll("#testStrategies input").forEach(input=>input.addEventListener("change",()=>{clearBacktest();render();el("backtestStatus").textContent="Strategy selection changed. Run a new backtest to see results."; }));
+document.querySelectorAll("#testStrategies input, #testRiskPercent, #testStopBuffer, #testTargetRatio, #testSlippage, #testCommission").forEach(input=>input.addEventListener("change",()=>{clearBacktest();render();el("backtestStatus").textContent="Test inputs changed. Run a new backtest to see results."; }));
 el("runBacktest").addEventListener("click",runBacktest);
 el("exportBacktest").addEventListener("click",exportBacktest);
 el("load").addEventListener("click",load);
