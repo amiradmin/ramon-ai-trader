@@ -445,6 +445,12 @@ def run_backtest_data(data, *, max_candles=MAX_TEST_CANDLES, progress=None):
             else "HISTORY_FILTERED_CHECK_BROKER_FILLS"
         )
         report=_simulate(data,rows,progress=progress)
+        exit_research = None
+        if "TREND_PULLBACK" in data.get("setups", list(STRATEGIES)):
+            from .research_exit_comparison import compare_exits
+            baseline = next((item for item in report if item.get("setup") == "TREND_PULLBACK"), None)
+            if baseline:
+                exit_research = compare_exits(rows, baseline.get("trades", []), data)
         return JsonResponse(dict(mode="ISOLATED_STRATEGY_RESEARCH_ESTIMATE",
              timeframe="M15",symbol=data["symbol"],source=data["source"],
              start=data["start"].isoformat(),end=data["end"].isoformat(),
@@ -459,7 +465,8 @@ def run_backtest_data(data, *, max_candles=MAX_TEST_CANDLES, progress=None):
                    ("target_reward_risk",1.25),("minimum_opportunity_score",0.55),
                    ("minimum_entry_quality",0.55),("slippage_points",0),("commission_per_lot",0))}},
              limitations="Model-priced fixed spread, per-side adverse slippage and round-trip commission assumptions; no historical cost records or gap fills; OHLC intrabar order assumed stop first; no news/account state history; not broker validation, not full live-worker parity.",
-             selected_setups=data.get("setups",list(STRATEGIES)),strategies=report))
+             selected_setups=data.get("setups",list(STRATEGIES)),strategies=report,
+             trend_pullback_exit_research=exit_research))
 
 
 @require_GET
