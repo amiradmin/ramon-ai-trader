@@ -102,6 +102,26 @@ class IndependentScalperTests(TestCase):
         strict=Client(enforce_csrf_checks=True);strict.force_login(user)
         self.assertEqual(strict.post('/api/ea/v1/scalper',{'action':'start','scope':self.control.pk}).status_code,403)
 
+    def test_dashboard_scalper_toggle_requires_staff_scope_and_fresh_feed(self):
+        url='/api/ea/v1/scalper/entries'
+        self.assertEqual(self.client.post(url,{'action':'pause','scope':self.control.pk}).status_code,302)
+        user=get_user_model().objects.create_user(username='scalp-dashboard',password='local-test',is_staff=True)
+        from django.test import Client
+        strict=Client(enforce_csrf_checks=True);strict.force_login(user)
+        self.assertEqual(strict.post(url,{'action':'pause','scope':self.control.pk}).status_code,403)
+        self.client.force_login(user)
+        self.assertEqual(self.client.post(url,{'action':'pause','scope':'wrong'}).status_code,409)
+        self.assertTrue(ScalperControl.objects.get(pk=self.control.pk).automatic)
+        response=self.client.post(url,{'action':'pause','scope':self.control.pk})
+        self.assertTrue(response.json()['ok'])
+        self.control.refresh_from_db()
+        self.assertFalse(self.control.automatic)
+        EAHeartbeat.objects.filter(pk=self.feed.pk).update(last_seen=timezone.now()-timedelta(minutes=3))
+        response=self.client.post(url,{'action':'start','scope':self.control.pk})
+        self.assertEqual(response.status_code,409)
+        self.control.refresh_from_db()
+        self.assertFalse(self.control.automatic)
+
     def test_account_scope_and_daily_loss_block_entries(self):
         self.control.account_login='other';self.control.save()
         self.assertEqual(open_scalp(self.feed,self.control,self.observation,now=self.now)[1],'CONTROL_SCOPE_MISMATCH')
