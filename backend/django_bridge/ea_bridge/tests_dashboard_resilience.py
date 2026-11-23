@@ -18,6 +18,8 @@ class DashboardResilienceTests(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         for _, (slug, _, _) in STRATEGIES.items():
             self.assertContains(response, "/api/ea/v1/strategies/" + slug)
+        self.assertContains(response, "/api/ea/v1/scalper")
+        self.assertContains(response, 'id="strategy-card-fast-scalp"')
         self.assertContains(response, "STATUS_LOADING")
         self.assertContains(response, "Position status unavailable")
         lookup.assert_not_called()
@@ -27,4 +29,4 @@ class DashboardResilienceTests(SimpleTestCase):
         # or account lookup a regression, even if it happens to succeed in CI.
         response = self.client.get("/api/ea/v1/dashboard")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.content.count(b'class="card strategy-card'), len(STRATEGIES))
+        self.assertEqual(response.content.count(b'class="card strategy-card'), len(STRATEGIES) + 1)
