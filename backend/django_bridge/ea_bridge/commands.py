@@ -163,6 +163,44 @@ def next_command(request):
                 "authorization_reason": "COMMAND_SERVER_MISMATCH",
             })
 
+        # Optional safe volume reduction at the last Django delivery boundary.
+        # Off by default; never relaxes the existing broker/EA delivery checks.
+        # Only an original, approved STRATEGY OPEN command may be repriced.
+        if (command.action == EACommand.Action.OPEN
+                and command_payload.get('engine') == 'STRATEGY'
+                and getattr(settings, 'RAMON_RISK_AWARE_DELIVERY_ENABLED', False)):
+            from django.utils.dateparse import parse_datetime
+            from .delivery_repricing import reprice_strategy_open, DeliveryRiskError
+            stamp = parse_datetime(str(payload.get('quote_time', '')))
+            fresh = bool(stamp and timezone.is_aware(stamp)
+                         and -5 <= (timezone.now()-stamp).total_seconds() <= 30)
+            try:
+                if not fresh:
+                    raise DeliveryRiskError('DELIVERY_QUOTE_STALE')
+                if command.decision_id is None or not command.risk_verdict_id:
+                    raise DeliveryRiskError('DELIVERY_APPROVAL_MISSING')
+                original_risk = command_payload.get('reserved_risk_money')
+                if original_risk is None:
+                    raise DeliveryRiskError('DELIVERY_APPROVED_RISK_MISSING')
+                account = payload.get('account')
+                quote = payload.get('quote')
+                spec = payload.get('symbol_info')
+                if not all(isinstance(x, dict) for x in (account, quote, spec)):
+                    raise DeliveryRiskError('DELIVERY_SNAPSHOT_INCOMPLETE')
+                adjusted, diagnostic = reprice_strategy_open(
+                    command_payload, quote, spec,
+                    approved_risk_money=original_risk,
+                    account_balance=account.get('balance'))
+            except DeliveryRiskError as exc:
+                command.state = EACommand.State.REJECTED
+                command.completed_at = timezone.now()
+                command.result = {'detail': str(exc), 'delivery_policy': 'RISK_AWARE_DELIVERY_V1'}
+                command.save(update_fields=['state', 'completed_at', 'result'])
+                return JsonResponse({'ok': True, 'commands_enabled': True, 'command': None,
+                                     'trading_authorization': False, 'authorization_reason': str(exc)})
+            command.payload = dict(adjusted, delivery_repricing=diagnostic)
+            command.save(update_fields=['payload'])
+
         command.state = EACommand.State.CLAIMED
         command.claimed_at = now
         command.save(update_fields=["state", "claimed_at"])
