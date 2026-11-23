@@ -66,6 +66,11 @@ def impulse_continuation_research(rows, *, start_ts, end_ts, balance,
                     open_pos = None
                 else:
                     stop_distance = abs(entry - open_pos["stop"])
+                    reward_distance = abs(open_pos["target"] - entry)
+                    if reward_distance / stop_distance < 1.2:
+                        reject("NEXT_OPEN_REWARD_RISK_TOO_LOW")
+                        open_pos = None
+                        continue
                     risk_budget = cash * risk_percent / 100
                     risk_per_lot = stop_distance * value_per_unit
                     affordable = floor((risk_budget / risk_per_lot - volume_min) / volume_step + 1e-9)
