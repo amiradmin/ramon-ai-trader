@@ -22,6 +22,8 @@ class HistoricalReplayTests(TestCase):
         response = self.client.get("/api/ea/v1/simulator")
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Step Forward")
+        self.assertContains(response, 'id="testStrategies"')
+        self.assertEqual(response.content.count(b'type="checkbox" value="'), 7)
 
     def test_validated_bars_are_ordered_and_single_source(self):
         response = self.client.get("/api/ea/v1/simulator/bars", {
@@ -245,6 +247,34 @@ class HistoricalStrategyBacktestTests(TestCase):
             reasons={(row["stage"],row["reason"]) for row in strategy["rejections"]}
             self.assertIn(("RISK_MANAGEMENT","RISK_BUDGET_BELOW_MINIMUM_VOLUME"),reasons)
 
+    def test_selected_strategies_only_are_evaluated_and_reported(self):
+        from unittest.mock import patch
+        from .strategy_registry import STRATEGIES
+        selected=["TREND_PULLBACK","RANGE_EDGE_FADE"]
+        class Pipeline:
+            class Risk:
+                class Config:
+                    target_reward_risk=1.5
+                config=Config()
+            risk_manager=Risk()
+            def run(self,market):
+                return {"approved":False,"action":"HOLD"}
+        with patch("ea_bridge.replay_backtest._research_pipeline",return_value=Pipeline()) as factory:
+            response=self.client.get(self.path,{**self.params,"setups":selected})
+        self.assertEqual(response.status_code,200,response.content)
+        report=response.json()
+        self.assertEqual(report["selected_setups"],selected)
+        self.assertEqual([item["setup"] for item in report["strategies"]],selected)
+        self.assertEqual(factory.call_count,2)
+        self.assertTrue(set(selected).issubset(STRATEGIES))
+
+    def test_invalid_or_empty_selected_strategy_is_rejected(self):
+        for setups in ([""],["FAST_SCALP"],["TREND_PULLBACK","TREND_PULLBACK"]):
+            with self.subTest(setups=setups):
+                response=self.client.get(self.path,{**self.params,"setups":setups})
+                self.assertEqual(response.status_code,400)
+                self.assertIn("strategy",response.json()["error"].lower())
+
     def test_evaluates_all_seven_read_only_without_commands(self):
         from unittest.mock import patch
         from .strategy_registry import STRATEGIES
@@ -313,6 +343,26 @@ class HistoricalBacktestQueueTests(TestCase):
                 state=replay_jobs.read(response.json()["job_id"])
                 self.assertTrue(state["compare_balances"])
                 self.assertEqual(EACommand.objects.count(),0)
+
+    def test_queued_job_keeps_the_selected_strategy_list(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from . import replay_jobs
+        params={
+            "symbol":"XAUUSD_o","source":"research-test",
+            "start":"2026-09-22","end":"2026-11-22",
+            "balance":"1000","spread_points":"20","point":"0.01",
+            "tick_size":"0.01","tick_value":"1","volume_min":"0.01",
+            "volume_max":"100","volume_step":"0.01",
+            "setups":["TREND_PULLBACK","RANGE_EDGE_FADE"],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(replay_jobs,"ROOT",Path(directory)):
+                response=self.client.post("/api/ea/v1/simulator/backtest/jobs",params)
+                self.assertEqual(response.status_code,202,response.content)
+                state=replay_jobs.read(response.json()["job_id"])
+                self.assertEqual(state["params"]["setups"],params["setups"])
 
     def test_job_api_rejects_invalid_dates(self):
         import tempfile
