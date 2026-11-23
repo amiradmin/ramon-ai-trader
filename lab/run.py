@@ -43,6 +43,8 @@ def parse():
     p.add_argument("--slippage-points", type=nonnegative, default=2)
     p.add_argument("--commission-per-lot", type=nonnegative, default=0)
     p.add_argument("--risk-percent", type=positive, default=.5)
+    p.add_argument("--batch-size", type=int, default=2000,
+                   help="Read historical rows from PostgreSQL in bounded batches")
     args = p.parse_args()
     if args.list_data:
         return args
@@ -52,7 +54,8 @@ def parse():
         p.error("Replay requires source, symbol, dates, balance, spread and broker contract values")
     if (not args.source.strip() or not args.symbol.strip() or len(args.source)>128
             or len(args.symbol)>32 or args.start>args.end or args.end>date.today()
-            or args.volume_max<args.volume_min or args.risk_percent>.5):
+            or args.volume_max<args.volume_min or args.risk_percent>.5
+            or not 100 <= args.batch_size <= 10000):
         p.error("Invalid market source, date range, volume limits or risk limit")
     return args
 
@@ -95,20 +98,14 @@ def main():
         return
     start = datetime.combine(args.start, time.min, tzinfo=timezone.utc)
     end = datetime.combine(args.end + timedelta(days=1), time.min, tzinfo=timezone.utc)
-    # Rely on database-enforced SELECT-only role as well as read-only transaction.
+    # Fetch long time series in bounded batches. Evaluation is continuous
+    # across fetch boundaries: indicator warm-up, pending orders and positions
+    # never reset at a batch boundary.
+    selected=[]
+    batches=0
     with psycopg.connect(**params) as conn:
         with conn.cursor() as cur:
             cur.execute("SET TRANSACTION READ ONLY")
-            cur.execute("""
-                SELECT timestamp, open, high, low, close
-                FROM public.ea_bridge_marketbar
-                WHERE source=%s AND symbol=%s AND timeframe='M15'
-                  AND timestamp >= %s AND timestamp < %s
-                ORDER BY timestamp LIMIT 16001
-            """, (args.source, args.symbol, start, end))
-            selected = cur.fetchall()
-            if len(selected)>16000:
-                raise RuntimeError("TOO_MANY_M15_BARS: narrow the date range")
             cur.execute("""
                 SELECT timestamp, open, high, low, close
                 FROM public.ea_bridge_marketbar
@@ -117,6 +114,22 @@ def main():
                 ORDER BY timestamp DESC LIMIT 256
             """, (args.source, args.symbol, start))
             prior = list(reversed(cur.fetchall()))
+        with conn.cursor(name="lab_m15_stream") as cur:
+            cur.execute("""
+                SELECT timestamp, open, high, low, close
+                FROM public.ea_bridge_marketbar
+                WHERE source=%s AND symbol=%s AND timeframe='M15'
+                  AND timestamp >= %s AND timestamp < %s
+                ORDER BY timestamp
+            """, (args.source, args.symbol, start, end))
+            while True:
+                batch=cur.fetchmany(args.batch_size)
+                if not batch:
+                    break
+                selected.extend(batch)
+                batches+=1
+                if len(selected)>120000:
+                    raise RuntimeError("MAX_120000_M15_BARS_EXCEEDED")
     if not selected:
         raise RuntimeError("NO_SELECTED_M15_BARS: inspect --list-data for source/symbol/date coverage")
     rows = [dict(time=int(r[0].timestamp()),open=float(r[1]),high=float(r[2]),
@@ -135,6 +148,7 @@ def main():
         "target_reward_risk":1.25,"minimum_opportunity_score":.55,
         "minimum_entry_quality":.55,
     }
+    from segmented import breakdown, fingerprint, quality_gate
     baseline = _simulate(data, rows)[0]
     candidate = impulse_continuation_research(
         rows, start_ts=int(start.timestamp()), end_ts=int(end.timestamp()),
@@ -144,15 +158,35 @@ def main():
         volume_step=args.volume_step, risk_percent=args.risk_percent,
         slippage_points=args.slippage_points,
         commission_per_lot=args.commission_per_lot)
+    # Fixed predeclared chronological partitions. The original strategy and
+    # candidate are each replayed exactly ONCE across the full timeline.
+    # This avoids resets or phantom trading at PostgreSQL batch boundaries.
+    baseline_periods = breakdown(baseline, args.start, args.end, args.balance,
+                                 name="TREND_PULLBACK")
+    candidate_periods = breakdown(candidate, args.start, args.end, args.balance,
+                                  name="IMPULSE_CONTINUATION")
     def summarize(x):
         return {k:x.get(k) for k in ("signals","closed_trades","win_rate","net_gain",
                                      "profit_factor","max_drawdown_pct","open_position")}
+    gate=quality_gate(quality, baseline_periods,
+                      {**candidate_periods,"status":candidate.get("status"),
+                       "open_position":candidate.get("open_position")},
+                      min_test_trades=30)
     output = {
         "mode":"ISOLATED_READ_ONLY_LABORATORY", "trading_authorized":False,
         "market_source":args.source,"symbol":args.symbol,
         "start":args.start.isoformat(),"end":args.end.isoformat(),
         "data_quality":quality,
         "data_quality_warning":quality["gap_count"]>0 or any(quality["excluded"].values()),
+        "history_fingerprint":fingerprint(rows),
+        "history_rows":len(rows),
+        "selected_candles":len(selected),
+        "database_fetch_batches":batches,
+        "batch_size":args.batch_size,
+        "partition_method":"FIXED_CALENDAR_TRADE_ENTRY_DATE",
+        "full_timeline_replay":True,
+        "historical_period_comparisons":[baseline_periods,candidate_periods],
+        "live_eligibility":gate,
         "assumptions":{k:data[k] for k in ("balance","spread_points","point",
             "tick_size","tick_value","volume_min","volume_max","volume_step",
             "slippage_points","commission_per_lot","risk_percent")},
