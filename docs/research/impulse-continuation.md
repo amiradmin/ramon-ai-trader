@@ -23,7 +23,7 @@ When the existing M15 research replay includes `TREND_PULLBACK`, its JSON includ
 ## Run and inspect
 
 ```bash
-docker compose exec django python manage.py test ea_bridge.test_impulse_continuation_research ea_bridge.tests_replay
+docker compose exec django python manage.py test ea_bridge.test_impulse_continuation_research ea_bridge.test_replay
 ```
 
 Run your existing M15 Historical Replay selecting TREND_PULLBACK, with explicit XAUUSD_l data source, balance, spread, tick size/value, and volume constraints. Export the JSON and inspect the `impulse_continuation_research` field. If that field is missing, the code is not deployed.
