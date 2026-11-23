@@ -43,6 +43,8 @@ def parse():
     p.add_argument("--slippage-points", type=nonnegative, default=2)
     p.add_argument("--commission-per-lot", type=nonnegative, default=0)
     p.add_argument("--risk-percent", type=positive, default=.5)
+    p.add_argument("--cost-stress", action="store_true",
+                   help="Re-evaluate both strategies with larger modeled spread/slippage")
     p.add_argument("--batch-size", type=int, default=2000,
                    help="Read historical rows from PostgreSQL in bounded batches")
     args = p.parse_args()
@@ -149,6 +151,8 @@ def main():
         "minimum_entry_quality":.55,
     }
     from segmented import breakdown, fingerprint, quality_gate
+    from diagnostics import (gap_diagnostics, risk_diagnostics, contract_diagnostics,
+                             per_year, per_regime, sensitivity_metric)
     baseline = _simulate(data, rows)[0]
     candidate = impulse_continuation_research(
         rows, start_ts=int(start.timestamp()), end_ts=int(end.timestamp()),
@@ -172,8 +176,40 @@ def main():
                       {**candidate_periods,"status":candidate.get("status"),
                        "open_position":candidate.get("open_position")},
                       min_test_trades=30)
+    stress = []
+    if args.cost_stress:
+        # Re-run on identical rows with unchanged risk limit and account
+        # assumptions. No strategy parameter optimization; no live commands.
+        for name,multiplier in (("BASE_COST",1),("DOUBLE_COST",2),("TRIPLE_COST",3)):
+            stressed=dict(data,spread_points=data["spread_points"]*multiplier,
+                          slippage_points=data["slippage_points"]*multiplier)
+            trend = baseline if multiplier==1 else _simulate(stressed,rows)[0]
+            impulse = candidate if multiplier==1 else impulse_continuation_research(
+                rows, start_ts=int(start.timestamp()), end_ts=int(end.timestamp()),
+                balance=args.balance, spread_points=stressed["spread_points"],
+                point=args.point, tick_size=args.tick_size, tick_value=args.tick_value,
+                volume_min=args.volume_min, volume_max=args.volume_max,
+                volume_step=args.volume_step, risk_percent=args.risk_percent,
+                slippage_points=stressed["slippage_points"],
+                commission_per_lot=args.commission_per_lot)
+            stress.append({"name":name,
+                           "spread_points":stressed["spread_points"],
+                           "slippage_points":stressed["slippage_points"],
+                           "trend_pullback":sensitivity_metric(trend),
+                           "impulse_continuation":sensitivity_metric(impulse)})
     output = {
         "mode":"ISOLATED_READ_ONLY_LABORATORY", "trading_authorized":False,
+        "gap_diagnostics":gap_diagnostics(rows),
+        "contract_diagnostics":contract_diagnostics(args),
+        "candidate_risk_diagnostics":risk_diagnostics(candidate),
+        "annual_performance":{
+            "trend_pullback":per_year(baseline,initial_balance=args.balance),
+            "impulse_continuation":per_year(candidate,initial_balance=args.balance)},
+        "regime_performance":{
+            "trend_pullback":per_regime(baseline,initial_balance=args.balance),
+            "impulse_continuation":per_regime(candidate,initial_balance=args.balance)},
+        "cost_sensitivity":stress,
+        "cost_sensitivity_status":"REPLAYED" if args.cost_stress else "NOT_REQUESTED",
         "market_source":args.source,"symbol":args.symbol,
         "start":args.start.isoformat(),"end":args.end.isoformat(),
         "data_quality":quality,
