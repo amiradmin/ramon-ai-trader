@@ -8,7 +8,7 @@ from django.db.models import Sum, Count
 from django.http import Http404, JsonResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
-from django.views.decorators.http import require_GET, require_http_methods
+from django.views.decorators.http import require_GET, require_POST, require_http_methods
 
 from .models import StrategyWorkerControl, DecisionEvaluation, EACommand, EAEvent, LearningTradeOutcome
 from .strategy_registry import STRATEGIES, strategy_commands, owned_strategy_position
@@ -35,6 +35,7 @@ def worker_rows():
         from .news_lock import entry_status
         result.append(dict(news_lock=entry_status(setup,now=now),open_positions=open_positions,position_status_known=position_status_known,setup=setup,slug=slug,description=description,container='ramon-'+slug,
             url='/api/ea/v1/strategies/'+slug,fresh=fresh,automatic=bool(c and c.automatic),
+            control_scope=c.pk if c else None,
             state=c.state if c else 'NOT_STARTED',last_seen=c.last_seen if c else None,
             latest=c.latest if c else {},magic=magic))
     return result
@@ -48,6 +49,51 @@ def strategies_status(request):
     return response
 
 
+def _set_strategy_entries(request, setup, action, scope):
+    """Use the same account-scoped rules for the console and dashboard."""
+    with transaction.atomic():
+        control=StrategyWorkerControl.objects.select_for_update().filter(setup=setup).first()
+        if not control or str(control.pk)!=str(scope):
+            return False, 'Strategy scope changed. Reload before using controls.'
+        feed=configured_feed()
+        ready=strategy_readiness(feed)
+        scope_matches=bool(feed and (control.source,control.account_login,control.server_name,control.symbol)==
+            (feed.instance_id,feed.account_login,feed.server_name,feed.symbol))
+        fresh=bool(control.last_seen and 0<=(timezone.now()-control.last_seen).total_seconds()<90)
+        if action=='pause':
+            control.automatic=False;control.save(update_fields=['automatic'])
+            EACommand.objects.filter(instance_id=control.source,account_login=control.account_login,
+                symbol=control.symbol,payload__server_name=control.server_name,payload__engine='STRATEGY',
+                payload__strategy_setup=setup,action='OPEN',state='PENDING').update(state='EXPIRED',completed_at=timezone.now())
+            text='Paused this strategy and expired its queued entries. Already claimed orders may finish; existing positions retain exits.'
+            success=True
+        elif action=='start' and scope_matches and fresh and ready=='READY' and settings.RAMON_STRATEGY_CONTAINERS_ENABLED and all(
+                getattr(settings,k,False) for k in ['RAMON_EA_COMMAND_CREATION_ENABLED','RAMON_EA_COMMAND_EXECUTION_ENABLED']):
+            control.automatic=True;control.save(update_fields=['automatic'])
+            text='Automatic real cent entries enabled for this strategy only.'
+            success=True
+        else:
+            text='Cannot enable strategy: check worker health, account scope, readiness and execution gates.'
+            success=False
+        EAEvent.objects.create(instance_id=control.source,event_id='setup-control-'+uuid.uuid4().hex,
+            event_type='STRATEGY_CONTROL',payload=dict(setup=setup,user=request.user.get_username(),action=action,message=text))
+        return success,text
+
+
+@staff_member_required
+@require_POST
+def strategy_entries_control(request, slug):
+    setup=next((name for name,item in STRATEGIES.items() if item[0]==slug),None)
+    if setup is None: raise Http404
+    action=request.POST.get('action')
+    if action not in ('start','pause'):
+        return JsonResponse({'ok':False,'error':'Unsupported action.'},status=400)
+    success,message=_set_strategy_entries(request,setup,action,request.POST.get('scope'))
+    response=JsonResponse({'ok':success,'message':message},status=200 if success else 409)
+    response['Cache-Control']='no-store'
+    return response
+
+
 @staff_member_required
 @require_http_methods(['GET','POST'])
 def strategy_console(request,slug):
@@ -55,33 +101,23 @@ def strategy_console(request,slug):
     if setup is None: raise Http404
     feed=configured_feed()
     control=StrategyWorkerControl.objects.filter(setup=setup).first()
+    if request.method=='POST' and request.POST.get('action') in ('start','pause'):
+        success,text=_set_strategy_entries(request,setup,request.POST['action'],request.POST.get('scope'))
+        (messages.info if success else messages.error)(request,text)
+        return redirect(request.path)
     if request.method=='POST':
         if not control or request.POST.get('scope')!=str(control.pk):
             messages.error(request,'Strategy scope changed. Reload before using controls.')
             return redirect(request.path)
         with transaction.atomic():
             control=StrategyWorkerControl.objects.select_for_update().get(pk=control.pk)
-            action=request.POST.get('action')
-            ready=strategy_readiness(feed)
-            scope_matches=bool(feed and (control.source,control.account_login,control.server_name,control.symbol)==
-                (feed.instance_id,feed.account_login,feed.server_name,feed.symbol))
-            fresh=bool(control.last_seen and 0<=(timezone.now()-control.last_seen).total_seconds()<90)
-            if action=='pause':
-                control.automatic=False;control.save(update_fields=['automatic'])
-                EACommand.objects.filter(instance_id=control.source,account_login=control.account_login,
-                    symbol=control.symbol,payload__server_name=control.server_name,payload__engine='STRATEGY',
-                    payload__strategy_setup=setup,action='OPEN',state='PENDING').update(state='EXPIRED',completed_at=timezone.now())
-                text='Paused this strategy and expired its queued entries. Already claimed orders may finish; existing positions retain exits.'
-            elif action=='start' and scope_matches and fresh and ready=='READY' and settings.RAMON_STRATEGY_CONTAINERS_ENABLED and all(
-                    getattr(settings,k,False) for k in ['RAMON_EA_COMMAND_CREATION_ENABLED','RAMON_EA_COMMAND_EXECUTION_ENABLED']):
-                control.automatic=True;control.save(update_fields=['automatic'])
-                text='Automatic real cent entries enabled for this strategy only.'
-            elif action=='close' and scope_matches:
+            feed=configured_feed()
+            if request.POST.get('action')=='close':
                 _,text=close_strategy_position(setup,request.POST.get('ticket',''))
             else:
-                text='Cannot perform action: check worker health, account scope, readiness and execution gates.'
+                text='Unknown control action.'
             EAEvent.objects.create(instance_id=control.source,event_id='setup-control-'+uuid.uuid4().hex,
-                event_type='STRATEGY_CONTROL',payload=dict(setup=setup,user=request.user.get_username(),action=action,message=text))
+                event_type='STRATEGY_CONTROL',payload=dict(setup=setup,user=request.user.get_username(),action=request.POST.get('action'),message=text))
             messages.info(request,text)
         return redirect(request.path)
     worker=next(row for row in worker_rows() if row['setup']==setup)
