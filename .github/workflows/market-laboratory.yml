@@ -46,4 +46,5 @@ jobs:
           assert 'ENTRYPOINT ["python", "lab/run.py"]' in dockerfile
           sql=Path('lab/create_reader.sql').read_text()
           assert "GRANT SELECT ON TABLE public.ea_bridge_marketbar" in sql
+          assert "GRANT SELECT ON TABLE public.ea_bridge_decisionthresholdconfig" in sql
           PY
