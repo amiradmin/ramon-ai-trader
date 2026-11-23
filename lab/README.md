@@ -305,3 +305,44 @@ python3 -m json.tool contract-verification.json
 connected MT5 installation; GitHub CI does not compile MQL5, so inspect the
 MetaEditor errors if any. This snapshot represents current broker specs,
 not necessarily the full 2024–2026 historical contract.
+
+## TREND_PULLBACK cost attribution — research-only
+
+Use `--cost-attribution` **instead of** `--cost-stress` with the same
+historical data and broker-matched contract arguments. The experiment
+does not tune, disable or bypass any entry filter or account-risk limit.
+It evaluates seven predeclared combinations on identical historical
+M15 candles, with the same chronological partitions:
+
+| Scenario | Spread | Slippage |
+| --- | --- | --- |
+| BASE_COST | 1x | 1x |
+| SPREAD_ONLY_2X | 2x | 1x |
+| SLIPPAGE_ONLY_2X | 1x | 2x |
+| DOUBLE_COST | 2x | 2x |
+| SPREAD_ONLY_3X | 3x | 1x |
+| SLIPPAGE_ONLY_3X | 1x | 3x |
+| TRIPLE_COST | 3x | 3x |
+
+The `cost_sensitivity` section records exact signal/closed trade counts,
+`evaluations`, `rejection_total` and the real pipeline's top 25 stage
+reasons in each scenario. The offline dashboard displays those reasons,
+alongside historical gaps and period performance.
+
+To inspect the resulting report:
+
+```bash
+python3 lab/analyze_trend_costs.py impulse-lab-attribution.json \
+  > trend-cost-attribution.json
+python3 -m json.tool trend-cost-attribution.json
+python3 lab/render_report.py impulse-lab-attribution.json \
+  > impulse-lab-attribution.html
+```
+
+The attribution run executes more simulations than the original
+`--cost-stress` mode, so it takes longer. This is a diagnostic
+comparison rather than optimized parameters or evidence of live
+profitability. No market-data writes, trading authorizations, or EA
+changes are introduced. Because replay reports only the most
+frequent 25 rejection types, the per-reason deltas are not necessarily
+exhaustive. Actual historical quote spread and slippage are not known.
