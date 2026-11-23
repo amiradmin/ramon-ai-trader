@@ -135,7 +135,7 @@ def _clean_m15_rows(rows):
                   "method":"EXCLUDE_OFF_GRID_OR_DUPLICATE_ONLY_NO_SYNTHETIC_CANDLES"}
 
 def _research_pipeline(setup, *, risk_percent=0.5, stop_buffer_atr=None, target_reward_risk=None,
-                       minimum_opportunity_score=None, minimum_entry_quality=None):
+                       minimum_opportunity_score=None, minimum_entry_quality=None, research_overrides=None):
     """Use standard risk policy, enabling exactly one config-approved research setup."""
     pipeline=_build_pipeline(demo_mode=False,strategy_setup=setup)
     configs=pipeline.opportunities.trading_settings["opportunity_finder"]["setups"]
@@ -147,6 +147,28 @@ def _research_pipeline(setup, *, risk_percent=0.5, stop_buffer_atr=None, target_
         raise ValueError("Strategy disabled in both standard and research configuration: "+name)
     for key,settings in configs.items():
         settings["enabled"]=(key==name)
+    # Only the offline research runner may provide structural overrides. These
+    # are applied to this newly constructed pipeline, not Django settings/DB.
+    if research_overrides:
+        from .thresholds import THRESHOLDS
+        allowed = {'min_impulse_atr', 'min_retracement', 'max_retracement',
+                   'regime_lookback', 'atr_ratio_min'}
+        if setup != 'TREND_PULLBACK' or set(research_overrides) - allowed:
+            raise ValueError('Unsupported research-only structural overrides')
+        opts = {}
+        for key, value in research_overrides.items():
+            spec = THRESHOLDS['opportunities'][key]
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                raise ValueError('Non-numeric research threshold: ' + key)
+            if not spec['min'] <= value <= spec['max']:
+                raise ValueError('Research threshold out of range: ' + key)
+            if spec['step'] == 1 and int(value) != value:
+                raise ValueError('Research threshold must be integral: ' + key)
+            opts[key] = value
+        config = replace(pipeline.opportunities.config, **opts)
+        if config.min_retracement >= config.max_retracement or config.atr_ratio_min >= config.atr_ratio_max:
+            raise ValueError('Invalid research threshold ordering')
+        pipeline.opportunities.config = config
     # Tune only the isolated research pipeline, never persisted/live thresholds.
     if minimum_opportunity_score is not None:
         pipeline.opportunities.minimum_score = minimum_opportunity_score
@@ -212,6 +234,7 @@ def _simulate(data, rows, progress=None):
             target_reward_risk=data.get("target_reward_risk"),
             minimum_opportunity_score=data.get("minimum_opportunity_score"),
             minimum_entry_quality=data.get("minimum_entry_quality"),
+            research_overrides=data.get("research_overrides"),
         ) for setup in setups}
     book={name:{"open":None,"trades":[],"equity":data["balance"],"peak":data["balance"],"drawdown":0,"signals":0,
                 "evaluations":0,"rejections":{},"rejection_examples":{},"rejection_details":{}}
