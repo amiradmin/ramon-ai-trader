@@ -279,6 +279,61 @@ class HistoricalStrategyBacktestTests(TestCase):
         self.assertEqual(baseline.risk_manager.config.stop_buffer_atr,0.25)
         self.assertNotEqual(baseline.risk_manager.config.target_reward_risk,2.0)
 
+    def test_trade_diagnostics_group_realized_outcomes_without_filtering(self):
+        from .replay_backtest import _trade_diagnostics
+        from .models import EACommand
+        trades=[
+            dict(opened_at=int(datetime(2026,10,1,2,tzinfo=timezone.utc).timestamp()),
+                side="BUY",signal_regime="BULLISH",gaps_crossed=0,reason="TARGET",
+                pnl=60.0,gross_pnl=61.0,commission=1.0),
+            dict(opened_at=int(datetime(2026,10,2,14,tzinfo=timezone.utc).timestamp()),
+                side="SELL",signal_regime="BEARISH",gaps_crossed=1,reason="STOP",
+                pnl=-48.0,gross_pnl=-47.0,commission=1.0),
+            dict(opened_at=int(datetime(2026,11,2,14,tzinfo=timezone.utc).timestamp()),
+                side="SELL",signal_regime="BEARISH",gaps_crossed=0,reason="TARGET",
+                pnl=55.0,gross_pnl=56.0,commission=1.0),
+        ]
+        report=_trade_diagnostics(trades)
+        self.assertEqual(report["gap_affected_trades"],1)
+        self.assertEqual(report["commission"],3)
+        self.assertEqual(report["gross_pnl"],70)
+        self.assertEqual([(r["label"],r["trades"],r["net_pnl"]) for r in report["by_month"]],
+                         [("2026-10",2,12.0),("2026-11",1,55.0)])
+        self.assertEqual([(r["label"],r["net_pnl"]) for r in report["by_exit"]],
+                         [("STOP",-48.0),("TARGET",115.0)])
+        self.assertFalse(EACommand.objects.exists())
+
+    def test_gap_and_signal_regime_are_attached_to_simulated_trade(self):
+        from unittest.mock import patch
+        from .replay_backtest import _simulate
+        class Pipeline:
+            class Risk:
+                class Config:
+                    target_reward_risk=1.25
+                config=Config()
+            risk_manager=Risk()
+            def run(self,market):
+                return {"approved":True,"action":"BUY",
+                    "stages":{"opportunities":{"regime":{"label":"BULLISH","adx":25.0}},
+                              "risk_management":{"stop_price":99,"target_price":101,"volume":1}}}
+        start=datetime(2026,1,1,tzinfo=timezone.utc)
+        rows=[{"time":int((start+timedelta(minutes=15*i)).timestamp()),
+               "open":100,"high":101,"low":99,"close":100} for i in range(140)]
+        rows[129]["time"]+=900
+        for i in range(130,140):
+            rows[i]["time"]+=900
+        data={"start":start.date(),"end":start.date(),"symbol":"XAUUSD_o",
+              "balance":1000,"spread_points":10,"point":0.01,"tick_size":0.01,
+              "tick_value":1,"volume_min":0.01,"volume_max":10,"volume_step":0.01,
+              "setups":["TREND_PULLBACK"]}
+        with patch("ea_bridge.replay_backtest._research_pipeline",return_value=Pipeline()):
+            report=_simulate(data,rows)[0]
+        self.assertGreater(report["closed_trades"],0)
+        self.assertEqual(report["trades"][0]["signal_regime"],"BULLISH")
+        self.assertEqual(report["trades"][0]["signal_adx"],25.0)
+        self.assertEqual(report["trades"][0]["gaps_crossed"],1)
+        self.assertGreaterEqual(report["trade_diagnostics"]["gap_affected_trades"],1)
+
     def test_assumed_slippage_and_commission_reduce_estimated_trade_pnl(self):
         from unittest.mock import patch
         from .replay_backtest import _simulate
