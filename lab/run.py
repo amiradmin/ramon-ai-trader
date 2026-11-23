@@ -46,13 +46,15 @@ def parse():
     p.add_argument("--risk-percent", type=positive, default=.5)
     p.add_argument("--cost-stress", action="store_true",
                    help="Re-evaluate both strategies with larger modeled spread/slippage")
+    p.add_argument("--spread-shadow", action="store_true",
+                   help="Research-only matched-spread 50/90/130-point limit shadow experiments")
     p.add_argument("--cost-attribution", action="store_true",
                    help="Separate spread vs slippage effects with fixed 1x/2x/3x scenarios; research only")
     p.add_argument("--batch-size", type=int, default=2000,
                    help="Read historical rows from PostgreSQL in bounded batches")
     args = p.parse_args()
-    if args.cost_attribution and args.cost_stress:
-        p.error("Choose --cost-attribution OR --cost-stress, not both")
+    if sum(bool(x) for x in (args.cost_attribution, args.cost_stress, args.spread_shadow))>1:
+        p.error("Choose only one of --cost-attribution, --cost-stress or --spread-shadow")
     if args.list_data:
         return args
     required = ("source","symbol","start","end","balance","spread_points",
@@ -185,6 +187,32 @@ def main():
     progress('Running TREND_PULLBACK, baseline costs')
     baseline = _simulate(data, rows, progress=replay_progress('TREND_PULLBACK 1x'))[0]
     progress('Completed TREND_PULLBACK, baseline costs')
+    if args.spread_shadow:
+        import ea_bridge.replay_backtest as replay_module
+        from spread_shadow import comparison_report
+        progress('Running frozen higher-spread shadow experiment')
+        shadow=comparison_report(
+            replay_module=replay_module, data=data, rows=rows,
+            start=args.start,end=args.end,baseline=baseline,
+            quality=quality,
+            progress_callback=lambda name: progress(f'Shadow scenario {name}: starting'),
+            progress_factory=lambda name: replay_progress(f'Shadow scenario {name}'))
+        shadow.update({
+            "market_source":args.source,"symbol":args.symbol,
+            "start":args.start.isoformat(),"end":args.end.isoformat(),
+            "history_fingerprint":quality["history_fingerprint"],
+            "selected_candles":len(selected),
+            "database_fetch_batches":batches,
+            "history_quality":quality,
+            "broker_assumptions":{k:data[k] for k in (
+                "balance","spread_points","point","tick_size","tick_value",
+                "volume_min","volume_max","volume_step","risk_percent",
+                "slippage_points","commission_per_lot")}
+        })
+        progress('Writing shadow experiment JSON')
+        print(json.dumps(shadow,indent=2,sort_keys=True))
+        progress('Completed successfully')
+        return
     progress('Running IMPULSE_CONTINUATION, baseline costs')
     candidate = impulse_continuation_research(
         rows, start_ts=int(start.timestamp()), end_ts=int(end.timestamp()),
