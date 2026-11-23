@@ -35,3 +35,35 @@ This is **descriptive research**, not a proven edge or an implementation of the 
 Do not promote to live execution without frozen in/out-of-sample data, several non-overlapping months/regimes, realistic symbol-specific cent-contract economics, spread and slippage stress, drawdown and margin stress, strategy collision checks, validated feed continuity, and broker/demo execution tests. A profit factor without losses, a small sample, or flagged data gaps is **not evidence of profit**.
 
 **No setting in this change enables trades.** Keep the current TREND_PULLBACK live controls unchanged.
+
+## Reproducible read-only comparison command
+
+This command reads stored M15 bars from PostgreSQL and writes comparative JSON to stdout.
+The parameters below use the **reported** XAUUSD_l tick/volume specifications and an
+**illustrative** 42-point spread from a single observed bid/ask quote; it is **not**
+a verified historical cost series. Replace costs with conservative measured values
+for the selected period before interpreting any result.
+
+```bash
+docker compose exec -T django python manage.py research_impulse_continuation \
+  --source ramon-command-ea-1 --symbol XAUUSD_l \
+  --start 2026-09-22 --end 2026-11-22 \
+  --balance 1024.23 --spread-points 42 \
+  --point 0.01 --tick-size 0.01 --tick-value 1 \
+  --volume-min 0.01 --volume-max 100 --volume-step 0.01 \
+  --slippage-points 2 --commission-per-lot 0 \
+  > impulse-comparison.json
+```
+
+If your database contains insufficient valid aligned candles or a different
+source label, the command errors without sending any orders. Validate cent
+account economics before relying on the balance and reported tick value.
+
+## CI baseline check (2026-11-23)
+
+The branch's first full CI run (638 tests) reported 3 failures; the
+unmodified main-branch CI run (632 tests) reported the **same three**
+historical-replay / classifier assertions. The six added candidate
+tests did not fail. Main's existing CI is not green and should be repaired
+in a separate narrowly scoped change. A passing new-module test suite does not
+demonstrate profitable or broker-accurate trading.
