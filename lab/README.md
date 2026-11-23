@@ -407,3 +407,12 @@ already been examined, so it must no longer be treated as an
 uncontaminated untouched holdout. The simulated $/tick unit has been
 matched to the terminal snapshot but historical quote economics remain
 unverified. The results cannot authorize live strategy changes.
+
+**Config-source caveat (2026-11-23):** Django builds its effective
+entry spread limit from the read-only PostgreSQL `DecisionThresholdConfig`
+profile, which can differ from the 50-point JSON file default. The lab
+reports `configured_entry_spread_limit_points` and
+`preflight_original_baseline` separately. The `BASE_42_LIMIT_50`
+control is now replayed independently with an explicit 50-point
+in-memory limit, rather than assuming a production-configured limit
+of 50. The shadow-only limits remain 50/90/130 and never write DB config.
