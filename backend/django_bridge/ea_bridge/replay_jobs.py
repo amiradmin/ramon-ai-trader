@@ -58,7 +58,7 @@ def create_job(request):
         "id":job_id,"status":"QUEUED","progress_pct":0,
         "created_at":time.time(),"updated_at":time.time(),
         "params":{**data,"start":data["start"].isoformat(),"end":data["end"].isoformat()},
-        "compare_balances":request.POST.get("compare_balances")=="1",
+        "compare_balances":request.POST.get("compare_balances")=="1" and data["setups"] != ["FAST_SCALP"],
         "result":None,"error":None,
     })
     response = JsonResponse({"job_id":job_id,"status":"QUEUED"}, status=202)
