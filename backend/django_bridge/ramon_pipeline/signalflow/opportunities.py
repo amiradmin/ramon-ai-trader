@@ -1091,7 +1091,7 @@ class OpportunityDetector:
 
         # 0. Supplemental setups: independently gated, opt-in and regime-aware.
         # Supplemental setups share the core volatility and regime-stability gates.
-        # Range fades are the sole exception to directional-trend requirements.
+        # Range fades and independently confirmed breakout/reversal setups can evaluate ranges.
         supplemental_settings = {
             name: dict(settings)
             for name, settings in setup_settings.items()
@@ -1102,6 +1102,8 @@ class OpportunityDetector:
         for name, settings in supplemental_settings.items():
             if name == "range_edge_fade":
                 settings["enabled"] = settings["enabled"] and regime.label == "RANGING"
+            elif name in {"session_opening_range_breakout", "volatility_compression_expansion", "exhaustion_reversal"}:
+                settings["enabled"] = settings["enabled"] and (regime.label == "RANGING" or (regime.label in {"BULLISH", "BEARISH"} and regime_stable))
             elif name == "failed_breakout_sweep":
                 settings["enabled"] = settings["enabled"] and regime.label != "UNCERTAIN" and regime_stable
             else:
@@ -1161,6 +1163,8 @@ class OpportunityDetector:
             f"{regime.label} (ADX {regime.adx:.1f}, EMA bias {regime.ema_bias}, structure {regime.structure})"
         )
         if regime.label == "RANGING":
+            if setup_name in {"session_opening_range_breakout", "volatility_compression_expansion", "exhaustion_reversal"} and setup_settings[setup_name]["enabled"] and volatility_ready:
+                return finish(REJECTED, "AWAITING_" + setup_name.upper(), "the assigned setup has not confirmed in the ranging market")
             _check(checks, "regime", False, regime_text, metrics={"value": round(regime.adx, 2), "threshold": config.adx_ranging, "factor": "ADX; ranging threshold"})
             return finish(REJECTED, "MARKET_RANGING", f"market is ranging: {regime_text}")
         if regime.label == "UNCERTAIN":
