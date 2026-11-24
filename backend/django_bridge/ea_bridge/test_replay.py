@@ -344,7 +344,7 @@ class HistoricalStrategyBacktestTests(TestCase):
         rows[129]["time"]+=900
         for i in range(130,140):
             rows[i]["time"]+=900
-        data={"start":start.date(),"end":start.date(),"symbol":"XAUUSD_o",
+        data={"start":start.date(),"end":(start+timedelta(days=1)).date(),"symbol":"XAUUSD_o",
               "balance":1000,"spread_points":10,"point":0.01,"tick_size":0.01,
               "tick_value":1,"volume_min":0.01,"volume_max":10,"volume_step":0.01,
               "setups":["TREND_PULLBACK"]}
@@ -371,7 +371,7 @@ class HistoricalStrategyBacktestTests(TestCase):
         start=datetime(2026,1,1,tzinfo=timezone.utc)
         rows=[{"time":int((start+timedelta(minutes=15*i)).timestamp()),
                "open":100,"high":101,"low":99,"close":100} for i in range(140)]
-        data={"start":start.date(),"end":start.date(),"symbol":"XAUUSD_o",
+        data={"start":start.date(),"end":(start+timedelta(days=1)).date(),"symbol":"XAUUSD_o",
               "balance":1000,"spread_points":10,"point":0.01,"tick_size":0.01,
               "tick_value":1,"volume_min":0.01,"volume_max":10,"volume_step":0.01,
               "setups":["TREND_PULLBACK"],"risk_percent":0.5,
