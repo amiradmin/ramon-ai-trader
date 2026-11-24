@@ -22,7 +22,7 @@
       <span class="small" id="liveSettingsSaved" role="status" aria-live="polite"></span>
     </div>
   </form>
-  <p class="small">Account identity, spread at execution, lot rules and execution authorization remain broker/server-owned. Risk cannot exceed the existing shared limit. Fast Scalp has its own independent risk control below.</p>
+  <p class="small">Account identity, spread at execution, lot rules and execution authorization remain broker/server-owned. Portfolio risk here is a strategy-specific ceiling on combined exposure, bounded by the shared account limit (maximum 2%). Fast Scalp has its own independent risk control below.</p>
   <form id="liveScalpForm" style="margin-top:20px;padding-top:15px;border-top:1px solid var(--line,#37465c)">
     <h3 style="margin:0 0 8px;font-size:16px">Fast Scalp · live M1/M5</h3>
     <p class="small">Independent worker: only the per-entry risk budget is editable here; the engine hard cap is 0.150%. All current scalp entry rules and protective exits remain in force.</p>
@@ -61,7 +61,7 @@
     for(const field of data.fields){
       const label=document.createElement('label');label.textContent=field.label;
       const inp=document.createElement('input');
-      inp.type='number';inp.name=field.key;inp.min=field.min;inp.max=field.max;
+      inp.type='number';inp.name=field.key;inp.min=field.min;inp.max=field.key==='maximum_risk_percent'?selected.maximum_risk_percent_ceiling:field.max;
       inp.step=field.step;inp.required=true;inp.value=selected.overrides[field.key];
       label.appendChild(inp);host.appendChild(label);
     }
