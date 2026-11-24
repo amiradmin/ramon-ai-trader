@@ -48,6 +48,7 @@ class ContextLoadingTests(TestCase):
 
 
 @override_settings(RAMON_REAL_CENT_INSTANCE='playbook-demo',RAMON_REAL_CENT_LOGIN='123',RAMON_REAL_CENT_SERVER='Demo',RAMON_REAL_CENT_CURRENCY='USC',RAMON_REAL_CENT_SYMBOL='XAUUSD_o')
+@override_settings(RAMON_STRATEGY_CONTAINERS_ENABLED=False)
 class DemoPlaybookApiTests(TestCase):
     @override_settings(RAMON_DEMO_PROFILE="expanded", RAMON_DEMO_PREVIOUS_WEEK_CONTEXT=True)
     def test_weekly_context_switch_is_demo_only(self):
@@ -55,7 +56,7 @@ class DemoPlaybookApiTests(TestCase):
         self.assertFalse(_build_pipeline(demo_mode=False).use_previous_week)
         self.assertFalse(_build_pipeline(demo_mode=True, strategy_setup="TREND_PULLBACK").use_previous_week)
 
-    @override_settings(RAMON_DEMO_PROFILE="expanded")
+    @override_settings(RAMON_DEMO_PROFILE="expanded", RAMON_USE_COMPUTED_ENTRY_QUALITY=False)
     def test_comparison_and_computed_quality_are_demo_specific(self):
         demo, live = _build_pipeline(demo_mode=True), _build_pipeline(demo_mode=False)
         self.assertTrue(demo.compare_candidates)
