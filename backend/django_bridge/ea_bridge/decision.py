@@ -54,12 +54,14 @@ def _build_pipeline(*, demo_mode=False, strategy_setup=None, live_scope=None):
 
     # Apply only an exact real-account, independent-worker overlay. The replay
     # simulator and demo research never inherit live configuration.
+    live_risk_cap = 0.5
     if strategy_setup and live_scope and not demo_mode:
-        from .live_strategy_settings import active_settings, EDITABLE
+        from .live_strategy_settings import active_settings, EDITABLE, live_risk_ceiling
         for key, value in active_settings(strategy_setup, live_scope).items():
             group, field = EDITABLE[key]
             if key == "maximum_risk_percent":
-                value = min(float(value), float(threshold_values[group][field]), 0.5)
+                live_risk_cap = live_risk_ceiling(strategy_setup, threshold_values)
+                value = min(float(value), live_risk_cap)
             threshold_values[group][field] = value
 
     opportunity_values = dict(threshold_values["opportunities"])
@@ -112,10 +114,10 @@ def _build_pipeline(*, demo_mode=False, strategy_setup=None, live_scope=None):
     # constructor defaults; explicitly pin the Django-persisted values afterwards.
     timer.minimum_quality = minimum_quality
     timer.maximum_spread_points = maximum_spread_points
-    # Safety cap applies to both standard and expanded demo profiles, even when
-    # older database overrides specify a higher value. Never round lots upward.
+    # Only an explicit exact-account live override can raise the default cap.
+    # Demo and unscoped evaluations retain 0.5%. Never round lots upward.
     configured_risk_percent = float(risk_values.pop("maximum_risk_percent"))
-    maximum_risk_percent = min(configured_risk_percent, 0.5)
+    maximum_risk_percent = min(configured_risk_percent, live_risk_cap)
     risk = RiskManager(
         maximum_risk_percent=maximum_risk_percent,
         config=RiskConfig(
