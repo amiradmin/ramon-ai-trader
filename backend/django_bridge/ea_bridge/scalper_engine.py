@@ -184,6 +184,12 @@ def _open_scalp(feed, control, observation, *, now=None, audit_context=None):
             budget = min(balance*risk_percent/100,headroom)
             per_lot = (distance+Decimal('15')*point)/tick*value # adverse allowance plus commission in reservation
             volume = (min(maximum,budget/per_lot)/step).to_integral_value(rounding=ROUND_FLOOR)*step
+            if audit_context is not None:
+                audit_context['sizing'] = dict(
+                    risk_budget=str(budget), available_headroom=str(headroom),
+                    raw_volume=str(budget/per_lot), calculated_volume=str(volume),
+                    min_volume=str(minimum), minimum_volume_risk=str(minimum*per_lot),
+                    minimum_required_risk_percent=str(minimum*per_lot/balance*100))
             if volume<minimum: return None,'RISK_BUDGET_BELOW_MINIMUM_VOLUME'
             reserved = per_lot*volume
         except (KeyError,TypeError,ValueError,ArithmeticError):
