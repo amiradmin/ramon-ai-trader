@@ -63,7 +63,10 @@ def _build_pipeline(*, demo_mode=False, strategy_setup=None, live_scope=None):
             if key == "maximum_risk_percent":
                 live_risk_cap = live_risk_ceiling(strategy_setup, threshold_values)
                 value = min(float(value), live_risk_cap)
+            elif key == "max_total_risk_percent":
+                value = min(float(value), 2.0, float(threshold_values[group][field]))
             threshold_values[group][field] = value
+        live_risk_cap = min(live_risk_cap, float(threshold_values["risk_management"]["max_total_risk_percent"]))
 
     opportunity_values = dict(threshold_values["opportunities"])
     minimum_score = float(opportunity_values.pop("minimum_score"))
