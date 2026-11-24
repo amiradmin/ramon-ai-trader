@@ -25,12 +25,18 @@ EDITABLE = {
     "minimum_quality": ("entry_timing", "minimum_quality"),
     "maximum_spread_points": ("entry_timing", "maximum_spread_points"),
     "maximum_risk_percent": ("risk_management", "maximum_risk_percent"),
+    "max_chase_atr": ("entry_timing", "max_chase_atr"),
+    "max_signal_age_bars": ("entry_timing", "max_signal_age_bars"),
+    "max_total_risk_percent": ("risk_management", "max_total_risk_percent"),
 }
 LABELS = {
     "minimum_score": "Minimum opportunity score",
     "minimum_quality": "Minimum entry quality",
     "maximum_spread_points": "Maximum allowed spread (points)",
     "maximum_risk_percent": "Maximum risk per entry (%)",
+    "max_chase_atr": "Maximum chase ATR",
+    "max_signal_age_bars": "Maximum signal age (bars)",
+    "max_total_risk_percent": "Maximum portfolio risk (%)",
 }
 
 
@@ -99,11 +105,13 @@ def live_strategy_settings(request):
             if body.get("scope") != scope_for(control):
                 return JsonResponse({"ok": False, "error": "Account identity changed: reload page"}, status=409)
             proposed = body.get("overrides")
-            if not isinstance(proposed, dict) or set(proposed) != set(EDITABLE):
-                raise ValueError("Provide exactly the four supported strategy settings")
+            legacy_keys = {"minimum_score", "minimum_quality", "maximum_spread_points", "maximum_risk_percent"}
+            if not isinstance(proposed, dict) or set(proposed) not in (legacy_keys, set(EDITABLE)):
+                raise ValueError("Provide the supported strategy settings")
+            proposed = {**active_settings(setup, scope_for(control)), **proposed}
             values = {}
             for key, (group, field) in EDITABLE.items():
-                raw = proposed[key]
+                raw = proposed.get(key, base[group][field])
                 if isinstance(raw, bool):
                     raise ValueError(key + " must be a number")
                 value = float(raw)
@@ -111,6 +119,10 @@ def live_strategy_settings(request):
                 if not math.isfinite(value) or not spec["min"] <= value <= spec["max"]:
                     raise ValueError(key + " outside allowed range")
                 values[key] = value
+            if values["max_total_risk_percent"] > min(2.0, float(base["risk_management"]["max_total_risk_percent"])):
+                raise ValueError("Portfolio risk cannot exceed the shared live ceiling")
+            if values["maximum_risk_percent"] > values["max_total_risk_percent"]:
+                raise ValueError("Entry risk cannot exceed portfolio risk")
             current_ceiling = live_risk_ceiling(setup, base)
             if values["maximum_risk_percent"] > current_ceiling:
                 raise ValueError("Live risk cannot exceed the strategy/server ceiling")
@@ -162,7 +174,8 @@ def live_strategy_settings(request):
         "fields": [{"key": key, "label": LABELS[key],
                     "min": THRESHOLDS[group][field]["min"],
                     "max": live_risk_ceiling("TREND_PULLBACK", base)
-                           if key == "maximum_risk_percent" else THRESHOLDS[group][field]["max"],
+                           if key == "maximum_risk_percent" else min(2.0, float(base["risk_management"]["max_total_risk_percent"]))
+                           if key == "max_total_risk_percent" else THRESHOLDS[group][field]["max"],
                     "step": THRESHOLDS[group][field]["step"]}
                    for key, (group, field) in EDITABLE.items()],
     })
