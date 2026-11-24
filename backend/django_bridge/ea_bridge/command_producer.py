@@ -84,7 +84,7 @@ def create_open_command(*, decision, verdict, instance_id, account_login, server
         from .models import StrategyWorkerControl
         if strategy_setup not in STRATEGIES:
             return None, False, 'UNKNOWN_STRATEGY'
-        control = StrategyWorkerControl.objects.filter(setup=strategy_setup,source=instance_id,
+        control = StrategyWorkerControl.objects.select_for_update().filter(setup=strategy_setup,source=instance_id,
             account_login=account_login,server_name=server_name,symbol=decision.symbol,automatic=True).first()
         if not control: return None, False, 'STRATEGY_PAUSED_OR_SCOPE_MISMATCH'
         if not verified_engine_positions(heartbeat): return None, False, 'STRATEGY_HEDGING_OWNERSHIP_REQUIRED'
@@ -155,18 +155,32 @@ def create_open_command(*, decision, verdict, instance_id, account_login, server
         tick_value = _decimal(snapshot.get("symbol_info", {}).get("tick_value"), "tick value")
         if min(tick_size,tick_value)<=0: raise ValueError("contract")
         reserved_risk = risk_distance/tick_size*tick_value*volume
-        # Recheck the absolute ceiling against the current executable quote,
-        # including legacy decisions without a strategy-specific risk policy.
-        if reserved_risk > current_balance * Decimal('0.5') / 100:
-            return None, False, 'PER_TRADE_RISK_LIMIT_REACHED'
+        # Recheck current server policy and the approved decision budget.
+        # A later configuration increase must never enlarge an existing verdict.
+        per_trade_cap = Decimal('0.5')
+        strategy_portfolio_cap = Decimal('2.0')
         if strategy_setup:
-            per_trade_cap = _decimal(decision.features.get('risk_policy',{}).get('maximum_risk_percent'), 'per-trade cap')
-            if per_trade_cap<=0 or reserved_risk>current_balance*per_trade_cap/100:
-                return None, False, 'STRATEGY_RISK_CHANGED_AFTER_SIZING'
+            from .decision import _build_pipeline
+            pipeline = _build_pipeline(
+                demo_mode=False, strategy_setup=strategy_setup,
+                live_scope=(instance_id, account_login, server_name, decision.symbol),
+            )
+            current_cap = _decimal(pipeline.risk_manager.maximum_risk_percent, 'current strategy risk')
+            approved_cap = _decimal(decision.features.get('risk_policy',{}).get('maximum_risk_percent'), 'approved strategy risk')
+            hard_cap = Decimal('1.5') if strategy_setup == 'TREND_PULLBACK' else Decimal('0.5')
+            per_trade_cap = min(current_cap, approved_cap, hard_cap)
+            strategy_portfolio_cap = min(strategy_portfolio_cap, _decimal(
+                pipeline.risk_manager.config.max_total_risk_percent, 'current strategy portfolio risk'))
+            approved_portfolio = decision.features.get('effective_policy', {}).get('risk_management', {}).get('max_total_risk_percent')
+            if approved_portfolio is not None:
+                strategy_portfolio_cap = min(strategy_portfolio_cap, _decimal(approved_portfolio, 'approved portfolio risk'))
+        if per_trade_cap <= 0 or reserved_risk > current_balance * per_trade_cap / 100:
+            return None, False, 'STRATEGY_RISK_CHANGED_AFTER_SIZING' if strategy_setup else 'PER_TRADE_RISK_LIMIT_REACHED'
         if not EACommand.objects.filter(command_id=command_id).exists():
             from .scalper_engine import exposure_money, limits
             cap, _ = limits()
-            if exposure_money(heartbeat)+reserved_risk > current_balance*cap/100:
+            cap = min(cap, strategy_portfolio_cap)
+            if cap <= 0 or exposure_money(heartbeat)+reserved_risk > current_balance*cap/100:
                 return None, False, "PORTFOLIO_RISK_LIMIT_REACHED"
     except (ValueError,TypeError,ArithmeticError):
         return None, False, "PORTFOLIO_RISK_UNVERIFIED"
