@@ -538,6 +538,7 @@ class ServerDailyBaselineTelemetryTests(TestCase):
 
 
 @override_settings(RAMON_REAL_CENT_INSTANCE='ea-decision-test',RAMON_REAL_CENT_LOGIN='12345678',RAMON_REAL_CENT_SERVER='LiteFinance-MT5-Demo',RAMON_REAL_CENT_CURRENCY='USD',RAMON_REAL_CENT_SYMBOL='XAUUSD_o')
+@override_settings(RAMON_STRATEGY_CONTAINERS_ENABLED=False, RAMON_EA_COMMAND_CREATION_ENABLED=False, RAMON_EA_COMMAND_EXECUTION_ENABLED=False)
 class DjangoDecisionApiTests(TestCase):
     url="/api/ea/v1/decision"
     headers={"HTTP_AUTHORIZATION":"Bearer test-token"}
@@ -688,7 +689,7 @@ class DjangoDecisionApiTests(TestCase):
         self.assertTrue(body["command_created"], body)
         self.assertTrue(body["command_available"], body)
         self.assertEqual(body["command_reason"], "COMMAND_CREATED")
-        self.assertEqual(body["daily_loss_source"], "UNAVAILABLE_FAIL_CLOSED")
+        self.assertEqual(body["daily_loss_source"], "UNAVAILABLE_REPORTING_ONLY")
         command = EACommand.objects.get(command_id=body["command_id"])
         self.assertEqual(command.action, EACommand.Action.OPEN)
         self.assertEqual(command.instance_id, "ea-decision-test")
