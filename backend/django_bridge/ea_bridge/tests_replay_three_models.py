@@ -33,6 +33,7 @@ class ThreeReplayModelsTests(SimpleTestCase):
         from ea_bridge.ai_shadow import observe_replay_classifiers
         bars = synthetic_bars()
         with patch("ea_bridge.ai_shadow.LearningModelRun.objects") as models:
+            models.select_related.return_value.filter.return_value.exclude.return_value.order_by.return_value.first.return_value = None
             values = observe_replay_classifiers(
                 {"decision": "WAIT"}, symbol="XAUUSD_l", setup="TREND_PULLBACK",
                 market_bars=bars, spread_points=15)
