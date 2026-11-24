@@ -103,7 +103,13 @@ def _build_pipeline(*, demo_mode=False, strategy_setup=None, live_scope=None):
         if strategy_setup not in STRATEGIES:
             raise ValueError("Unknown strategy setup")
         for name, policy in detector.trading_settings["opportunity_finder"]["setups"].items():
-            policy["enabled"] = bool(policy["enabled"] and name == strategy_setup.lower())
+            # An explicitly scoped independent live worker owns exactly one setup.
+            # File defaults still govern unscoped, demo and historical evaluations.
+            # Worker automatic control and downstream execution guards remain mandatory.
+            policy["enabled"] = bool(
+                name == strategy_setup.lower()
+                and (live_scope is not None and not demo_mode or policy["enabled"])
+            )
     timer = EntryTimer(
         minimum_quality=minimum_quality,
         maximum_spread_points=maximum_spread_points,
