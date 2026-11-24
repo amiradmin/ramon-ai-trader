@@ -35,6 +35,7 @@ class EconomicCalendarTests(SimpleTestCase):
         self.assertEqual(self.status()["state"], "NOT_IMPORTED")
         self.assertFalse(snapshot_path().exists())
 
+    @override_settings(RAMON_NEWS_LOCK_ENABLED=False)
     def test_naive_provider_time_is_never_assumed_utc(self):
         import_snapshot(self.data, now=NOW)
         data = self.status()
