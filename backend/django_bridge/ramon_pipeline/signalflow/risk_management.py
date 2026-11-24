@@ -297,7 +297,15 @@ class RiskManager:
         if volume < min_volume:
             raise _Reject("RISK_BUDGET_BELOW_MINIMUM_VOLUME",
                           f"budget of {risk_budget:g} buys {raw_volume:.4f} lots, below the {min_volume:g} lot minimum (not rounded up)",
-                          risk_budget=risk_budget)
+                          risk_budget=risk_budget,
+                          raw_volume=raw_volume,
+                          min_volume=min_volume,
+                          minimum_volume_risk=round(min_volume * stop_points * point_value, 8),
+                          minimum_required_risk_percent=round(min_volume * stop_points * point_value / balance * 100, 8),
+                          risk_percent=risk_pct,
+                          stop_points=round(stop_points, 4),
+                          stop_source=details["stop_source"],
+                          stop_price=details.get("stop_price"))
         estimated_risk = volume * stop_points * point_value
         if estimated_risk > risk_budget + 1e-9:
             raise _Reject("RISK_BUDGET_EXCEEDED", "rounded volume would risk more than the budget", risk_budget=risk_budget)
