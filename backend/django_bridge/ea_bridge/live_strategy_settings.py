@@ -40,6 +40,18 @@ LABELS = {
 }
 
 
+# Additional per-strategy settings use the existing validated threshold schema.
+_EXTRA_FIELDS = {
+    "entry_timing": ("min_risk_room_atr", "max_spread_atr", "max_spread_to_risk"),
+    "risk_management": ("stop_buffer_atr", "min_stop_atr", "max_stop_atr",
+                        "target_reward_risk", "min_reward_risk"),
+}
+for _group, _fields in _EXTRA_FIELDS.items():
+    for _field in _fields:
+        EDITABLE[_field] = (_group, _field)
+        LABELS[_field] = THRESHOLDS[_group][_field]["label"]
+
+
 def live_risk_ceiling(setup, base):
     """Only TREND_PULLBACK may explicitly opt into the higher live ceiling."""
     cap = 1.5 if setup == "TREND_PULLBACK" else min(0.5, float(base["risk_management"]["maximum_risk_percent"]))
@@ -106,7 +118,7 @@ def live_strategy_settings(request):
                 return JsonResponse({"ok": False, "error": "Account identity changed: reload page"}, status=409)
             proposed = body.get("overrides")
             legacy_keys = {"minimum_score", "minimum_quality", "maximum_spread_points", "maximum_risk_percent"}
-            if not isinstance(proposed, dict) or set(proposed) not in (legacy_keys, set(EDITABLE)):
+            if not isinstance(proposed, dict) or not legacy_keys <= set(proposed) <= set(EDITABLE):
                 raise ValueError("Provide the supported strategy settings")
             proposed = {**active_settings(setup, scope_for(control)), **proposed}
             values = {}
@@ -119,6 +131,10 @@ def live_strategy_settings(request):
                 if not math.isfinite(value) or not spec["min"] <= value <= spec["max"]:
                     raise ValueError(key + " outside allowed range")
                 values[key] = value
+            if values["min_stop_atr"] >= values["max_stop_atr"]:
+                raise ValueError("Minimum stop distance must be below maximum stop distance")
+            if values["target_reward_risk"] < values["min_reward_risk"]:
+                raise ValueError("Target reward/risk must be at least the minimum reward/risk")
             if values["max_total_risk_percent"] > min(2.0, float(base["risk_management"]["max_total_risk_percent"])):
                 raise ValueError("Portfolio risk cannot exceed the shared live ceiling")
             if values["maximum_risk_percent"] > values["max_total_risk_percent"]:
