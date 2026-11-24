@@ -1,5 +1,6 @@
 """Conservative Django-hosted decision API for Ramon EA."""
 import hashlib, json, math, time, logging
+from datetime import date
 from decimal import Decimal
 from django.conf import settings
 from django.http import JsonResponse
@@ -279,7 +280,7 @@ def evaluate_payload(p, *, strategy_setup=None, input_evidence=None, live_worker
         daily_baseline_day = ""
         daily_baseline_balance = None
         daily_baseline_capture_method = ""
-        daily_loss_source = "UNAVAILABLE_FAIL_CLOSED"
+        daily_loss_source = "UNAVAILABLE_REPORTING_ONLY"
         daily_current_equity = None
         account_snapshot_balance = None
 
@@ -330,6 +331,24 @@ def evaluate_payload(p, *, strategy_setup=None, input_evidence=None, live_worker
                     else:
                         # Daily baselines remain optional reporting data, never trade gates.
                         account_state_reason = ""
+                        if isinstance(broker_day_raw, str):
+                            try:
+                                broker_day = date.fromisoformat(broker_day_raw)
+                            except ValueError:
+                                broker_day = None
+                            if broker_day is not None:
+                                daily_baseline_day = broker_day.isoformat()
+                                baseline = AccountDailyBaseline.objects.filter(
+                                    account_login=account_login, server_name=server_name,
+                                    broker_day=broker_day,
+                                ).first()
+                                if baseline is not None:
+                                    opening = float(baseline.opening_balance)
+                                    if math.isfinite(opening) and opening > 0:
+                                        daily_baseline_balance = opening
+                                        daily_baseline_capture_method = baseline.capture_method
+                                        server_daily_loss_percent = max(0.0, (opening - snapshot_equity) / opening * 100.0)
+                                        daily_loss_source = "ACCOUNT_DAILY_BASELINE"
 
 
         # Derive all policy inputs on the server from raw account and symbol telemetry.
