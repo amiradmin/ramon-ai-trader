@@ -77,15 +77,30 @@ class LiveStrategySettingsTests(TestCase):
         self.assertLessEqual(live.risk_manager.maximum_risk_percent, 0.5)
         self.assertTrue(self.control.automatic)
 
-    def test_rejects_risk_increase_above_shared_ceiling(self):
+    def test_rejects_risk_increase_above_strategy_ceiling(self):
         self.client.force_login(self.user)
-        self.payload["overrides"]["maximum_risk_percent"] = 1.5
+        self.payload["overrides"]["maximum_risk_percent"] = 1.55
         with patch("ea_bridge.live_strategy_settings.configured_feed", return_value=self.feed), \
              patch("ea_bridge.live_strategy_settings.real_cent_scope", return_value=(True, "OK")):
             response = self.client.post(self.endpoint, json.dumps(self.payload),
                                         content_type="application/json")
         self.assertEqual(response.status_code, 400)
         self.assertFalse(DecisionThresholdConfig.objects.filter(profile=profile_key(self.setup)).exists())
+
+    def test_explicit_trend_risk_and_advanced_fields_are_scoped(self):
+        self.client.force_login(self.user)
+        self.payload["overrides"].update(maximum_risk_percent=1.5, max_chase_atr=0.85,
+                                         max_signal_age_bars=2, max_total_risk_percent=2)
+        with patch("ea_bridge.live_strategy_settings.configured_feed", return_value=self.feed), \
+             patch("ea_bridge.live_strategy_settings.real_cent_scope", return_value=(True, "OK")):
+            response = self.client.post(self.endpoint, json.dumps(self.payload), content_type="application/json")
+        self.assertEqual(response.status_code, 200, response.content)
+        live = _build_pipeline(strategy_setup=self.setup, live_scope=self.scope)
+        self.assertEqual(live.risk_manager.maximum_risk_percent, 1.5)
+        self.assertEqual(live.entry_timer.config.max_chase_atr, 0.85)
+        self.assertEqual(live.entry_timer.config.max_signal_age_bars, 2)
+        self.assertEqual(live.risk_manager.config.max_total_risk_percent, 2)
+        self.assertEqual(_build_pipeline(strategy_setup=self.setup).risk_manager.maximum_risk_percent, 0.5)
 
     @override_settings(RAMON_SCALP_INSTANCE="real-feed", RAMON_SCALP_LOGIN="556677",
                        RAMON_SCALP_SERVER="CentServer")
