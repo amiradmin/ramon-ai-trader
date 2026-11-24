@@ -89,8 +89,20 @@ class DemoPlaybookApiTests(TestCase):
 
     @override_settings(EA_BEARER_TOKEN="test-token", RAMON_MARKET_SESSION_HOURS=None, RAMON_MARKET_SESSION_TIMEZONE=None,
                        RAMON_EA_COMMAND_CREATION_ENABLED=False, RAMON_EA_COMMAND_EXECUTION_ENABLED=False)
-    def test_api_persists_selection_and_rejects_a_plan_without_room_to_target(self):
+    @patch("ea_bridge.decision.SignalFlowPipeline.run")
+    def test_api_persists_selection_and_rejects_a_plan_without_room_to_target(self, run):
         payload = self.payload()
+        # A deterministic rejected pipeline result tests API persistence without
+        # assuming that a generic historical price fixture always produces WAIT.
+        run.return_value = {
+            "approved": False, "action": "WAIT", "reason": "TARGET_ROOM_TOO_SMALL",
+            "selection": {"version": "demo-playbook-v1", "candidates": []},
+            "stages": {
+                "opportunities": {"approved": True, "score": 0.8, "checks": []},
+                "entry_timing": {"approved": True, "checks": []},
+                "risk_management": {"approved": False, "reason": "TARGET_ROOM_TOO_SMALL", "checks": []},
+            },
+        }
         response = self.client.post("/api/ea/v1/decision", json.dumps(payload), content_type="application/json",
                                     HTTP_AUTHORIZATION="Bearer test-token")
         self.assertEqual(response.status_code, 200, response.content)
@@ -98,6 +110,9 @@ class DemoPlaybookApiTests(TestCase):
         self.assertEqual(body["strategy_profile"], "STANDARD")
         self.assertEqual(body["risk_policy"]["effective_risk_percent"], 0.5)
         self.assertEqual(body["decision"], "WAIT")
+        self.assertEqual(body["reason"], "TARGET_ROOM_TOO_SMALL")
+        self.assertFalse(body["risk_approved_advisory_only"])
+        self.assertFalse(RiskVerdictRecord.objects.get(decision_id=body["sample_key"]).approved)
         self.assertFalse(EACommand.objects.exists())
         decision = StrategyDecisionRecord.objects.get(decision_id=body["sample_key"])
         self.assertEqual(decision.features["selection"], body["selection"])
@@ -105,6 +120,32 @@ class DemoPlaybookApiTests(TestCase):
         evaluation = DecisionEvaluation.objects.get(pk=body["evaluation_id"])
         self.assertEqual(evaluation.instance_id, "playbook-demo")
         self.assertEqual(evaluation.features, decision.features)
+
+    @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_CREATION_ENABLED=True,
+                       RAMON_EA_COMMAND_EXECUTION_ENABLED=True)
+    @patch("ea_bridge.decision.SignalFlowPipeline.run")
+    def test_insufficient_structural_reward_blocks_command_even_with_execution_enabled(self, run):
+        payload = self.payload()
+        entry = payload["ask"]
+        # Deliberately inconsistent upstream approval: actual target is only 0.5R.
+        run.return_value = {"approved": True, "action": "BUY", "reason": "SIGNALFLOW_APPROVED",
+            "selection": {"version": "demo-playbook-v1"}, "stages": {
+                "opportunities": {"approved": True, "score": 0.8, "checks": [], "setup": {"type": "BREAKOUT_RETEST"}},
+                "entry_timing": {"approved": True, "checks": []},
+                "risk_management": {"approved": True, "volume": 0.1, "stop_price": entry-2.0,
+                                    "target_price": entry+1.0, "target_reward_risk": 2.0, "checks": []}}}
+        response = self.client.post("/api/ea/v1/decision", json.dumps(payload), content_type="application/json",
+                                    HTTP_AUTHORIZATION="Bearer test-token")
+        self.assertEqual(response.status_code, 200, response.content)
+        body = response.json()
+        self.assertTrue(body["risk_inputs_complete"], body)
+        self.assertFalse(body["risk_approved_advisory_only"])
+        self.assertFalse(body["command_created"])
+        self.assertEqual(body["command_reason"], "RISK_VERDICT_NOT_APPROVED")
+        verdict = RiskVerdictRecord.objects.get(decision_id=body["sample_key"])
+        self.assertFalse(verdict.approved)
+        self.assertEqual(verdict.approved_volume, 0)
+        self.assertFalse(EACommand.objects.exists())
 
     @override_settings(EA_BEARER_TOKEN="test-token", RAMON_EA_COMMAND_CREATION_ENABLED=False,
                        RAMON_EA_COMMAND_EXECUTION_ENABLED=False)
