@@ -34,6 +34,12 @@ LABELS = {
 }
 
 
+def live_risk_ceiling(setup, base):
+    """Only TREND_PULLBACK may explicitly opt into the higher live ceiling."""
+    cap = 1.5 if setup == "TREND_PULLBACK" else min(0.5, float(base["risk_management"]["maximum_risk_percent"]))
+    return min(cap, float(base["risk_management"]["max_total_risk_percent"]))
+
+
 def profile_key(setup):
     if setup not in STRATEGIES:
         raise ValueError("Unknown setup")
@@ -105,11 +111,9 @@ def live_strategy_settings(request):
                 if not math.isfinite(value) or not spec["min"] <= value <= spec["max"]:
                     raise ValueError(key + " outside allowed range")
                 values[key] = value
-            # Live-account risk is only allowed to tighten the existing server
-            # policy; it cannot increase the shared configured risk budget.
-            current_ceiling = min(0.5, float(base["risk_management"]["maximum_risk_percent"]))
+            current_ceiling = live_risk_ceiling(setup, base)
             if values["maximum_risk_percent"] > current_ceiling:
-                raise ValueError("Live risk cannot exceed current shared/server limit")
+                raise ValueError("Live risk cannot exceed the strategy/server ceiling")
             with transaction.atomic():
                 control = StrategyWorkerControl.objects.select_for_update().get(setup=setup)
                 if scope_for(control) != body["scope"]:
@@ -141,6 +145,7 @@ def live_strategy_settings(request):
             "overrides": {key: overrides.get(key, base[group][field])
                           for key, (group, field) in EDITABLE.items()},
             "updated_at": row.updated_at.isoformat() if row and overrides else None,
+            "maximum_risk_percent_ceiling": live_risk_ceiling(setup, base),
             "ready": bool(scope_valid and control and scope == [
                 feed.instance_id, feed.account_login, feed.server_name, feed.symbol]),
         })
@@ -156,7 +161,7 @@ def live_strategy_settings(request):
         },
         "fields": [{"key": key, "label": LABELS[key],
                     "min": THRESHOLDS[group][field]["min"],
-                    "max": min(0.5, float(base["risk_management"]["maximum_risk_percent"]))
+                    "max": live_risk_ceiling("TREND_PULLBACK", base)
                            if key == "maximum_risk_percent" else THRESHOLDS[group][field]["max"],
                     "step": THRESHOLDS[group][field]["step"]}
                    for key, (group, field) in EDITABLE.items()],
