@@ -68,7 +68,32 @@ class StrategyWorkerTests(TestCase):
                     instance_id='demo', account_login='123', server_name='Demo')
                 self.assertIsNone(command)
                 self.assertFalse(created)
-                self.assertEqual(reason, 'PER_TRADE_RISK_LIMIT_REACHED')
+                self.assertEqual(reason, 'STRATEGY_RISK_CHANGED_AFTER_SIZING' if setup else 'PER_TRADE_RISK_LIMIT_REACHED')
+
+    def test_explicit_trend_cap_allows_only_current_and_approved_budget(self):
+        from .live_strategy_settings import profile_key
+        scope = ['demo', '123', 'Demo', 'XAUUSD_o']
+        row = DecisionThresholdConfig.objects.create(profile=profile_key('TREND_PULLBACK'),
+            values={'scope': scope, 'overrides': {'maximum_risk_percent': 1.5, 'max_total_risk_percent': 2}})
+        for suffix, volume, approved_cap, current_cap, expected in (
+            ('-old-verdict', '.20', .5, 1.5, False),
+            ('-reduced', '.20', 1.5, .5, False),
+            ('-over', '.30', 1.5, 1.5, False),
+            ('-allowed', '.20', 1.5, 1.5, True),
+        ):
+            row.values['overrides']['maximum_risk_percent'] = current_cap
+            row.save()
+            decision, verdict = approved('TREND_PULLBACK', suffix)
+            decision.features['risk_policy']['maximum_risk_percent'] = approved_cap
+            decision.save(update_fields=['features'])
+            verdict.approved_volume = Decimal(volume)
+            verdict.save(update_fields=['approved_volume'])
+            command, created, reason = create_open_command(decision=decision, verdict=verdict,
+                instance_id='demo', account_login='123', server_name='Demo')
+            self.assertEqual(created, expected, reason)
+            if not expected:
+                self.assertIsNone(command)
+                self.assertEqual(reason, 'STRATEGY_RISK_CHANGED_AFTER_SIZING')
 
     def test_independent_evaluation_runs_only_its_setup_and_keys_are_scoped(self):
         from .tests_playbook import DemoPlaybookApiTests
