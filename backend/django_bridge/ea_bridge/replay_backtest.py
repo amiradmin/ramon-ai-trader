@@ -210,6 +210,31 @@ def _trade_diagnostics(trades):
     )
 
 
+def _completed_trend_closes(rows, interval, primary_interval):
+    """Return complete higher-timeframe groups indexed by their close instant."""
+    groups = {}
+    for bar in rows:
+        groups.setdefault(bar["time"] // interval * interval, []).append(bar)
+    return [(stamp + interval, group[-1]["close"])
+            for stamp, group in sorted(groups.items())
+            if [b["time"] for b in group] ==
+               list(range(stamp, stamp + interval, primary_interval))]
+
+
+def _confirmation_reason(closes, decision_time, interval, side):
+    from bisect import bisect_right
+    end = bisect_right(closes, (decision_time, float("inf")))
+    if end < 50:
+        return "WARMUP"
+    if decision_time - closes[end-1][0] >= interval:
+        return "STALE"
+    values = [value for _, value in closes[max(0, end-150):end]]
+    fast, slow = _ema(values, 20), _ema(values, 50)
+    if not ((side == "BUY" and fast > slow) or (side == "SELL" and fast < slow)):
+        return "DIRECTION_MISMATCH"
+    return None
+
+
 def _simulate(data, rows, progress=None):
     spread = data["spread_points"]*data["point"]
     value_per_price=data["tick_value"]/data["tick_size"]
@@ -236,6 +261,15 @@ def _simulate(data, rows, progress=None):
     interval = 300 if timeframe == "M5" else 900
     if research and setups != ["TREND_PULLBACK"]:
         raise ValueError("Trend research options require Trend Pullback alone")
+    confirmations = research.get("confirm_timeframes", [])
+    direction_filter = research.get("allowed_side")
+    if (confirmations or direction_filter) and (research.get("version") != 7 or timeframe != "M5"):
+        raise ValueError("Directional filters are restricted to isolated V7 M5 research")
+    if any(tf not in ("M15", "H1") for tf in confirmations) or direction_filter not in (None, "BUY", "SELL"):
+        raise ValueError("Invalid V7 confirmation policy")
+    context_intervals = {"M15": 900, "H1": 3600}
+    context_closes = {tf: _completed_trend_closes(rows, context_intervals[tf], interval)
+                      for tf in confirmations}
     hours = research.get("entry_hours")
     audit_enabled = research.get("missed_opportunity_audit", False)
     audit_records = {name: [] for name in setups}
@@ -395,6 +429,15 @@ def _simulate(data, rows, progress=None):
                         (stages.get(rejection_stage) or {}).get("explanation"))
                 else:
                     rejected(state,"EVALUATION",result.get("reason") or "NO_APPROVED_SIGNAL",bar["time"])
+                continue
+            if direction_filter and result["action"] != direction_filter:
+                rejected(state, "RESEARCH", "SIDE_NOT_ALLOWED", bar["time"])
+                continue
+            mismatch = next((tf + "_" + reason for tf in confirmations
+                             if (reason := _confirmation_reason(context_closes[tf],
+                                 bar["time"]+interval, context_intervals[tf], result["action"]))), None)
+            if mismatch:
+                rejected(state, "RESEARCH", mismatch, bar["time"])
                 continue
             if research.get("h1_confirmation"):
                 if len(h1_closes)<50:
