@@ -109,7 +109,15 @@ def scalper_status(request):
     positions_known = bool(fresh and control and isinstance(feed.payload.get('positions'), list))
     positions = sum(owned_position(feed, position) is not None
                     for position in feed.payload['positions']) if positions_known else 0
+    from .scalper_diagnostics import authorization_summary, latest_entry_evidence
+    # The public status endpoint must not expose account balances or risk money.
+    evidence = latest_entry_evidence(feed) if feed and request.user.is_staff else {}
+    sizing = evidence.get('sizing') or {}
+    evidence['sizing'] = {k: sizing[k] for k in (
+        'calculated_volume','min_volume','minimum_required_risk_percent') if k in sizing}
     response = JsonResponse({
+        'authorization': authorization_summary(feed) if feed else None,
+        'entry_evidence': evidence,
         'fresh': fresh,
         'automatic': bool(control and control.automatic),
         'control_scope': control.pk if control else None,

@@ -24,10 +24,38 @@ def recent(query, limit, ordering, *fields):
     return list(query.order_by(ordering, '-pk').values(*fields)[:limit])
 
 
+def authorization_summary(feed):
+    from .account_scope import real_cent_scope
+    allowed, reason = real_cent_scope(feed)
+    return dict(policy='INDEPENDENT_SCALPER_REAL_CENT_SCOPE',
+                scope_verified=allowed, scope_reason=reason,
+                main_real_execution_flag=bool(getattr(settings, 'RAMON_REAL_EXECUTION_ENABLED', False)),
+                main_flag_is_scalper_gate=False,
+                readiness=readiness(feed))
+
+
+def latest_entry_evidence(feed):
+    scope = dict(source=feed.instance_id, account_login=feed.account_login,
+                 server_name=feed.server_name, symbol=feed.symbol)
+    gates = ScalpAuditEvent.objects.filter(**scope, kind='ENTRY_GATE')
+    fields = ('observed_at', 'reason', 'observation_id', 'details')
+    latest = gates.order_by('-observed_at', '-pk').values(*fields).first()
+    # Older workers did not persist sizing. Keep the timestamp and do not
+    # silently replace missing historical evidence with a current estimate.
+    rejected = gates.filter(reason='RISK_BUDGET_BELOW_MINIMUM_VOLUME').order_by(
+        '-observed_at', '-pk').values(*fields).first()
+    details = (rejected or {}).get('details') or {}
+    sizing = (details.get('engine_inputs') or {}).get('sizing')
+    return dict(latest_gate_reason=(latest or {}).get('reason'),
+                latest_gate_at=(latest or {}).get('observed_at'),
+                risk_rejection_at=(rejected or {}).get('observed_at'),
+                sizing=sizing, sizing_status='RECORDED' if sizing else 'UNAVAILABLE')
+
+
 def build_report(now=None):
     now = now or timezone.now()
     since = now - timedelta(days=7)
-    report = dict(schema_version=1, generated_at=now, window_start=since,
+    report = dict(schema_version=2, generated_at=now, window_start=since,
                   strategy='FAST_SCALP', read_only=True,
                   flags={key: bool(getattr(settings, key, False)) for key in FLAGS},
                   provenance=provenance(),
@@ -49,6 +77,8 @@ def build_report(now=None):
                                   ('quote_time','quote','account','symbol_info','positions','broker_day',
                                    'account_margin_mode','execution_profile','server_name')})
     report['readiness'] = readiness(feed, now=now)
+    report['authorization'] = authorization_summary(feed)
+    report['latest_entry_evidence'] = latest_entry_evidence(feed)
     report['control'] = ScalperControl.objects.filter(**scope).values(
         'automatic','risk_percent','updated_at').first()
     cap, daily_cap = limits()
@@ -74,6 +104,14 @@ def build_report(now=None):
         '-observed_at','observed_at','kind','reason','observation_id','command_id','details')
     report['latest_entry_gates'] = recent(audit.filter(kind='ENTRY_GATE'), 200,
         '-observed_at','observed_at','reason','observation_id','command_id','details')
+    # Retain rare risk rejections independently of high-frequency WAIT events.
+    risk_gates = audit.filter(kind='ENTRY_GATE', reason='RISK_BUDGET_BELOW_MINIMUM_VOLUME')
+    report['risk_rejection_count'] = risk_gates.count()
+    report['risk_rejections'] = recent(risk_gates, 1000, '-observed_at',
+        'observed_at','reason','observation_id','details')
+    report['risk_rejections_truncated'] = report['risk_rejection_count'] > 1000
+    report['entry_signals'] = recent(obs.filter(action__in=['BUY','SELL']), 1000,
+        '-recorded_at','id','recorded_at','signal_bar_time','action','reason','snapshot')
     report['latest_commands'] = recent(commands, 200, '-created_at',
         'command_id','action','state','created_at','expires_at','claimed_at',
         'completed_at','execution_authorized','payload','result')
@@ -82,6 +120,15 @@ def build_report(now=None):
         bars = MarketBar.objects.filter(source=feed.instance_id, symbol=feed.symbol, timeframe=tf)
         report['market_bars'][tf] = recent(bars, 100, '-timestamp',
             'timestamp','received_at','open','high','low','close','volume')
+    report['market_data_health'] = {}
+    for tf, seconds in (('M1', 60), ('M5', 300)):
+        rows = report['market_bars'][tf]
+        report['market_data_health'][tf] = dict(
+            latest_closed_bar_age_seconds=(now - rows[0]['timestamp']).total_seconds() - seconds if rows else None,
+            latest_receipt_age_seconds=(now - rows[0]['received_at']).total_seconds() if rows else None,
+            sampled_gap_count=sum((a['timestamp']-b['timestamp']).total_seconds() != seconds
+                                  for a,b in zip(rows, rows[1:])),
+            sample_count=len(rows))
     return report
 
 

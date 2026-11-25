@@ -33,3 +33,16 @@ class FastScalpDiagnosticTests(TestCase):
         self.assertEqual(EACommand.objects.count(), 0)
         self.assertEqual(ScalpAuditEvent.objects.count(), 0)
         self.assertEqual(ScalpObservation.objects.count(), 2)
+
+    def test_missing_sizing_is_explicit_and_risk_rejections_retained(self):
+        now = timezone.now()
+        EAHeartbeat.objects.create(instance_id='test-feed', account_login='123',
+            server_name='test-server', symbol='XAUUSD_l', status='TELEMETRY_OK')
+        scope = dict(source='test-feed', account_login='123', server_name='test-server', symbol='XAUUSD_l')
+        ScalpAuditEvent.objects.create(**scope, event_key='test-risk', kind='ENTRY_GATE',
+            reason='RISK_BUDGET_BELOW_MINIMUM_VOLUME', observed_at=now, details={})
+        report = build_report(timezone.now())
+        self.assertEqual(report['risk_rejection_count'], 1)
+        self.assertEqual(report['latest_entry_evidence']['sizing_status'], 'UNAVAILABLE')
+        self.assertFalse(report['authorization']['main_flag_is_scalper_gate'])
+        self.assertEqual(EACommand.objects.count(), 0)

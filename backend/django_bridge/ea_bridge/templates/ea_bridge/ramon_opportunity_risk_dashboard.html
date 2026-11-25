@@ -29,6 +29,7 @@
     {% endfor %}
     <article id="strategy-card-fast-scalp" class="card strategy-card"><h3 style="font-size:14px;overflow-wrap:anywhere;margin-top:0">FAST_SCALP</h3><p class="small">Independent M1/M5 fast scalp strategy</p>
       <p class="small" id="strategy-fast-scalp">Checking status · Position status unavailable</p>
+      <p class="small" id="scalp-authorization"></p><p class="small" id="scalp-sizing" role="status"></p>
       <label class="small" style="display:flex;align-items:center;gap:8px;margin:10px 0"><input type="checkbox" class="entry-toggle" id="entries-fast-scalp" data-control-url="{% url 'ramon-scalper-entries' %}" aria-label="Enable Fast Scalp new entries" disabled> Enable new entries</label>
       <p class="small" id="entry-message-fast-scalp" role="status" aria-live="polite"></p>
       <a class="btn" style="display:inline-block;text-decoration:none" href="{% url 'ramon-scalper-console' %}">Open strategy ↗</a>
@@ -355,9 +356,24 @@ async function refreshFastScalp() {
       ? `${data.open_positions} open position${data.open_positions === 1 ? "" : "s"}`
       : "Position status unavailable";
     status.textContent = `${data.fresh ? "Feed current" : "Feed stale or unavailable"} · Entries ${data.automatic ? "On" : "Paused"} · ${data.readiness} · ${positionText}`;
+    const auth = data.authorization;
+    $("scalp-authorization").textContent = auth ? "Independent scalp authorization · " +
+      (auth.scope_verified ? "Account scope verified" : "Account scope not verified") +
+      " · Main real-entry flag: " + (auth.main_real_execution_flag ? "On" : "Off") : "";
+    const evidence = data.entry_evidence || {};
+    const sizing = evidence.sizing || {};
+    $("scalp-sizing").textContent = evidence.latest_gate_reason ?
+      "Last gate: " + evidence.latest_gate_reason +
+      (evidence.risk_rejection_at ? " · Last sizing rejection: " + evidence.risk_rejection_at : "") +
+      (sizing.minimum_required_risk_percent != null ?
+       " · Required risk: " + Number(sizing.minimum_required_risk_percent).toFixed(3) +
+       "% · Calculated lot: " + sizing.calculated_volume + " / min " + sizing.min_volume :
+       " · Historical sizing unavailable") : "";
   } catch (error) {
     card.classList.remove("strategy-on", "strategy-position-open");
     unavailableEntryToggle("fast-scalp");
+    $("scalp-authorization").textContent = "";
+    $("scalp-sizing").textContent = "";
     status.textContent = "Fast Scalp status unavailable · Position status unavailable";
   } finally { clearTimeout(timeout); scalpStatusInFlight = false; }
 }
