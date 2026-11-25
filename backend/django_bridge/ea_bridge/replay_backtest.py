@@ -137,7 +137,7 @@ def _clean_m15_rows(rows, interval=900):
 
 def _research_pipeline(setup, *, risk_percent=0.5, stop_buffer_atr=None, target_reward_risk=None,
                        minimum_opportunity_score=None, minimum_entry_quality=None, opportunity_overrides=None,
-                       isolated_risk_sensitivity=False):
+                       isolated_risk_sensitivity=False, all_strategy_risk_research=False):
     """Use standard risk policy, enabling exactly one config-approved research setup."""
     pipeline=_build_pipeline(demo_mode=False,strategy_setup=setup)
     configs=pipeline.opportunities.trading_settings["opportunity_finder"]["setups"]
@@ -160,8 +160,8 @@ def _research_pipeline(setup, *, risk_percent=0.5, stop_buffer_atr=None, target_
     if minimum_entry_quality is not None:
         pipeline.entry_timer.minimum_quality = minimum_entry_quality
     if isolated_risk_sensitivity:
-        if setup != "TREND_PULLBACK" or isinstance(risk_percent, bool) or not 0 < risk_percent <= 1.5:
-            raise ValueError("Invalid isolated Trend Pullback risk sensitivity")
+        if (setup != "TREND_PULLBACK" and not (all_strategy_risk_research and setup in STRATEGIES)) or isinstance(risk_percent, bool) or not 0 < risk_percent <= 1.5:
+            raise ValueError("Invalid isolated research risk sensitivity")
         pipeline.risk_manager.maximum_risk_percent = min(
             risk_percent, pipeline.risk_manager.config.max_total_risk_percent
         )
@@ -236,6 +236,8 @@ def _confirmation_reason(closes, decision_time, interval, side):
 
 
 def _simulate(data, rows, progress=None):
+    if data.get("all_strategy_risk_research") and (data.get("isolated_timeframe", "M15") != "M15" or data.get("trend_research") or not data.get("isolated_risk_sensitivity") or len(data.get("setups", [])) != 1):
+        raise ValueError("V9 requires one isolated M15 setup")
     spread = data["spread_points"]*data["point"]
     value_per_price=data["tick_value"]/data["tick_size"]
     risk_percent=data.get("risk_percent", 0.5)
@@ -253,6 +255,7 @@ def _simulate(data, rows, progress=None):
             minimum_entry_quality=data.get("minimum_entry_quality"),
             opportunity_overrides=data.get("opportunity_overrides"),
             isolated_risk_sensitivity=data.get("isolated_risk_sensitivity", False),
+            all_strategy_risk_research=data.get("all_strategy_risk_research", False),
         ) for setup in setups}
     research = data.get("trend_research", {})
     timeframe = data.get("isolated_timeframe", "M15")
@@ -615,7 +618,7 @@ def run_backtest_data(data, *, max_candles=MAX_TEST_CANDLES, progress=None):
              first_bar=datetime.fromtimestamp(rows[0]["time"],tz=timezone.utc).isoformat(),
              last_bar=datetime.fromtimestamp(rows[-1]["time"],tz=timezone.utc).isoformat(),
              candles=len(rows),data_quality=quality,
-             research_profile=("ISOLATED_TREND_RISK_SENSITIVITY" if data.get("isolated_risk_sensitivity") else "STANDARD_RISK_EXPLICIT_SETUP_RESEARCH"),
+             research_profile=("ISOLATED_ALL_M15_RISK_SENSITIVITY" if data.get("all_strategy_risk_research") else "ISOLATED_TREND_RISK_SENSITIVITY" if data.get("isolated_risk_sensitivity") else "STANDARD_RISK_EXPLICIT_SETUP_RESEARCH"),
              assumptions={**{k:data[k] for k in (
                "balance","spread_points","point","tick_size","tick_value","volume_min","volume_max","volume_step")},
                **{k:data.get(k,default) for k,default in (
