@@ -15,6 +15,11 @@
     <label>Maximum lot (MT5)<input id="liveMaxLot" readonly></label>
     <label>Lot step (MT5)<input id="liveLotStep" readonly></label>
   </div>
+  <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:12px 0">
+    <label for="liveParameterFile">Import strategy parameters (JSON)</label>
+    <input id="liveParameterFile" type="file" accept=".json,application/json" style="max-width:340px;margin:0">
+    <span id="liveImportStatus" class="small" role="status" aria-live="polite"></span>
+  </div>
   <form id="liveSettingsForm">
     <div id="liveEditableFields" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px"></div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-top:15px">
@@ -159,6 +164,68 @@
     }catch(e){byId('liveScalpState').textContent='Not saved: '+e.message;}
     finally{byId('liveScalpSave').disabled=false;}
   });
+  byId('liveParameterFile').addEventListener('change',async event=>{
+    const picker=event.target, file=picker.files[0], status=byId('liveImportStatus');
+    if(!file)return;
+    picker.disabled=true;
+    try{
+      if(file.size>1024*1024)throw new Error('JSON file must be smaller than 1 MB.');
+      const doc=JSON.parse(await file.text());
+      const isObject=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
+      if(!isObject(doc))throw new Error('Expected a JSON object.');
+      const live=doc.live_configuration;
+      const setup=doc.strategy??doc.setup??live?.strategy??byId('liveStrategy').value;
+      if(typeof setup!=='string'||!Array.from(byId('liveStrategy').options).some(o=>o.value===setup))
+        throw new Error('Unknown strategy or configuration not loaded.');
+      if([doc.strategy,doc.setup,live?.strategy].some(v=>v!=null&&v!==setup))
+        throw new Error('Conflicting strategy names in file.');
+      // Require explicit selection of the target; never silently replace another strategy's edits.
+      if(setup!==byId('liveStrategy').value)throw new Error('Select '+setup.replaceAll('_',' ')+' first, then browse again.');
+      const scalp=setup==='FAST_SCALP';
+      const save=byId(scalp?'liveScalpSave':'liveSave');
+      if(save.disabled||(!scalp&&!data)|| (scalp&&!scalpScope))throw new Error('Live configuration is not ready for editing.');
+      const source=live?.parameters??doc.parameters??doc.overrides??doc.signal_overrides??doc;
+      if(!isObject(source))throw new Error('Parameters must be a JSON object.');
+      const inputs=Array.from(byId(scalp?'liveScalpFields':'liveEditableFields').querySelectorAll('input'));
+      const fields=new Map(inputs.map(input=>[input.name,input]));
+      if(scalp)fields.set('risk_percent',byId('liveScalpRisk'));
+      const pending=new Map();
+      const metadata=new Set(['strategy','setup','generated_at','configuration_source','scope','risk_percent']);
+      for(const [key,raw] of Object.entries(source)){
+        if(!fields.has(key)){
+          if(source===doc&&metadata.has(key))continue;
+          throw new Error('Unsupported parameter: '+key);
+        }
+        const value=isObject(raw)?raw.value:raw;
+        if(!((typeof value==='number')||(typeof value==='string'&&value.trim()!==''))||!Number.isFinite(Number(value)))
+          throw new Error('Invalid numeric value: '+key);
+        const input=fields.get(key), probe=input.cloneNode();
+        probe.value=String(Number(value));
+        if(!probe.checkValidity()||probe.value==='')throw new Error('Out of range or invalid increment: '+key);
+        pending.set(key,probe.value);
+      }
+      if(scalp&&source!==doc&&doc.risk_percent!=null&&!pending.has('risk_percent')){
+        const v=doc.risk_percent, probe=fields.get('risk_percent').cloneNode();
+        if(!['string','number'].includes(typeof v)||String(v).trim()===''||!Number.isFinite(Number(v)))throw new Error('Invalid scalp risk.');
+        probe.value=String(Number(v));
+        if(!probe.checkValidity()||probe.value==='')throw new Error('Invalid scalp risk.');
+        pending.set('risk_percent',probe.value);
+      }
+      if(!pending.size)throw new Error('No supported parameters found.');
+      const val=k=>Number(pending.get(k)??fields.get(k)?.value);
+      if(scalp){
+        if(val('minimum_stop_atr')>val('maximum_stop_atr'))throw new Error('Minimum stop distance exceeds maximum.');
+      }else{
+        if(val('min_stop_atr')>=val('max_stop_atr'))throw new Error('Minimum stop distance must be below maximum.');
+        if(val('target_reward_risk')<val('min_reward_risk'))throw new Error('Target reward/risk must meet minimum.');
+        if(val('maximum_risk_percent')>val('max_total_risk_percent'))throw new Error('Entry risk exceeds portfolio risk.');
+      }
+      for(const [key,value] of pending)fields.get(key).value=value;
+      status.textContent='Loaded '+pending.size+' parameter(s) for '+setup+'. Review and click Save to apply. Nothing saved yet.';
+    }catch(error){status.textContent='Import failed: '+error.message;}
+    finally{picker.value='';picker.disabled=false;}
+  });
+  byId('liveStrategy').addEventListener('change',()=>{byId('liveImportStatus').textContent='';});
   load();loadScalp();
 })();
 </script>
