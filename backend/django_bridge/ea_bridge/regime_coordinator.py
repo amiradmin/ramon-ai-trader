@@ -1,5 +1,6 @@
 """Advisory-only V12 coordinator. Never creates orders or changes controls."""
 from datetime import timedelta
+from django.conf import settings
 from collections import Counter
 import math
 from django.utils import timezone
@@ -31,6 +32,39 @@ def ema(values, n):
         value+=(x-value)*2/(n+1)
     return value
 
+def gap_details(stamps, minutes, closures=()):
+    """Only explicitly verified UTC closures excuse missing complete bar slots."""
+    step=timedelta(minutes=minutes)
+    gaps=[]
+    for a,b in zip(stamps,stamps[1:]):
+        if b-a==step: continue
+        count=max(0,int((b-a)/step)-1)
+        verified=count>0 and any(start<=a+step and b<=end for start,end in closures)
+        gaps.append(dict(previous=a.isoformat(),next=b.isoformat(),missing_slots=count,
+                         classification="VERIFIED_CLOSURE" if verified else "UNVERIFIED_GAP"))
+    return gaps
+
+def verified_closures(source,symbol):
+    # Optional, exact source/symbol-specific UTC windows confirmed by operator.
+    entries=getattr(settings,"RAMON_COORDINATOR_VERIFIED_CLOSURES",[])
+    windows=[]
+    for item in entries:
+        if item.get("source")!=source or item.get("symbol")!=symbol: continue
+        try:
+            a,b=parse_datetime(item["start"]),parse_datetime(item["end"])
+            if a and b and timezone.is_aware(a) and timezone.is_aware(b) and a<b:
+                windows.append((a,b))
+        except (KeyError,ValueError,TypeError): continue
+    return windows
+
+def alignment(context):
+    a,b,c=(context[tf]["direction"] if context[tf]["status"]=="READY" else None for tf in ("M5","M15","H1"))
+    if b not in ("BUY","SELL"): return "UNCERTAIN"
+    if a not in ("BUY","SELL"): return "SHORT_TERM_UNAVAILABLE"
+    if c in ("BUY","SELL") and c!=b: return "HIGHER_TIMEFRAME_CONFLICT"
+    if a!=b: return "PULLBACK_OR_CONFLICT" if c==b else "SHORT_TERM_CONFLICT_H1_UNCONFIRMED"
+    return "ALIGNED_ALL_TIMEFRAMES" if c==b else "M5_M15_ALIGNED_H1_UNCONFIRMED"
+
 def timeframe_context(source,symbol,tf,minutes,now):
     end=now-timedelta(minutes=minutes)
     rows=list(MarketBar.objects.filter(source=source,symbol=symbol,timeframe=tf,
@@ -42,15 +76,17 @@ def timeframe_context(source,symbol,tf,minutes,now):
     if not 0<=age<minutes*60:
         return {"status":"STALE","direction":None,"bars":len(rows)}
     recent=rows[-50:]
-    if any(r.timestamp.timestamp()%(minutes*60) for r in recent) or any(
-        (b.timestamp-a.timestamp).total_seconds()!=minutes*60 for a,b in zip(recent,recent[1:])):
-        return {"status":"GAP_OR_OFF_GRID","direction":None,"bars":len(rows)}
+    gaps=gap_details([r.timestamp for r in recent],minutes,verified_closures(source,symbol))
+    off_grid=[r.timestamp.isoformat() for r in recent if r.timestamp.timestamp()%(minutes*60)]
+    diagnostics=dict(gaps=gaps,off_grid=off_grid,missing_slots=sum(g["missing_slots"] for g in gaps))
+    if off_grid or any(g["classification"]!="VERIFIED_CLOSURE" for g in gaps):
+        return {"status":"GAP_OR_OFF_GRID","direction":None,"bars":len(rows),**diagnostics}
     values=[float(r.close) for r in recent]
     if not all(math.isfinite(x) and x>0 for x in values):
         return {"status":"INVALID_CLOSE","direction":None}
     fast=ema(values,20); slow=ema(values,50)
     return {"status":"READY","direction":"BUY" if fast>slow else "SELL" if fast<slow else "FLAT",
-            "ema20":fast,"ema50":slow,"last_closed":(last+timedelta(minutes=minutes)).isoformat(),"bars":50}
+            "ema20":fast,"ema50":slow,"last_closed":(last+timedelta(minutes=minutes)).isoformat(),"bars":50,**diagnostics}
 
 def build_report(source,symbol,account_login,server_name,now=None):
     now=now or timezone.now()
@@ -97,9 +133,9 @@ def build_report(source,symbol,account_login,server_name,now=None):
         row["timeframe_alignment"]={tf:(v["direction"]==side if side in ("BUY","SELL") and v["status"]=="READY" else None) for tf,v in context.items()}
     ranked=sorted((r for r in candidates if len(bars)==1 and None not in bars and r["bar_time"] in bars),
         key=lambda r:(-(r["score"]+r["quality"])/2,r["setup"]))
-    return {"version":"V12.1","mode":"ADVISORY_ONLY","live_promotion":False,"generated_at":now.isoformat(),
+    return {"version":"V12.2","mode":"ADVISORY_ONLY","live_promotion":False,"generated_at":now.isoformat(),
         "source":source,"symbol":symbol,"regime":regime,"regime_votes":dict(Counter(label for bar,label in labels)),
-        "timeframes":context,"strategies":rows,"ranked_candidates":[dict(setup=r["setup"],action=r["action"],
+        "timeframes":context,"alignment":alignment(context),"strategies":rows,"ranked_candidates":[dict(setup=r["setup"],action=r["action"],
             score=r["score"],quality=r["quality"],evaluation_id=r["evaluation_id"],regime_fit=r["regime_fit"]) for r in ranked],
         "limitations":["Current recorded evaluations only; not a synchronized execution arbiter.",
           "Equal-weight opportunity and entry-quality ranking is exploratory, not expected return.",
