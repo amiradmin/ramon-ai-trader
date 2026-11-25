@@ -50,9 +50,19 @@ class Command(BaseCommand):
         except (ValueError, KeyError) as exc:
             raise CommandError(str(exc)) from exc
 
-        def evaluate(params, first, last):
+        def evaluate(params, first, last, *, phase, name, index, total):
+            last_percent = -1
+            self.stderr.write(f"[{phase} {index}/{total}] {name}: starting")
+            def progress(done, candles):
+                nonlocal last_percent
+                percent = min(100, int(100 * done / max(1, candles)))
+                if percent != last_percent:
+                    self.stderr.write(f"[{phase} {index}/{total}] {name}: {percent:3d}% ({done:,}/{candles:,} candles)")
+                    self.stderr.flush()
+                    last_percent = percent
+
             response = run_backtest_data(dict(data, start=first, end=last,
-                opportunity_overrides=params), max_candles=options["max_candles"])
+                opportunity_overrides=params), max_candles=options["max_candles"], progress=progress)
             result = json.loads(response.content)
             if response.status_code != 200:
                 raise CommandError(result.get("error", "Research failed"))
@@ -61,7 +71,9 @@ class Command(BaseCommand):
             return dict(metrics=stats, data_quality=result["data_quality"],
                         assumptions=result["assumptions"], limitations=result["limitations"])
 
-        development = {name: evaluate(params, start, split) for name, params in VARIANTS.items()}
+        development = {name: evaluate(params, start, split, phase="development", name=name,
+                                      index=index, total=len(VARIANTS))
+                       for index, (name, params) in enumerate(VARIANTS.items(), 1)}
         minimum = options["minimum_trades"]
         eligible = [name for name, report in development.items()
                     if report["metrics"]["closed_trades"] >= minimum
@@ -72,8 +84,9 @@ class Command(BaseCommand):
             development[name]["metrics"]["net_gain"] / max(1, development[name]["metrics"]["max_drawdown_pct"]),
             name)) if eligible else None
         selected = list(dict.fromkeys(["baseline"] + ([winner] if winner else [])))
-        validation = {name: evaluate(VARIANTS[name], split + timedelta(days=1), end)
-                      for name in selected}
+        validation = {name: evaluate(VARIANTS[name], split + timedelta(days=1), end,
+                                    phase="validation", name=name, index=index, total=len(selected))
+                      for index, name in enumerate(selected, 1)}
         self.stdout.write(json.dumps(dict(mode="ISOLATED_RESEARCH_DESCRIPTIVE_ONLY",
             live_promotion=False, variants=VARIANTS, development=development,
             validation=validation, development_candidate=winner, minimum_trades=minimum,
@@ -84,3 +97,5 @@ class Command(BaseCommand):
                         "closed-trade drawdown only; no live settings or orders changed. "
                         "Validation results are descriptive, not deployment authorization."),
             indent=2))
+        self.stderr.write("[research] 100% complete; JSON report written.")
+        self.stderr.flush()
