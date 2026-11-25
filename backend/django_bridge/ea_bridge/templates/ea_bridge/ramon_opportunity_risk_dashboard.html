@@ -39,6 +39,8 @@
       <p class="small" id="entry-message-fast-scalp" role="status" aria-live="polite"></p>
       <a class="btn" style="display:inline-block;text-decoration:none" href="{% url 'ramon-scalper-console' %}">Open strategy ↗</a>
       <a class="btn" style="display:inline-block;text-decoration:none;margin-top:6px" href="{% url 'ramon-scalper-diagnostic-report' %}">Download diagnostic report ↓</a>
+      <button class="btn" id="copyFastScalpParameters" type="button" style="margin-top:6px">Copy All Parameters</button>
+      <p class="small" id="copyFastScalpStatus" role="status" aria-live="polite"></p>
     </article>
   </div>
 </section>
@@ -274,6 +276,68 @@ if (trendCopyButton) trendCopyButton.addEventListener("click", async () => {
   }
 });
 
+
+const scalpCopyButton = $("copyFastScalpParameters");
+if (scalpCopyButton) scalpCopyButton.addEventListener("click", async () => {
+  const status = $("copyFastScalpStatus");
+  scalpCopyButton.disabled = true;
+  status.textContent = "Preparing parameters…";
+  try {
+    const response = await fetch("/api/ea/v1/dashboard/live-scalper-risk", {cache:"no-store", credentials:"same-origin"});
+    if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) {
+      throw new Error("Live scalp configuration unavailable; sign in as staff and retry.");
+    }
+    const config = await response.json();
+    if (!config.ok || !config.scope || !config.broker || config.scope[3] !== config.broker.symbol ||
+        !Array.isArray(config.fields) || !config.fields.length || !config.signal_overrides) {
+      throw new Error("Live scalp configuration or account scope unavailable.");
+    }
+    const broker = config.broker, account = broker.account || {}, spec = broker.symbol_spec || {};
+    const parameters = Object.fromEntries(config.fields.map(field => [field.key, {
+      label: field.label, value: config.signal_overrides[field.key] ?? null,
+      min: field.min, max: field.max, step: field.step
+    }]));
+    parameters.risk_percent = {label:"Maximum planned scalp risk (%)",
+      value: config.risk_percent == null ? null : Number(config.risk_percent),
+      min:0.010, max:Number(config.maximum_risk_percent), step:0.001};
+    const text = JSON.stringify({
+      strategy:"FAST_SCALP", generated_at:new Date().toISOString(),
+      configuration_source:"live-scalper-risk",
+      live_configuration:{
+        strategy:"FAST_SCALP", broker_telemetry_fresh:broker.fresh ?? false,
+        account_balance_mt5:account.balance ?? null, equity_mt5:account.equity ?? null,
+        free_margin_mt5:account.free_margin ?? null, currency:account.currency ?? null,
+        broker_symbol:broker.symbol ?? null, point_mt5:spec.point ?? null,
+        tick_size_mt5:spec.tick_size ?? null, tick_value_mt5:spec.tick_value ?? null,
+        minimum_lot_mt5:spec.volume_min ?? null, maximum_lot_mt5:spec.volume_max ?? null,
+        lot_step_mt5:spec.volume_step ?? null, ready:config.ready,
+        parameters, effective_signal_policy:config.signal_overrides
+      },
+      strategy_status:$("strategy-fast-scalp")?.textContent?.trim() ?? null,
+      authorization_status:$("scalp-authorization")?.textContent?.trim() ?? null,
+      sizing_status:$("scalp-sizing")?.textContent?.trim() ?? null
+    }, null, 2);
+    let copied = false;
+    if (navigator.clipboard && window.isSecureContext) {
+      try { await navigator.clipboard.writeText(text); copied = true; } catch (error) { /* HTTP-compatible fallback. */ }
+    }
+    if (!copied) {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "");
+      textarea.style.cssText = "position:fixed;opacity:0";
+      document.body.appendChild(textarea);
+      try { textarea.select(); copied = document.execCommand("copy"); }
+      finally { textarea.remove(); }
+    }
+    if (!copied) throw new Error("Clipboard access denied; use Download diagnostic report.");
+    status.textContent = "Parameters copied ✓";
+  } catch (error) {
+    status.textContent = "Copy failed: " + error.message;
+  } finally {
+    scalpCopyButton.disabled = false;
+  }
+});
 
 function utcDateInputValue(date) {
   return [date.getUTCFullYear(), String(date.getUTCMonth()+1).padStart(2,"0"), String(date.getUTCDate()).padStart(2,"0")].join("-");
