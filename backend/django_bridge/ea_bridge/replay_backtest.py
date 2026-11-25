@@ -497,6 +497,23 @@ def _scalp_backtest_data(data, progress=None):
                      "slippage_points","commission_per_lot")},
         limitations="Descriptive M1/M5 replay; complete M5 candles derived from stored M1. Fixed modeled costs, unknown historical broker stop level, no historical quotes or tick path. Points per lot and R are not account-currency profit or a 1,000/10,000 balance comparison."))
 
+def _derive_m5_rows(raw):
+    """Aggregate only exact, valid, consecutive M1 groups; no synthetic fills."""
+    groups = {}
+    for bar in raw:
+        groups.setdefault(bar["time"] // 300 * 300, []).append(bar)
+    rows = []
+    for stamp, group in sorted(groups.items()):
+        if [b["time"] for b in group] != [stamp + 60*i for i in range(5)]:
+            continue
+        if not all(valid_bar(b, 60) for b in group):
+            continue
+        rows.append(dict(time=stamp, open=group[0]["open"], high=max(b["high"] for b in group),
+                         low=min(b["low"] for b in group), close=group[-1]["close"]))
+    return rows, dict(method="COMPLETE_FIVE_CONSECUTIVE_M1_ONLY", input_m1=len(raw),
+                      input_groups=len(groups), incomplete_or_invalid_groups=len(groups)-len(rows))
+
+
 def run_backtest_data(data, *, max_candles=MAX_TEST_CANDLES, progress=None):
         if data.get("setups")==["FAST_SCALP"]:
             return _scalp_backtest_data(data,progress=progress)
@@ -505,23 +522,44 @@ def run_backtest_data(data, *, max_candles=MAX_TEST_CANDLES, progress=None):
         timeframe=data.get("isolated_timeframe","M15")
         if timeframe not in ("M15","M5"):
             raise ValueError("Unsupported research timeframe")
-        scope=dict(source=data["source"],symbol=data["symbol"],timeframe=timeframe)
-        selected=MarketBar.objects.filter(**scope,timestamp__gte=start_dt,timestamp__lt=end_dt).order_by("timestamp")
-        count=selected.count()
-        if count+256>max_candles:
-            return JsonResponse({"error":f"Selected range contains {count} {timeframe} candles; this interactive research runner allows at most {max_candles-256} plus warmup. Choose a shorter range. For longer ranges, import complete historical data and use segmented batch processing."},status=422)
-        prior=list(MarketBar.objects.filter(**scope,timestamp__lt=start_dt).order_by("-timestamp")[:256])
-        prior.reverse()
-        selected_rows=list(selected)
-        all_rows=prior+selected_rows
-        rows=[dict(time=int(r.timestamp.timestamp()),open=float(r.open),high=float(r.high),
-              low=float(r.low),close=float(r.close)) for r in all_rows]
-        if not selected_rows or len(rows)<WARMUP+2:
-            return JsonResponse({"error":f"Insufficient historical {timeframe} data: need at least 130 candles including warmup."},status=422)
-        rows, quality = _clean_m15_rows(rows, 300 if timeframe=="M5" else 900)
-        if len(rows)<WARMUP+2 or not any(start_dt.timestamp()<=row["time"]<end_dt.timestamp() for row in rows):
-            return JsonResponse({"error":f"Insufficient valid grid-aligned {timeframe} history after excluding invalid candles.",
-                "data_quality":quality},status=422)
+        derivation = None
+        if timeframe == "M5":
+            # Always use the same source policy for both M5 variants and periods.
+            scope = dict(source=data["source"], symbol=data["symbol"], timeframe="M1")
+            selected = MarketBar.objects.filter(**scope, timestamp__gte=start_dt,
+                                               timestamp__lt=end_dt).order_by("timestamp")
+            if selected.count() > (max_candles-256)*5:
+                return JsonResponse({"error":"M1 input exceeds M5 research limit; shorten the range."}, status=422)
+            prior = list(MarketBar.objects.filter(**scope, timestamp__lt=start_dt).order_by("-timestamp")[:1280])
+            raw = [dict(time=b.timestamp.timestamp(), open=float(b.open), high=float(b.high),
+                        low=float(b.low), close=float(b.close)) for b in prior[::-1]+list(selected)]
+            # Preserve fractional timestamps until validation, then use integer seconds.
+            rows, derivation = _derive_m5_rows(raw)
+            for row in rows:
+                row["time"] = int(row["time"])
+            rows, quality = _clean_m15_rows(rows, 300)
+            quality["derivation"] = derivation
+            if len(rows)<WARMUP+2 or not any(start_dt.timestamp()<=row["time"]<end_dt.timestamp() for row in rows):
+                return JsonResponse({"error":"Insufficient complete M5 groups derived from same-source M1 history.",
+                                     "data_quality":quality}, status=422)
+        else:
+            scope=dict(source=data["source"],symbol=data["symbol"],timeframe=timeframe)
+            selected=MarketBar.objects.filter(**scope,timestamp__gte=start_dt,timestamp__lt=end_dt).order_by("timestamp")
+            count=selected.count()
+            if count+256>max_candles:
+                return JsonResponse({"error":f"Selected range contains {count} {timeframe} candles; this interactive research runner allows at most {max_candles-256} plus warmup. Choose a shorter range. For longer ranges, import complete historical data and use segmented batch processing."},status=422)
+            prior=list(MarketBar.objects.filter(**scope,timestamp__lt=start_dt).order_by("-timestamp")[:256])
+            prior.reverse()
+            selected_rows=list(selected)
+            all_rows=prior+selected_rows
+            rows=[dict(time=int(r.timestamp.timestamp()),open=float(r.open),high=float(r.high),
+                  low=float(r.low),close=float(r.close)) for r in all_rows]
+            if not selected_rows or len(rows)<WARMUP+2:
+                return JsonResponse({"error":f"Insufficient historical {timeframe} data: need at least 130 candles including warmup."},status=422)
+            rows, quality = _clean_m15_rows(rows, 300 if timeframe=="M5" else 900)
+            if len(rows)<WARMUP+2 or not any(start_dt.timestamp()<=row["time"]<end_dt.timestamp() for row in rows):
+                return JsonResponse({"error":f"Insufficient valid grid-aligned {timeframe} history after excluding invalid candles.",
+                    "data_quality":quality},status=422)
         excluded_count=sum(quality["excluded"].values())
         excluded_fraction=excluded_count/max(1,quality["input_candles"])
         quality["excluded_fraction"]=round(excluded_fraction,5)
