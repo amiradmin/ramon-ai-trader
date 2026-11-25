@@ -112,10 +112,15 @@ class LiveStrategySettingsTests(TestCase):
         self.client.force_login(self.user)
         endpoint = "/api/ea/v1/dashboard/live-scalper-risk"
         with patch("ea_bridge.live_strategy_settings.real_cent_scope", return_value=(True, "OK")):
+            # The configured scalper ceiling is 5.000%; shared exposure
+            # is separately enforced by the execution engine.
+            original_risk = scalp.risk_percent
             over = self.client.post(endpoint, json.dumps({
-                "scope": self.scope, "risk_percent": "0.200"
+                "scope": self.scope, "risk_percent": "5.001"
             }), content_type="application/json")
             self.assertEqual(over.status_code, 400)
+            scalp.refresh_from_db()
+            self.assertEqual(scalp.risk_percent, original_risk)
             good = self.client.post(endpoint, json.dumps({
                 "scope": self.scope, "risk_percent": "0.075"
             }), content_type="application/json")
