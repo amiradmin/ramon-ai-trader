@@ -55,6 +55,20 @@ for _group, _fields in _EXTRA_FIELDS.items():
         LABELS[_field] = THRESHOLDS[_group][_field]["label"]
 
 
+TREND_FIELDS = ("min_impulse_atr", "min_retracement", "max_retracement",
+                "zone_tolerance_atr", "max_bars_since_pullback_low", "support_tolerance_atr")
+for _field in TREND_FIELDS:
+    EDITABLE[_field] = ("opportunities", _field)
+    LABELS[_field] = THRESHOLDS["opportunities"][_field]["label"]
+LABELS["min_retracement"] += " (fraction, 0.20 = 20%)"
+LABELS["max_retracement"] += " (fraction, 0.82 = 82%)"
+
+
+def editable_for(setup):
+    return {k: v for k, v in EDITABLE.items()
+            if k not in TREND_FIELDS or setup == "TREND_PULLBACK"}
+
+
 def live_risk_ceiling(setup, base):
     """Only TREND_PULLBACK may explicitly opt into the higher live ceiling."""
     cap = 1.5 if setup == "TREND_PULLBACK" else min(0.5, float(base["risk_management"]["maximum_risk_percent"]))
@@ -82,7 +96,7 @@ def active_settings(setup, scope):
     data = row.values if row and isinstance(row.values, dict) else {}
     if data.get("scope") != scope_for(control):
         return {}
-    return {k: v for k, v in data.get("overrides", {}).items() if k in EDITABLE}
+    return {k: v for k, v in data.get("overrides", {}).items() if k in editable_for(setup)}
 
 
 def _effective_base():
@@ -121,11 +135,11 @@ def live_strategy_settings(request):
                 return JsonResponse({"ok": False, "error": "Account identity changed: reload page"}, status=409)
             proposed = body.get("overrides")
             legacy_keys = {"minimum_score", "minimum_quality", "maximum_spread_points", "maximum_risk_percent"}
-            if not isinstance(proposed, dict) or not legacy_keys <= set(proposed) <= set(EDITABLE):
+            if not isinstance(proposed, dict) or not legacy_keys <= set(proposed) <= set(editable_for(setup)):
                 raise ValueError("Provide the supported strategy settings")
             proposed = {**active_settings(setup, scope_for(control)), **proposed}
             values = {}
-            for key, (group, field) in EDITABLE.items():
+            for key, (group, field) in editable_for(setup).items():
                 raw = proposed.get(key, base[group][field])
                 if isinstance(raw, bool):
                     raise ValueError(key + " must be a number")
@@ -133,7 +147,17 @@ def live_strategy_settings(request):
                 spec = THRESHOLDS[group][field]
                 if not math.isfinite(value) or not spec["min"] <= value <= spec["max"]:
                     raise ValueError(key + " outside allowed range")
-                values[key] = value
+                if key == "max_bars_since_pullback_low" and not value.is_integer():
+                    raise ValueError(key + " must be a whole number")
+                # Legacy clients do not pin newly introduced shared defaults.
+                if key in TREND_FIELDS and key not in proposed:
+                    continue
+                values[key] = int(value) if key == "max_bars_since_pullback_low" else value
+            if setup == "TREND_PULLBACK" and (
+                values.get("min_retracement", base["opportunities"]["min_retracement"]) >=
+                values.get("max_retracement", base["opportunities"]["max_retracement"])
+            ):
+                raise ValueError("Minimum retracement must be below maximum retracement")
             if values["min_stop_atr"] >= values["max_stop_atr"]:
                 raise ValueError("Minimum stop distance must be below maximum stop distance")
             if values["target_reward_risk"] < values["min_reward_risk"]:
@@ -174,7 +198,8 @@ def live_strategy_settings(request):
         result.append({
             "setup": setup, "description": description, "scope": scope,
             "overrides": {key: overrides.get(key, base[group][field])
-                          for key, (group, field) in EDITABLE.items()},
+                          for key, (group, field) in editable_for(setup).items()},
+            "latest_evaluation": control.latest if setup == "TREND_PULLBACK" and scope_valid and control and scope == [feed.instance_id, feed.account_login, feed.server_name, feed.symbol] else None,
             "updated_at": row.updated_at.isoformat() if row and overrides else None,
             "maximum_risk_percent_ceiling": live_risk_ceiling(setup, base),
             "ready": bool(scope_valid and control and scope == [
@@ -191,6 +216,7 @@ def live_strategy_settings(request):
             "symbol_spec": payload.get("symbol_info", {}),
         },
         "fields": [{"key": key, "label": LABELS[key],
+                    "strategy": "TREND_PULLBACK" if key in TREND_FIELDS else None,
                     "min": THRESHOLDS[group][field]["min"],
                     "max": live_risk_ceiling("TREND_PULLBACK", base)
                            if key == "maximum_risk_percent" else min(2.0, float(base["risk_management"]["max_total_risk_percent"]))
