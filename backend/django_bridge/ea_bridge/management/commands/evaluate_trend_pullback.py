@@ -23,6 +23,18 @@ VARIANTS = {"baseline": BASE, **{
 }}
 
 
+V2 = {"baseline": {}, "utc_00_06": {"entry_hours": [0,6]},
+      "utc_06_12": {"entry_hours": [6,12]}, "utc_12_18": {"entry_hours": [12,18]},
+      "utc_18_24": {"entry_hours": [18,24]}, "h1_alignment": {"h1_confirmation": True},
+      **{f"reward_{r}": {"target_reward_risk": r} for r in (1.5,2.0,2.5)},
+      **{f"breakeven_{r}": {"breakeven_r": r} for r in (0.75,1.0)},
+      **{f"trailing_{r}": {"trailing_atr": r} for r in (1.0,1.5)},
+      **{f"time_{n}": {"time_exit": n} for n in (4,8,16,24)},
+      **{f"zone_{z}": {"opportunity": {"zone_tolerance_atr": z}} for z in (0.6,0.8,1.0)},
+      "morning_deep": {"entry_hours": [6,12], "opportunity": {"max_retracement": 0.85}},
+      "morning_h1": {"entry_hours": [6,12], "h1_confirmation": True}}
+
+
 class Command(BaseCommand):
     help = "Compare Trend Pullback candidates on disjoint chronological periods; descriptive only."
 
@@ -32,6 +44,7 @@ class Command(BaseCommand):
         for name in ("balance", "spread-points", "point", "tick-size", "tick-value",
                      "volume-min", "volume-step", "volume-max", "slippage-points", "commission-per-lot"):
             parser.add_argument("--" + name, required=True, type=float)
+        parser.add_argument("--version", choices=("1","2"), default="1")
         parser.add_argument("--minimum-trades", type=int, default=30)
         parser.add_argument("--max-candles", type=int, default=20000)
 
@@ -50,6 +63,9 @@ class Command(BaseCommand):
         except (ValueError, KeyError) as exc:
             raise CommandError(str(exc)) from exc
 
+        v2 = options["version"] == "2"
+        variants = V2 if v2 else VARIANTS
+
         def evaluate(params, first, last, *, phase, name, index, total):
             last_percent = -1
             self.stderr.write(f"[{phase} {index}/{total}] {name}: starting")
@@ -61,8 +77,14 @@ class Command(BaseCommand):
                     self.stderr.flush()
                     last_percent = percent
 
-            response = run_backtest_data(dict(data, start=first, end=last,
-                opportunity_overrides=params), max_candles=options["max_candles"], progress=progress)
+            overrides = dict(data, start=first, end=last)
+            if v2:
+                overrides["opportunity_overrides"] = {**BASE, **params.get("opportunity", {})}
+                overrides["trend_research"] = {"version": 2, **params}
+                overrides["target_reward_risk"] = params.get("target_reward_risk", data["target_reward_risk"])
+            else:
+                overrides["opportunity_overrides"] = params
+            response = run_backtest_data(overrides, max_candles=options["max_candles"], progress=progress)
             result = json.loads(response.content)
             if response.status_code != 200:
                 raise CommandError(result.get("error", "Research failed"))
@@ -72,8 +94,8 @@ class Command(BaseCommand):
                         assumptions=result["assumptions"], limitations=result["limitations"])
 
         development = {name: evaluate(params, start, split, phase="development", name=name,
-                                      index=index, total=len(VARIANTS))
-                       for index, (name, params) in enumerate(VARIANTS.items(), 1)}
+                                      index=index, total=len(variants))
+                       for index, (name, params) in enumerate(variants.items(), 1)}
         minimum = options["minimum_trades"]
         eligible = [name for name, report in development.items()
                     if report["metrics"]["closed_trades"] >= minimum
@@ -84,18 +106,18 @@ class Command(BaseCommand):
             development[name]["metrics"]["net_gain"] / max(1, development[name]["metrics"]["max_drawdown_pct"]),
             name)) if eligible else None
         selected = list(dict.fromkeys(["baseline"] + ([winner] if winner else [])))
-        validation = {name: evaluate(VARIANTS[name], split + timedelta(days=1), end,
+        validation = {name: evaluate(variants[name], split + timedelta(days=1), end,
                                     phase="validation", name=name, index=index, total=len(selected))
                       for index, name in enumerate(selected, 1)}
         self.stdout.write(json.dumps(dict(mode="ISOLATED_RESEARCH_DESCRIPTIVE_ONLY",
-            live_promotion=False, variants=VARIANTS, development=development,
+            live_promotion=False, research_version=options["version"], variants=variants, development=development,
             validation=validation, development_candidate=winner, minimum_trades=minimum,
             windows=dict(development=[str(start), str(split)],
                          validation=[str(split + timedelta(days=1)), str(end)]),
             limitations="Standard research risk capped at 0.5%; not live 1.5% parity. "
                         "Independent starting balance per period, fixed costs, OHLC stop-first approximation, "
                         "closed-trade drawdown only; no live settings or orders changed. "
-                        "Validation results are descriptive, not deployment authorization."),
+                        "Validation results are descriptive, not deployment authorization. V2 hypotheses were informed by V1, including previously viewed 2026 baseline results; fresh forward data is required. V2 H1 uses completed M15 groups, stops update at close for next bar, and time exits use modeled close."),
             indent=2))
         self.stderr.write("[research] 100% complete; JSON report written.")
         self.stderr.flush()

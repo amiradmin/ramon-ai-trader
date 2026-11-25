@@ -219,6 +219,12 @@ def _simulate(data, rows, progress=None):
             minimum_entry_quality=data.get("minimum_entry_quality"),
             opportunity_overrides=data.get("opportunity_overrides"),
         ) for setup in setups}
+    research = data.get("trend_research", {})
+    if research and setups != ["TREND_PULLBACK"]:
+        raise ValueError("Trend research options require Trend Pullback alone")
+    hours = research.get("entry_hours")
+    h1_closes = []
+    h1_group = []
     book={name:{"open":None,"trades":[],"equity":data["balance"],"peak":data["balance"],"drawdown":0,"signals":0,
                 "evaluations":0,"rejections":{},"rejection_examples":{},"rejection_details":{}}
           for name in setups}
@@ -242,16 +248,25 @@ def _simulate(data, rows, progress=None):
         previous=rows[idx-1]
         gap_before_bar=bar["time"]-previous["time"]>900
         within=first_ts<=bar["time"]<end_ts
+        # Only complete, contiguous UTC H1 groups; never use a future M15 bar.
+        if research.get("h1_confirmation"):
+            h1_group.append(bar)
+            if bar["time"] % 3600 == 2700:
+                if [x["time"] for x in h1_group[-4:]] == [bar["time"]-2700+i*900 for i in range(4)]:
+                    h1_closes.append(bar["close"])
+                h1_group = []
         # Fill pending orders at next candle OPEN (never at a signal candle close).
         for name,state in book.items():
             filled_this_bar=False
             pos=state.get("pending")
             if pos is not None:
                 state["pending"]=None
-                if within and state["open"] is None:
+                if within and state["open"] is None and (not research or not gap_before_bar):
                     entry=bar["open"]+(spread+slippage if pos["side"]=="BUY" else -slippage)
                     if (pos["side"]=="BUY" and pos["stop"]<entry<pos["target"]) or (pos["side"]=="SELL" and pos["target"]<entry<pos["stop"]):
                         pos["entry"]=entry;pos["opened_at"]=bar["time"]
+                        pos["initial_stop"]=pos["stop"]
+                        pos["held_bars"]=0
                         state["open"]=pos
                         filled_this_bar=True
                         pos["gaps_crossed"]=int(gap_before_bar)
@@ -264,8 +279,33 @@ def _simulate(data, rows, progress=None):
             # Bid-chart approximation; conservative SL first if both hit same bar.
             stop_hit=bar["low"]<=pos["stop"] if pos["side"]=="BUY" else bar["high"]+spread>=pos["stop"]
             target_hit=bar["high"]>=pos["target"] if pos["side"]=="BUY" else bar["low"]+spread<=pos["target"]
-            if not (stop_hit or target_hit):continue
-            level=pos["stop"] if stop_hit else pos["target"]
+            pos["held_bars"] += 1
+            timed = bool(research.get("time_exit") and pos["held_bars"] >= research["time_exit"])
+            if not (stop_hit or target_hit or timed):
+                # Stop changes take effect on the NEXT bar, not retrospectively.
+                direction = 1 if pos["side"] == "BUY" else -1
+                mark = bar["close"] if direction == 1 else bar["close"] + spread
+                initial_r = abs(pos["entry"] - pos["initial_stop"])
+                trigger = research.get("breakeven_r")
+                proposed = pos["stop"]
+                if trigger and direction * (mark-pos["entry"]) >= trigger * initial_r:
+                    proposed = pos["entry"]
+                trailing = research.get("trailing_atr")
+                if trailing and direction * (mark-pos["entry"]) >= initial_r:
+                    try:
+                        trail_atr, _, _ = _indicators(rows[max(0,idx-255):idx+1])
+                        if math.isfinite(trail_atr) and trail_atr > 0:
+                            candidate = mark-direction*trailing*trail_atr
+                            proposed = max(proposed,candidate) if direction == 1 else min(proposed,candidate)
+                    except (ValueError, ZeroDivisionError):
+                        pass
+                pos["stop"] = max(pos["stop"],proposed) if direction == 1 else min(pos["stop"],proposed)
+                continue
+            level=pos["stop"] if stop_hit else pos["target"] if target_hit else (
+                bar["close"] if pos["side"]=="BUY" else bar["close"]+spread)
+            if research and stop_hit:
+                opening_quote = bar["open"] if pos["side"]=="BUY" else bar["open"]+spread
+                level = min(level,opening_quote) if pos["side"]=="BUY" else max(level,opening_quote)
             exit_price=level+(-slippage if pos["side"]=="BUY" else slippage)
             direction=1 if pos["side"]=="BUY" else -1
             gross_pnl=(exit_price-pos["entry"])*direction*value_per_price*pos["volume"]
@@ -283,7 +323,7 @@ def _simulate(data, rows, progress=None):
                "exit_slippage_points":data.get("slippage_points",0),
                "signal_regime":pos.get("signal_regime"),"signal_adx":pos.get("signal_adx"),
                "gaps_crossed":pos.get("gaps_crossed",0),
-               "reason":"STOP" if stop_hit else "TARGET"})
+               "reason":"STOP" if stop_hit else "TARGET" if target_hit else "TIME_EXIT"})
             state["open"]=None
         # Don't evaluate the final candle: an order requires a next candle to fill.
         if idx==len(rows)-1 or not within:continue
@@ -295,6 +335,9 @@ def _simulate(data, rows, progress=None):
         close=bar["close"]
         for name,state in book.items():
             if state["open"] is not None or state.get("pending") is not None:continue
+            if hours and not hours[0] <= ((bar["time"]+900)%86400)//3600 < hours[1]:
+                rejected(state,"RESEARCH","OUTSIDE_ENTRY_WINDOW",bar["time"])
+                continue
             pipeline=pipelines[name]
             market=dict(symbol=data["symbol"],timeframe="M15",bars=[
                 dict(time=b["time"],open=b["open"],high=b["high"],low=b["low"],close=b["close"],closed=True)
@@ -332,6 +375,14 @@ def _simulate(data, rows, progress=None):
                 else:
                     rejected(state,"EVALUATION",result.get("reason") or "NO_APPROVED_SIGNAL",bar["time"])
                 continue
+            if research.get("h1_confirmation"):
+                if len(h1_closes)<50:
+                    rejected(state,"RESEARCH","H1_WARMUP",bar["time"])
+                    continue
+                hfast,hslow=_ema(h1_closes[-80:],20),_ema(h1_closes[-150:],50)
+                if not ((result["action"]=="BUY" and hfast>hslow) or (result["action"]=="SELL" and hfast<hslow)):
+                    rejected(state,"RESEARCH","H1_DIRECTION_MISMATCH",bar["time"])
+                    continue
             risk=result["stages"]["risk_management"]
             stop=risk.get("stop_price");target=risk.get("target_price")
             if target is None:
