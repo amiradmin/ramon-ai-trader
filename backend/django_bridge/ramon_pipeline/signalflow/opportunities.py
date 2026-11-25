@@ -264,7 +264,7 @@ def _time_out(value: float) -> int | float:
     return int(value) if float(value).is_integer() else value
 
 
-def _parse_bars(raw: Any, config: OpportunityConfig) -> _Bars:
+def _parse_bars(raw: Any, config: OpportunityConfig, *, bar_seconds: int | None = None) -> _Bars:
     if isinstance(raw, (str, bytes)) or not isinstance(raw, Sequence):
         raise InvalidMarketData("INVALID_MARKET_DATA", "bars must be a list of candle objects")
     if len(raw) < config.min_bars:
@@ -299,19 +299,20 @@ def _parse_bars(raw: Any, config: OpportunityConfig) -> _Bars:
         low.append(l)
         close.append(c)
     gaps = [b - a for a, b in zip(times, times[1:])]
-    interval = median(gaps)
+    interval = bar_seconds if bar_seconds is not None else median(gaps)
     recent_start = max(0, len(gaps) - config.gap_window)
     recent = gaps[recent_start:]
     if config.session_hours is not None:
         session_gaps = [
-            _expected_session_bars_between(times[index], times[index + 1], config)
+            _expected_session_bars_between(times[index], times[index + 1], config,
+                                           bar_seconds=bar_seconds or 900)
             for index in range(recent_start, len(times) - 1)
         ]
         worst_missing = max(session_gaps, default=0)
         if worst_missing > config.max_gap_intervals:
             raise InvalidMarketData(
                 "DATA_GAP_IN_RECENT_BARS",
-                f"{worst_missing} expected M15 bars are missing during broker trading sessions "
+                f"{worst_missing} expected {'M5' if bar_seconds == 300 else 'M15'} bars are missing during broker trading sessions "
                 f"in the last {len(recent)} intervals",
             )
     elif recent and max(recent) > config.max_gap_intervals * interval:
@@ -1025,12 +1026,12 @@ class OpportunityDetector:
                         detail=f"{symbol} does not start with any of {', '.join(config.symbol_prefixes)}")
 
         try:
-            bars = _parse_bars(market["bars"], config)
+            bars = _parse_bars(market["bars"], config, bar_seconds=300 if timeframe == "M5" else None)
         except InvalidMarketData as exc:
             _check(checks, "data_valid", False, exc.detail)
             return done(REJECTED, exc.reason, detail=exc.detail)
-        if timeframe == "M15" and any(b-a < 900 for a, b in zip(bars.times, bars.times[1:])):
-            detail = "M15 candles must be at least 900 seconds apart; shifted duplicates are not independent bars"
+        if timeframe in ("M15", "M5") and any(b-a < (300 if timeframe == "M5" else 900) for a, b in zip(bars.times, bars.times[1:])):
+            detail = f"{timeframe} candles must be at least {300 if timeframe == 'M5' else 900} seconds apart; shifted duplicates are not independent bars"
             _check(checks, "data_valid", False, detail)
             return done(REJECTED, "INVALID_CANDLE_CADENCE", detail=detail)
         _check(checks, "data_valid", True, f"{len(bars.close)} completed bars", metrics={"value": len(bars.close), "threshold": config.min_bars, "factor": "completed bars"})
