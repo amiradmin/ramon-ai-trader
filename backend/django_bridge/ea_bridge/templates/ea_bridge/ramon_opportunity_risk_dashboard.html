@@ -27,7 +27,7 @@
       <a class="btn" style="display:inline-block;text-decoration:none" href="{{ worker.url }}">Open strategy ↗</a>
       {% if worker.setup == "TREND_PULLBACK" %}
       <a class="btn" style="display:inline-block;text-decoration:none;margin-top:6px" href="{% url 'ramon-trend-pullback-diagnostic-report' %}">Download diagnostic report ↓</a>
-      <button class="btn" id="copyTrendPullbackParameters" type="button" style="margin-top:6px" data-report-url="{% url 'ramon-trend-pullback-diagnostic-report' %}">Copy All Parameters</button>
+      <button class="btn" id="copyTrendPullbackParameters" type="button" style="margin-top:6px">Copy All Parameters</button>
       <p class="small" id="copyTrendPullbackStatus" role="status" aria-live="polite"></p>
       {% endif %}
     </article>
@@ -212,26 +212,17 @@ if (trendCopyButton) trendCopyButton.addEventListener("click", async () => {
   trendCopyButton.disabled = true;
   status.textContent = "Preparing parameters…";
   try {
-    const response = await fetch(trendCopyButton.dataset.reportUrl, {cache:"no-store", credentials:"same-origin"});
-    if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) {
-      throw new Error("Diagnostic report unavailable; sign in as staff and retry.");
-    }
-    const report = await response.json();
-    if (report.strategy !== "TREND_PULLBACK" || !report.configured_thresholds) {
-      throw new Error("Live strategy parameters unavailable.");
-    }
     const configResponse = await fetch("/api/ea/v1/dashboard/live-strategy-settings", {cache:"no-store", credentials:"same-origin"});
     if (!configResponse.ok || !configResponse.headers.get("content-type")?.includes("application/json")) {
-      throw new Error("Live configuration unavailable.");
+      throw new Error(`Live configuration unavailable (HTTP ${configResponse.status}); sign in as staff on this dashboard and retry.`);
     }
     const config = await configResponse.json();
     const selected = config.strategies?.find(item => item.setup === "TREND_PULLBACK");
     if (!selected || !Array.isArray(config.fields) || !config.fields.length || !selected.overrides) {
       throw new Error("Trend Pullback configuration unavailable.");
     }
-    const scope = report.scope;
-    if (!scope || JSON.stringify(selected.scope) !== JSON.stringify([scope.source, scope.account_login, scope.server_name, scope.symbol])) {
-      throw new Error("Strategy scope changed; retry.");
+    if (!selected.scope || selected.scope[3] !== config.broker?.symbol) {
+      throw new Error("Live strategy scope unavailable or mismatched.");
     }
     const broker = config.broker || {}, account = broker.account || {}, spec = broker.symbol_spec || {};
     const live_configuration = {
@@ -256,15 +247,10 @@ if (trendCopyButton) trendCopyButton.addEventListener("click", async () => {
       }]))
     };
     const text = JSON.stringify({
-      strategy: report.strategy, generated_at: report.generated_at,
+      strategy: selected.setup, generated_at: new Date().toISOString(),
       live_configuration,
-      symbol: report.scope?.symbol, readiness: report.readiness,
-      flags: report.flags, control_scope_matches: report.control_scope_matches,
-      automatic: report.control?.automatic, state: report.control?.state,
-      saved_overrides: report.saved_overrides,
-      configured_thresholds: report.configured_thresholds,
-      risk_ceiling_percent: report.risk_ceiling_percent,
-      latest_evaluation: report.latest_evaluations?.[0] ?? null
+      configuration_source: "live-strategy-settings",
+      strategy_status: $("strategy-trend-pullback")?.textContent?.trim() ?? null
     }, null, 2);
     let copied = false;
     if (navigator.clipboard && window.isSecureContext) {
