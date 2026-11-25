@@ -14,6 +14,7 @@ from django.views.decorators.http import require_GET
 from django.test.utils import override_settings
 
 from .models import MarketBar
+from .missed_opportunities import audit_rejection, summarize_audit
 from .strategy_registry import STRATEGIES
 from .decision import _build_pipeline, _ema
 from ramon_pipeline.signalflow.scalping import ScalpCosts, replay_scalper, valid_bar
@@ -232,6 +233,8 @@ def _simulate(data, rows, progress=None):
     if research and setups != ["TREND_PULLBACK"]:
         raise ValueError("Trend research options require Trend Pullback alone")
     hours = research.get("entry_hours")
+    audit_enabled = research.get("missed_opportunity_audit", False)
+    audit_records = {name: [] for name in setups}
     h1_closes = []
     h1_group = []
     book={name:{"open":None,"trades":[],"equity":data["balance"],"peak":data["balance"],"drawdown":0,"signals":0,
@@ -371,6 +374,11 @@ def _simulate(data, rows, progress=None):
                 rejected(state,"EVALUATION",type(exc).__name__,bar["time"])
                 continue
             if not result.get("approved") or result.get("action") not in ("BUY","SELL"):
+                if audit_enabled:
+                    record = audit_rejection(result, market, rows[idx+1:idx+33],
+                                             slippage_points=data.get("slippage_points", 0))
+                    if record is not None:
+                        audit_records[name].append(record)
                 stages=result.get("stages") or {}
                 rejection_stage=result.get("rejected_by")
                 if rejection_stage not in ("opportunities","entry_timing","risk_management"):
@@ -430,6 +438,8 @@ def _simulate(data, rows, progress=None):
                 detail=state["rejection_details"].get(key))
               for key,count in sorted(state["rejections"].items(),key=lambda item:(-item[1],item[0]))[:25]],
            rejection_total=sum(state["rejections"].values())))
+        if audit_enabled:
+            report[-1]["missed_opportunity_audit"] = summarize_audit(audit_records[name])
     return report
 
 def _scalp_backtest_data(data, progress=None):
