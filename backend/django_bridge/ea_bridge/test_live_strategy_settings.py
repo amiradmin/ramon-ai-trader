@@ -114,6 +114,7 @@ class LiveStrategySettingsTests(TestCase):
         with patch("ea_bridge.live_strategy_settings.real_cent_scope", return_value=(True, "OK")):
             # The configured scalper ceiling is 5.000%; shared exposure
             # is separately enforced by the execution engine.
+            scalp.refresh_from_db()
             original_risk = scalp.risk_percent
             over = self.client.post(endpoint, json.dumps({
                 "scope": self.scope, "risk_percent": "5.001"
