@@ -47,6 +47,27 @@ def _session_open_range(times: Sequence[float], highs: Sequence[float], lows: Se
     return None
 
 
+def exhaustion_diagnostics(highs, lows, closes, atr_values, rsi_values,
+                           swing_highs, swing_lows, cfg):
+    """Read-only predicate evidence for the existing same-bar detector."""
+    t = len(closes)-1
+    lookback = int(cfg["extension_lookback_bars"])
+    if t < lookback or not math.isfinite(atr_values[t]) or atr_values[t] <= 0 or not math.isfinite(rsi_values[t]):
+        return {"ready": False}
+    atr = atr_values[t]
+    extension = (closes[t]-closes[t-lookback])/atr
+    extreme = float(cfg["rsi_extreme"])
+    threshold = float(cfg["minimum_extension_atr"])
+    lower = [i for i in swing_lows if i < t]
+    upper = [i for i in swing_highs if i < t]
+    return {"ready": True, "extension_atr": extension, "rsi": rsi_values[t],
+            "minimum_extension_atr": threshold, "rsi_extreme": extreme,
+            "sell": {"extension": extension >= threshold, "rsi": rsi_values[t] >= extreme,
+                     "swing_available": bool(lower), "choch": bool(lower and closes[t] < lows[lower[-1]])},
+            "buy": {"extension": extension <= -threshold, "rsi": rsi_values[t] <= 100-extreme,
+                    "swing_available": bool(upper), "choch": bool(upper and closes[t] > highs[upper[-1]])}}
+
+
 def detect_additional_opportunity(times: Sequence[float], opens: Sequence[float],
         highs: Sequence[float], lows: Sequence[float], closes: Sequence[float],
         atr_values: Sequence[float], adx_values: Sequence[float], rsi_values: Sequence[float],
