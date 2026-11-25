@@ -263,8 +263,8 @@ def _simulate(data, rows, progress=None):
         raise ValueError("Trend research options require Trend Pullback alone")
     confirmations = research.get("confirm_timeframes", [])
     direction_filter = research.get("allowed_side")
-    if (confirmations or direction_filter) and (research.get("version") != 7 or timeframe != "M5"):
-        raise ValueError("Directional filters are restricted to isolated V7 M5 research")
+    if (confirmations or direction_filter) and (research.get("version") not in (7, 8) or timeframe != "M5"):
+        raise ValueError("Directional filters are restricted to isolated V7/V8 M5 research")
     if any(tf not in ("M15", "H1") for tf in confirmations) or direction_filter not in (None, "BUY", "SELL"):
         raise ValueError("Invalid V7 confirmation policy")
     context_intervals = {"M15": 900, "H1": 3600}
