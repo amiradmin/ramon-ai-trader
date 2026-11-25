@@ -66,6 +66,12 @@ class _Invalid(ValueError):
         self.detail = detail
 
 
+def _spread_out_of_range(spread: float, maximum: float) -> bool:
+    """Allow only negligible binary arithmetic noise at the inclusive limit."""
+    return (not math.isfinite(spread) or spread < 0 or
+            (spread > maximum and not math.isclose(spread, maximum, rel_tol=0.0, abs_tol=1e-8)))
+
+
 def _number(value: Any, name: str, reason: str = "INVALID_ENTRY_METRICS") -> float:
     if isinstance(value, bool):
         raise _Invalid(reason, f"{name} must be numeric")
@@ -182,7 +188,7 @@ class EntryTimer:
         if quality < self.minimum_quality or quality > 1.0:
             return self._result(DEFERRED, "ENTRY_QUALITY_TOO_LOW", opportunity=opportunity, **metrics,
                                 detail=f"entry quality {quality:.2f} is outside {self.minimum_quality:.2f}..1.00")
-        if spread < 0 or spread > self.maximum_spread_points:
+        if _spread_out_of_range(spread, self.maximum_spread_points):
             return self._result(DEFERRED, "SPREAD_OUT_OF_RANGE", opportunity=opportunity, **metrics,
                                 detail=f"spread {spread:g} points exceeds the {self.maximum_spread_points:g} point limit")
         return self._result(ACCEPTED, "ENTRY_TIMING_APPROVED", opportunity=opportunity, **metrics,
@@ -231,7 +237,7 @@ class EntryTimer:
         metrics: dict[str, Any] = {"spread_points": spread, "price_checks": "APPLIED" if quote else "SKIPPED_NO_QUOTE"}
         if quote is not None:
             metrics["quote_price"] = entry
-        if spread < 0 or spread > self.maximum_spread_points:
+        if _spread_out_of_range(spread, self.maximum_spread_points):
             check("spread_absolute", False, f"spread {spread:g} points exceeds the {self.maximum_spread_points:g} point limit")
             return self._finish(DEFERRED, "SPREAD_OUT_OF_RANGE", opportunity, checks, metrics,
                                 f"spread {spread:g} points exceeds the {self.maximum_spread_points:g} point limit")
