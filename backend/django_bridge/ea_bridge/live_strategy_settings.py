@@ -252,7 +252,17 @@ def live_scalper_risk(request):
             return JsonResponse({"ok": True, "risk_percent": str(risk)})
         except (ValueError, TypeError, InvalidOperation, json.JSONDecodeError) as exc:
             return JsonResponse({"ok": False, "error": str(exc)}, status=400)
+    payload = feed.payload if feed and isinstance(feed.payload, dict) else {}
+    account = payload.get("account")
+    spec = payload.get("symbol_info")
+    broker = {
+        "fresh": fresh, "symbol": feed.symbol if feed else None,
+        "account": {k: account.get(k) for k in ("balance", "equity", "free_margin", "currency")}
+                   if isinstance(account, dict) else {},
+        "symbol_spec": spec if isinstance(spec, dict) else {},
+    }
     response = JsonResponse({"ok": True, "ready": fresh, "scope": scope,
+                             "broker": broker,
                              "risk_percent": str(control.risk_percent) if control else None,
                              "maximum_risk_percent": "0.150",
                              "fields": field_schema(),
