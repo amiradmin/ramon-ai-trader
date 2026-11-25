@@ -19,6 +19,7 @@ from ramon_pipeline.signalflow.scalping import (
 )
 from .models import EAHeartbeat, MarketBar, ScalpObservation, ScalperControl
 from .scalper_audit import health_skip, provenance, policy_artifact
+from .scalp_policy import validated_policy
 
 
 def candle(bar):
@@ -53,8 +54,15 @@ def record_scalp(feed, *, now=None):
         except (KeyError, TypeError, ValueError, ZeroDivisionError):
             health_skip(feed,'INVALID_COST_OR_CONTRACT',now)
             return 0
+        control = ScalperControl.objects.filter(source=feed.instance_id, account_login=feed.account_login,
+            server_name=feed.server_name, symbol=feed.symbol).first()
+        try:
+            config = validated_policy(control.signal_overrides if control else {})
+        except ValueError:
+            health_skip(feed,'INVALID_SCALP_POLICY',now)
+            return 0
         m1 = list(MarketBar.objects.filter(source=feed.instance_id, symbol=feed.symbol, timeframe='M1',
-            received_at__lte=now, timestamp__lte=now-timedelta(minutes=1)).order_by('-timestamp')[:64])[::-1]
+            received_at__lte=now, timestamp__lte=now-timedelta(minutes=1)).order_by('-timestamp')[:config.m1_window])[::-1]
         if not m1 or not 0 <= (now-m1[-1].timestamp-timedelta(minutes=1)).total_seconds() <= 30:
             health_skip(feed,'M1_STALE_OR_MISSING',now)
             return 0
@@ -64,10 +72,10 @@ def record_scalp(feed, *, now=None):
             return 0
         cutoff = m1[-1].timestamp+timedelta(minutes=1)
         m5 = list(MarketBar.objects.filter(source=feed.instance_id, symbol=feed.symbol, timeframe='M5',
-            timestamp__lte=cutoff-timedelta(minutes=5), received_at__lte=now).order_by('-timestamp')[:32])[::-1]
+            timestamp__lte=cutoff-timedelta(minutes=5), received_at__lte=now).order_by('-timestamp')[:config.m5_window])[::-1]
         inputs = {'M1': [candle(b) for b in m1], 'M5': [candle(b) for b in m5]}
         plan = detect_scalp(inputs['M1'], inputs['M5'], bid=bid, costs=costs, tick_size=tick_size,
-                            stop_level_points=stop_level)
+                            stop_level_points=stop_level, config=config)
         raw_plan = dict(plan)
         active = ScalpObservation.objects.filter(source=feed.instance_id, account_login=feed.account_login,
             server_name=feed.server_name, symbol=feed.symbol, version=VERSION, status='WAITING').exists()
@@ -76,9 +84,9 @@ def record_scalp(feed, *, now=None):
         start = datetime.fromtimestamp((int(now.timestamp())//60+1)*60, utc_timezone.utc)
         artifact = policy_artifact(feed, now)
         ScalpObservation.objects.create(**key, action=plan['action'], reason=plan['reason'],
-            recorded_at=now, evaluation_start=start, evaluation_end=start+timedelta(minutes=5),
+            recorded_at=now, evaluation_start=start, evaluation_end=start+timedelta(minutes=config.max_holding_bars),
             status='WAITING' if plan['action'] in {'BUY','SELL'} else 'NOT_ENTERED',
-            snapshot={'plan': plan, 'raw_signal': raw_plan, 'costs': asdict(costs), 'policy': asdict(ScalpConfig()),
+            snapshot={'plan': plan, 'raw_signal': raw_plan, 'costs': asdict(costs), 'policy': asdict(config),
                 'provenance': provenance(), 'policy_artifact_key': artifact.event_key, 'quote_time': p.get('quote_time'), 'heartbeat_at': feed.last_seen.isoformat(),
                 'input_received_at': {'M1':[b.received_at.isoformat() for b in m1],
                                       'M5':[b.received_at.isoformat() for b in m5]},
@@ -104,7 +112,9 @@ def settle_scalps(*, now=None):
             if row.recorded_at >= row.evaluation_start:
                 row.status = 'SKIPPED'; state['result'] = 'NOT_FORWARD_RECORDED'
             else:
-                while len(bars) < 5:
+                holding = row.snapshot.get('policy', {}).get('max_holding_bars', 5)
+                cost_limit = row.snapshot.get('policy', {}).get('maximum_cost_to_risk', .20)
+                while len(bars) < holding:
                     expected = row.evaluation_start+len(bars)*timedelta(minutes=1)
                     if expected+timedelta(minutes=1) > now:
                         break
@@ -116,7 +126,7 @@ def settle_scalps(*, now=None):
                         break
                     bars.append({**candle(available[0]), 'received_at': available[0].received_at.isoformat(),
                                  'frozen_at': now.isoformat()})
-                    result = resolve_scalp(bars, row.snapshot['plan'], ScalpCosts(**row.snapshot['costs']))
+                    result = resolve_scalp(bars, row.snapshot['plan'], ScalpCosts(**row.snapshot['costs']), max_holding_bars=holding, maximum_cost_to_risk=cost_limit)
                     state.update(result)
                     if result['result'] != 'OPEN':
                         row.status = 'SCORED' if result['result'] in {'STOP','TARGET','TIME'} else 'SKIPPED'

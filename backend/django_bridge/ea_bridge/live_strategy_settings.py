@@ -14,6 +14,8 @@ from django.views.decorators.http import require_http_methods
 
 from .models import DecisionThresholdConfig, StrategyWorkerControl, ScalperControl, EAHeartbeat, EAEvent
 from .account_scope import real_cent_scope
+from .scalp_policy import validated_policy, field_schema
+from dataclasses import asdict
 from .strategy_registry import STRATEGIES
 from .strategy_worker import configured_feed
 from .thresholds import THRESHOLDS, defaults_for
@@ -230,18 +232,21 @@ def live_scalper_risk(request):
                 raise ValueError("Scalper risk must be between 0.010% and 0.150%")
             if risk.as_tuple().exponent < -3:
                 raise ValueError("Maximum three decimal places")
+            proposed = body.get("signal_overrides")
             with transaction.atomic():
                 control = ScalperControl.objects.select_for_update().get(pk=control.pk)
                 if [control.source, control.account_login, control.server_name, control.symbol] != scope:
                     return JsonResponse({"ok": False, "error": "Scalper scope changed"}, status=409)
                 control.risk_percent = risk
-                control.save(update_fields=["risk_percent"])
+                if proposed is not None:
+                    control.signal_overrides = asdict(validated_policy(proposed))
+                control.save(update_fields=["risk_percent", "signal_overrides", "updated_at"])
                 EAEvent.objects.create(
                     instance_id=control.source,
                     event_id="scalp-setting-" + uuid.uuid4().hex,
                     event_type="SCALPER_SETTINGS",
                     payload={"user": request.user.get_username(), "scope": scope,
-                             "risk_percent": str(risk),
+                             "risk_percent": str(risk), "signal_overrides": control.signal_overrides,
                              "note": "Future scalp entries only; no order submitted"},
                 )
             return JsonResponse({"ok": True, "risk_percent": str(risk)})
@@ -249,6 +254,8 @@ def live_scalper_risk(request):
             return JsonResponse({"ok": False, "error": str(exc)}, status=400)
     response = JsonResponse({"ok": True, "ready": fresh, "scope": scope,
                              "risk_percent": str(control.risk_percent) if control else None,
-                             "maximum_risk_percent": "0.150"})
+                             "maximum_risk_percent": "0.150",
+                             "fields": field_schema(),
+                             "signal_overrides": asdict(validated_policy(control.signal_overrides if control else {}))})
     response["Cache-Control"] = "no-store"
     return response

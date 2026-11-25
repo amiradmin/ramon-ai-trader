@@ -467,6 +467,7 @@ class ScalperControl(models.Model):
     symbol = models.CharField(max_length=32)
     automatic = models.BooleanField(default=False)
     risk_percent = models.DecimalField(max_digits=6, decimal_places=3, default='0.100')
+    signal_overrides = models.JSONField(default=dict, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
     class Meta:
         constraints = [models.UniqueConstraint(fields=['source','account_login','server_name','symbol'],

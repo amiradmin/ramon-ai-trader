@@ -25,9 +25,10 @@
   <p class="small" id="liveM15Note">Account identity, spread at execution, lot rules and execution authorization remain broker/server-owned. Portfolio risk here is a strategy-specific ceiling on combined exposure, bounded by the shared account limit (maximum 2%). Fast Scalp uses its own risk policy; select it above.</p>
   <form id="liveScalpForm" hidden style="margin-top:20px;padding-top:15px;border-top:1px solid var(--line,#37465c)">
     <h3 style="margin:0 0 8px;font-size:16px">Fast Scalp · live M1/M5</h3>
-    <p class="small">Independent worker: only the per-entry risk budget is editable here; the engine hard cap is 0.150%. All current scalp entry rules and protective exits remain in force.</p>
+    <p class="small">Independent worker: saved parameters apply to future signals only. The live risk ceiling remains 0.150%; broker and shared account protections remain in force.</p>
     <label>Maximum planned scalp risk (%)<input type="number" required id="liveScalpRisk" min="0.010" max="0.150" step="0.001" style="max-width:240px" disabled></label>
-    <button class="btn" type="submit" id="liveScalpSave" disabled style="margin-top:10px">Save Fast Scalp risk</button>
+    <div id="liveScalpFields" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:12px"></div>
+    <button class="btn" type="submit" id="liveScalpSave" disabled style="margin-top:10px">Save Fast Scalp settings</button>
     <span class="small" id="liveScalpState" role="status" aria-live="polite">Loading scalper scope…</span>
   </form>
 </section>
@@ -125,6 +126,14 @@
       if(!res.ok)throw new Error('HTTP '+res.status);
       const value=await res.json();
       scalpScope=value.scope;
+      const fields=byId('liveScalpFields');fields.replaceChildren();
+      for(const field of value.fields||[]){
+        const label=document.createElement('label');label.textContent=field.label;
+        const input=document.createElement('input');input.type='number';input.name=field.key;
+        input.min=field.min;input.max=field.max;input.step=field.step;input.required=true;
+        input.value=value.signal_overrides[field.key];input.disabled=!value.ready;
+        label.appendChild(input);fields.appendChild(label);
+      }
       byId('liveScalpRisk').value=value.risk_percent||'';
       byId('liveScalpRisk').disabled=!value.ready;
       byId('liveScalpSave').disabled=!value.ready;
@@ -134,7 +143,7 @@
   byId('liveScalpForm').addEventListener('submit',async event=>{
     event.preventDefault();
     if(!scalpScope||byId('liveStrategy').value!=='FAST_SCALP')return;
-    if(!window.confirm('Update the risk budget for future REAL Fast Scalp entries?'))return;
+    if(!window.confirm('Update strategy parameters for future REAL Fast Scalp entries?'))return;
     const token=(document.cookie.match(/(?:^|; )csrftoken=([^;]+)/)||[])[1];
     if(!token){byId('liveScalpState').textContent='CSRF cookie missing; reload after staff login.';return;}
     byId('liveScalpSave').disabled=true;
@@ -142,11 +151,11 @@
       const response=await fetch('/api/ea/v1/dashboard/live-scalper-risk',{
         method:'POST',credentials:'same-origin',
         headers:{'Content-Type':'application/json','X-CSRFToken':decodeURIComponent(token)},
-        body:JSON.stringify({scope:scalpScope,risk_percent:byId('liveScalpRisk').value})
+        body:JSON.stringify({scope:scalpScope,risk_percent:byId('liveScalpRisk').value,signal_overrides:Object.fromEntries([...byId('liveScalpFields').querySelectorAll('input')].map(input=>[input.name,input.value]))})
       });
       const value=await response.json();
       if(!response.ok||!value.ok)throw new Error(value.error||'Not saved');
-      byId('liveScalpState').textContent='Fast Scalp risk saved: '+value.risk_percent+'%';
+      byId('liveScalpState').textContent='Fast Scalp settings saved. Risk: '+value.risk_percent+'%';
     }catch(e){byId('liveScalpState').textContent='Not saved: '+e.message;}
     finally{byId('liveScalpSave').disabled=false;}
   });

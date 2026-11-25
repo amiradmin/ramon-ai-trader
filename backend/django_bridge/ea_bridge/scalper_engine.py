@@ -15,6 +15,8 @@ from django.utils.dateparse import parse_datetime
 from .models import AccountDailyBaseline, DecisionThresholdConfig, EACommand, EAHeartbeat, ScalperControl, ScalpObservation
 from .command_producer import _decimal
 from .account_scope import real_cent_scope
+from .scalp_policy import validated_policy
+from dataclasses import asdict
 
 ENGINE = 'SCALPER'
 MAGIC = 26092213
@@ -149,6 +151,12 @@ def _open_scalp(feed, control, observation, *, now=None, audit_context=None):
             return None,'NO_FRESH_SIGNAL'
         if not 0 <= (now-observation.signal_bar_time-timedelta(minutes=1)).total_seconds() <= 30:
             return None,'SIGNAL_BAR_STALE'
+        try:
+            config = validated_policy(control.signal_overrides)
+        except ValueError:
+            return None,'INVALID_SCALP_POLICY'
+        if observation.snapshot.get('policy', asdict(validated_policy({}))) != asdict(config):
+            return None,'SCALP_POLICY_CHANGED'
         if engine_commands(feed).filter(state__in=UNSETTLED).exists(): return None,'COMMAND_UNSETTLED'
         if not isinstance(feed.payload.get('positions'),list): return None,'POSITIONS_UNAVAILABLE'
         # Unknown/foreign positions may coexist, but their stops must be measurable.
@@ -179,7 +187,7 @@ def _open_scalp(feed, control, observation, *, now=None, audit_context=None):
             if min(distance,reward)<=0 or reward/distance<1: return None,'ENTRY_PLAN_INVALID'
             if min(sign*(exit_quote-stop),sign*(target-exit_quote)) <= stops*point: return None,'BROKER_STOP_DISTANCE'
             costs = (ask-bid)+Decimal('15')*point # assumed 5 each side plus 5 round-trip commission
-            if costs/distance>Decimal('.20'): return None,'COST_LIMIT'
+            if costs/distance>Decimal(str(config.maximum_cost_to_risk)): return None,'COST_LIMIT'
             headroom = balance*cap/100-exposure_money(feed)
             budget = min(balance*risk_percent/100,headroom)
             per_lot = (distance+Decimal('15')*point)/tick*value # adverse allowance plus commission in reservation
@@ -201,6 +209,7 @@ def _open_scalp(feed, control, observation, *, now=None, audit_context=None):
             payload=dict(server_name=feed.server_name,engine=ENGINE,magic=MAGIC,side=observation.action,
                 volume=float(volume),stop_loss=float(stop),take_profit=float(target),
                 reserved_risk_money=float(reserved),scalp_observation_id=observation.pk,
+                max_holding_bars=config.max_holding_bars, scalp_policy=asdict(config),
                 market_snapshot=dict(bid=float(bid),ask=float(ask),point=float(point)),
                 risk_snapshot=dict(balance=str(balance),equity=str(equity),baseline=str(baseline.opening_balance),
                     total_risk_cap_percent=str(cap),daily_loss_cap_percent=str(daily_cap),
@@ -239,8 +248,8 @@ def engine_cycle():
         # Pause stops entries only. Time exits keep managing owned positions.
         for position in feed.payload.get('positions',[]):
             original = owned_position(feed,position)
-            if original and original.completed_at and timezone.now()-original.completed_at>=timedelta(minutes=5):
-                _, reason = close_scalp(feed=feed,ticket=position['ticket'],reason='FIVE_MINUTE_TIME_EXIT')
+            if original and original.completed_at and timezone.now()-original.completed_at>=timedelta(minutes=original.payload.get('max_holding_bars',5)):
+                _, reason = close_scalp(feed=feed,ticket=position['ticket'],reason='FIVE_MINUTE_TIME_EXIT' if original.payload.get('max_holding_bars',5)==5 else 'CONFIGURED_TIME_EXIT')
                 results.append(reason)
         latest = ScalpObservation.objects.filter(source=feed.instance_id,account_login=feed.account_login,
             server_name=feed.server_name,symbol=feed.symbol).order_by('-recorded_at').first()

@@ -116,7 +116,7 @@ def detect_scalp(m1, m5, *, bid, costs, tick_size, stop_level_points=0, config=S
         max_holding_bars=config.max_holding_bars)
 
 
-def resolve_scalp(bars, plan, costs, *, max_holding_bars=5):
+def resolve_scalp(bars, plan, costs, *, max_holding_bars=5, maximum_cost_to_risk=.20):
     """Exact consecutive bid M1 OHLC; ask-side shorts, adverse slips, stop first."""
     if not bars or not continuous(bars, 60) or plan.get('action') not in {'BUY', 'SELL'}:
         return {'result': 'INVALID_DATA'}
@@ -125,7 +125,7 @@ def resolve_scalp(bars, plan, costs, *, max_holding_bars=5):
     entry = bars[0]['open']+(spread if sign > 0 else 0)+sign*slip
     stop, target = plan['stop'], plan['target']
     risk, reward = sign*(entry-stop), sign*(target-entry)
-    if min(risk, reward) <= 0 or reward/risk < 1.0 or costs.total_price/risk > .20:
+    if min(risk, reward) <= 0 or reward/risk < 1.0 or costs.total_price/risk > maximum_cost_to_risk:
         return {'result': 'INVALID_AT_ENTRY'}
     for i, bar in enumerate(bars[:max_holding_bars]):
         opening, low, high = [bar[k]+(spread if sign < 0 else 0) for k in ('open','low','high')]
@@ -168,7 +168,7 @@ def replay_scalper(m1, m5, *, costs, tick_size, stop_level_points=0, score_start
             reasons['OUTCOME_GAP'] += 1
             i += 1
             continue
-        outcome = resolve_scalp(future, plan, costs, max_holding_bars=config.max_holding_bars)
+        outcome = resolve_scalp(future, plan, costs, max_holding_bars=config.max_holding_bars, maximum_cost_to_risk=config.maximum_cost_to_risk)
         if outcome['result'] in {'OPEN','INVALID_DATA','INVALID_AT_ENTRY'}:
             reasons[outcome['result']] += 1
             i += 1
