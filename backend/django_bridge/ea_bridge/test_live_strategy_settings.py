@@ -6,7 +6,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 
 from .decision import _build_pipeline
-from .live_strategy_settings import active_settings, profile_key
+from .live_strategy_settings import active_settings, profile_key, broker_symbol_spec
 from .models import DecisionThresholdConfig, EAHeartbeat, StrategyWorkerControl, ScalperControl
 
 
@@ -152,3 +152,15 @@ class LiveStrategySettingsTests(TestCase):
             self.assertEqual(good.status_code, 200, good.content)
         self.assertEqual(active_settings(self.setup, self.scope)["max_retracement"], 0.81)
         self.assertEqual(active_settings(self.setup, ["other", *self.scope[1:]]), {})
+
+    def test_broker_point_uses_quote_not_tick_size(self):
+        spec = broker_symbol_spec({"symbol_info": {"tick_size": "0.05"},
+                                   "quote": {"point": "0.01"}})
+        self.assertEqual(spec["point"], "0.01")
+        self.assertEqual(spec["point_source"], "quote.point")
+        self.assertEqual(spec["tick_size"], "0.05")
+        self.assertIsNone(broker_symbol_spec({"symbol_info": {"tick_size": 0.01}})["point"])
+        conflict = broker_symbol_spec({"symbol_info": {"point": 0.05},
+                                       "quote": {"point": 0.01}})
+        self.assertIsNone(conflict["point"])
+        self.assertEqual(conflict["point_source"], "CONFLICTING_BROKER_TELEMETRY")
