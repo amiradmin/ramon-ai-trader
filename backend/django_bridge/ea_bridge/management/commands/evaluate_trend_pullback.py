@@ -44,7 +44,7 @@ class Command(BaseCommand):
         for name in ("balance", "spread-points", "point", "tick-size", "tick-value",
                      "volume-min", "volume-step", "volume-max", "slippage-points", "commission-per-lot"):
             parser.add_argument("--" + name, required=True, type=float)
-        parser.add_argument("--version", choices=("1","2"), default="1")
+        parser.add_argument("--research-version", choices=("1","2"), default="1")
         parser.add_argument("--minimum-trades", type=int, default=30)
         parser.add_argument("--max-candles", type=int, default=20000)
 
@@ -63,7 +63,7 @@ class Command(BaseCommand):
         except (ValueError, KeyError) as exc:
             raise CommandError(str(exc)) from exc
 
-        v2 = options["version"] == "2"
+        v2 = options["research_version"] == "2"
         variants = V2 if v2 else VARIANTS
 
         def evaluate(params, first, last, *, phase, name, index, total):
@@ -110,7 +110,7 @@ class Command(BaseCommand):
                                     phase="validation", name=name, index=index, total=len(selected))
                       for index, name in enumerate(selected, 1)}
         self.stdout.write(json.dumps(dict(mode="ISOLATED_RESEARCH_DESCRIPTIVE_ONLY",
-            live_promotion=False, research_version=options["version"], variants=variants, development=development,
+            live_promotion=False, research_version=options["research_version"], variants=variants, development=development,
             validation=validation, development_candidate=winner, minimum_trades=minimum,
             windows=dict(development=[str(start), str(split)],
                          validation=[str(split + timedelta(days=1)), str(end)]),
