@@ -129,3 +129,26 @@ class LiveStrategySettingsTests(TestCase):
         scalp.refresh_from_db()
         self.assertEqual(str(scalp.risk_percent), "0.075")
         self.assertFalse(scalp.automatic)
+
+    def test_trend_fields_are_scoped_and_validated(self):
+        self.client.force_login(self.user)
+        with patch("ea_bridge.live_strategy_settings.configured_feed", return_value=self.feed), \
+             patch("ea_bridge.live_strategy_settings.real_cent_scope", return_value=(True, "OK")):
+            response = self.client.get(self.endpoint)
+            trend = next(s for s in response.json()["strategies"] if s["setup"] == self.setup)
+            other = next(s for s in response.json()["strategies"] if s["setup"] != self.setup)
+            self.assertEqual(trend["overrides"]["max_retracement"], 0.82)
+            self.assertNotIn("max_retracement", other["overrides"])
+            self.payload["overrides"].update(min_retracement=0.6, max_retracement=0.5)
+            bad = self.client.post(self.endpoint, json.dumps(self.payload), content_type="application/json")
+            self.assertEqual(bad.status_code, 400)
+            self.payload["overrides"].update(min_retracement=0.2, max_retracement=0.82,
+                                             max_bars_since_pullback_low=8.5)
+            bad = self.client.post(self.endpoint, json.dumps(self.payload), content_type="application/json")
+            self.assertEqual(bad.status_code, 400)
+            self.assertFalse(DecisionThresholdConfig.objects.filter(profile=profile_key(self.setup)).exists())
+            self.payload["overrides"].update(max_bars_since_pullback_low=8, max_retracement=0.81)
+            good = self.client.post(self.endpoint, json.dumps(self.payload), content_type="application/json")
+            self.assertEqual(good.status_code, 200, good.content)
+        self.assertEqual(active_settings(self.setup, self.scope)["max_retracement"], 0.81)
+        self.assertEqual(active_settings(self.setup, ["other", *self.scope[1:]]), {})
