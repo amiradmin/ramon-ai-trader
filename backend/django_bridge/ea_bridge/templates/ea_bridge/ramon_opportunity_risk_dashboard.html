@@ -25,6 +25,9 @@
       <label class="small" style="display:flex;align-items:center;gap:8px;margin:10px 0"><input type="checkbox" class="entry-toggle" id="entries-{{ worker.slug }}" data-control-url="{{ worker.url }}/entries" aria-label="Enable {{ worker.setup }} new entries" disabled> Enable new entries</label>
       <p class="small" id="entry-message-{{ worker.slug }}" role="status" aria-live="polite"></p>
       <a class="btn" style="display:inline-block;text-decoration:none" href="{{ worker.url }}">Open strategy ↗</a>
+      {% if worker.setup == "TREND_PULLBACK" %}
+      <a class="btn" style="display:inline-block;text-decoration:none;margin-top:6px" href="{% url 'ramon-trend-pullback-diagnostic-report' %}">Download diagnostic report ↓</a>
+      {% endif %}
     </article>
     {% endfor %}
     <article id="strategy-card-fast-scalp" class="card strategy-card"><h3 style="font-size:14px;overflow-wrap:anywhere;margin-top:0">FAST_SCALP</h3><p class="small">Independent M1/M5 fast scalp strategy</p>
