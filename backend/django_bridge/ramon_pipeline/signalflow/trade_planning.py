@@ -191,7 +191,7 @@ def plan_target(opportunity: Mapping[str, Any], risk: dict[str, Any], market: Ma
     else:
         levels = []
         h1_bars, _ = completed_context(market, "H1")
-        for timeframe, bars in (("M15", market["bars"][-80:]), ("H1", h1_bars[-80:])):
+        for timeframe, bars in ((str(market.get("timeframe", "M15")).upper(), market["bars"][-80:]), ("H1", h1_bars[-80:])):
             field = "high" if sign > 0 else "low"
             for i in range(3, len(bars) - 3):
                 level = float(bars[i][field])
