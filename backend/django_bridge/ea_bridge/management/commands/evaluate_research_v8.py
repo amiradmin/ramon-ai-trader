@@ -51,7 +51,7 @@ class Command(BaseCommand):
         for key in ("balance","point","tick-size","tick-value","volume-min",
                     "volume-step","volume-max","slippage-points","commission-per-lot"):
             parser.add_argument("--"+key, required=True, type=float)
-        parser.add_argument("--suite", choices=("v8","all-m15"), default="v8")
+        parser.add_argument("--suite", choices=("v8","all-m15","v9"), default="v8")
         parser.add_argument("--window-days", type=int, default=60)
         parser.add_argument("--max-candles", type=int, default=30000)
         parser.add_argument("--sensitivity", action="store_true")
@@ -60,7 +60,7 @@ class Command(BaseCommand):
     def handle(self, *args, **opts):
         if not 7 <= opts["window_days"] <= 120 or not 130 <= opts["max_candles"] <= 100000 or opts["minimum_trades"] < 1:
             raise CommandError("Invalid window, candle or trade limit")
-        if opts["suite"] == "all-m15" and opts["sensitivity"]:
+        if opts["suite"] in ("all-m15","v9") and opts["sensitivity"]:
             raise CommandError("Sensitivity is currently restricted to V8 Trend Pullback")
         q = QueryDict(mutable=True)
         for k in ("source","symbol","start","end","balance","point","tick_size","tick_value",
@@ -73,7 +73,7 @@ class Command(BaseCommand):
         except (ValueError, KeyError) as exc:
             raise CommandError(str(exc)) from exc
         policies = V8 if opts["suite"] == "v8" else {s: {"timeframe":"M15"} for s in STRATEGIES}
-        costs = scenarios(opts["sensitivity"]) if opts["suite"] == "v8" else [(42,0.5)]
+        costs = scenarios(opts["sensitivity"]) if opts["suite"] == "v8" else [(42,r) for r in (0.5,1.0,1.5)] if opts["suite"] == "v9" else [(42,0.5)]
         reports = []
         for first,last in windows(data["start"], data["end"], opts["window_days"]):
             fingerprints = {}
@@ -86,6 +86,8 @@ class Command(BaseCommand):
                             isolated_timeframe=policy["timeframe"], trend_research={"version":8,**policy})
                     else:
                         overrides["setups"] = [name]
+                        if opts["suite"] == "v9":
+                            overrides.update(isolated_risk_sensitivity=True, all_strategy_risk_research=True)
                     def progress(done,total):
                         if done == total or done % 1000 == 0:
                             self.stderr.write(f"  {done}/{total}")
@@ -105,6 +107,7 @@ class Command(BaseCommand):
                     trades = stats.pop("trades")
                     stats["longest_losing_streak"] = streak(trades)
                     stats["expectancy_per_closed_trade"] = round(stats["net_gain"]/len(trades),4) if trades else None
+                    stats["minimum_volume_rejections"] = sum(x["count"] for x in stats["rejections"] if x["reason"] == "RISK_BUDGET_BELOW_MINIMUM_VOLUME")
                     stats["minimum_trade_count_met"] = len(trades) >= opts["minimum_trades"]
                     reports.append(dict(row,metrics=stats,data_quality=quality,assumptions=result["assumptions"]))
         summaries = []
@@ -115,10 +118,12 @@ class Command(BaseCommand):
                 summaries.append(dict(candidate=name,spread_points=spread,risk_percent=risk,
                     windows=len(group),successful_windows=len(valid),profitable_windows=sum(m["net_gain"]>0 for m in valid),
                     closed_trades=sum(m["closed_trades"] for m in valid),
+                    minimum_volume_rejections=sum(m["minimum_volume_rejections"] for m in valid),
+                    windows_meeting_trade_count=sum(m["minimum_trade_count_met"] for m in valid),
                     summed_independent_window_pnl=round(sum(m["net_gain"] for m in valid),2) if valid else None,
                     worst_window_closed_drawdown_pct=max((m["max_drawdown_pct"] for m in valid),default=None),
                     longest_within_window_losing_streak=max((m["longest_losing_streak"] for m in valid),default=None)))
         self.stdout.write(json.dumps(dict(mode="FROZEN_POLICY_DESCRIPTIVE_ONLY",live_promotion=False,
-            research_version=8,suite=opts["suite"],source=data["source"],symbol=data["symbol"],policies=policies,
+            research_version=9 if opts["suite"] == "v9" else 8,suite=opts["suite"],source=data["source"],symbol=data["symbol"],policies=policies,
             minimum_trades=opts["minimum_trades"],windows=reports,summaries=summaries,
-            limitations="Fixed policies, no fitting or winner selection. Windows reset balances and positions; open positions at boundaries are not included in closed PnL. This is rolling evaluation, not retraining walk-forward or portfolio simulation. Previously examined dates are not fresh holdout. M5 requires same-source M1. Context warmup may be insufficient initially. Fixed costs and OHLC stop-first, closed drawdown only. All-M15 uses standard 0.5% cap and legacy replay fills; V8 uses isolated risk and gap-aware fills. Missing windows are not zero-return windows."),indent=2))
+            limitations="Fixed policies, no fitting or winner selection. Windows reset balances and positions; open positions at boundaries are not included in closed PnL. This is rolling evaluation, not retraining walk-forward or portfolio simulation. Previously examined dates are not fresh holdout. M5 requires same-source M1. Context warmup may be insufficient initially. Fixed costs and OHLC stop-first, closed drawdown only. All-M15 uses standard 0.5% cap; V9 uses isolated risk at 0.5/1/1.5%, both use identical legacy replay fills for comparability. V8 uses isolated risk and gap-aware fills. Missing windows are not zero-return windows."),indent=2))
