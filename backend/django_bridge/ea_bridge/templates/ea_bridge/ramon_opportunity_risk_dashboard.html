@@ -243,7 +243,7 @@ if (trendCopyButton) trendCopyButton.addEventListener("click", async () => {
       lot_step_mt5: spec.volume_step ?? null,
       ready: selected.ready,
       last_saved_at: selected.updated_at,
-      parameters: Object.fromEntries(config.fields.map(field => [field.key, {
+      parameters: Object.fromEntries(config.fields.filter(field => !field.strategy || field.strategy === selected.setup).map(field => [field.key, {
         label: field.label, value: selected.overrides[field.key] ?? null,
         min: field.min, max: field.key === "maximum_risk_percent" ? selected.maximum_risk_percent_ceiling : field.max, step: field.step
       }]))
@@ -252,6 +252,7 @@ if (trendCopyButton) trendCopyButton.addEventListener("click", async () => {
       strategy: selected.setup, generated_at: new Date().toISOString(),
       live_configuration,
       configuration_source: "live-strategy-settings",
+      latest_evaluation: selected.latest_evaluation ?? null,
       strategy_status: $("strategy-trend-pullback")?.textContent?.trim() ?? null
     }, null, 2);
     let copied = false;
