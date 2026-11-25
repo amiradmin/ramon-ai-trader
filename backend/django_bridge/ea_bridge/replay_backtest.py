@@ -98,7 +98,7 @@ def _indicators(history):
     slow=_ema(closes[-150:],50)
     return atr,fast,slow
 
-def _clean_m15_rows(rows):
+def _clean_m15_rows(rows, interval=900):
     """Keep original on-grid bars only: never shift timestamps or invent candles."""
     clean=[]
     offsets={}
@@ -106,7 +106,7 @@ def _clean_m15_rows(rows):
     examples=[]
     for row in rows:
         ts=row["time"]
-        offset=ts % 900
+        offset=ts % interval
         offsets[str(offset)]=offsets.get(str(offset),0)+1
         if offset != 0:
             excluded["off_grid"]+=1
@@ -116,12 +116,12 @@ def _clean_m15_rows(rows):
             excluded["duplicate_slot"]+=1
             if len(examples)<5:examples.append({"reason":"DUPLICATE_SLOT","time":ts})
             continue
-        if clean and ts-clean[-1]["time"]<900:
+        if clean and ts-clean[-1]["time"]<interval:
             excluded["short_interval"]+=1
             if len(examples)<5:examples.append({"reason":"SHORT_INTERVAL","time":ts})
             continue
         clean.append(row)
-    gaps=sum(b["time"]-a["time"]>900 for a,b in zip(clean,clean[1:]))
+    gaps=sum(b["time"]-a["time"]>interval for a,b in zip(clean,clean[1:]))
     digest=hashlib.sha256()
     for row in clean:
         digest.update(("{time}:{open:.8f}:{high:.8f}:{low:.8f}:{close:.8f};".format(
@@ -230,6 +230,13 @@ def _simulate(data, rows, progress=None):
             isolated_risk_sensitivity=data.get("isolated_risk_sensitivity", False),
         ) for setup in setups}
     research = data.get("trend_research", {})
+    timeframe = data.get("isolated_timeframe", "M15")
+    if timeframe not in ("M15", "M5") or (timeframe == "M5" and (setups != ["TREND_PULLBACK"] or not research or research.get("h1_confirmation") or research.get("missed_opportunity_audit"))):
+        raise ValueError("M5 is restricted to isolated Trend Pullback research without H1 or M15 audit")
+    interval = 300 if timeframe == "M5" else 900
+    if timeframe == "M5":
+        for pipeline in pipelines.values():
+            pipeline.opportunities.config = replace(pipeline.opportunities.config, bar_seconds=interval)
     if research and setups != ["TREND_PULLBACK"]:
         raise ValueError("Trend research options require Trend Pullback alone")
     hours = research.get("entry_hours")
@@ -258,7 +265,7 @@ def _simulate(data, rows, progress=None):
             progress(idx, len(rows))
         bar=rows[idx]
         previous=rows[idx-1]
-        gap_before_bar=bar["time"]-previous["time"]>900
+        gap_before_bar=bar["time"]-previous["time"]>interval
         within=first_ts<=bar["time"]<end_ts
         # Only complete, contiguous UTC H1 groups; never use a future M15 bar.
         if research.get("h1_confirmation"):
@@ -347,11 +354,11 @@ def _simulate(data, rows, progress=None):
         close=bar["close"]
         for name,state in book.items():
             if state["open"] is not None or state.get("pending") is not None:continue
-            if hours and not hours[0] <= ((bar["time"]+900)%86400)//3600 < hours[1]:
+            if hours and not hours[0] <= ((bar["time"]+interval)%86400)//3600 < hours[1]:
                 rejected(state,"RESEARCH","OUTSIDE_ENTRY_WINDOW",bar["time"])
                 continue
             pipeline=pipelines[name]
-            market=dict(symbol=data["symbol"],timeframe="M15",bars=[
+            market=dict(symbol=data["symbol"],timeframe=timeframe,decision_time=bar["time"]+interval,bars=[
                 dict(time=b["time"],open=b["open"],high=b["high"],low=b["low"],close=b["close"],closed=True)
                 for b in history],last_bar_closed=True,latest_bar_time=bar["time"],
                 bid=close,ask=close+spread,point=data["point"],
@@ -495,11 +502,14 @@ def run_backtest_data(data, *, max_candles=MAX_TEST_CANDLES, progress=None):
             return _scalp_backtest_data(data,progress=progress)
         start_dt=datetime.combine(data["start"],time.min,tzinfo=timezone.utc)
         end_dt=datetime.combine(data["end"]+timedelta(days=1),time.min,tzinfo=timezone.utc)
-        scope=dict(source=data["source"],symbol=data["symbol"],timeframe="M15")
+        timeframe=data.get("isolated_timeframe","M15")
+        if timeframe not in ("M15","M5"):
+            raise ValueError("Unsupported research timeframe")
+        scope=dict(source=data["source"],symbol=data["symbol"],timeframe=timeframe)
         selected=MarketBar.objects.filter(**scope,timestamp__gte=start_dt,timestamp__lt=end_dt).order_by("timestamp")
         count=selected.count()
         if count+256>max_candles:
-            return JsonResponse({"error":f"Selected range contains {count} M15 candles; this interactive research runner allows at most {max_candles-256} plus warmup. Choose a shorter range. For longer ranges, import complete historical data and use segmented batch processing."},status=422)
+            return JsonResponse({"error":f"Selected range contains {count} {timeframe} candles; this interactive research runner allows at most {max_candles-256} plus warmup. Choose a shorter range. For longer ranges, import complete historical data and use segmented batch processing."},status=422)
         prior=list(MarketBar.objects.filter(**scope,timestamp__lt=start_dt).order_by("-timestamp")[:256])
         prior.reverse()
         selected_rows=list(selected)
@@ -507,10 +517,10 @@ def run_backtest_data(data, *, max_candles=MAX_TEST_CANDLES, progress=None):
         rows=[dict(time=int(r.timestamp.timestamp()),open=float(r.open),high=float(r.high),
               low=float(r.low),close=float(r.close)) for r in all_rows]
         if not selected_rows or len(rows)<WARMUP+2:
-            return JsonResponse({"error":"Insufficient historical M15 data: need at least 130 candles including warmup."},status=422)
-        rows, quality = _clean_m15_rows(rows)
+            return JsonResponse({"error":f"Insufficient historical {timeframe} data: need at least 130 candles including warmup."},status=422)
+        rows, quality = _clean_m15_rows(rows, 300 if timeframe=="M5" else 900)
         if len(rows)<WARMUP+2 or not any(start_dt.timestamp()<=row["time"]<end_dt.timestamp() for row in rows):
-            return JsonResponse({"error":"Insufficient valid grid-aligned M15 history after excluding invalid candles.",
+            return JsonResponse({"error":f"Insufficient valid grid-aligned {timeframe} history after excluding invalid candles.",
                 "data_quality":quality},status=422)
         excluded_count=sum(quality["excluded"].values())
         excluded_fraction=excluded_count/max(1,quality["input_candles"])
@@ -522,7 +532,7 @@ def run_backtest_data(data, *, max_candles=MAX_TEST_CANDLES, progress=None):
         )
         report=_simulate(data,rows,progress=progress)
         return JsonResponse(dict(mode="ISOLATED_STRATEGY_RESEARCH_ESTIMATE",
-             timeframe="M15",symbol=data["symbol"],source=data["source"],
+             timeframe=timeframe,symbol=data["symbol"],source=data["source"],
              start=data["start"].isoformat(),end=data["end"].isoformat(),
              first_bar=datetime.fromtimestamp(rows[0]["time"],tz=timezone.utc).isoformat(),
              last_bar=datetime.fromtimestamp(rows[-1]["time"],tz=timezone.utc).isoformat(),
