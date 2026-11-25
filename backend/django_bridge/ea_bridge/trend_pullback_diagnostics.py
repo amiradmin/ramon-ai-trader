@@ -1,5 +1,6 @@
 """Staff-only, read-only diagnostics for the live Trend Pullback worker."""
 from datetime import timedelta
+from django.db.models.fields.json import KeyTextTransform
 
 from django.conf import settings
 from django.contrib.admin.views.decorators import staff_member_required
@@ -17,12 +18,54 @@ FLAGS = ("RAMON_STRATEGY_CONTAINERS_ENABLED", "RAMON_EA_COMMAND_CREATION_ENABLED
          "RAMON_EA_COMMAND_EXECUTION_ENABLED", "RAMON_REAL_EXECUTION_ENABLED")
 
 
+def compact_features(features):
+    features = features if isinstance(features, dict) else {}
+    result = {k: features[k] for k in ("atr", "ema20", "ema50", "market_snapshot",
+        "risk_calculation_inputs", "daily_risk", "effective_policy", "news_lock")
+        if k in features}
+    result["stages"] = {}
+    for name, stage in (features.get("stages") or {}).items():
+        if not isinstance(stage, dict):
+            continue
+        item = {k: stage[k] for k in ("reason", "status", "approved", "score", "side",
+            "regime", "components", "setup", "thresholds", "explanation") if k in stage}
+        item["checks"] = [{k: check[k] for k in ("name", "passed", "status", "detail", "metrics")
+            if k in check} for check in stage.get("checks", []) if isinstance(check, dict)
+            and check.get("status") != "NOT_EVALUATED"]
+        result["stages"][name] = item
+    return result
+
+
+def per_bar_counts(evaluations):
+    # Count the latest evaluation per signal candle, not repeated worker polls.
+    rows = evaluations.annotate(bar_key=KeyTextTransform("bar_time",
+        KeyTextTransform("market_snapshot", "features"))).order_by("-created_at", "-pk").values_list(
+        "bar_key", "action", "rationale_code")
+    seen = set()
+    counts_by_reason = {}
+    missing = 0
+    for bar, action, reason in rows.iterator(chunk_size=500):
+        if not bar:
+            missing += 1
+            continue
+        if bar in seen:
+            continue
+        seen.add(bar)
+        key = (action, reason)
+        counts_by_reason[key] = counts_by_reason.get(key, 0) + 1
+    return dict(method="LATEST_EVALUATION_PER_SIGNAL_BAR", unique_bars=len(seen),
+        missing_bar_evaluations=missing,
+        counts=[dict(action=a, rationale_code=r, count=n) for (a,r),n in
+            sorted(counts_by_reason.items(), key=lambda item: (-item[1], item[0]))])
+
+
 def build_report(now=None):
     now = now or timezone.now()
     since = now - timedelta(days=7)
-    report = dict(schema_version=1, strategy=SETUP, read_only=True, generated_at=now,
+    report = dict(schema_version=2, strategy=SETUP, read_only=True, generated_at=now,
                   window_start=since, flags={k: bool(getattr(settings, k, False)) for k in FLAGS},
-                  sample_limits={"evaluations": 500, "commands": 200, "bars_per_timeframe": 300})
+                  sample_limits={"evaluations": 30, "commands": 200, "bars_per_timeframe": 300})
+    report["flag_note"] = "Independent worker and command producer check strategy container, command creation and command execution flags; real execution flag alone is not a readiness verdict."
     feed = configured_feed()
     control = StrategyWorkerControl.objects.filter(setup=SETUP).first()
     report["readiness"] = strategy_readiness(feed, now=now)
@@ -63,10 +106,13 @@ def build_report(now=None):
     report["signal_counts"] = counts(evaluations, "action", "rationale_code")
     report["risk_counts"] = counts(evaluations, "verdict__approved", "verdict__reason_code")
     report["command_counts"] = counts(commands, "action", "state")
-    report["latest_evaluations"] = recent(evaluations, 500, "-created_at", "decision_id",
+    report["per_bar"] = per_bar_counts(evaluations)
+    report["latest_evaluations"] = recent(evaluations, 30, "-created_at", "decision_id",
         "created_at", "action", "rationale_code", "confidence", "model_version", "features",
         "verdict__approved", "verdict__reason_code", "verdict__approved_volume",
-        "verdict__stop_loss", "verdict__take_profit", "verdict__details")
+        "verdict__stop_loss", "verdict__take_profit")
+    for row in report["latest_evaluations"]:
+        row["features"] = compact_features(row.pop("features"))
     report["latest_commands"] = recent(commands, 200, "-created_at", "command_id",
         "decision_id", "created_at", "expires_at", "claimed_at", "completed_at",
         "action", "state", "execution_authorized", "payload", "result")
@@ -81,7 +127,7 @@ def build_report(now=None):
 @require_GET
 def download(request):
     now = timezone.now()
-    response = JsonResponse(build_report(now), json_dumps_params={"indent": 2})
+    response = JsonResponse(build_report(now), json_dumps_params={"separators": (",", ":")})
     response["Content-Disposition"] = 'attachment; filename="ramon-trend-pullback-diagnostic-%s.json"' % now.strftime("%Y%m%d-%H%M%S-UTC")
     response["Cache-Control"] = "no-store"
     return response

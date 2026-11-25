@@ -135,7 +135,7 @@ def _clean_m15_rows(rows):
                   "method":"EXCLUDE_OFF_GRID_OR_DUPLICATE_ONLY_NO_SYNTHETIC_CANDLES"}
 
 def _research_pipeline(setup, *, risk_percent=0.5, stop_buffer_atr=None, target_reward_risk=None,
-                       minimum_opportunity_score=None, minimum_entry_quality=None):
+                       minimum_opportunity_score=None, minimum_entry_quality=None, opportunity_overrides=None):
     """Use standard risk policy, enabling exactly one config-approved research setup."""
     pipeline=_build_pipeline(demo_mode=False,strategy_setup=setup)
     configs=pipeline.opportunities.trading_settings["opportunity_finder"]["setups"]
@@ -148,6 +148,11 @@ def _research_pipeline(setup, *, risk_percent=0.5, stop_buffer_atr=None, target_
     for key,settings in configs.items():
         settings["enabled"]=(key==name)
     # Tune only the isolated research pipeline, never persisted/live thresholds.
+    if opportunity_overrides:
+        allowed = {"min_impulse_atr", "min_retracement", "max_retracement", "zone_tolerance_atr", "regime_lookback"}
+        if setup != "TREND_PULLBACK" or not set(opportunity_overrides) <= allowed:
+            raise ValueError("Unsupported research opportunity overrides")
+        pipeline.opportunities.config = replace(pipeline.opportunities.config, **opportunity_overrides)
     if minimum_opportunity_score is not None:
         pipeline.opportunities.minimum_score = minimum_opportunity_score
     if minimum_entry_quality is not None:
@@ -212,6 +217,7 @@ def _simulate(data, rows, progress=None):
             target_reward_risk=data.get("target_reward_risk"),
             minimum_opportunity_score=data.get("minimum_opportunity_score"),
             minimum_entry_quality=data.get("minimum_entry_quality"),
+            opportunity_overrides=data.get("opportunity_overrides"),
         ) for setup in setups}
     book={name:{"open":None,"trades":[],"equity":data["balance"],"peak":data["balance"],"drawdown":0,"signals":0,
                 "evaluations":0,"rejections":{},"rejection_examples":{},"rejection_details":{}}
