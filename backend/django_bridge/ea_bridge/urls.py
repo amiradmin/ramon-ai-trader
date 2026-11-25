@@ -23,9 +23,11 @@ from . import replay_views
 from . import replay_backtest
 from . import replay_jobs
 
-from . import research_shadow_views
+from . import research_shadow_views, regime_views
 
 urlpatterns = [
+    path("research/regime", regime_views.page, name="ramon-regime-dashboard"),
+    path("research/regime/report", regime_views.report, name="ramon-regime-report"),
     path("research/shadow", research_shadow_views.page, name="ramon-research-shadow"),
     path("research/shadow/report", research_shadow_views.report, name="ramon-research-shadow-report"),
     path("dashboard/live-strategy-settings", live_strategy_settings.live_strategy_settings, name="ramon-live-strategy-settings"),
