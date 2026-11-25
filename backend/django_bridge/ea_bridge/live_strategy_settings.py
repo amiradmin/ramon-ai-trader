@@ -99,6 +99,41 @@ def active_settings(setup, scope):
     return {k: v for k, v in data.get("overrides", {}).items() if k in editable_for(setup)}
 
 
+def broker_symbol_spec(payload):
+    """Display the broker-reported point, never infer it from tick size."""
+    raw = payload.get("symbol_info")
+    spec = dict(raw) if isinstance(raw, dict) else {}
+    quote = payload.get("quote")
+    quote = quote if isinstance(quote, dict) else {}
+
+    def positive(value):
+        if isinstance(value, bool):
+            return None
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return number if math.isfinite(number) and number > 0 else None
+
+    symbol_point = positive(spec.get("point"))
+    quote_point = positive(quote.get("point"))
+    if symbol_point is not None and quote_point is not None and not math.isclose(
+        symbol_point, quote_point, rel_tol=1e-9, abs_tol=0.0
+    ):
+        spec["point"] = None
+        spec["point_source"] = "CONFLICTING_BROKER_TELEMETRY"
+    elif symbol_point is not None:
+        spec["point"] = spec["point"]
+        spec["point_source"] = "symbol_info.point"
+    elif quote_point is not None:
+        spec["point"] = quote["point"]
+        spec["point_source"] = "quote.point"
+    else:
+        spec["point"] = None
+        spec["point_source"] = "UNAVAILABLE"
+    return spec
+
+
 def _effective_base():
     base = defaults_for("standard")
     shared = DecisionThresholdConfig.objects.filter(profile="standard").first()
@@ -213,7 +248,7 @@ def live_strategy_settings(request):
             "account": {k: payload.get("account", {}).get(k) for k in
                         ("balance", "equity", "free_margin", "currency")
                         if isinstance(payload.get("account"), dict)},
-            "symbol_spec": payload.get("symbol_info", {}),
+            "symbol_spec": broker_symbol_spec(payload),
         },
         "fields": [{"key": key, "label": LABELS[key],
                     "strategy": "TREND_PULLBACK" if key in TREND_FIELDS else None,
@@ -281,12 +316,11 @@ def live_scalper_risk(request):
             return JsonResponse({"ok": False, "error": str(exc)}, status=400)
     payload = feed.payload if feed and isinstance(feed.payload, dict) else {}
     account = payload.get("account")
-    spec = payload.get("symbol_info")
     broker = {
         "fresh": fresh, "symbol": feed.symbol if feed else None,
         "account": {k: account.get(k) for k in ("balance", "equity", "free_margin", "currency")}
                    if isinstance(account, dict) else {},
-        "symbol_spec": spec if isinstance(spec, dict) else {},
+        "symbol_spec": broker_symbol_spec(payload),
     }
     response = JsonResponse({"ok": True, "ready": fresh, "scope": scope,
                              "broker": broker,
