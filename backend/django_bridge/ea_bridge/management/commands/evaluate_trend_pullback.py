@@ -43,6 +43,14 @@ RETRACEMENT_VARIANTS = {
 }
 
 
+RISK_VARIANTS = {
+    ("baseline" if risk == 0.5 and name == "baseline" else
+     f"{name}_risk_{risk:g}"): {"opportunity": params, "risk_percent": risk}
+    for risk in (0.5, 1.0, 1.5)
+    for name, params in RETRACEMENT_VARIANTS.items()
+}
+
+
 class Command(BaseCommand):
     help = "Compare Trend Pullback candidates on disjoint chronological periods; descriptive only."
 
@@ -52,7 +60,7 @@ class Command(BaseCommand):
         for name in ("balance", "spread-points", "point", "tick-size", "tick-value",
                      "volume-min", "volume-step", "volume-max", "slippage-points", "commission-per-lot"):
             parser.add_argument("--" + name, required=True, type=float)
-        parser.add_argument("--research-version", choices=("1","2","3"), default="1")
+        parser.add_argument("--research-version", choices=("1","2","3","4"), default="1")
         parser.add_argument("--minimum-trades", type=int, default=30)
         parser.add_argument("--max-candles", type=int, default=20000)
 
@@ -72,8 +80,9 @@ class Command(BaseCommand):
             raise CommandError(str(exc)) from exc
 
         v2 = options["research_version"] == "2"
-        sensitivity = options["research_version"] == "3"
-        variants = RETRACEMENT_VARIANTS if sensitivity else V2 if v2 else VARIANTS
+        risk_sensitivity = options["research_version"] == "4"
+        sensitivity = options["research_version"] in ("3", "4")
+        variants = RISK_VARIANTS if risk_sensitivity else RETRACEMENT_VARIANTS if sensitivity else V2 if v2 else VARIANTS
 
         def evaluate(params, first, last, *, phase, name, index, total):
             last_percent = -1
@@ -87,7 +96,11 @@ class Command(BaseCommand):
                     last_percent = percent
 
             overrides = dict(data, start=first, end=last)
-            if v2:
+            if risk_sensitivity:
+                overrides.update(opportunity_overrides=params["opportunity"],
+                                 risk_percent=params["risk_percent"],
+                                 isolated_risk_sensitivity=True)
+            elif v2:
                 overrides["opportunity_overrides"] = {**BASE, **params.get("opportunity", {})}
                 overrides["trend_research"] = {"version": 2, **params}
                 overrides["target_reward_risk"] = params.get("target_reward_risk", data["target_reward_risk"])
@@ -131,11 +144,11 @@ class Command(BaseCommand):
             raise CommandError("Historical data changed during validation; rerun on a stable source")
         self.stdout.write(json.dumps(dict(mode="ISOLATED_RESEARCH_DESCRIPTIVE_ONLY",
             live_promotion=False, research_version=options["research_version"], variants=variants, development=development,
-            comparison_variable="max_retracement" if sensitivity else None,
+            comparison_variable=("max_retracement_and_risk_percent" if risk_sensitivity else "max_retracement" if sensitivity else None),
             validation=validation, development_candidate=winner, minimum_trades=minimum,
             windows=dict(development=[str(start), str(split)],
                          validation=[str(split + timedelta(days=1)), str(end)]),
-            limitations="Standard research risk capped at 0.5%; not live 1.5% parity. "
+            limitations=("V4 hypothetical risk up to 1.5%; not full live-policy parity. " if risk_sensitivity else "Standard research risk capped at 0.5%; not live 1.5% parity. ") +
                         "Independent starting balance per period, fixed costs, OHLC stop-first approximation, "
                         "closed-trade drawdown only; no live settings or orders changed. "
                         "Validation results are descriptive, not deployment authorization. V2 hypotheses were informed by V1, including previously viewed 2026 baseline results; fresh forward data is required. V2 H1 uses completed M15 groups, stops update at close for next bar, and time exits use modeled close."),
