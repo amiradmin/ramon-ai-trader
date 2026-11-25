@@ -220,8 +220,44 @@ if (trendCopyButton) trendCopyButton.addEventListener("click", async () => {
     if (report.strategy !== "TREND_PULLBACK" || !report.configured_thresholds) {
       throw new Error("Live strategy parameters unavailable.");
     }
+    const configResponse = await fetch("/api/ea/v1/dashboard/live-strategy-settings", {cache:"no-store", credentials:"same-origin"});
+    if (!configResponse.ok || !configResponse.headers.get("content-type")?.includes("application/json")) {
+      throw new Error("Live configuration unavailable.");
+    }
+    const config = await configResponse.json();
+    const selected = config.strategies?.find(item => item.setup === "TREND_PULLBACK");
+    if (!selected || !Array.isArray(config.fields) || !config.fields.length || !selected.overrides) {
+      throw new Error("Trend Pullback configuration unavailable.");
+    }
+    const scope = report.scope;
+    if (!scope || JSON.stringify(selected.scope) !== JSON.stringify([scope.source, scope.account_login, scope.server_name, scope.symbol])) {
+      throw new Error("Strategy scope changed; retry.");
+    }
+    const broker = config.broker || {}, account = broker.account || {}, spec = broker.symbol_spec || {};
+    const live_configuration = {
+      strategy: selected.setup,
+      broker_telemetry_fresh: broker.fresh ?? false,
+      account_balance_mt5: account.balance ?? null,
+      equity_mt5: account.equity ?? null,
+      free_margin_mt5: account.free_margin ?? null,
+      currency: account.currency ?? null,
+      broker_symbol: broker.symbol ?? null,
+      point_mt5: spec.point ?? null,
+      tick_size_mt5: spec.tick_size ?? null,
+      tick_value_mt5: spec.tick_value ?? null,
+      minimum_lot_mt5: spec.volume_min ?? null,
+      maximum_lot_mt5: spec.volume_max ?? null,
+      lot_step_mt5: spec.volume_step ?? null,
+      ready: selected.ready,
+      last_saved_at: selected.updated_at,
+      parameters: Object.fromEntries(config.fields.map(field => [field.key, {
+        label: field.label, value: selected.overrides[field.key] ?? null,
+        min: field.min, max: field.key === "maximum_risk_percent" ? selected.maximum_risk_percent_ceiling : field.max, step: field.step
+      }]))
+    };
     const text = JSON.stringify({
       strategy: report.strategy, generated_at: report.generated_at,
+      live_configuration,
       symbol: report.scope?.symbol, readiness: report.readiness,
       flags: report.flags, control_scope_matches: report.control_scope_matches,
       automatic: report.control?.automatic, state: report.control?.state,
