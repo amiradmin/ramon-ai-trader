@@ -234,9 +234,6 @@ def _simulate(data, rows, progress=None):
     if timeframe not in ("M15", "M5") or (timeframe == "M5" and (setups != ["TREND_PULLBACK"] or not research or research.get("h1_confirmation") or research.get("missed_opportunity_audit"))):
         raise ValueError("M5 is restricted to isolated Trend Pullback research without H1 or M15 audit")
     interval = 300 if timeframe == "M5" else 900
-    if timeframe == "M5":
-        for pipeline in pipelines.values():
-            pipeline.opportunities.config = replace(pipeline.opportunities.config, bar_seconds=interval)
     if research and setups != ["TREND_PULLBACK"]:
         raise ValueError("Trend research options require Trend Pullback alone")
     hours = research.get("entry_hours")
