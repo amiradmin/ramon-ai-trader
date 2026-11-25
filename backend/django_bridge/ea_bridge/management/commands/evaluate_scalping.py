@@ -6,6 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 from datetime import timedelta
+from ea_bridge.scalp_risk_research import compare_risk
 
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
@@ -19,6 +20,7 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument('--source', required=True)
+        parser.add_argument('--starting-balance', type=float, help='Explicit research account balance in broker-reported units; enables risk comparison.')
         parser.add_argument('--symbol', default='XAUUSD_l')
         parser.add_argument('--limit', type=int, default=10000)
         parser.add_argument('--snapshot-output', help='Optional local research snapshot; no database writes.')
@@ -66,4 +68,16 @@ class Command(BaseCommand):
         for label, scenario in [('base',costs), ('stress',ScalpCosts(costs.point, costs.spread_points*2,
                 costs.slippage_points*2, costs.commission_points))]:
             report[label] = replay_scalper(data['M1'], data['M5'], costs=scenario, tick_size=tick, stop_level_points=stop_level)
+        if options['starting_balance'] is not None:
+            try:
+                spec = feed.payload['symbol_info']
+                report['risk_comparison'] = {
+                    label: compare_risk(report[label]['trades'], starting_balance=options['starting_balance'],
+                        point=costs.point, tick_size=tick, tick_value=spec['tick_value'],
+                        minimum=spec['volume_min'], step=spec['volume_step'], maximum=spec['volume_max'],
+                        allowance_points=2*report[label]['costs']['slippage_points']+report[label]['costs']['commission_points'])
+                    for label in ('base','stress')
+                }
+            except (ValueError, ArithmeticError, KeyError, TypeError) as exc:
+                raise CommandError('Invalid research sizing inputs: '+str(exc)) from exc
         self.stdout.write(json.dumps(report, indent=2, default=str, allow_nan=False))
