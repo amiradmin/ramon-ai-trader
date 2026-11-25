@@ -258,6 +258,14 @@ def _simulate(data, rows, progress=None):
             all_strategy_risk_research=data.get("all_strategy_risk_research", False),
         ) for setup in setups}
     research = data.get("trend_research", {})
+    experiment = data.get("v10_entry_filter", {})
+    if experiment:
+        if not data.get("all_strategy_risk_research") or len(setups) != 1:
+            raise ValueError("V10 filters require isolated M15 research")
+        if set(experiment) - {"hours", "confirmation", "min_body_atr"}:
+            raise ValueError("Unknown V10 filter")
+        if experiment.get("confirmation") not in (None, "previous_extreme", "reversal_body"):
+            raise ValueError("Unknown V10 confirmation")
     timeframe = data.get("isolated_timeframe", "M15")
     if timeframe not in ("M15", "M5") or (timeframe == "M5" and (setups != ["TREND_PULLBACK"] or not research or research.get("h1_confirmation") or research.get("missed_opportunity_audit"))):
         raise ValueError("M5 is restricted to isolated Trend Pullback research without H1 or M15 audit")
@@ -273,7 +281,7 @@ def _simulate(data, rows, progress=None):
     context_intervals = {"M15": 900, "H1": 3600}
     context_closes = {tf: _completed_trend_closes(rows, context_intervals[tf], interval)
                       for tf in confirmations}
-    hours = research.get("entry_hours")
+    hours = experiment.get("hours") or research.get("entry_hours")
     audit_enabled = research.get("missed_opportunity_audit", False)
     audit_records = {name: [] for name in setups}
     h1_closes = []
@@ -449,6 +457,18 @@ def _simulate(data, rows, progress=None):
                 hfast,hslow=_ema(h1_closes[-80:],20),_ema(h1_closes[-150:],50)
                 if not ((result["action"]=="BUY" and hfast>hslow) or (result["action"]=="SELL" and hfast<hslow)):
                     rejected(state,"RESEARCH","H1_DIRECTION_MISMATCH",bar["time"])
+                    continue
+            if experiment:
+                side = result["action"]
+                body = (bar["close"] - bar["open"]) * (1 if side == "BUY" else -1)
+                mode = experiment.get("confirmation")
+                if mode == "previous_extreme" and not (
+                    bar["close"] > previous["high"] if side == "BUY" else bar["close"] < previous["low"]
+                ):
+                    rejected(state,"RESEARCH","V10_PREVIOUS_EXTREME_NOT_CONFIRMED",bar["time"])
+                    continue
+                if mode == "reversal_body" and body < experiment.get("min_body_atr", 0.25)*atr:
+                    rejected(state,"RESEARCH","V10_DIRECTIONAL_BODY_TOO_SMALL",bar["time"])
                     continue
             risk=result["stages"]["risk_management"]
             stop=risk.get("stop_price");target=risk.get("target_price")
