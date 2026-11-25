@@ -23,7 +23,11 @@ from . import replay_views
 from . import replay_backtest
 from . import replay_jobs
 
+from . import research_shadow_views
+
 urlpatterns = [
+    path("research/shadow", research_shadow_views.page, name="ramon-research-shadow"),
+    path("research/shadow/report", research_shadow_views.report, name="ramon-research-shadow-report"),
     path("dashboard/live-strategy-settings", live_strategy_settings.live_strategy_settings, name="ramon-live-strategy-settings"),
     path("dashboard/live-scalper-risk", live_strategy_settings.live_scalper_risk, name="ramon-live-scalper-risk"),
     path("simulator", replay_views.simulator, name="ramon-simulator"),
