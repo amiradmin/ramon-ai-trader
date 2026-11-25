@@ -13,6 +13,7 @@ from . import reliability
 from . import scalp_observer
 from . import scalper_views
 from . import scalper_diagnostics
+from . import trend_pullback_diagnostics
 from . import trend_observer
 from . import strategy_views
 from . import live_strategy_settings
@@ -35,6 +36,7 @@ urlpatterns = [
     path("strategies", strategy_views.strategies_status, name="strategy-workers-status"),
     path("strategies/<slug:slug>", strategy_views.strategy_console, name="strategy-worker-console"),
     path("strategies/<slug:slug>/entries", strategy_views.strategy_entries_control, name="strategy-worker-entries"),
+    path("strategies/trend-pullback/diagnostic-report", trend_pullback_diagnostics.download, name="ramon-trend-pullback-diagnostic-report"),
     path("research/trend", trend_observer.trend_status, name="ramon-trend-shadow"),
     path("scalper", scalper_views.scalper_console, name="ramon-scalper-console"),
     path("scalper/diagnostic-report", scalper_diagnostics.download, name="ramon-scalper-diagnostic-report"),
