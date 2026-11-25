@@ -18,6 +18,7 @@ from .account_scope import real_cent_scope
 from .scalp_policy import validated_policy
 from dataclasses import asdict
 
+SCALP_MAX_RISK_PERCENT = Decimal('5.000')
 ENGINE = 'SCALPER'
 MAGIC = 26092213
 UNSETTLED = ['PENDING','CLAIMED','RECEIVED','EXECUTING','RECONCILIATION_REQUIRED']
@@ -173,7 +174,7 @@ def _open_scalp(feed, control, observation, *, now=None, audit_context=None):
             if (baseline.opening_balance-equity)/baseline.opening_balance*100 >= daily_cap:
                 return None,'DAILY_LOSS_LIMIT'
             risk_percent = _decimal(control.risk_percent,'risk percent')
-            if not 0 < risk_percent <= Decimal('.15'): return None,'SCALPER_RISK_LIMIT'
+            if not Decimal('.010') <= risk_percent <= SCALP_MAX_RISK_PERCENT: return None,'SCALPER_RISK_LIMIT'
             bid,ask,point = [_decimal(quote[k],k) for k in ['bid','ask','point']]
             tick,value,step,minimum,maximum,stops = [_decimal(info[k],k) for k in
                 ['tick_size','tick_value','volume_step','volume_min','volume_max','stops_level_points']]

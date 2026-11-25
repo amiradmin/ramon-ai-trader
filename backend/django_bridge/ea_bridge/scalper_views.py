@@ -34,7 +34,7 @@ def _set_scalper_entries(request, action, scope):
         elif action == 'start' and readiness(feed) == 'READY':
             control.automatic = True
             control.save(update_fields=['automatic'])
-            message = 'Automatic real cent scalping enabled at a maximum 0.15% planned risk per trade.'
+            message = 'Automatic real cent scalping enabled; saved risk and shared account limits apply.'
             success = True
         else:
             message = 'Cannot enable Fast Scalp: '+readiness(feed)

@@ -191,7 +191,7 @@ class IndependentScalperTests(TestCase):
         self.assertLessEqual(command.payload['reserved_risk_money'],2209.45*.0015)
 
     def test_risk_above_approved_demo_ceiling_is_rejected(self):
-        self.control.risk_percent=Decimal('.151');self.control.save()
+        self.control.risk_percent=Decimal('5.001');self.control.save()
         command,reason=open_scalp(self.feed,self.control,self.observation,now=self.now)
         self.assertIsNone(command)
         self.assertEqual(reason,'SCALPER_RISK_LIMIT')

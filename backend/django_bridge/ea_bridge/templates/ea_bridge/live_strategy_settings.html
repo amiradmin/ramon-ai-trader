@@ -30,8 +30,8 @@
   <p class="small" id="liveM15Note">Account identity, spread at execution, lot rules and execution authorization remain broker/server-owned. Portfolio risk here is a strategy-specific ceiling on combined exposure, bounded by the shared account limit (maximum 2%). Fast Scalp uses its own risk policy; select it above.</p>
   <form id="liveScalpForm" hidden style="margin-top:20px;padding-top:15px;border-top:1px solid var(--line,#37465c)">
     <h3 style="margin:0 0 8px;font-size:16px">Fast Scalp · live M1/M5</h3>
-    <p class="small">Independent worker: saved parameters apply to future signals only. The live risk ceiling remains 0.150%; broker and shared account protections remain in force.</p>
-    <label>Maximum planned scalp risk (%)<input type="number" required id="liveScalpRisk" min="0.010" max="0.150" step="0.001" style="max-width:240px" disabled></label>
+    <p class="small">Independent worker: saved parameters apply to future signals only. The configured risk ceiling is shown below; shared account exposure may further reduce the actual risk budget.</p>
+    <label>Maximum planned scalp risk (%)<input type="number" required id="liveScalpRisk" min="0.010" max="5.000" step="0.001" style="max-width:240px" disabled></label>
     <div id="liveScalpFields" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:12px"></div>
     <button class="btn" type="submit" id="liveScalpSave" disabled style="margin-top:10px">Save Fast Scalp settings</button>
     <span class="small" id="liveScalpState" role="status" aria-live="polite">Loading scalper scope…</span>
@@ -139,6 +139,7 @@
         input.value=value.signal_overrides[field.key];input.disabled=!value.ready;
         label.appendChild(input);fields.appendChild(label);
       }
+      byId('liveScalpRisk').max=value.maximum_risk_percent;
       byId('liveScalpRisk').value=value.risk_percent||'';
       byId('liveScalpRisk').disabled=!value.ready;
       byId('liveScalpSave').disabled=!value.ready;

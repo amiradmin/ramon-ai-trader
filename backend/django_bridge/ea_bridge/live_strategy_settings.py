@@ -15,6 +15,7 @@ from django.views.decorators.http import require_http_methods
 from .models import DecisionThresholdConfig, StrategyWorkerControl, ScalperControl, EAHeartbeat, EAEvent
 from .account_scope import real_cent_scope
 from .scalp_policy import validated_policy, field_schema
+from .scalper_engine import SCALP_MAX_RISK_PERCENT
 from dataclasses import asdict
 from .strategy_registry import STRATEGIES
 from .strategy_worker import configured_feed
@@ -204,7 +205,7 @@ def live_strategy_settings(request):
 @staff_member_required
 @require_http_methods(["GET", "POST"])
 def live_scalper_risk(request):
-    """Existing independent M1/M5 scalper budget, capped at the engine's 0.15%."""
+    """Existing independent M1/M5 scalper budget, bounded by the engine ceiling and shared exposure."""
     identity = {
         "instance_id": settings.RAMON_SCALP_INSTANCE,
         "account_login": settings.RAMON_SCALP_LOGIN,
@@ -228,8 +229,8 @@ def live_scalper_risk(request):
             if isinstance(raw, bool):
                 raise ValueError("Invalid scalper risk")
             risk = Decimal(str(raw))
-            if not risk.is_finite() or not Decimal("0.010") <= risk <= Decimal("0.150"):
-                raise ValueError("Scalper risk must be between 0.010% and 0.150%")
+            if not risk.is_finite() or not Decimal("0.010") <= risk <= SCALP_MAX_RISK_PERCENT:
+                raise ValueError(f"Scalper risk must be between 0.010% and {SCALP_MAX_RISK_PERCENT}%")
             if risk.as_tuple().exponent < -3:
                 raise ValueError("Maximum three decimal places")
             proposed = body.get("signal_overrides")
@@ -264,7 +265,7 @@ def live_scalper_risk(request):
     response = JsonResponse({"ok": True, "ready": fresh, "scope": scope,
                              "broker": broker,
                              "risk_percent": str(control.risk_percent) if control else None,
-                             "maximum_risk_percent": "0.150",
+                             "maximum_risk_percent": str(SCALP_MAX_RISK_PERCENT),
                              "fields": field_schema(),
                              "signal_overrides": asdict(validated_policy(control.signal_overrides if control else {}))})
     response["Cache-Control"] = "no-store"
