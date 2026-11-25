@@ -1,5 +1,4 @@
 """Forward-only paper research. No broker commands, no live configuration writes."""
-import argparse
 import fcntl
 import json
 import math
@@ -68,8 +67,10 @@ def cycle(state, rows, config, now):
             entry=bar["open"]+(spread+slip if pending["side"]=="BUY" else -slip)
             distance=(entry-pending["stop"])*(1 if pending["side"]=="BUY" else -1)
             reward=(pending["target"]-entry)*(1 if pending["side"]=="BUY" else -1)
-            if distance>0 and reward>=1.2*distance and distance*value*pending["volume"]<=pending["budget"]:
+            if distance>0 and reward>=1.2*distance and ((distance+slip)*value+config["commission_per_lot"])*pending["volume"]<=pending["budget"]:
                 book["position"]=dict(pending,entry=entry,opened_at=stamp)
+            else:
+                book["last_reason"]="PAPER_FILL_RISK_OR_REWARD_REJECTED"
         if book.get("position"):
             trade=settle(book["position"],bar,spread,slip,value,config["commission_per_lot"])
             if trade:
@@ -150,6 +151,15 @@ class Command(BaseCommand):
                     timeframe="M15",timestamp__lte=now-timedelta(minutes=15),received_at__lte=now).order_by("-timestamp")[:256]][::-1]
                 status=cycle(state,rows,config,now.timestamp())
                 state["status"]=status
+                state["updated_at"]=now.isoformat()
+                for book in state["books"].values():
+                    trades=book["trades"]
+                    gains=sum(max(0,t["pnl"]) for t in trades)
+                    losses=sum(max(0,-t["pnl"]) for t in trades)
+                    book["metrics"]=dict(closed_trades=len(trades), wins=sum(t["pnl"]>0 for t in trades),
+                        win_rate=100*sum(t["pnl"]>0 for t in trades)/len(trades) if trades else None,
+                        profit_factor=gains/losses if losses else None,
+                        net_pnl=book["balance"]-config["balance"],closed_drawdown_pct=book["drawdown"])
                 save(path,state)
                 self.stdout.write(status)
                 if opts["once"] or status=="GAP_MANUAL_REVIEW":
