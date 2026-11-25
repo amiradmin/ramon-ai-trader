@@ -146,7 +146,7 @@ def resolve_scalp(bars, plan, costs, *, max_holding_bars=5, maximum_cost_to_risk
     return {'result': 'OPEN'}
 
 
-def replay_scalper(m1, m5, *, costs, tick_size, stop_level_points=0, score_start=0, config=ScalpConfig()):
+def replay_scalper(m1, m5, *, costs, tick_size, stop_level_points=0, score_start=0, config=ScalpConfig(), direction='BOTH', utc_hours=None):
     trades, reasons = [], Counter()
     m5_times = [bar['time'] for bar in m5]
     i, decisions = config.m1_window-1, 0
@@ -161,6 +161,14 @@ def replay_scalper(m1, m5, *, costs, tick_size, stop_level_points=0, score_start
         decisions += 1
         if plan['action'] == 'WAIT':
             reasons[plan['reason']] += 1
+            i += 1
+            continue
+        if direction != 'BOTH' and plan['action'] != direction:
+            reasons['RESEARCH_DIRECTION_FILTER'] += 1
+            i += 1
+            continue
+        if utc_hours is not None and int((m1[i]['time']+60)%86400//3600) not in utc_hours:
+            reasons['RESEARCH_SESSION_FILTER'] += 1
             i += 1
             continue
         future = m1[i+1:i+1+config.max_holding_bars]

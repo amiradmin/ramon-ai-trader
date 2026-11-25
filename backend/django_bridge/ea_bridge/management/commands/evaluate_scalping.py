@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from datetime import timedelta
 from ea_bridge.scalp_risk_research import compare_risk
+from ramon_pipeline.signalflow.scalp_lab import optimize
 
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
@@ -20,6 +21,8 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument('--source', required=True)
+        parser.add_argument('--optimize', action='store_true', help='Offline chronological scalp research')
+        parser.add_argument('--minimum-trades', type=int, default=30)
         parser.add_argument('--starting-balance', type=float, help='Explicit research account balance in broker-reported units; enables risk comparison.')
         parser.add_argument('--symbol', default='XAUUSD_l')
         parser.add_argument('--limit', type=int, default=10000)
@@ -80,4 +83,17 @@ class Command(BaseCommand):
                 }
             except (ValueError, ArithmeticError, KeyError, TypeError) as exc:
                 raise CommandError('Invalid research sizing inputs: '+str(exc)) from exc
+        if options['optimize']:
+            try:
+                report['laboratory'] = optimize(data['M1'],data['M5'],costs=costs,tick_size=tick,
+                    stop_level_points=stop_level,minimum_trades=options['minimum_trades'])
+                if options['starting_balance'] is not None and report['laboratory']['holdout']:
+                    report['laboratory']['holdout_risk_comparison'] = {
+                        label: compare_risk(result['trades'],starting_balance=options['starting_balance'],
+                            point=costs.point,tick_size=tick,tick_value=spec['tick_value'],
+                            minimum=spec['volume_min'],step=spec['volume_step'],maximum=spec['volume_max'],
+                            allowance_points=2*result['costs']['slippage_points']+result['costs']['commission_points'])
+                        for label,result in report['laboratory']['holdout'].items()}
+            except (ValueError, ArithmeticError, KeyError, TypeError) as exc:
+                raise CommandError(str(exc)) from exc
         self.stdout.write(json.dumps(report, indent=2, default=str, allow_nan=False))
