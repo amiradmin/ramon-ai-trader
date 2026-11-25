@@ -35,6 +35,14 @@ V2 = {"baseline": {}, "utc_00_06": {"entry_hours": [0,6]},
       "morning_h1": {"entry_hours": [6,12], "h1_confirmation": True}}
 
 
+# One-factor sensitivity: all other opportunity inputs are identical.
+RETRACEMENT_VARIANTS = {
+    ("baseline" if level == 82 else f"retracement_{level}"):
+    {**BASE, "max_retracement": level / 100}
+    for level in (82, 85, 88, 90, 95)
+}
+
+
 class Command(BaseCommand):
     help = "Compare Trend Pullback candidates on disjoint chronological periods; descriptive only."
 
@@ -44,7 +52,7 @@ class Command(BaseCommand):
         for name in ("balance", "spread-points", "point", "tick-size", "tick-value",
                      "volume-min", "volume-step", "volume-max", "slippage-points", "commission-per-lot"):
             parser.add_argument("--" + name, required=True, type=float)
-        parser.add_argument("--research-version", choices=("1","2"), default="1")
+        parser.add_argument("--research-version", choices=("1","2","3"), default="1")
         parser.add_argument("--minimum-trades", type=int, default=30)
         parser.add_argument("--max-candles", type=int, default=20000)
 
@@ -64,7 +72,8 @@ class Command(BaseCommand):
             raise CommandError(str(exc)) from exc
 
         v2 = options["research_version"] == "2"
-        variants = V2 if v2 else VARIANTS
+        sensitivity = options["research_version"] == "3"
+        variants = RETRACEMENT_VARIANTS if sensitivity else V2 if v2 else VARIANTS
 
         def evaluate(params, first, last, *, phase, name, index, total):
             last_percent = -1
@@ -90,12 +99,21 @@ class Command(BaseCommand):
                 raise CommandError(result.get("error", "Research failed"))
             stats = result["strategies"][0]
             stats.pop("trades", None)
+            if sensitivity:
+                closed = stats["closed_trades"]
+                stats["expectancy_per_closed_trade"] = (
+                    round(stats["net_gain"] / closed, 4) if closed else None
+                )
             return dict(metrics=stats, data_quality=result["data_quality"],
                         assumptions=result["assumptions"], limitations=result["limitations"])
 
         development = {name: evaluate(params, start, split, phase="development", name=name,
                                       index=index, total=len(variants))
                        for index, (name, params) in enumerate(variants.items(), 1)}
+        if sensitivity:
+            fingerprints = {r["data_quality"]["history_fingerprint"] for r in development.values()}
+            if len(fingerprints) != 1:
+                raise CommandError("Historical data changed during sensitivity comparison; rerun on a stable source")
         minimum = options["minimum_trades"]
         eligible = [name for name, report in development.items()
                     if report["metrics"]["closed_trades"] >= minimum
@@ -109,8 +127,11 @@ class Command(BaseCommand):
         validation = {name: evaluate(variants[name], split + timedelta(days=1), end,
                                     phase="validation", name=name, index=index, total=len(selected))
                       for index, name in enumerate(selected, 1)}
+        if sensitivity and len({r["data_quality"]["history_fingerprint"] for r in validation.values()}) != 1:
+            raise CommandError("Historical data changed during validation; rerun on a stable source")
         self.stdout.write(json.dumps(dict(mode="ISOLATED_RESEARCH_DESCRIPTIVE_ONLY",
             live_promotion=False, research_version=options["research_version"], variants=variants, development=development,
+            comparison_variable="max_retracement" if sensitivity else None,
             validation=validation, development_candidate=winner, minimum_trades=minimum,
             windows=dict(development=[str(start), str(split)],
                          validation=[str(split + timedelta(days=1)), str(end)]),
