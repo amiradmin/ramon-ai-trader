@@ -117,6 +117,7 @@ def worker_cycle(setup, *, now=None):
             command_id=data.get('command_id'),
             command_reason=data.get('command_reason'),
             command_created=data.get('command_created', False),
+            opportunity_checks=((data.get('stages') or {}).get('opportunities') or {}).get('checks', []) if setup == 'TREND_PULLBACK' else [],
             ai_shadow=shadow,
             ai_replay_shadow=replay_shadow,
             ai_trade_success=replay_classifiers['replay_trade_success'],

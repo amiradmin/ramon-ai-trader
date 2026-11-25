@@ -112,10 +112,16 @@ class LiveStrategySettingsTests(TestCase):
         self.client.force_login(self.user)
         endpoint = "/api/ea/v1/dashboard/live-scalper-risk"
         with patch("ea_bridge.live_strategy_settings.real_cent_scope", return_value=(True, "OK")):
+            # The configured scalper ceiling is 5.000%; shared exposure
+            # is separately enforced by the execution engine.
+            scalp.refresh_from_db()
+            original_risk = scalp.risk_percent
             over = self.client.post(endpoint, json.dumps({
-                "scope": self.scope, "risk_percent": "0.200"
+                "scope": self.scope, "risk_percent": "5.001"
             }), content_type="application/json")
             self.assertEqual(over.status_code, 400)
+            scalp.refresh_from_db()
+            self.assertEqual(scalp.risk_percent, original_risk)
             good = self.client.post(endpoint, json.dumps({
                 "scope": self.scope, "risk_percent": "0.075"
             }), content_type="application/json")
@@ -123,3 +129,26 @@ class LiveStrategySettingsTests(TestCase):
         scalp.refresh_from_db()
         self.assertEqual(str(scalp.risk_percent), "0.075")
         self.assertFalse(scalp.automatic)
+
+    def test_trend_fields_are_scoped_and_validated(self):
+        self.client.force_login(self.user)
+        with patch("ea_bridge.live_strategy_settings.configured_feed", return_value=self.feed), \
+             patch("ea_bridge.live_strategy_settings.real_cent_scope", return_value=(True, "OK")):
+            response = self.client.get(self.endpoint)
+            trend = next(s for s in response.json()["strategies"] if s["setup"] == self.setup)
+            other = next(s for s in response.json()["strategies"] if s["setup"] != self.setup)
+            self.assertEqual(trend["overrides"]["max_retracement"], 0.82)
+            self.assertNotIn("max_retracement", other["overrides"])
+            self.payload["overrides"].update(min_retracement=0.6, max_retracement=0.5)
+            bad = self.client.post(self.endpoint, json.dumps(self.payload), content_type="application/json")
+            self.assertEqual(bad.status_code, 400)
+            self.payload["overrides"].update(min_retracement=0.2, max_retracement=0.82,
+                                             max_bars_since_pullback_low=8.5)
+            bad = self.client.post(self.endpoint, json.dumps(self.payload), content_type="application/json")
+            self.assertEqual(bad.status_code, 400)
+            self.assertFalse(DecisionThresholdConfig.objects.filter(profile=profile_key(self.setup)).exists())
+            self.payload["overrides"].update(max_bars_since_pullback_low=8, max_retracement=0.81)
+            good = self.client.post(self.endpoint, json.dumps(self.payload), content_type="application/json")
+            self.assertEqual(good.status_code, 200, good.content)
+        self.assertEqual(active_settings(self.setup, self.scope)["max_retracement"], 0.81)
+        self.assertEqual(active_settings(self.setup, ["other", *self.scope[1:]]), {})

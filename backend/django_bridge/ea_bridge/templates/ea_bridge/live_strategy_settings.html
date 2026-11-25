@@ -20,6 +20,7 @@
     <input id="liveParameterFile" type="file" accept=".json,application/json" style="max-width:340px;margin:0">
     <span id="liveImportStatus" class="small" role="status" aria-live="polite"></span>
   </div>
+  <div id="liveTrendEvidence" class="small" hidden style="margin:12px 0;white-space:pre-wrap"></div>
   <form id="liveSettingsForm">
     <div id="liveEditableFields" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px"></div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-top:15px">
@@ -66,10 +67,19 @@
     byId('liveSettingsForm').hidden=scalp;
     byId('liveM15Note').hidden=scalp;
     byId('liveScalpForm').hidden=!scalp;
+    byId("liveTrendEvidence").hidden=true;
     if(scalp)return;
     const selected=chosen();if(!selected)return;
     const host=byId('liveEditableFields');host.replaceChildren();
-    for(const field of data.fields){
+    const evidence=byId("liveTrendEvidence");
+    if(selected.setup==="TREND_PULLBACK"){
+      const latest=selected.latest_evaluation;
+      const check=latest?.opportunity_checks?.find(c=>c.name==="pullback_depth");
+      const m=check?.metrics;
+      evidence.hidden=false;
+      evidence.textContent=latest ? "Last evaluation: "+(latest.evaluated_at||"unknown")+" · "+(latest.reason||"unknown")+(m?"\nRetracement: "+m.value+"% · Allowed: "+m.threshold+(m.depth_atr!=null?" · Depth: "+m.depth_atr+" ATR · Maximum: "+m.maximum_depth_atr+" ATR · Structure broken: "+m.structure_broken:""):"\nPullback depth not evaluated or unavailable.") : "No scoped evaluation available.";
+    }
+    for(const field of data.fields.filter(f=>!f.strategy||f.strategy===selected.setup)){
       const label=document.createElement('label');label.textContent=field.label;
       const inp=document.createElement('input');
       inp.type='number';inp.name=field.key;inp.min=field.min;inp.max=field.key==='maximum_risk_percent'?selected.maximum_risk_percent_ceiling:field.max;
@@ -107,7 +117,7 @@
     const selected=chosen();if(!selected||!selected.ready)return;
     if(!window.confirm('Apply these changes to future REAL trades for '+selected.setup+'?'))return;
     const overrides={};
-    for(const f of data.fields)overrides[f.key]=Number(root.querySelector('[name="'+f.key+'"]').value);
+    for(const f of data.fields.filter(f=>!f.strategy||f.strategy===selected.setup))overrides[f.key]=Number(root.querySelector('[name="'+f.key+'"]').value);
     const token=(document.cookie.match(/(?:^|; )csrftoken=([^;]+)/)||[])[1];
     if(!token){byId('liveSettingsSaved').textContent='CSRF cookie missing; sign in as staff and reload.';return;}
     byId('liveSave').disabled=true;
@@ -217,6 +227,7 @@
       if(scalp){
         if(val('minimum_stop_atr')>val('maximum_stop_atr'))throw new Error('Minimum stop distance exceeds maximum.');
       }else{
+        if(setup==='TREND_PULLBACK'&&val('min_retracement')>=val('max_retracement'))throw new Error('Minimum retracement must be below maximum.');
         if(val('min_stop_atr')>=val('max_stop_atr'))throw new Error('Minimum stop distance must be below maximum.');
         if(val('target_reward_risk')<val('min_reward_risk'))throw new Error('Target reward/risk must meet minimum.');
         if(val('maximum_risk_percent')>val('max_total_risk_percent'))throw new Error('Entry risk exceeds portfolio risk.');

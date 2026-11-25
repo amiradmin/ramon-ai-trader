@@ -1419,15 +1419,27 @@ class OpportunityDetector:
         pullback_low = min(window)
         ip = ih + 1 + window.index(pullback_low)
         retracement = (o_high[ih] - pullback_low) / impulse
+        depth_metrics = {
+            "value": round(retracement * 100, 2),
+            "threshold": f"{config.min_retracement * 100:.1f}–{config.max_retracement * 100:.1f}%",
+            "factor": "impulse retracement (%)",
+            "minimum": config.min_retracement * 100,
+            "maximum": config.max_retracement * 100,
+            "depth_atr": round((o_high[ih] - pullback_low) / atr, 4),
+            "maximum_depth_atr": round(impulse_atr * config.max_retracement, 4),
+            "impulse_atr": round(impulse_atr, 4),
+            "structure_broken": bool(pullback_low <= o_low[il]),
+            "maximum_retracement_exceeded": bool(retracement > config.max_retracement),
+        }
         if pullback_low <= o_low[il] or retracement > config.max_retracement:
             detail = f"pullback retraced {retracement:.0%} of the impulse; the trend structure is broken"
-            _check(checks, "pullback_depth", False, detail, metrics={"value": round(retracement * 100, 2), "threshold": f"{config.min_retracement * 100:.1f}–{config.max_retracement * 100:.1f}%", "factor": "impulse retracement (%)"})
+            _check(checks, "pullback_depth", False, detail, metrics=depth_metrics)
             return finish(REJECTED, "PULLBACK_TOO_DEEP", detail, side)
         if retracement < config.min_retracement:
             detail = f"pullback retraced only {retracement:.0%} (minimum {config.min_retracement:.0%})"
-            _check(checks, "pullback_depth", False, detail, metrics={"value": round(retracement * 100, 2), "threshold": f"{config.min_retracement * 100:.1f}–{config.max_retracement * 100:.1f}%", "factor": "impulse retracement (%)"})
+            _check(checks, "pullback_depth", False, detail, metrics=depth_metrics)
             return finish(DEFERRED, "PULLBACK_NOT_DEEP_ENOUGH", detail, side)
-        _check(checks, "pullback_depth", True, f"pullback retraced {retracement:.0%} of the impulse", metrics={"value": round(retracement * 100, 2), "threshold": f"{config.min_retracement * 100:.1f}–{config.max_retracement * 100:.1f}%", "factor": "impulse retracement (%)"})
+        _check(checks, "pullback_depth", True, f"pullback retraced {retracement:.0%} of the impulse", metrics=depth_metrics)
 
         support = config.support_tolerance_atr * atr
         if any(o_close[j] < o_ema_slow[j] - support for j in range(ih + 1, t + 1)):
