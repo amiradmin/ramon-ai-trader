@@ -25,9 +25,11 @@ from . import replay_jobs
 
 from . import research_shadow_views, regime_views
 
-from . import real_performance_views, execution_quality_views
+from . import real_performance_views, execution_quality_views, communication_probe
 
 urlpatterns = [
+    path("research/communication/start", communication_probe.start, name="ramon-communication-start"),
+    path("research/communication/status", communication_probe.status, name="ramon-communication-status"),
     path("research/execution-quality", execution_quality_views.page, name="ramon-execution-quality"),
     path("research/execution-quality/report", execution_quality_views.report, name="ramon-execution-quality-report"),
     path("research/real-performance", real_performance_views.page, name="ramon-real-performance"),
@@ -62,7 +64,7 @@ urlpatterns = [
     path("decision", decision_views.decision, name="ea-decision"),
     path("telemetry", telemetry_views.telemetry, name="ea-telemetry"),
     path("market-data/status", telemetry_views.market_data_status, name="ea-market-data-status"),
-    path("commands/next", command_views.next_command, name="ea-command-next"),
+    path("commands/next", communication_probe.next_with_probe, name="ea-command-next"),
     path("commands/ack", command_views.acknowledge_command, name="ea-command-ack"),
     path("status", views.status, name="ea-status"),
     path("dashboard", views.dashboard, name="ramon-dashboard"),
