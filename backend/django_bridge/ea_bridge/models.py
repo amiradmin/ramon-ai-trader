@@ -496,3 +496,15 @@ class ScalpAuditEvent(models.Model):
 
     def delete(self, *args, **kwargs):
         raise ValueError('Scalp audit events are append-only')
+
+
+class CommunicationProbeRun(models.Model):
+    """One bounded diagnostic run per bridge; never an EACommand."""
+    instance_id = models.CharField(max_length=128, unique=True)
+    account_login = models.CharField(max_length=32)
+    server_name = models.CharField(max_length=128)
+    symbol = models.CharField(max_length=32)
+    run_id = models.CharField(max_length=32)
+    started_at = models.DateTimeField()
+    deadline = models.DateTimeField()
+    samples = models.JSONField(default=list)
