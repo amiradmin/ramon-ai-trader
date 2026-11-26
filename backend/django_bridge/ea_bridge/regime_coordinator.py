@@ -5,7 +5,8 @@ from collections import Counter
 import math
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
-from .models import DecisionEvaluation, StrategyWorkerControl, MarketBar
+from .models import DecisionEvaluation, StrategyWorkerControl, MarketBar, EAHeartbeat
+from .strategy_worker import strategy_readiness
 from .strategy_registry import STRATEGIES
 
 TREND={"TREND_PULLBACK","BREAKOUT_RETEST"}
@@ -48,7 +49,8 @@ def verified_closures(source,symbol):
     # Optional, exact source/symbol-specific UTC windows confirmed by operator.
     entries=getattr(settings,"RAMON_COORDINATOR_VERIFIED_CLOSURES",[])
     windows=[]
-    for item in entries:
+    for item in entries if isinstance(entries,list) else []:
+        if not isinstance(item,dict): continue
         if item.get("source")!=source or item.get("symbol")!=symbol: continue
         try:
             a,b=parse_datetime(item["start"]),parse_datetime(item["end"])
@@ -95,7 +97,9 @@ def build_report(source,symbol,account_login,server_name,now=None):
     ids=[c.latest.get("evaluation_id") for c in controls.values() if type(c.latest.get("evaluation_id")) is int]
     evaluations={e.pk:e for e in DecisionEvaluation.objects.filter(pk__in=ids,instance_id=source,
         symbol=symbol,account_login=account_login,server_name=server_name).select_related("verdict")}
-    rows=[]; labels=[]; candidates=[]
+    feed=EAHeartbeat.objects.filter(instance_id=source,account_login=account_login,server_name=server_name,symbol=symbol).first()
+    feed_state=strategy_readiness(feed,now=now)
+    rows=[]; labels=[]; recorded=[]; candidates=[]
     for setup in STRATEGIES:
         c=controls.get(setup)
         row={"setup":setup,"status":"MISSING","eligible":False}
@@ -116,6 +120,14 @@ def build_report(source,symbol,account_login,server_name,now=None):
         bar=(e.features.get("market_snapshot") or {}).get("bar_time")
         row.update(status="OBSERVED",evaluation_id=e.pk,bar_time=bar,regime=regime,action=e.action,
             reason=e.rationale_code,risk_approved=e.verdict.approved,command_created=bool(c.latest.get("command_created")))
+        if regime: recorded.append((bar,regime))
+        expected_state=c.latest.get("command_reason") if c.latest.get("command_created") else c.latest.get("reason")
+        current_bar=int(now.timestamp())//900*900-900
+        if feed_state!="READY" or not expected_state or c.state!=expected_state or bar!=current_bar or c.state in {
+            "TELEMETRY_STALE","QUOTE_STALE","TERMINAL_NOT_READY","M15_STALE","M15_WARMUP","EVALUATION_ERROR"}:
+            row["status"]="RECORDED_NOT_CURRENT"
+            continue
+        row["status"]="CURRENT"
         if regime: labels.append((bar,regime))
         if e.action in ("BUY","SELL") and e.verdict.approved and all((stages.get(k) or {}).get("approved") is True for k in ("opportunities","entry_timing","risk_management")):
             score=opp.get("score")
@@ -133,8 +145,9 @@ def build_report(source,symbol,account_login,server_name,now=None):
         row["timeframe_alignment"]={tf:(v["direction"]==side if side in ("BUY","SELL") and v["status"]=="READY" else None) for tf,v in context.items()}
     ranked=sorted((r for r in candidates if len(bars)==1 and None not in bars and r["bar_time"] in bars),
         key=lambda r:(-(r["score"]+r["quality"])/2,r["setup"]))
-    return {"version":"V12.2","mode":"ADVISORY_ONLY","live_promotion":False,"generated_at":now.isoformat(),
+    return {"version":"V12.3","mode":"ADVISORY_ONLY","live_promotion":False,"generated_at":now.isoformat(),
         "source":source,"symbol":symbol,"regime":regime,"regime_votes":dict(Counter(label for bar,label in labels)),
+        "feed_readiness":feed_state,"recorded_regime_votes":dict(Counter(label for bar,label in recorded)),
         "timeframes":context,"alignment":alignment(context),"strategies":rows,"ranked_candidates":[dict(setup=r["setup"],action=r["action"],
             score=r["score"],quality=r["quality"],evaluation_id=r["evaluation_id"],regime_fit=r["regime_fit"]) for r in ranked],
         "limitations":["Current recorded evaluations only; not a synchronized execution arbiter.",
