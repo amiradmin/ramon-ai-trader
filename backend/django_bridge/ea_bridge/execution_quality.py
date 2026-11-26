@@ -7,7 +7,7 @@ from django.utils import timezone
 from .account_scope import real_cent_scope
 from .models import EACommand, EAHeartbeat, ScalpObservation
 from .strategy_registry import STRATEGIES
-from .execution_observer import number, request_metrics
+from .execution_observer import number
 
 THRESHOLDS=(0.5,1,2,3)
 
@@ -32,7 +32,7 @@ def price_metrics(side, market, request):
     return dict(decision_spread_points=spread,decision_to_request_points=before,
         decision_to_fill_points=total,request_slippage_points=broker,
         adverse_request_spread_ratio=ratio,
-        hypothetical_warning_thresholds=[x for x in THRESHOLDS if ratio is not None and ratio>x])
+        hypothetical_warning_thresholds=[x for x in THRESHOLDS if ratio is not None and ratio>x and abs(ratio-x)>1e-9])
 
 def summary(rows,key):
     values=sorted(r[key] for r in rows if r.get(key) is not None)
@@ -98,7 +98,6 @@ def build_report(days=30,now=None):
     keys=("decision_to_command_seconds","command_to_claim_seconds","claim_to_terminal_seconds",
           "command_to_terminal_seconds","decision_spread_points","decision_to_request_points",
           "decision_to_fill_points","request_slippage_points","adverse_request_spread_ratio")
-    executed=[r for r in rows if r["state"]=="EXECUTED"]
     def aggregate(group):
         fills=[r for r in group if r["state"]=="EXECUTED"]
         return dict(commands=len(group),states=dict(Counter(r["state"] for r in group)),
