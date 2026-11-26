@@ -42,6 +42,20 @@ V10 = {
 }
 
 
+V13 = {
+    "volatility_baseline": ("VOLATILITY_COMPRESSION_EXPANSION",1.0,"baseline"),
+    "volatility_transition": ("VOLATILITY_COMPRESSION_EXPANSION",1.0,"transition"),
+    "session_baseline": ("SESSION_OPENING_RANGE_BREAKOUT",0.5,"baseline"),
+    "session_transition": ("SESSION_OPENING_RANGE_BREAKOUT",0.5,"transition"),
+    "sweep_baseline": ("FAILED_BREAKOUT_SWEEP",0.5,"baseline"),
+    "sweep_transition": ("FAILED_BREAKOUT_SWEEP",0.5,"transition"),
+    "exhaustion_baseline": ("EXHAUSTION_REVERSAL",0.5,"baseline"),
+    "exhaustion_transition": ("EXHAUSTION_REVERSAL",0.5,"transition"),
+    "exhaustion_v2": ("EXHAUSTION_REVERSAL",0.5,"exhaustion_v2"),
+    "exhaustion_v2_transition": ("EXHAUSTION_REVERSAL",0.5,"exhaustion_v2_transition"),
+}
+
+
 def windows(start, end, days):
     if days < 1 or start > end:
         raise ValueError("Invalid windows")
@@ -74,7 +88,7 @@ class Command(BaseCommand):
         for key in ("balance","point","tick-size","tick-value","volume-min",
                     "volume-step","volume-max","slippage-points","commission-per-lot"):
             parser.add_argument("--"+key, required=True, type=float)
-        parser.add_argument("--suite", choices=("v8","all-m15","v9","v10"), default="v8")
+        parser.add_argument("--suite", choices=("v8","all-m15","v9","v10","v13"), default="v8")
         parser.add_argument("--window-days", type=int, default=60)
         parser.add_argument("--max-candles", type=int, default=30000)
         parser.add_argument("--sensitivity", action="store_true")
@@ -83,7 +97,7 @@ class Command(BaseCommand):
     def handle(self, *args, **opts):
         if not 7 <= opts["window_days"] <= 120 or not 130 <= opts["max_candles"] <= 100000 or opts["minimum_trades"] < 1:
             raise CommandError("Invalid window, candle or trade limit")
-        if opts["suite"] in ("all-m15","v9","v10") and opts["sensitivity"]:
+        if opts["suite"] in ("all-m15","v9","v10","v13") and opts["sensitivity"]:
             raise CommandError("Sensitivity is currently restricted to V8 Trend Pullback")
         q = QueryDict(mutable=True)
         for k in ("source","symbol","start","end","balance","point","tick_size","tick_value",
@@ -99,8 +113,10 @@ class Command(BaseCommand):
         costs = scenarios(opts["sensitivity"]) if opts["suite"] == "v8" else [(42,r) for r in (0.5,1.0,1.5)] if opts["suite"] == "v9" else [(42,0.5)]
         if opts["suite"] == "v10":
             policies = {n: dict(timeframe="M15",setup=s,spread_points=p,risk_percent=r,entry_filter=f) for n,(s,p,r,f) in V10.items()}
+        if opts["suite"] == "v13":
+            policies = {n: dict(timeframe="M15",setup=s,spread_points=42,risk_percent=r,detector_policy=p) for n,(s,r,p) in V13.items()}
         def candidate_costs(policy):
-            return [(policy["spread_points"],policy["risk_percent"])] if opts["suite"] == "v10" else costs
+            return [(policy["spread_points"],policy["risk_percent"])] if opts["suite"] in ("v10","v13") else costs
         reports = []
         for first,last in windows(data["start"], data["end"], opts["window_days"]):
             fingerprints = {}
@@ -113,10 +129,12 @@ class Command(BaseCommand):
                             isolated_timeframe=policy["timeframe"], trend_research={"version":8,**policy})
                     else:
                         overrides["setups"] = [policy.get("setup",name)]
-                        if opts["suite"] in ("v9","v10"):
+                        if opts["suite"] in ("v9","v10","v13"):
                             overrides.update(isolated_risk_sensitivity=True, all_strategy_risk_research=True)
                         if opts["suite"] == "v10":
                             overrides["v10_entry_filter"] = policy["entry_filter"]
+                        if opts["suite"] == "v13":
+                            overrides["v13_detector_policy"] = policy["detector_policy"]
                     def progress(done,total):
                         if done == total or done % 1000 == 0:
                             self.stderr.write(f"  {done}/{total}")
@@ -153,6 +171,6 @@ class Command(BaseCommand):
                     worst_window_closed_drawdown_pct=max((m["max_drawdown_pct"] for m in valid),default=None),
                     longest_within_window_losing_streak=max((m["longest_losing_streak"] for m in valid),default=None)))
         self.stdout.write(json.dumps(dict(mode="FROZEN_POLICY_DESCRIPTIVE_ONLY",live_promotion=False,
-            research_version=10 if opts["suite"] == "v10" else 9 if opts["suite"] == "v9" else 8,suite=opts["suite"],source=data["source"],symbol=data["symbol"],policies=policies,
+            research_version=13 if opts["suite"] == "v13" else 10 if opts["suite"] == "v10" else 9 if opts["suite"] == "v9" else 8,suite=opts["suite"],source=data["source"],symbol=data["symbol"],policies=policies,
             minimum_trades=opts["minimum_trades"],windows=reports,summaries=summaries,
-            limitations="Fixed policies, no fitting or winner selection. Windows reset balances and positions; open positions at boundaries are not included in closed PnL. This is rolling evaluation, not retraining walk-forward or portfolio simulation. Previously examined dates are not fresh holdout. M5 requires same-source M1. Context warmup may be insufficient initially. Fixed costs and OHLC stop-first, closed drawdown only. All-M15 uses standard 0.5% cap; V9 uses isolated risk at 0.5/1/1.5%, both use identical legacy replay fills for comparability. V8 uses isolated risk and gap-aware fills. V10 adds fixed setup-specific confirmation filters after approval, retaining V9 fills. These are exploratory and not a full detector redesign. Missing windows are not zero-return windows."),indent=2))
+            limitations="Fixed policies, no fitting or winner selection. Windows reset balances and positions; open positions at boundaries are not included in closed PnL. This is rolling evaluation, not retraining walk-forward or portfolio simulation. Previously examined dates are not fresh holdout. M5 requires same-source M1. Context warmup may be insufficient initially. Fixed costs and OHLC stop-first, closed drawdown only. All-M15 uses standard 0.5% cap; V9 uses isolated risk at 0.5/1/1.5%, both use identical legacy replay fills for comparability. V8 uses isolated risk and gap-aware fills. V10 adds fixed setup-specific confirmation filters after approval, retaining V9 fills. These are exploratory and not a full detector redesign. V13 tests opt-in supplemental transition eligibility and causal delayed exhaustion confirmation, with the same legacy fills for matched baselines. Missing windows are not zero-return windows."),indent=2))
