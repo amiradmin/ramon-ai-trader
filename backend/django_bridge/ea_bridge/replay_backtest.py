@@ -257,6 +257,19 @@ def _simulate(data, rows, progress=None):
             isolated_risk_sensitivity=data.get("isolated_risk_sensitivity", False),
             all_strategy_risk_research=data.get("all_strategy_risk_research", False),
         ) for setup in setups}
+    v13 = data.get("v13_detector_policy")
+    if v13 is not None:
+        allowed={"SESSION_OPENING_RANGE_BREAKOUT","VOLATILITY_COMPRESSION_EXPANSION",
+                 "FAILED_BREAKOUT_SWEEP","EXHAUSTION_REVERSAL"}
+        if not data.get("all_strategy_risk_research") or len(setups)!=1 or setups[0] not in allowed:
+            raise ValueError("V13 requires isolated supplemental M15 research")
+        if v13 not in ("baseline","transition","exhaustion_v2","exhaustion_v2_transition"):
+            raise ValueError("Invalid V13 detector policy")
+        if v13.startswith("exhaustion_v2") and setups[0]!="EXHAUSTION_REVERSAL":
+            raise ValueError("Exhaustion V2 requires its own setup")
+        detector=pipelines[setups[0]].opportunities
+        detector.research_transition_setup=setups[0].lower() if v13 in ("transition","exhaustion_v2_transition") else None
+        detector.research_exhaustion_v2=v13.startswith("exhaustion_v2")
     research = data.get("trend_research", {})
     experiment = data.get("v10_entry_filter", {})
     if experiment:
