@@ -270,6 +270,11 @@ def _simulate(data, rows, progress=None):
         detector=pipelines[setups[0]].opportunities
         detector.research_transition_setup=setups[0].lower() if v13 in ("transition","exhaustion_v2_transition") else None
         detector.research_exhaustion_v2=v13.startswith("exhaustion_v2")
+    from .exit_research import POLICIES, next_stop, close_signal
+    exit_name = data.get("v15_exit_policy")
+    if exit_name is not None and (exit_name not in POLICIES or not data.get("all_strategy_risk_research") or len(setups)!=1 or data.get("trend_research")):
+        raise ValueError("V15 requires one isolated M15 setup and a fixed exit policy")
+    exit_policy = POLICIES[exit_name] if exit_name is not None else None
     research = data.get("trend_research", {})
     experiment = data.get("v10_entry_filter", {})
     if experiment:
@@ -335,7 +340,7 @@ def _simulate(data, rows, progress=None):
             pos=state.get("pending")
             if pos is not None:
                 state["pending"]=None
-                if within and state["open"] is None and (not research or not gap_before_bar):
+                if within and state["open"] is None and (not (research or exit_policy is not None) or not gap_before_bar):
                     entry=bar["open"]+(spread+slippage if pos["side"]=="BUY" else -slippage)
                     if (pos["side"]=="BUY" and pos["stop"]<entry<pos["target"]) or (pos["side"]=="SELL" and pos["target"]<entry<pos["stop"]):
                         pos["entry"]=entry;pos["opened_at"]=bar["time"]
@@ -354,8 +359,33 @@ def _simulate(data, rows, progress=None):
             stop_hit=bar["low"]<=pos["stop"] if pos["side"]=="BUY" else bar["high"]+spread>=pos["stop"]
             target_hit=bar["high"]>=pos["target"] if pos["side"]=="BUY" else bar["low"]+spread<=pos["target"]
             pos["held_bars"] += 1
+            exit_signal = pos.get("exit_signal") if exit_policy is not None else None
+            if exit_policy is not None:
+                direction = 1 if pos["side"]=="BUY" else -1
+                opening_quote = bar["open"] if direction==1 else bar["open"]+spread
+                if exit_signal:
+                    stop_hit = direction*(opening_quote-pos["stop"])<=0
+                    target_hit = direction*(opening_quote-pos["target"])>=0
+                risk = abs(pos["entry"]-pos["initial_stop"])
+                marks = [opening_quote]
+                if not (stop_hit or target_hit or exit_signal):
+                    marks.extend([bar["low"]+(spread if direction==-1 else 0),
+                                  bar["high"]+(spread if direction==-1 else 0)])
+                excursions = [direction*(m-pos["entry"])/risk for m in marks]
+                pos["mfe_r"] = max(pos.get("mfe_r",0),*excursions)
+                pos["mae_r"] = min(pos.get("mae_r",0),*excursions)
             timed = bool(research.get("time_exit") and pos["held_bars"] >= research["time_exit"])
-            if not (stop_hit or target_hit or timed):
+            if exit_policy is not None and not (stop_hit or target_hit or exit_signal):
+                mark=bar["close"] if pos["side"]=="BUY" else bar["close"]+spread
+                context=rows[max(0,idx-14):idx+1]
+                atr=None
+                if len(context)==15 and all(b["time"]-a["time"]==interval for a,b in zip(context,context[1:])):
+                    atr=sum(max(b["high"]-b["low"],abs(b["high"]-a["close"]),abs(b["low"]-a["close"])) for a,b in zip(context,context[1:]))/14
+                if not gap_before_bar:
+                    pos["exit_signal"]=close_signal(pos,bar,previous,mark,exit_policy)
+                pos["stop"]=next_stop(pos,mark,atr,data["tick_size"],exit_policy)
+                continue
+            if not (stop_hit or target_hit or timed or exit_signal):
                 # Stop changes take effect on the NEXT bar, not retrospectively.
                 direction = 1 if pos["side"] == "BUY" else -1
                 mark = bar["close"] if direction == 1 else bar["close"] + spread
@@ -377,7 +407,9 @@ def _simulate(data, rows, progress=None):
                 continue
             level=pos["stop"] if stop_hit else pos["target"] if target_hit else (
                 bar["close"] if pos["side"]=="BUY" else bar["close"]+spread)
-            if research and stop_hit:
+            if exit_signal and not (stop_hit or target_hit):
+                level=bar["open"] if pos["side"]=="BUY" else bar["open"]+spread
+            if (research or exit_policy is not None) and stop_hit:
                 opening_quote = bar["open"] if pos["side"]=="BUY" else bar["open"]+spread
                 level = min(level,opening_quote) if pos["side"]=="BUY" else max(level,opening_quote)
             exit_price=level+(-slippage if pos["side"]=="BUY" else slippage)
@@ -397,7 +429,10 @@ def _simulate(data, rows, progress=None):
                "exit_slippage_points":data.get("slippage_points",0),
                "signal_regime":pos.get("signal_regime"),"signal_adx":pos.get("signal_adx"),
                "gaps_crossed":pos.get("gaps_crossed",0),
-               "reason":"STOP" if stop_hit else "TARGET" if target_hit else "TIME_EXIT"})
+               "reason":"STOP" if stop_hit else "TARGET" if target_hit else exit_signal or "TIME_EXIT",
+               **({"initial_stop":pos["initial_stop"],"held_bars":pos["held_bars"],
+                   "observed_mfe_r_lower_bound":pos["mfe_r"],"observed_mae_r_signed_upper_bound":pos["mae_r"]}
+                  if exit_policy is not None else {})})
             state["open"]=None
         # Don't evaluate the final candle: an order requires a next candle to fill.
         if idx==len(rows)-1 or not within:continue
