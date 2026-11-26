@@ -654,6 +654,8 @@ class OpportunityDetector:
             raise ValueError("forecast_limit must be at least 40 candles")
         self.trading_settings = load_trading_config()
         self.demo_mode = bool(demo_mode)
+        self.research_transition_setup = None
+        self.research_exhaustion_v2 = False
         if self.demo_mode:
             demo_setups = self.trading_settings["opportunity_finder"]["setups"]
             for name in _SUPPLEMENTAL_SETUP_NAMES:
@@ -1109,6 +1111,15 @@ class OpportunityDetector:
                 settings["enabled"] = settings["enabled"] and regime.label != "UNCERTAIN" and regime_stable
             else:
                 settings["enabled"] = settings["enabled"] and regime.label in {"BULLISH", "BEARISH"} and regime_stable
+            # Research policy lives on the isolated detector object, never market input.
+            if name == self.research_transition_setup and name in {"session_opening_range_breakout",
+                    "volatility_compression_expansion","failed_breakout_sweep","exhaustion_reversal"}:
+                potential = transition["state"] in {"POTENTIAL_BULLISH_REVERSAL","POTENTIAL_BEARISH_REVERSAL"}
+                if potential:
+                    settings["enabled"] = setup_settings[name]["enabled"]
+            if name == "exhaustion_reversal" and self.research_exhaustion_v2:
+                settings["research_exhaustion_v2"] = True
+                settings["research_pivot_window"] = config.pivot_window
             settings["enabled"] = settings["enabled"] and volatility_ready
         supplemental = detect_additional_opportunity(
             bars.times,
@@ -1116,6 +1127,10 @@ class OpportunityDetector:
             bars.high, bars.low, bars.close, ind.atr, ind.adx, ind.rsi,
             ind.swing_highs, ind.swing_lows, regime.label, supplemental_settings,
         )
+        if supplemental is not None and self.research_transition_setup and regime.label == "UNCERTAIN":
+            wanted = {"BULLISH":"BUY","BEARISH":"SELL"}.get(transition["candidate_reversal_direction"])
+            if supplemental["side"] != wanted:
+                supplemental = None
         if supplemental is not None:
             candidate_side = supplemental["side"]
             score = min(1.0, max(0.0, float(supplemental.pop("score", 0.55))))
