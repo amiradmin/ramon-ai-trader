@@ -8,6 +8,7 @@ from .account_scope import real_cent_scope
 from .models import EACommand, EAHeartbeat, ScalpObservation
 from .strategy_registry import STRATEGIES
 from .execution_observer import number
+from .entry_protection import entry_report
 
 THRESHOLDS=(0.5,1,2,3)
 
@@ -55,7 +56,7 @@ def build_report(days=30,now=None):
     now=now or timezone.now()
     feed=EAHeartbeat.objects.filter(instance_id=getattr(settings,"RAMON_REAL_CENT_INSTANCE","")).first()
     ok,reason=real_cent_scope(feed)
-    result=dict(version="V14.3",mode="OBSERVATION_ONLY",affects_orders=False,
+    result=dict(version="V14.4",mode="OBSERVATION_ONLY",affects_orders=False,
         generated_at=now.isoformat(),days=days,status="READY" if ok else reason)
     if not ok:return result
     commands=list(EACommand.objects.filter(instance_id=feed.instance_id,account_login=feed.account_login,
@@ -98,6 +99,7 @@ def build_report(days=30,now=None):
             value=number(raw.get(key)) if valid else None
             row[key]=value if value is not None and value>=0 else None
         row["terminal_detail"]=str(c.result.get("detail",""))[:500] if isinstance(c.result,dict) else None
+        row["entry_protection"]=entry_report(c.payload,market,raw) if c.state in ("EXECUTED","REJECTED","FAILED","RECONCILIATION_REQUIRED") else {"status":"UNAVAILABLE","warnings":[]}
         rows.append(row)
     keys=("decision_to_command_seconds","command_to_claim_seconds","claim_to_terminal_seconds",
           "command_to_terminal_seconds","decision_spread_points","decision_to_request_points",
@@ -107,6 +109,9 @@ def build_report(days=30,now=None):
         return dict(commands=len(group),states=dict(Counter(r["state"] for r in group)),
             latency={k:summary(group,k) for k in keys[:4]},prices={k:summary(fills,k) for k in keys[4:]},
             ea_timing_ms={k:summary(fills,k) for k in ("poll_http_ms","response_to_submit_ms","trade_call_ms")},
+            entry_protection=dict(status_counts=dict(Counter(r["entry_protection"]["status"] for r in group)),
+                warning_counts=dict(Counter(w for r in group for w in r["entry_protection"]["warnings"])),
+                metrics={k:summary([r["entry_protection"] for r in group],k) for k in ("quote_age_ms","spread_points","adverse_entry_points","estimated_loss_money","reward_risk")}),
             warning_counts={str(x):sum(x in r["hypothetical_warning_thresholds"] for r in fills) for x in THRESHOLDS})
     return dict(result,source=feed.instance_id,server=feed.server_name,symbol=feed.symbol,
         heartbeat_age_seconds=(now-feed.last_seen).total_seconds(),excluded_unverified_commands=len(commands)-len(rows),
@@ -117,4 +122,5 @@ def build_report(days=30,now=None):
             "Scalper price reference is its command market snapshot, not necessarily the observation quote.",
             "Request-to-fill uses execution acknowledgement prices; no closed-outcome duplication.",
             "Warning thresholds are retrospective, strictly greater than multiples of reference spread, and do not block orders.",
-            "Missing and inverted timestamps remain unavailable. EA monotonic timing requires v1.10 acknowledgements; absolute receipt timestamps and quote freshness at submission are not established."])
+            "Missing and inverted timestamps remain unavailable. EA monotonic timing requires v1.10 acknowledgements; absolute receipt timestamps are not established.",
+            "Entry protection is observation-only. Quote age uses broker server seconds minus tick milliseconds (roughly one second resolution); OrderCalcProfit excludes fees and stop slippage. Warning thresholds are diagnostic, not effective live policy."])
