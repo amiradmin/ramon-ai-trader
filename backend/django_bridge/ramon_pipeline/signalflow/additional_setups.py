@@ -68,6 +68,48 @@ def exhaustion_diagnostics(highs, lows, closes, atr_values, rsi_values,
                     "swing_available": bool(upper), "choch": bool(upper and closes[t] > highs[upper[-1]])}}
 
 
+def exhaustion_v2(times, opens, highs, lows, closes, atr_values, rsi_values,
+                  swing_highs, swing_lows, cfg):
+    """Research: prior exhaustion then first causal structural break, within eight bars."""
+    t=len(closes)-1
+    lookback=int(cfg["extension_lookback_bars"])
+    window=int(cfg["research_pivot_window"])
+    expiry=8
+    if t<lookback+1 or t<1:
+        return None
+    for event in range(t-1,max(lookback-1,t-expiry-1),-1):
+        atr=atr_values[event]
+        rsi=rsi_values[event]
+        if not math.isfinite(atr) or atr<=0 or not math.isfinite(rsi):
+            continue
+        if any(times[i]-times[i-1]!=900 for i in range(event-lookback+1,t+1)):
+            continue
+        extension=(closes[event]-closes[event-lookback])/atr
+        threshold=float(cfg["minimum_extension_atr"])
+        extreme=float(cfg["rsi_extreme"])
+        if extension>=threshold and rsi>=extreme:
+            side="SELL"; pivots=swing_lows; levels=lows
+        elif extension<=-threshold and rsi<=100-extreme:
+            side="BUY"; pivots=swing_highs; levels=highs
+        else:
+            continue
+        known=[i for i in pivots if i+window<=event]
+        if not known: continue
+        level=levels[known[-1]]
+        sign=1 if side=="BUY" else -1
+        # The level must be unbroken when exhaustion is observed and until this bar.
+        if any(sign*(closes[i]-level)>0 for i in range(event,t)):
+            continue
+        if sign*(closes[t]-level)<=0 or sign*(closes[t]-opens[t])<=0:
+            continue
+        stop=min(lows[event:t+1]) if side=="BUY" else max(highs[event:t+1])
+        return dict(type="EXHAUSTION_REVERSAL",side=side,extension_atr=abs(extension),
+                    choch_level=level,invalidation_price=stop,exhaustion_bar_time=times[event],
+                    exhaustion_age_bars=t-event,score=0.55+min(0.25,abs(extension)*0.05),
+                    research_variant="EXHAUSTION_V2")
+    return None
+
+
 def detect_additional_opportunity(times: Sequence[float], opens: Sequence[float],
         highs: Sequence[float], lows: Sequence[float], closes: Sequence[float],
         atr_values: Sequence[float], adx_values: Sequence[float], rsi_values: Sequence[float],
@@ -183,6 +225,8 @@ def detect_additional_opportunity(times: Sequence[float], opens: Sequence[float]
     # 5. Exhaustion reversal is last-resort and requires a confirmed swing CHoCH.
     cfg = setups["exhaustion_reversal"]
     if cfg["enabled"]:
+        if cfg.get("research_exhaustion_v2") is True:
+            return exhaustion_v2(times,opens,highs,lows,closes,atr_values,rsi_values,swing_highs,swing_lows,cfg)
         lookback = int(cfg["extension_lookback_bars"])
         if t >= lookback and math.isfinite(rsi_values[t]):
             extension = closes[t] - closes[t-lookback]
