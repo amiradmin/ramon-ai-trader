@@ -55,7 +55,7 @@ def build_report(days=30,now=None):
     now=now or timezone.now()
     feed=EAHeartbeat.objects.filter(instance_id=getattr(settings,"RAMON_REAL_CENT_INSTANCE","")).first()
     ok,reason=real_cent_scope(feed)
-    result=dict(version="V14.2",mode="OBSERVATION_ONLY",affects_orders=False,
+    result=dict(version="V14.3",mode="OBSERVATION_ONLY",affects_orders=False,
         generated_at=now.isoformat(),days=days,status="READY" if ok else reason)
     if not ok:return result
     commands=list(EACommand.objects.filter(instance_id=feed.instance_id,account_login=feed.account_login,
@@ -94,6 +94,10 @@ def build_report(days=30,now=None):
             claim_to_terminal_seconds=seconds(c.claimed_at,c.completed_at),
             command_to_terminal_seconds=seconds(c.created_at,c.completed_at),
             **price_metrics(c.payload.get("side"),market,request))
+        for key in ("poll_http_ms","response_to_submit_ms","trade_call_ms"):
+            value=number(raw.get(key)) if valid else None
+            row[key]=value if value is not None and value>=0 else None
+        row["terminal_detail"]=str(c.result.get("detail",""))[:500] if isinstance(c.result,dict) else None
         rows.append(row)
     keys=("decision_to_command_seconds","command_to_claim_seconds","claim_to_terminal_seconds",
           "command_to_terminal_seconds","decision_spread_points","decision_to_request_points",
@@ -102,6 +106,7 @@ def build_report(days=30,now=None):
         fills=[r for r in group if r["state"]=="EXECUTED"]
         return dict(commands=len(group),states=dict(Counter(r["state"] for r in group)),
             latency={k:summary(group,k) for k in keys[:4]},prices={k:summary(fills,k) for k in keys[4:]},
+            ea_timing_ms={k:summary(fills,k) for k in ("poll_http_ms","response_to_submit_ms","trade_call_ms")},
             warning_counts={str(x):sum(x in r["hypothetical_warning_thresholds"] for r in fills) for x in THRESHOLDS})
     return dict(result,source=feed.instance_id,server=feed.server_name,symbol=feed.symbol,
         heartbeat_age_seconds=(now-feed.last_seen).total_seconds(),excluded_unverified_commands=len(commands)-len(rows),
@@ -112,4 +117,4 @@ def build_report(days=30,now=None):
             "Scalper price reference is its command market snapshot, not necessarily the observation quote.",
             "Request-to-fill uses execution acknowledgement prices; no closed-outcome duplication.",
             "Warning thresholds are retrospective, strictly greater than multiples of reference spread, and do not block orders.",
-            "Missing and inverted timestamps remain unavailable. Quote freshness at execution and EA receive/submit timestamps are not established by this report."])
+            "Missing and inverted timestamps remain unavailable. EA monotonic timing requires v1.10 acknowledgements; absolute receipt timestamps and quote freshness at submission are not established."])
