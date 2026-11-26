@@ -96,15 +96,15 @@ def start(request):
         return JsonResponse({"error":"COUNT_MUST_BE_10_20_OR_50"},status=400)
     feed=feed_for_scope()
     now=timezone.now()
-    if not feed or feed.ea_version!="1.11" or not feed.terminal_connected or not 0<=(now-feed.last_seen).total_seconds()<=30:
-        return JsonResponse({"error":"FRESH_EA_1_11_REQUIRED"},status=409)
+    if not feed or feed.ea_version not in ("1.11","1.12") or not feed.terminal_connected or not 0<=(now-feed.last_seen).total_seconds()<=30:
+        return JsonResponse({"error":"FRESH_PROBE_CAPABLE_EA_REQUIRED"},status=409)
     with transaction.atomic():
         # Lock the existing unique heartbeat to serialize simultaneous starts.
         feed=EAHeartbeat.objects.select_for_update().get(pk=feed.pk)
         ok,_=real_cent_scope(feed)
         now=timezone.now()
-        if not ok or feed.ea_version!="1.11" or not feed.terminal_connected or not 0<=(now-feed.last_seen).total_seconds()<=30:
-            return JsonResponse({"error":"FRESH_EA_1_11_REQUIRED"},status=409)
+        if not ok or feed.ea_version not in ("1.11","1.12") or not feed.terminal_connected or not 0<=(now-feed.last_seen).total_seconds()<=30:
+            return JsonResponse({"error":"FRESH_PROBE_CAPABLE_EA_REQUIRED"},status=409)
         existing=CommunicationProbeRun.objects.select_for_update().filter(instance_id=feed.instance_id).first()
         if existing and report(existing,now)["status"]=="RUNNING":
             return JsonResponse({"error":"RUN_ALREADY_ACTIVE"},status=409)
@@ -144,7 +144,7 @@ def next_with_probe(request):
         if BearerTokenRequired.reject_if_invalid(request) is not None:
             return response
         feed=feed_for_scope()
-        if not feed or feed.ea_version!="1.11" or (p.get("instance_id"),p.get("account_login"),p.get("server_name"),p.get("symbol"))!=(
+        if not feed or feed.ea_version not in ("1.11","1.12") or (p.get("instance_id"),p.get("account_login"),p.get("server_name"),p.get("symbol"))!=(
             feed.instance_id,feed.account_login,feed.server_name,feed.symbol):
             return response
         now=timezone.now()
