@@ -1,5 +1,6 @@
 from pathlib import Path
 import os
+import json
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "development-only-change-me")
@@ -121,3 +122,6 @@ RAMON_STRATEGY_SERVER = os.environ.get("RAMON_STRATEGY_SERVER", RAMON_PROFIT_PRO
 RAMON_NEWS_LOCK_ENABLED = os.environ.get("RAMON_NEWS_LOCK_ENABLED", "0") == "1"
 RAMON_NEWS_FEED_AUTOMATIC = os.environ.get("RAMON_NEWS_FEED_AUTOMATIC", "0") == "1"
 RAMON_NEWS_MAX_AGE_SECONDS = 3600
+
+# Advisory research only. Explicit dated UTC quote closures; no recurring offset assumption.
+RAMON_COORDINATOR_VERIFIED_CLOSURES = json.loads(os.environ.get("RAMON_COORDINATOR_VERIFIED_CLOSURES", "[]"))
