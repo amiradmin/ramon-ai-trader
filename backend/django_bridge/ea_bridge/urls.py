@@ -25,7 +25,11 @@ from . import replay_jobs
 
 from . import research_shadow_views, regime_views
 
+from . import real_performance_views
+
 urlpatterns = [
+    path("research/real-performance", real_performance_views.page, name="ramon-real-performance"),
+    path("research/real-performance/report", real_performance_views.report, name="ramon-real-performance-report"),
     path("research/regime", regime_views.page, name="ramon-regime-dashboard"),
     path("research/regime/report", regime_views.report, name="ramon-regime-report"),
     path("research/shadow", research_shadow_views.page, name="ramon-research-shadow"),
