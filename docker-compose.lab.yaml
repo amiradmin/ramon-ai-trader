@@ -1,0 +1,42 @@
+# Optional research-only add-on. Use together with docker-compose.yaml:
+# docker compose -f docker-compose.yaml -f docker-compose.lab.yaml --profile lab run --rm --no-deps laboratory ...
+services:
+  laboratory:
+    profiles: ["lab"]
+    build:
+      context: .
+      dockerfile: lab/Dockerfile
+    image: ramon-market-laboratory:local
+    restart: "no"
+    environment:
+      TZ: UTC
+      DJANGO_SETTINGS_MODULE: ramon_django.settings
+      DJANGO_DB_ENGINE: postgresql
+      DJANGO_DB_HOST: timescaledb
+      DJANGO_DB_PORT: "5432"
+      DJANGO_DB_NAME: ${POSTGRES_DB:-ramon}
+      DJANGO_DB_USER: ramon_lab_reader
+      DJANGO_DB_PASSWORD: ${LAB_DB_PASSWORD:?Export a separate read-only laboratory DB password}
+      RAMON_EA_COMMAND_CREATION_ENABLED: "0"
+      RAMON_EA_COMMAND_EXECUTION_ENABLED: "0"
+      RAMON_STRATEGY_CONTAINERS_ENABLED: "0"
+      RAMON_SCALP_EXECUTION_ENABLED: "0"
+      RAMON_REAL_CENT_PROFIT_PROTECTION_ENABLED: "0"
+      RAMON_PIPELINE_INGEST_ENABLED: "0"
+      RAMON_DJANGO_DECISION_ENABLED: "0"
+      RAMON_TREND_SHADOW_ENABLED: "0"
+      RAMON_SCALP_SHADOW_ENABLED: "0"
+      RAMON_ARIMA_SHADOW_ENABLED: "0"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    # Same internal DB network as the existing stack; no published ports.
+    # The separate DB role is SELECT-only and cannot modify live tables.
+    networks: [ramon_backend]
+    pids_limit: 80
+    mem_limit: 1g
+    cpus: 1.0
+    entrypoint: ["python", "lab/run.py"]
