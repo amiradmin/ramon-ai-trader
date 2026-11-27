@@ -302,6 +302,11 @@ def _simulate(data, rows, progress=None):
     hours = experiment.get("hours") or research.get("entry_hours")
     audit_enabled = research.get("missed_opportunity_audit", False)
     audit_records = {name: [] for name in setups}
+    entry_audit = data.get("v15_entry_audit", False)
+    if entry_audit and (exit_name!="baseline" or not data.get("all_strategy_risk_research") or len(setups)!=1 or timeframe!="M15"):
+        raise ValueError("Entry audit requires isolated V15 baseline M15")
+    from .entry_quality_research import features, rejected_volume, summarize_entries
+    entry_records = {name: [] for name in setups}
     h1_closes = []
     h1_group = []
     book={name:{"open":None,"trades":[],"equity":data["balance"],"peak":data["balance"],"drawdown":0,"signals":0,
@@ -430,6 +435,7 @@ def _simulate(data, rows, progress=None):
                "signal_regime":pos.get("signal_regime"),"signal_adx":pos.get("signal_adx"),
                "gaps_crossed":pos.get("gaps_crossed",0),
                "reason":"STOP" if stop_hit else "TARGET" if target_hit else exit_signal or "TIME_EXIT",
+               **({"entry_features":pos["entry_features"]} if entry_audit else {}),
                **({"initial_stop":pos["initial_stop"],"held_bars":pos["held_bars"],
                    "observed_mfe_r_lower_bound":pos["mfe_r"],"observed_mae_r_signed_upper_bound":pos["mae_r"]}
                   if exit_policy is not None else {})})
@@ -471,6 +477,10 @@ def _simulate(data, rows, progress=None):
                 rejected(state,"EVALUATION",type(exc).__name__,bar["time"])
                 continue
             if not result.get("approved") or result.get("action") not in ("BUY","SELL"):
+                if entry_audit:
+                    record=rejected_volume(result,market,[b for b in rows[idx+1:idx+33] if b["time"]<end_ts],
+                        slippage_points=data.get("slippage_points",0),commission_per_lot=commission_per_lot)
+                    if record is not None:entry_records[name].append(record)
                 if audit_enabled:
                     record = audit_rejection(result, market, rows[idx+1:idx+33],
                                              slippage_points=data.get("slippage_points", 0))
@@ -534,7 +544,8 @@ def _simulate(data, rows, progress=None):
             regime=regime.get("regime") or {}
             state["pending"]=dict(side=result["action"],stop=stop,target=target,volume=volume,
                 signal_at=bar["time"],signal_regime=regime.get("label"),
-                signal_adx=regime.get("adx"))
+                signal_adx=regime.get("adx"),
+                **({"entry_features":features(result,market)} if entry_audit else {}))
     if progress is not None:
         progress(len(rows), len(rows))
     report=[]
@@ -556,6 +567,8 @@ def _simulate(data, rows, progress=None):
                 detail=state["rejection_details"].get(key))
               for key,count in sorted(state["rejections"].items(),key=lambda item:(-item[1],item[0]))[:25]],
            rejection_total=sum(state["rejections"].values())))
+        if entry_audit:
+            report[-1]["entry_quality_audit"]=summarize_entries(trades,entry_records[name])
         if audit_enabled:
             report[-1]["missed_opportunity_audit"] = summarize_audit(audit_records[name])
     return report
