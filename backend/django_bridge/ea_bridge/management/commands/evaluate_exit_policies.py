@@ -19,13 +19,14 @@ class Command(BaseCommand):
             p.add_argument("--"+k,required=True,type=float)
         p.add_argument("--risk-percent",type=float,default=.5,choices=(.5,1.,1.5))
         p.add_argument("--window-days",type=int,default=90)
+        p.add_argument("--max-candles",type=int,default=30000)
         p.add_argument("--minimum-trades",type=int,default=30)
         p.add_argument("--strategies",nargs="+",choices=list(STRATEGIES),default=list(STRATEGIES))
         p.add_argument("--policies",nargs="+",choices=list(POLICIES),default=list(POLICIES))
 
     def handle(self,*args,**opts):
-        if not 7<=opts["window_days"]<=120 or opts["minimum_trades"]<1:
-            raise CommandError("Invalid window or minimum trade count")
+        if not 7<=opts["window_days"]<=120 or opts["minimum_trades"]<1 or not 130<=opts["max_candles"]<=100000:
+            raise CommandError("Invalid window, minimum trade count or candle limit")
         names=list(dict.fromkeys(["baseline",*opts["policies"]]))
         setups=list(dict.fromkeys(opts["strategies"]))
         q=QueryDict(mutable=True)
@@ -42,7 +43,7 @@ class Command(BaseCommand):
                     self.stderr.write(f"{start}..{end} {setup} {policy}")
                     response=run_backtest_data(dict(data,start=start,end=end,setups=[setup],
                         risk_percent=opts["risk_percent"],isolated_risk_sensitivity=True,
-                        all_strategy_risk_research=True,v15_exit_policy=policy))
+                        all_strategy_risk_research=True,v15_exit_policy=policy),max_candles=opts["max_candles"])
                     body=json.loads(response.content)
                     row=dict(start=str(start),end=str(end),strategy=setup,policy=policy)
                     if response.status_code!=200:
@@ -76,6 +77,7 @@ class Command(BaseCommand):
                     worst_window_closed_drawdown_pct=max((r["metrics"]["max_drawdown_pct"] for r in valid),default=None)))
         self.stdout.write(json.dumps(dict(version="V15.2",mode="OFFLINE_DESCRIPTIVE_ONLY",affects_orders=False,live_promotion=False,
             source=data["source"],symbol=data["symbol"],risk_percent=opts["risk_percent"],
+            max_candles=opts["max_candles"],status="COMPLETE" if all("metrics" in r for r in reports) else "PARTIAL" if any("metrics" in r for r in reports) else "NO_SUCCESSFUL_RUNS",
             assumptions={k:data[k] for k in ("balance","point","tick_size","tick_value","volume_min","volume_step","volume_max","spread_points","slippage_points","commission_per_lot")},
             policies={n:POLICIES[n] for n in names},windows=reports,summaries=summaries,
             limitations=["Seven M15 strategies only; Fast Scalp uses a separate M1/M5 engine and is not compared here.",
