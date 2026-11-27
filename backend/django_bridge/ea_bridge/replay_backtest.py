@@ -302,6 +302,8 @@ def _simulate(data, rows, progress=None):
     hours = experiment.get("hours") or research.get("entry_hours")
     audit_enabled = research.get("missed_opportunity_audit", False)
     audit_records = {name: [] for name in setups}
+    from .entry_filter_research import validate_filter, filter_reason
+    entry_filter=validate_filter(data,timeframe,exit_name)
     entry_audit = data.get("v15_entry_audit", False)
     if entry_audit and (exit_name!="baseline" or not data.get("all_strategy_risk_research") or len(setups)!=1 or timeframe!="M15"):
         raise ValueError("Entry audit requires isolated V15 baseline M15")
@@ -499,6 +501,11 @@ def _simulate(data, rows, progress=None):
                 else:
                     rejected(state,"EVALUATION",result.get("reason") or "NO_APPROVED_SIGNAL",bar["time"])
                 continue
+            if entry_filter is not None:
+                reason=filter_reason(entry_filter,result,market)
+                if reason:
+                    rejected(state,"RESEARCH",reason,bar["time"])
+                    continue
             if direction_filter and result["action"] != direction_filter:
                 rejected(state, "RESEARCH", "SIDE_NOT_ALLOWED", bar["time"])
                 continue
@@ -567,6 +574,9 @@ def _simulate(data, rows, progress=None):
                 detail=state["rejection_details"].get(key))
               for key,count in sorted(state["rejections"].items(),key=lambda item:(-item[1],item[0]))[:25]],
            rejection_total=sum(state["rejections"].values())))
+        if entry_filter is not None:
+            report[-1]["entry_filter"]=entry_filter
+            report[-1]["entry_filter_rejections"]={k.split(":",1)[1]:v for k,v in state["rejections"].items() if k.startswith("RESEARCH:V15_FILTER_")}
         if entry_audit:
             report[-1]["entry_quality_audit"]=summarize_entries(trades,entry_records[name])
         if audit_enabled:
