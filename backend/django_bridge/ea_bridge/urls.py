@@ -27,9 +27,11 @@ from . import research_shadow_views, regime_views
 
 from . import real_performance_views, execution_quality_views, communication_probe
 
-from . import position_observer_views
+from . import position_observer_views, forward_profiles_views
 
 urlpatterns = [
+    path('research/forward-profiles', forward_profiles_views.page, name='ramon-forward-profiles'),
+    path('research/forward-profiles/report', forward_profiles_views.report, name='ramon-forward-profiles-report'),
     path('research/position-management', position_observer_views.page, name='ramon-position-management'),
     path('research/position-management/report', position_observer_views.report, name='ramon-position-management-report'),
     path("research/communication/start", communication_probe.start, name="ramon-communication-start"),
