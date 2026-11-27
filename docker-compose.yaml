@@ -107,6 +107,33 @@ services:
         condition: service_healthy
     networks: [ramon_backend]
 
+  forward-profiles:
+    <<: *python-service
+    container_name: ramon-forward-profiles
+    profiles: ["forward-profiles"]
+    environment:
+      TZ: UTC
+      DJANGO_SETTINGS_MODULE: ramon_django.settings
+      DJANGO_DEBUG: "0"
+      DJANGO_DB_ENGINE: postgresql
+      DJANGO_DB_HOST: timescaledb
+      DJANGO_DB_PORT: "5432"
+      DJANGO_DB_NAME: ${POSTGRES_DB:-ramon}
+      DJANGO_DB_USER: ${POSTGRES_USER:-ramon}
+      DJANGO_DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      PGOPTIONS: "-c default_transaction_read_only=on"
+      RAMON_EA_COMMAND_CREATION_ENABLED: "0"
+      RAMON_EA_COMMAND_EXECUTION_ENABLED: "0"
+      RAMON_SCALP_EXECUTION_ENABLED: "0"
+      RAMON_REAL_EXECUTION_ENABLED: "0"
+    volumes:
+      - ./shadow-data:/shadow-data
+    command: ["python", "manage.py", "run_forward_profiles", "--source", "${RAMON_SHADOW_SOURCE:-ramon-command-ea-1}", "--symbol", "${RAMON_SHADOW_SYMBOL:-XAUUSD_l}", "--state-file", "/shadow-data/forward-v15.3.json", "--balance", "1024.6", "--point", "0.01", "--tick-size", "0.01", "--tick-value", "1", "--volume-min", "0.01", "--volume-step", "0.01", "--volume-max", "100", "--max-spread-points", "80", "--slippage-points", "5", "--commission-per-lot", "5", "--poll-seconds", "5"]
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    networks: [ramon_backend]
+
   replay-backtest-worker:
     <<: *python-service
     container_name: ramon-replay-backtest-worker
